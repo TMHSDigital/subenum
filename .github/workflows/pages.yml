@@ -32,6 +32,8 @@ jobs:
         with:
           source: ./docs
           destination: ./_site
+      - name: Debug Build Output
+        run: ls -la ./_site
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
