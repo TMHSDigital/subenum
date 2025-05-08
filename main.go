@@ -4,7 +4,7 @@
 //
 // IMPORTANT LEGAL NOTICE:
 // This tool is provided for educational and legitimate security testing purposes ONLY.
-// Usage of this tool against any domain without explicit permission from the domain 
+// Usage of this tool against any domain without explicit permission from the domain
 // owner may violate applicable local, national, and/or international laws.
 //
 // Users MUST:
@@ -82,7 +82,7 @@ func main() {
 		fmt.Println("Error: Concurrency level (-t) must be greater than 0")
 		os.Exit(1)
 	}
-	
+
 	if *timeoutMs <= 0 {
 		fmt.Println("Error: Timeout (-timeout) must be greater than 0")
 		os.Exit(1)
@@ -145,10 +145,10 @@ func main() {
 		if err := scanner.Err(); err != nil {
 			fmt.Printf("Error counting wordlist lines: %v\n", err)
 		}
-		
+
 		// Reset file position to beginning
 		file.Seek(0, 0)
-		
+
 		if *verbose {
 			fmt.Printf("Total wordlist entries: %d\n", totalWords)
 		}
@@ -174,12 +174,12 @@ func main() {
 					processed := atomic.LoadInt64(&processedWords)
 					found := atomic.LoadInt64(&foundSubdomains)
 					progress := float64(processed) / float64(totalWords) * 100
-					fmt.Printf("\rProgress: %.1f%% (%d/%d) | Found: %d ", 
+					fmt.Printf("\rProgress: %.1f%% (%d/%d) | Found: %d ",
 						progress, processed, totalWords, found)
 				}
 			}
 		}()
-		
+
 		// Clean up the progress goroutine when main() exits
 		defer func() {
 			done <- true
@@ -196,7 +196,7 @@ func main() {
 			for subdomainPrefix := range subdomains {
 				fullDomain := subdomainPrefix + "." + domain
 				var resolved bool
-				
+
 				if *testMode {
 					// In test mode, simulate DNS resolution without actual queries
 					resolved = simulateResolution(fullDomain, *testHitRate, *verbose)
@@ -204,7 +204,7 @@ func main() {
 					// In normal mode, perform actual DNS resolution
 					resolved = resolveDomain(fullDomain, timeout, *dnsServer, *verbose)
 				}
-				
+
 				if resolved {
 					if *testMode {
 						fmt.Printf("Found (SIMULATED): %s\n", fullDomain)
@@ -230,7 +230,7 @@ func main() {
 
 	close(subdomains)
 	wg.Wait()
-	
+
 	// Final summary
 	if *verbose {
 		fmt.Printf("\nScan completed for %s\n", domain)
@@ -240,7 +240,7 @@ func main() {
 			fmt.Printf("simulated ")
 		}
 		fmt.Printf("subdomains\n")
-		
+
 		if *testMode {
 			fmt.Println("\nNOTE: Results were simulated and no actual DNS queries were performed.")
 			fmt.Println("This mode is intended for educational and testing purposes only.")
@@ -253,11 +253,11 @@ func main() {
 func simulateResolution(domain string, hitRate int, verbose bool) bool {
 	// Always resolve common subdomains for more realistic simulation
 	commonSubdomains := []string{
-		"www", "mail", "ftp", "blog", 
-		"api", "dev", "staging", "test", 
+		"www", "mail", "ftp", "blog",
+		"api", "dev", "staging", "test",
 		"admin", "portal", "app", "secure",
 	}
-	
+
 	for _, sub := range commonSubdomains {
 		if strings.HasPrefix(domain, sub+".") {
 			// Simulate a successful lookup for these common subdomains
@@ -270,10 +270,10 @@ func simulateResolution(domain string, hitRate int, verbose bool) bool {
 			return rand.Intn(100) < 90
 		}
 	}
-	
+
 	// For other subdomains, use the hit rate to determine if they resolve
 	result := rand.Intn(100) < hitRate
-	
+
 	if verbose {
 		fakeTiming := time.Duration(100+rand.Intn(500)) * time.Millisecond
 		if result {
@@ -283,7 +283,7 @@ func simulateResolution(domain string, hitRate int, verbose bool) bool {
 			fmt.Printf("Failed to resolve (SIMULATED): %s (Error: no such host) in %s\n", domain, fakeTiming)
 		}
 	}
-	
+
 	return result
 }
 
@@ -297,16 +297,16 @@ func resolveDomain(domain string, timeout time.Duration, dnsServer string, verbo
 			return d.DialContext(ctx, "udp", dnsServer)
 		},
 	}
-	
+
 	start := time.Now()
 	ips, err := resolver.LookupHost(context.Background(), domain)
 	elapsed := time.Since(start)
-	
+
 	if verbose && err == nil {
 		fmt.Printf("Resolved: %s (IP: %s) in %s\n", domain, ips[0], elapsed)
 	} else if verbose {
 		fmt.Printf("Failed to resolve: %s (Error: %v) in %s\n", domain, err, elapsed)
 	}
-	
+
 	return err == nil
-} 
+}

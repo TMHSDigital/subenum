@@ -1,5 +1,5 @@
 // Copyright (c) 2025 TM Hospitality Strategies
-// 
+//
 // Tool for generating custom wordlists for subdomain enumeration
 // Educational purposes only
 
@@ -64,10 +64,10 @@ func main() {
 	// Process domain-specific terms if provided
 	if *domainInfo != "" {
 		fmt.Printf("Extracting terms from domain: %s\n", *domainInfo)
-		
+
 		// Remove TLD and split by separators
 		domain := *domainInfo
-		
+
 		// Remove common TLDs
 		domain = strings.TrimSuffix(domain, ".com")
 		domain = strings.TrimSuffix(domain, ".org")
@@ -75,12 +75,12 @@ func main() {
 		domain = strings.TrimSuffix(domain, ".edu")
 		domain = strings.TrimSuffix(domain, ".gov")
 		domain = strings.TrimSuffix(domain, ".io")
-		
+
 		// Split by common separators
 		parts := strings.FieldsFunc(domain, func(r rune) bool {
 			return r == '.' || r == '-' || r == '_'
 		})
-		
+
 		for _, part := range parts {
 			if len(part) > 2 && !addedWords[part] { // Only add if length > 2
 				fmt.Fprintln(writer, part)
@@ -94,27 +94,27 @@ func main() {
 	if *combineWith != "" {
 		prefixes := strings.Split(*combineWith, ",")
 		fmt.Printf("Combining with prefixes: %v\n", prefixes)
-		
+
 		// Create a temporary copy of addedWords to iterate over
 		wordsCopy := make([]string, 0, len(addedWords))
 		for word := range addedWords {
 			wordsCopy = append(wordsCopy, word)
 		}
-		
+
 		// Create combinations
 		for _, prefix := range prefixes {
 			prefix = strings.TrimSpace(prefix)
 			if prefix == "" {
 				continue
 			}
-			
+
 			// Add the prefix itself
 			if !addedWords[prefix] {
 				fmt.Fprintln(writer, prefix)
 				addedWords[prefix] = true
 				fmt.Printf("Added: %s\n", prefix)
 			}
-			
+
 			// Create combinations with existing words
 			for _, word := range wordsCopy {
 				combination := prefix + "-" + word
@@ -130,4 +130,4 @@ func main() {
 	// Count total words
 	fmt.Printf("\nWordlist generated at %s with %d unique entries\n", *outputFile, len(addedWords))
 	fmt.Println("\nNOTE: Only use this tool to generate wordlists for domains you have explicit permission to test.")
-} 
+}

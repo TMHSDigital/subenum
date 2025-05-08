@@ -49,14 +49,14 @@ func TestResolveDomain(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := resolveDomain(tt.domain, timeout)
-			
+
 			// Note: DNS results can be unpredictable depending on the network environment
 			// If this test fails, it might be due to network issues or DNS changes
 			if got != tt.expected {
-				t.Logf("Warning: DNS resolution result for %s was %v, expected %v", 
+				t.Logf("Warning: DNS resolution result for %s was %v, expected %v",
 					tt.domain, got, tt.expected)
 				t.Logf("This might be due to network conditions or DNS changes")
-				
+
 				// Commented out the actual failure to make the test more robust
 				// Uncomment to enforce strict testing
 				// t.Errorf("resolveDomain(%s) = %v, want %v", tt.domain, got, tt.expected)
@@ -74,10 +74,10 @@ func TestResolveDomainTimeout(t *testing.T) {
 
 	// Use a very short timeout that should cause the lookup to time out
 	veryShortTimeout := time.Millisecond * 1
-	
+
 	// This should time out and return false, regardless of whether the domain exists
 	result := resolveDomain("google.com", veryShortTimeout)
-	
+
 	// We expect this to time out and return false
 	// However, on some very fast networks, this might still succeed
 	if result == true {
@@ -97,20 +97,20 @@ func TestResolveDomainWithCustomDNS(t *testing.T) {
 
 	// Set a reasonable timeout for tests
 	timeout := time.Second * 2
-	
+
 	// Define DNS servers to test
 	dnsServers := []string{
-		"8.8.8.8:53",  // Google
-		"1.1.1.1:53",  // Cloudflare
+		"8.8.8.8:53", // Google
+		"1.1.1.1:53", // Cloudflare
 	}
-	
+
 	// A domain that should definitely resolve
 	testDomain := "google.com"
-	
+
 	for _, server := range dnsServers {
 		t.Run(fmt.Sprintf("DNS_Server_%s", server), func(t *testing.T) {
 			result := resolveDomain(testDomain, timeout, server, false)
-			
+
 			if !result {
 				t.Logf("Warning: Failed to resolve %s using DNS server %s", testDomain, server)
 				t.Logf("This might be due to network conditions or DNS configuration")
@@ -125,32 +125,32 @@ func TestResolveDomainWithCustomDNS(t *testing.T) {
 func TestDNSServerValidation(t *testing.T) {
 	// This test doesn't actually call any functions directly,
 	// but it checks the validation logic we'd want to apply to DNS server strings
-	
+
 	validServers := []string{
 		"8.8.8.8:53",
 		"1.1.1.1:53",
 		"192.168.1.1:53",
 		"[2001:4860:4860::8888]:53", // IPv6
 	}
-	
+
 	invalidServers := []string{
-		"8.8.8.8",      // Missing port
-		":53",          // Missing IP
-		"localhost",    // Not in IP:port format
-		"256.1.1.1:53", // Invalid IP
-		"1.1.1.1:99999" // Invalid port
+		"8.8.8.8",       // Missing port
+		":53",           // Missing IP
+		"localhost",     // Not in IP:port format
+		"256.1.1.1:53",  // Invalid IP
+		"1.1.1.1:99999", // Invalid port
 	}
-	
+
 	for _, server := range validServers {
 		if !strings.Contains(server, ":") {
 			t.Errorf("DNS server validation should pass for %s but would fail with our check", server)
 		}
 	}
-	
+
 	for _, server := range invalidServers {
 		if strings.Contains(server, ":") && server != ":53" {
 			t.Logf("Simple validation would pass for invalid server: %s", server)
 			t.Logf("Consider implementing more thorough validation")
 		}
 	}
-} 
+}
