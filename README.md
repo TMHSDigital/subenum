@@ -1,10 +1,10 @@
 # subenum
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/yourusername/subenum)](https://goreportcard.com/report/github.com/yourusername/subenum)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/yourusername/subenum/go.yml?branch=main)](https://github.com/yourusername/subenum/actions)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/yourusername/subenum)](https://github.com/yourusername/subenum/releases)
-[![License](https://img.shields.io/github/license/yourusername/subenum)](https://github.com/yourusername/subenum/blob/main/LICENSE)
-[![Docker](https://img.shields.io/badge/docker-supported-blue)](https://github.com/yourusername/subenum/blob/main/docs/docker.md)
+[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main)](https://github.com/TMHSDigital/subenum/actions)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/TMHSDigital/subenum)](https://github.com/TMHSDigital/subenum/releases)
+[![License](https://img.shields.io/github/license/TMHSDigital/subenum)](https://github.com/TMHSDigital/subenum/blob/main/LICENSE)
+[![Docker](https://img.shields.io/badge/docker-supported-blue)](https://github.com/TMHSDigital/subenum/blob/main/docs/docker.md)
 
 A Go-based CLI tool for subdomain enumeration.
 
@@ -47,7 +47,7 @@ The developers and contributors of `subenum` explicitly prohibit any use of this
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/subenum.git
+git clone https://github.com/TMHSDigital/subenum.git
 cd subenum
 
 # Build the tool
