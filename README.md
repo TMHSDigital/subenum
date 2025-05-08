@@ -200,7 +200,3 @@ See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for details on how to contribute to 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contact / Support (Optional)
-
-*(Information on how to get help or report issues can be added here.)*
