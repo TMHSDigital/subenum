@@ -33,7 +33,10 @@ jobs:
           source: ./docs
           destination: ./_site
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v1
+        uses: actions/upload-artifact@v3
+        with:
+          name: pages-artifact
+          path: ./_site
 
   # Deployment job
   deploy:
