@@ -1,0 +1,23 @@
+# Sample domains list file for use with multi_domain_scan.sh
+# Each domain should be on a separate line
+# Lines starting with # are comments and will be ignored
+#
+# LEGAL WARNING: These domains are listed for example purposes only.
+# DO NOT scan these or any domains without explicit legal permission.
+# Use only domains you own or have authorization to test.
+# Replace these examples with authorized domains before running any scans.
+
+# Major tech companies
+google.com
+microsoft.com
+apple.com
+
+# Social media
+twitter.com
+facebook.com
+
+# E-commerce
+amazon.com
+
+# Add your own domains below
+# example.com 

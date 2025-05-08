@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  subenum:
+    build: .
+    volumes:
+      - ./examples:/root/examples
+      - ./data:/data
+    tty: true
+    stdin_open: true
+    command: ["-w", "/data/wordlist.txt", "-v", "example.com"]
+    # Replace the command above with your desired parameters
+    # For interactive use, run: docker-compose run --rm subenum [args] 
