@@ -1,3 +1,8 @@
+---
+layout: default
+title: Architecture
+---
+
 # Architecture
 
 This document describes the architecture of the `subenum` tool, a Go-based command-line utility for subdomain enumeration.
@@ -47,14 +52,14 @@ This architecture is designed to be efficient by performing multiple DNS lookups
 
 *   **Purpose**: This is the core component responsible for performing the actual DNS lookup for each constructed subdomain (e.g., `prefix.targetdomain.com`). It determines if a subdomain has a valid DNS record (typically A or CNAME, though the current implementation checks for any successful resolution).
 *   **Implementation**:
-    *   Function: `resolveDomain(domain string, timeout time.Duration, dnsServer string, verbose bool) bool`
-    *   Function: `resolveDomainWithRetry(domain string, timeout time.Duration, dnsServer string, verbose bool, maxRetries int) bool` — wraps `resolveDomain` with configurable retry logic and exponential backoff between attempts.
+    *   Function: `resolveDomain(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) bool`
+    *   Function: `resolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxRetries int) bool` — wraps `resolveDomain` with configurable retry logic and exponential backoff between attempts.
     *   `net.Resolver{}`: A custom DNS resolver is configured.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.
         *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function is provided to control the connection to the DNS server, using the user-specified `dnsServer` address.
             *   `net.Dialer{Timeout: timeout}`: A `Dialer` is created with the user-specified timeout.
             *   `d.DialContext(ctx, "udp", dnsServer)`: Establishes a UDP connection to the configured DNS server.
-    *   `resolver.LookupHost(context.Background(), domain)`: Performs the DNS lookup for the given domain. It attempts to find A or AAAA records for the host.
+    *   `resolver.LookupHost(timeoutCtx, domain)`: Performs the DNS lookup for the given domain. The context is derived from the caller via `context.WithTimeout(ctx, timeout)`, so both the per-query timeout and SIGINT cancellation are respected. It attempts to find A or AAAA records for the host.
     *   The function returns `true` if `LookupHost` returns no error (i.e., the domain resolved), and `false` otherwise.
 *   **Interactions**: Workers call `resolveDomainWithRetry`, which delegates to `resolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.
 

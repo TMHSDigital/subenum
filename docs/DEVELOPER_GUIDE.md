@@ -1,3 +1,8 @@
+---
+layout: default
+title: Developer Guide
+---
+
 # Developer Guide
 
 This guide provides information for developers looking to contribute to or build upon the `subenum` project.
@@ -50,28 +55,56 @@ To work with `subenum`, you'll need:
 ```
 subenum/
 ├── main.go                 # Main application code
+├── main_test.go            # Test suite
 ├── go.mod                  # Go module definition
+├── Makefile                # Build, test, lint, Docker targets
+├── Dockerfile              # Multi-stage Docker build
+├── docker-compose.yml      # Docker Compose config
+├── .golangci.yml           # Linter configuration
 ├── README.md               # Project overview
 ├── LICENSE                 # License information
-├── docs/                   # Documentation
+├── SECURITY.md             # Security policy and disclosure
+├── .github/
+│   ├── workflows/
+│   │   ├── go.yml          # CI: build, test, lint, release
+│   │   ├── pages.yml       # GitHub Pages deployment
+│   │   └── codeql.yml      # CodeQL security scanning
+│   ├── dependabot.yml      # Automated dependency updates
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── ISSUE_TEMPLATE/     # Bug report & feature request templates
+├── docs/                   # Documentation (served via GitHub Pages)
+│   ├── _config.yml         # Jekyll site configuration
+│   ├── index.md            # Site home page
 │   ├── ARCHITECTURE.md     # Architectural details
 │   ├── DEVELOPER_GUIDE.md  # This file
 │   ├── CODE_OF_CONDUCT.md  # Community guidelines
-│   └── CONTRIBUTING.md     # Contribution guidelines
+│   ├── CONTRIBUTING.md     # Contribution guidelines
+│   └── docker.md           # Docker usage guide
+├── data/
+│   └── wordlist.txt        # Default wordlist
 ├── examples/               # Example files and usage demos
-│   └── sample_wordlist.txt # Sample subdomain prefixes
-└── logs/                   # Logs and change tracking
+│   ├── sample_wordlist.txt # Sample subdomain prefixes
+│   ├── sample_domains.txt  # Sample domain list
+│   └── advanced_usage.md   # Advanced usage examples
+├── tools/
+│   ├── wordlist-gen.go     # Wordlist generator utility
+│   └── README.md           # Wordlist generator docs
+└── logs/
     └── CHANGELOG.md        # Project change history
 ```
 
 ## Running Tests
 
-*Note: Test development is ongoing. This section will be expanded as the test suite grows.*
-
 To run all tests:
 
 ```bash
-go test ./...
+go test -v -race ./...
+```
+
+To run only fast, offline tests (skips network-dependent tests):
+
+```bash
+go test -v -short ./...
 ```
 
 ### Writing Tests
@@ -82,6 +115,7 @@ When adding new features or modifying existing ones, please ensure you add appro
 package main
 
 import (
+    "context"
     "testing"
     "time"
 )
@@ -109,7 +143,7 @@ func TestResolveDomain(t *testing.T) {
 
     for _, tc := range testCases {
         t.Run(tc.name, func(t *testing.T) {
-            result := resolveDomain(tc.domain, tc.timeout, DefaultDNSServer, false)
+            result := resolveDomain(context.Background(), tc.domain, tc.timeout, DefaultDNSServer, false)
             if result != tc.expected {
                 t.Errorf("Expected %v for domain %s, got %v", tc.expected, tc.domain, result)
             }

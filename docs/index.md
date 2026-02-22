@@ -81,7 +81,7 @@ make docker-build docker-run
 
 - [Usage Guide](https://github.com/TMHSDigital/subenum#usage)
 - [Advanced Usage Examples](https://github.com/TMHSDigital/subenum/blob/main/examples/advanced_usage.md)
-- [Docker Usage](#using-docker)
+- [Docker Usage](docker.html)
 - [Architecture](ARCHITECTURE.html)
 - [Developer Guide](DEVELOPER_GUIDE.html)
 - [Contributing](CONTRIBUTING.html)

@@ -1,3 +1,8 @@
+---
+layout: default
+title: Contributing
+---
+
 # Contributing to subenum
 
 We welcome contributions! Please read this guide to understand how you can contribute.
