@@ -7,12 +7,9 @@ import (
 	"time"
 )
 
-// TestResolveDomain tests the DNS resolution function with known domains
 func TestResolveDomain(t *testing.T) {
-	// Set a reasonable timeout for tests
 	timeout := time.Second * 2
 
-	// Test cases
 	tests := []struct {
 		name     string
 		domain   string
@@ -45,66 +42,44 @@ func TestResolveDomain(t *testing.T) {
 		},
 	}
 
-	// Run the tests
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveDomain(tt.domain, timeout)
+			got := resolveDomain(tt.domain, timeout, DefaultDNSServer, false)
 
-			// Note: DNS results can be unpredictable depending on the network environment
-			// If this test fails, it might be due to network issues or DNS changes
 			if got != tt.expected {
-				t.Logf("Warning: DNS resolution result for %s was %v, expected %v",
+				t.Errorf("resolveDomain(%q) = %v, want %v (may be network-dependent)",
 					tt.domain, got, tt.expected)
-				t.Logf("This might be due to network conditions or DNS changes")
-
-				// Commented out the actual failure to make the test more robust
-				// Uncomment to enforce strict testing
-				// t.Errorf("resolveDomain(%s) = %v, want %v", tt.domain, got, tt.expected)
 			}
 		})
 	}
 }
 
-// TestResolveDomainTimeout tests that the timeout parameter is respected
 func TestResolveDomainTimeout(t *testing.T) {
-	// Skip this test in short mode as it takes time
 	if testing.Short() {
 		t.Skip("Skipping timeout test in short mode")
 	}
 
-	// Use a very short timeout that should cause the lookup to time out
 	veryShortTimeout := time.Millisecond * 1
 
-	// This should time out and return false, regardless of whether the domain exists
-	result := resolveDomain("google.com", veryShortTimeout)
+	result := resolveDomain("google.com", veryShortTimeout, DefaultDNSServer, false)
 
-	// We expect this to time out and return false
-	// However, on some very fast networks, this might still succeed
-	if result == true {
-		t.Logf("Warning: Expected timeout didn't occur, this might be due to very fast DNS resolution")
-		t.Logf("Consider using a shorter timeout or a different approach for timeout testing")
+	if result {
+		t.Errorf("Expected timeout with 1ms deadline, but resolution succeeded")
 	}
 }
 
-// Add more test functions here as the codebase grows
-
-// TestResolveDomainWithCustomDNS tests the DNS resolution function with a custom DNS server
 func TestResolveDomainWithCustomDNS(t *testing.T) {
-	// Skip this test in short mode
 	if testing.Short() {
 		t.Skip("Skipping custom DNS test in short mode")
 	}
 
-	// Set a reasonable timeout for tests
 	timeout := time.Second * 2
 
-	// Define DNS servers to test
 	dnsServers := []string{
-		"8.8.8.8:53", // Google
-		"1.1.1.1:53", // Cloudflare
+		"8.8.8.8:53",
+		"1.1.1.1:53",
 	}
 
-	// A domain that should definitely resolve
 	testDomain := "google.com"
 
 	for _, server := range dnsServers {
@@ -112,45 +87,129 @@ func TestResolveDomainWithCustomDNS(t *testing.T) {
 			result := resolveDomain(testDomain, timeout, server, false)
 
 			if !result {
-				t.Logf("Warning: Failed to resolve %s using DNS server %s", testDomain, server)
-				t.Logf("This might be due to network conditions or DNS configuration")
-				// Uncomment to enforce strict testing
-				// t.Errorf("Expected %s to resolve using DNS server %s, but it failed", testDomain, server)
+				t.Errorf("Expected %s to resolve using DNS server %s, but it failed", testDomain, server)
 			}
 		})
 	}
 }
 
-// TestDNSServerValidation tests the DNS server format validation
-func TestDNSServerValidation(t *testing.T) {
-	// This test doesn't actually call any functions directly,
-	// but it checks the validation logic we'd want to apply to DNS server strings
+func TestResolveDomainWithRetry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping retry test in short mode")
+	}
 
+	timeout := time.Second * 2
+
+	result := resolveDomainWithRetry("google.com", timeout, DefaultDNSServer, false, 3)
+	if !result {
+		t.Errorf("Expected google.com to resolve with retries, but it failed")
+	}
+
+	result = resolveDomainWithRetry("this-domain-should-not-exist-123456789.com", timeout, DefaultDNSServer, false, 2)
+	if result {
+		t.Errorf("Expected non-existent domain to fail even with retries")
+	}
+}
+
+func TestValidateDNSServer(t *testing.T) {
 	validServers := []string{
 		"8.8.8.8:53",
 		"1.1.1.1:53",
 		"192.168.1.1:53",
-		"[2001:4860:4860::8888]:53", // IPv6
+		"[2001:4860:4860::8888]:53",
 	}
 
-	invalidServers := []string{
-		"8.8.8.8",       // Missing port
-		":53",           // Missing IP
-		"localhost",     // Not in IP:port format
-		"256.1.1.1:53",  // Invalid IP
-		"1.1.1.1:99999", // Invalid port
+	invalidServers := []struct {
+		server string
+		reason string
+	}{
+		{"8.8.8.8", "missing port"},
+		{":53", "missing IP"},
+		{"localhost:53", "not a valid IP"},
+		{"256.1.1.1:53", "invalid IP octet"},
+		{"1.1.1.1:99999", "port out of range"},
+		{"1.1.1.1:0", "port zero"},
+		{"1.1.1.1:-1", "negative port"},
+		{"not-an-ip:53", "hostname instead of IP"},
 	}
 
 	for _, server := range validServers {
-		if !strings.Contains(server, ":") {
-			t.Errorf("DNS server validation should pass for %s but would fail with our check", server)
-		}
+		t.Run(fmt.Sprintf("valid_%s", server), func(t *testing.T) {
+			if err := validateDNSServer(server); err != nil {
+				t.Errorf("validateDNSServer(%q) returned error: %v", server, err)
+			}
+		})
 	}
 
-	for _, server := range invalidServers {
-		if strings.Contains(server, ":") && server != ":53" {
-			t.Logf("Simple validation would pass for invalid server: %s", server)
-			t.Logf("Consider implementing more thorough validation")
+	for _, tc := range invalidServers {
+		t.Run(fmt.Sprintf("invalid_%s_%s", tc.server, tc.reason), func(t *testing.T) {
+			if err := validateDNSServer(tc.server); err == nil {
+				t.Errorf("validateDNSServer(%q) should have returned error (%s)", tc.server, tc.reason)
+			}
+		})
+	}
+}
+
+func TestValidateDomain(t *testing.T) {
+	validDomains := []string{
+		"example.com",
+		"sub.example.com",
+		"a.b.c.example.com",
+		"test-domain.co.uk",
+	}
+
+	invalidDomains := []string{
+		"",
+		"-example.com",
+		"example-.com",
+		".example.com",
+		"example..com",
+		strings.Repeat("a", 254) + ".com",
+	}
+
+	for _, domain := range validDomains {
+		t.Run(fmt.Sprintf("valid_%s", domain), func(t *testing.T) {
+			if err := validateDomain(domain); err != nil {
+				t.Errorf("validateDomain(%q) returned error: %v", domain, err)
+			}
+		})
+	}
+
+	for _, domain := range invalidDomains {
+		name := domain
+		if name == "" {
+			name = "empty"
 		}
+		if len(name) > 50 {
+			name = name[:50] + "..."
+		}
+		t.Run(fmt.Sprintf("invalid_%s", name), func(t *testing.T) {
+			if err := validateDomain(domain); err == nil {
+				t.Errorf("validateDomain(%q) should have returned error", domain)
+			}
+		})
+	}
+}
+
+func TestSimulateResolution(t *testing.T) {
+	resolved := 0
+	runs := 100
+	for i := 0; i < runs; i++ {
+		if simulateResolution("www.example.com", 15, false) {
+			resolved++
+		}
+	}
+	if resolved == 0 {
+		t.Errorf("Expected at least some common subdomains to resolve in simulation, got 0/%d", runs)
+	}
+
+	resolved = 0
+	for i := 0; i < runs; i++ {
+		if simulateResolution("zzz-random-prefix.example.com", 0, false) {
+			resolved++
+		}
+	}
+	if resolved != 0 {
+		t.Errorf("Expected 0%% hit rate to never resolve, got %d/%d", resolved, runs)
 	}
 }

@@ -16,8 +16,6 @@ This architecture is designed to be efficient by performing multiple DNS lookups
 
 ## 2. Key Components / Modules
 
-*(Details to be added regarding components, data flow, concurrency, etc.)*
-
 ### 2.1. Argument Parsing
 
 *   **Purpose**: This component is responsible for processing the command-line arguments provided by the user when `subenum` is executed. It extracts the target domain, the path to the wordlist file, the desired number of concurrent workers, and the DNS lookup timeout.
@@ -29,9 +27,11 @@ This architecture is designed to be efficient by performing multiple DNS lookups
     *   `flag.Bool("v", false, "Enable verbose output")`: Defines the verbose flag.
     *   `flag.Bool("progress", true, "Show progress during scanning")`: Defines the progress reporting flag.
     *   `flag.Bool("version", false, "Show version information")`: Defines the version flag.
+    *   `flag.String("o", "", "Write results to file")`: Defines the output file flag.
+    *   `flag.Int("retries", 1, "Number of DNS retry attempts")`: Defines the retry count flag.
     *   `flag.Parse()`: Parses the provided arguments.
     *   `flag.Arg(0)`: Retrieves the positional argument (the target domain).
-*   **Interactions**: The parsed values are used to configure the subsequent components, such as the Wordlist Processing and DNS Resolution Engine. Input validation is also performed to ensure valid values for critical parameters like concurrency and timeout.
+*   **Interactions**: The parsed values are used to configure the subsequent components, such as the Wordlist Processing and DNS Resolution Engine. Input validation is performed to ensure valid values for critical parameters like concurrency, timeout, DNS server format (validated via `validateDNSServer`), and domain syntax (validated via `validateDomain`).
 
 ### 2.2. Wordlist Processing
 
@@ -47,15 +47,16 @@ This architecture is designed to be efficient by performing multiple DNS lookups
 
 *   **Purpose**: This is the core component responsible for performing the actual DNS lookup for each constructed subdomain (e.g., `prefix.targetdomain.com`). It determines if a subdomain has a valid DNS record (typically A or CNAME, though the current implementation checks for any successful resolution).
 *   **Implementation**:
-    *   Function: `resolveDomain(domain string, timeout time.Duration) bool`
+    *   Function: `resolveDomain(domain string, timeout time.Duration, dnsServer string, verbose bool) bool`
+    *   Function: `resolveDomainWithRetry(domain string, timeout time.Duration, dnsServer string, verbose bool, maxRetries int) bool` — wraps `resolveDomain` with configurable retry logic and exponential backoff between attempts.
     *   `net.Resolver{}`: A custom DNS resolver is configured.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.
-        *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function is provided to control the connection to the DNS server. This allows for setting a specific timeout for the dial operation and for specifying the DNS server to use (currently hardcoded to Google's public DNS `8.8.8.8:53`).
+        *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function is provided to control the connection to the DNS server, using the user-specified `dnsServer` address.
             *   `net.Dialer{Timeout: timeout}`: A `Dialer` is created with the user-specified timeout.
-            *   `d.DialContext(ctx, "udp", "8.8.8.8:53")`: Establishes a UDP connection to the DNS server.
+            *   `d.DialContext(ctx, "udp", dnsServer)`: Establishes a UDP connection to the configured DNS server.
     *   `resolver.LookupHost(context.Background(), domain)`: Performs the DNS lookup for the given domain. It attempts to find A or AAAA records for the host.
     *   The function returns `true` if `LookupHost` returns no error (i.e., the domain resolved), and `false` otherwise.
-*   **Interactions**: This function is called by each worker goroutine. It takes a fully qualified domain name and the timeout duration as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console.
+*   **Interactions**: Workers call `resolveDomainWithRetry`, which delegates to `resolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.
 
 ### 2.4. Concurrency Management (Worker Pool)
 
@@ -144,8 +145,13 @@ Visually, this can be seen as:
 
 ### 4.1. User Input Errors
 
-*   **Missing Required Arguments**: When the user doesn't provide a wordlist file (`-w` flag) or a target domain, the tool prints a usage message (`fmt.Println("Usage: subenum -w <wordlist_file> <domain>")`) followed by the description of all flags, and then exits with a non-zero status code (`os.Exit(1)`).
-*   **Validation**: Currently, the tool performs minimal validation of the input arguments. The domain and wordlist file must be provided, but there is no validation of flag values (e.g., checking if the concurrency level or timeout is a positive number).
+*   **Missing Required Arguments**: When the user doesn't provide a wordlist file (`-w` flag) or a target domain, the tool prints a usage message followed by the description of all flags, and then exits with a non-zero status code (`os.Exit(1)`).
+*   **Validation**: The tool validates:
+    *   Concurrency level and timeout must be positive integers.
+    *   DNS server must be a valid `ip:port` format with proper IP address and port range (1-65535), validated by `validateDNSServer`.
+    *   Target domain must conform to DNS naming rules, validated by `validateDomain`.
+    *   Hit rate (simulation mode) must be 1-100.
+    *   Retry count must be at least 1.
 
 ### 4.2. File Operation Errors
 
@@ -162,12 +168,14 @@ Visually, this can be seen as:
 *   **Channel Operations**: The tool uses a channel (`subdomains`) to pass work between the wordlist reading goroutine and the worker goroutines. No explicit error handling is implemented for channel operations, as Go's channel semantics ensure that operations like closing an already closed channel would panic. This is avoided by design in the current implementation.
 *   **Worker Goroutine Errors**: Each worker goroutine processes DNS lookups independently. If an error occurs within a worker (outside of the expected DNS resolution failures), it can cause the entire goroutine to terminate. The current implementation doesn't have specific handling for such scenarios.
 
-### 4.5. Potential Improvements
+### 4.5. Graceful Shutdown
 
-*   **Input Validation**: Add more thorough validation of command-line arguments, including:
-    *   Checking that the concurrency level is positive.
-    *   Validating that the timeout value is reasonable.
-    *   Verifying that the domain adheres to DNS naming rules.
-*   **Verbose Mode**: Implement a verbose mode (e.g., `-v` flag) that would print more information, including errors during DNS lookups, to help with debugging.
-*   **Graceful Handling of DNS Server Issues**: Add better handling of DNS server problems, possibly including retry mechanisms or fall-back to alternative DNS servers.
-*   **Progress Reporting**: Provide information about the progress of the enumeration to give the user feedback on long-running scans. 
+The tool listens for `SIGINT` and `SIGTERM` signals. Upon receiving an interrupt, it cancels the work context, drains in-flight workers, and exits cleanly with a summary of results processed so far.
+
+### 4.6. Output File Support
+
+When the `-o` flag is provided, resolved subdomains are written to the specified file (one per line) in addition to stdout. A mutex protects concurrent writes to both stdout and the output file.
+
+### 4.7. Retry Mechanism
+
+The `-retries` flag (default: 1) controls how many times each subdomain is attempted before being marked as unresolved. A short backoff delay is applied between retries to handle transient DNS failures.

@@ -8,7 +8,7 @@ This guide provides information for developers looking to contribute to or build
 
 To work with `subenum`, you'll need:
 
-*   **Go Programming Language**: [Go 1.16+](https://golang.org/dl/) is recommended. The tool uses features from recent Go versions.
+*   **Go Programming Language**: [Go 1.22+](https://golang.org/dl/) is required.
 *   **Git**: For version control.
 *   **Text Editor or IDE**: VS Code, GoLand, or any editor with Go support is recommended.
 
@@ -17,7 +17,7 @@ To work with `subenum`, you'll need:
 1.  **Clone the Repository**
 
     ```bash
-    git clone https://github.com/yourusername/subenum.git
+    git clone https://github.com/TMHSDigital/subenum.git
     cd subenum
     ```
 
@@ -79,17 +79,14 @@ go test ./...
 When adding new features or modifying existing ones, please ensure you add appropriate tests. Here's a basic structure for tests:
 
 ```go
-// In a file like main_test.go
 package main
 
 import (
-    "context"
     "testing"
     "time"
 )
 
 func TestResolveDomain(t *testing.T) {
-    // Test cases
     testCases := []struct {
         name     string
         domain   string
@@ -110,10 +107,9 @@ func TestResolveDomain(t *testing.T) {
         },
     }
 
-    // Run test cases
     for _, tc := range testCases {
         t.Run(tc.name, func(t *testing.T) {
-            result := resolveDomain(tc.domain, tc.timeout)
+            result := resolveDomain(tc.domain, tc.timeout, DefaultDNSServer, false)
             if result != tc.expected {
                 t.Errorf("Expected %v for domain %s, got %v", tc.expected, tc.domain, result)
             }
@@ -188,10 +184,10 @@ Please follow these style guidelines when contributing:
 
 Areas for potential enhancement include:
 
-*   **Custom DNS Server**: Adding a flag to specify a DNS server to use for lookups.
-*   **Output Formats**: Supporting different output formats (JSON, CSV).
-*   **Verbose Mode**: Adding a verbose flag for more detailed output, including errors and progress.
+*   **Output Formats**: Supporting different output formats (JSON, CSV) in addition to the current plain text output file (`-o`).
 *   **Result Filtering**: Allowing users to filter results based on DNS record types.
 *   **Recursive Enumeration**: Adding support for recursive subdomain enumeration (e.g., finding subdomains of discovered subdomains).
+*   **Wildcard Detection**: Detecting wildcard DNS records that resolve all subdomains.
+*   **Rate Limiting**: Adding configurable rate limiting for DNS queries to avoid triggering abuse detection.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 

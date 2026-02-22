@@ -18,12 +18,12 @@ We welcome contributions! Please read this guide to understand how you can contr
 1. **Fork the repository** on GitHub
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/your-username/subenum.git
+   git clone https://github.com/TMHSDigital/subenum.git
    cd subenum
    ```
 3. **Set up the upstream remote**:
    ```bash
-   git remote add upstream https://github.com/original-owner/subenum.git
+   git remote add upstream https://github.com/TMHSDigital/subenum.git
    ```
 
 ## Development Workflow

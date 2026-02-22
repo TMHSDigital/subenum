@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-22
+
+### Added
+- Output file support with the `-o` flag to save results to a file
+- DNS retry mechanism with configurable `-retries` flag for transient failure resilience
+- Graceful shutdown on SIGINT/SIGTERM — drains in-flight workers and prints partial results
+- Proper DNS server validation (IP format and port range 1-65535)
+- Domain format validation against DNS naming rules
+- Tests for `validateDNSServer`, `validateDomain`, `resolveDomainWithRetry`, and `simulateResolution`
+
+### Changed
+- Removed deprecated `rand.Seed` call (auto-seeded since Go 1.20)
+- Tests now use `t.Errorf` for real assertions instead of `t.Logf` warnings
+- Fixed test compilation — `resolveDomain` calls now pass all 4 required parameters
+- Updated all placeholder URLs/emails in documentation to actual repo values
+
+### Fixed
+- Progress goroutine `done` channel is now buffered to prevent potential deadlock
+- Mutex-protected stdout/file output to prevent interleaved writes from concurrent workers
+
 ## [0.2.0] - 2025-05-08
 
 ### Added

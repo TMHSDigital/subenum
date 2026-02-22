@@ -5,7 +5,7 @@
 If you discover a security vulnerability in `subenum`, please follow these steps to report it responsibly:
 
 1. **Do NOT** disclose the vulnerability publicly until it has been addressed.
-2. Send details of the vulnerability to [your-email@example.com] or create a private report through GitHub's Security tab.
+2. Send details of the vulnerability to the repository maintainers via GitHub Issues or create a private report through GitHub's Security tab.
 3. Include the following information:
    - A description of the vulnerability
    - Steps to reproduce the issue

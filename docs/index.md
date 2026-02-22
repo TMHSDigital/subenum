@@ -11,9 +11,14 @@ A Go-based CLI tool for subdomain enumeration designed for educational purposes 
 
 - Fast, concurrent DNS lookup of subdomains using customizable wordlists
 - Configurable concurrency level and timeout settings
-- Support for custom DNS servers
+- Support for custom DNS servers with proper validation
 - Verbose mode for detailed output
 - Real-time progress tracking
+- Output to file with `-o` flag
+- DNS retry mechanism for transient failure resilience
+- Graceful shutdown on Ctrl+C (SIGINT/SIGTERM)
+- Simulation mode for safe testing without network access
+- Domain and DNS server input validation
 - Docker support for containerized usage
 - Extensive documentation and examples
 
@@ -23,7 +28,7 @@ A Go-based CLI tool for subdomain enumeration designed for educational purposes 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/subenum.git
+git clone https://github.com/TMHSDigital/subenum.git
 cd subenum
 
 # Build the tool
@@ -34,7 +39,7 @@ go build
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/subenum.git
+git clone https://github.com/TMHSDigital/subenum.git
 cd subenum
 
 # Build the Docker image
@@ -74,8 +79,8 @@ make docker-build docker-run
 
 ## Documentation
 
-- [Usage Guide](https://github.com/yourusername/subenum#usage)
-- [Advanced Usage Examples](https://github.com/yourusername/subenum/blob/main/examples/advanced_usage.md)
+- [Usage Guide](https://github.com/TMHSDigital/subenum#usage)
+- [Advanced Usage Examples](https://github.com/TMHSDigital/subenum/blob/main/examples/advanced_usage.md)
 - [Docker Usage](#using-docker)
 - [Architecture](ARCHITECTURE.html)
 - [Developer Guide](DEVELOPER_GUIDE.html)
@@ -83,7 +88,7 @@ make docker-build docker-run
 
 ## Ethical Use
 
-This tool is provided for **educational and legitimate security testing purposes only**. Users must ensure they have proper authorization before conducting subdomain enumeration on any domains. See the [LICENSE](https://github.com/yourusername/subenum/blob/main/LICENSE) file for detailed terms of use.
+This tool is provided for **educational and legitimate security testing purposes only**. Users must ensure they have proper authorization before conducting subdomain enumeration on any domains. See the [LICENSE](https://github.com/TMHSDigital/subenum/blob/main/LICENSE) file for detailed terms of use.
 
 ## License
 

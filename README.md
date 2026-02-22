@@ -96,6 +96,8 @@ go build
 -   `-dns-server <ip:port>`: DNS server to use for lookups (default: 8.8.8.8:53).
 -   `-v`: Enable verbose output with detailed information about each lookup.
 -   `-progress`: Show scan progress (default: true, use `-progress=false` to disable).
+-   `-o <file>`: Write discovered subdomains to file (in addition to stdout).
+-   `-retries <number>`: Number of DNS retry attempts per subdomain (default: 1).
 -   `-version`: Show version information and exit.
 
 ### Output:
@@ -166,6 +168,16 @@ Enabling verbose output while using higher concurrency and longer timeout:
 Disabling progress reporting (useful for scripting):
 ```bash
 ./subenum -w words.txt -progress=false example.com
+```
+
+Saving results to a file:
+```bash
+./subenum -w words.txt -o results.txt example.com
+```
+
+Using retries for unreliable networks:
+```bash
+./subenum -w words.txt -retries 3 example.com
 ```
 
 ### Simulation Mode for Safe Testing

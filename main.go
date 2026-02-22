@@ -26,21 +26,56 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"os/signal"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
-// Version information
 const (
 	ProgramName      = "subenum"
-	Version          = "0.2.0"
-	DefaultDNSServer = "8.8.8.8:53" // Google's public DNS
+	Version          = "0.3.0"
+	DefaultDNSServer = "8.8.8.8:53"
+	DefaultRetries   = 1
 )
 
+var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
+
+// validateDNSServer checks that the DNS server string is a valid ip:port.
+func validateDNSServer(server string) error {
+	host, portStr, err := net.SplitHostPort(server)
+	if err != nil {
+		return fmt.Errorf("invalid format, expected ip:port (e.g., %s): %w", DefaultDNSServer, err)
+	}
+	if net.ParseIP(host) == nil {
+		return fmt.Errorf("invalid IP address: %s", host)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("invalid port: %s (must be 1-65535)", portStr)
+	}
+	return nil
+}
+
+// validateDomain checks that a domain name is syntactically valid.
+func validateDomain(domain string) error {
+	if len(domain) == 0 {
+		return fmt.Errorf("domain cannot be empty")
+	}
+	if len(domain) > 253 {
+		return fmt.Errorf("domain exceeds maximum length of 253 characters")
+	}
+	if !domainRegex.MatchString(domain) {
+		return fmt.Errorf("invalid domain format: %s", domain)
+	}
+	return nil
+}
+
 func main() {
-	// Parse command-line flags
 	wordlistFile := flag.String("w", "", "Path to the wordlist file")
 	concurrency := flag.Int("t", 100, "Number of concurrent workers")
 	timeoutMs := flag.Int("timeout", 1000, "DNS lookup timeout in milliseconds")
@@ -50,9 +85,10 @@ func main() {
 	showProgress := flag.Bool("progress", true, "Show progress during scanning")
 	testMode := flag.Bool("simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
 	testHitRate := flag.Int("hit-rate", 15, "In simulation mode, percentage of subdomains that will 'resolve' (1-100)")
+	outputFile := flag.String("o", "", "Write results to file (in addition to stdout)")
+	retries := flag.Int("retries", DefaultRetries, "Number of DNS retry attempts per subdomain")
 	flag.Parse()
 
-	// Add a warning banner when simulation mode is enabled
 	if *testMode {
 		fmt.Printf("\n")
 		fmt.Printf("╔════════════════════════════════════════════════════════════════════╗\n")
@@ -61,7 +97,6 @@ func main() {
 		fmt.Printf("╚════════════════════════════════════════════════════════════════════╝\n\n")
 	}
 
-	// Show version if requested
 	if *showVersion {
 		fmt.Printf("%s v%s\n", ProgramName, Version)
 		if *testMode {
@@ -70,14 +105,12 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Validate required arguments
 	if *wordlistFile == "" || flag.NArg() == 0 {
-		fmt.Println("Usage: subenum -w <wordlist_file> <domain>")
+		fmt.Println("Usage: subenum -w <wordlist_file> [options] <domain>")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
-	// Validate numeric parameters
 	if *concurrency <= 0 {
 		fmt.Println("Error: Concurrency level (-t) must be greater than 0")
 		os.Exit(1)
@@ -88,22 +121,43 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Validate hit rate for simulation mode
 	if *testHitRate < 1 || *testHitRate > 100 {
 		fmt.Println("Error: Hit rate (-hit-rate) must be between 1 and 100")
 		os.Exit(1)
 	}
 
-	// Validate DNS server format if not in test mode
-	if !*testMode && !strings.Contains(*dnsServer, ":") {
-		fmt.Printf("Error: DNS server must be in format ip:port (e.g., %s)\n", DefaultDNSServer)
+	if *retries < 1 {
+		fmt.Println("Error: Retries (-retries) must be at least 1")
 		os.Exit(1)
 	}
 
+	if !*testMode {
+		if err := validateDNSServer(*dnsServer); err != nil {
+			fmt.Printf("Error: DNS server %s: %v\n", *dnsServer, err)
+			os.Exit(1)
+		}
+	}
+
 	domain := flag.Arg(0)
+	if err := validateDomain(domain); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	timeout := time.Duration(*timeoutMs) * time.Millisecond
 
-	// Verbose info about settings
+	// Set up output file if requested
+	var outFile *os.File
+	if *outputFile != "" {
+		var err error
+		outFile, err = os.Create(*outputFile)
+		if err != nil {
+			fmt.Printf("Error creating output file: %v\n", err)
+			os.Exit(1)
+		}
+		defer outFile.Close()
+	}
+
 	if *verbose {
 		fmt.Printf("Starting %s v%s\n", ProgramName, Version)
 		if *testMode {
@@ -116,18 +170,16 @@ func main() {
 		fmt.Printf("Wordlist: %s\n", *wordlistFile)
 		fmt.Printf("Concurrency: %d workers\n", *concurrency)
 		fmt.Printf("Timeout: %d ms\n", *timeoutMs)
+		fmt.Printf("Retries: %d\n", *retries)
 		if !*testMode {
 			fmt.Printf("DNS Server: %s\n", *dnsServer)
+		}
+		if *outputFile != "" {
+			fmt.Printf("Output file: %s\n", *outputFile)
 		}
 		fmt.Println("---")
 	}
 
-	// Initialize random number generator for simulation mode
-	if *testMode {
-		rand.Seed(time.Now().UnixNano())
-	}
-
-	// Open wordlist
 	file, err := os.Open(*wordlistFile)
 	if err != nil {
 		fmt.Printf("Error opening wordlist file: %v\n", err)
@@ -135,7 +187,6 @@ func main() {
 	}
 	defer file.Close()
 
-	// Count total lines for progress reporting
 	var totalWords int64 = 0
 	if *showProgress {
 		scanner := bufio.NewScanner(file)
@@ -146,7 +197,6 @@ func main() {
 			fmt.Printf("Error counting wordlist lines: %v\n", err)
 		}
 
-		// Reset file position to beginning
 		file.Seek(0, 0)
 
 		if *verbose {
@@ -154,16 +204,27 @@ func main() {
 		}
 	}
 
-	// Channel for subdomain prefixes
+	// Set up graceful shutdown via SIGINT/SIGTERM
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintf(os.Stderr, "\nInterrupt received, shutting down gracefully...\n")
+		cancel()
+	}()
+
 	subdomains := make(chan string)
 	var wg sync.WaitGroup
 	var processedWords int64 = 0
 	var foundSubdomains int64 = 0
+	var outputMu sync.Mutex
 
-	// Progress reporting goroutine
 	if *showProgress && totalWords > 0 {
 		ticker := time.NewTicker(2 * time.Second)
-		done := make(chan bool)
+		done := make(chan bool, 1)
 		go func() {
 			for {
 				select {
@@ -180,37 +241,42 @@ func main() {
 			}
 		}()
 
-		// Clean up the progress goroutine when main() exits
 		defer func() {
 			done <- true
-			// Print a newline after the last progress update
 			fmt.Println()
 		}()
 	}
 
-	// Worker pool
 	for i := 0; i < *concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for subdomainPrefix := range subdomains {
+				if ctx.Err() != nil {
+					atomic.AddInt64(&processedWords, 1)
+					continue
+				}
+
 				fullDomain := subdomainPrefix + "." + domain
 				var resolved bool
 
 				if *testMode {
-					// In test mode, simulate DNS resolution without actual queries
 					resolved = simulateResolution(fullDomain, *testHitRate, *verbose)
 				} else {
-					// In normal mode, perform actual DNS resolution
-					resolved = resolveDomain(fullDomain, timeout, *dnsServer, *verbose)
+					resolved = resolveDomainWithRetry(fullDomain, timeout, *dnsServer, *verbose, *retries)
 				}
 
 				if resolved {
+					outputMu.Lock()
 					if *testMode {
 						fmt.Printf("Found (SIMULATED): %s\n", fullDomain)
 					} else {
 						fmt.Printf("Found: %s\n", fullDomain)
 					}
+					if outFile != nil {
+						fmt.Fprintln(outFile, fullDomain)
+					}
+					outputMu.Unlock()
 					atomic.AddInt64(&foundSubdomains, 1)
 				}
 				atomic.AddInt64(&processedWords, 1)
@@ -218,28 +284,35 @@ func main() {
 		}()
 	}
 
-	// Read wordlist and send to workers
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		subdomains <- scanner.Text()
+		select {
+		case <-ctx.Done():
+			goto done
+		case subdomains <- scanner.Text():
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		fmt.Printf("Error reading wordlist file: %v\n", err)
 	}
 
+done:
 	close(subdomains)
 	wg.Wait()
 
-	// Final summary
 	if *verbose {
 		fmt.Printf("\nScan completed for %s\n", domain)
-		fmt.Printf("Processed %d subdomain prefixes\n", totalWords)
+		fmt.Printf("Processed %d subdomain prefixes\n", atomic.LoadInt64(&processedWords))
 		fmt.Printf("Found %d ", atomic.LoadInt64(&foundSubdomains))
 		if *testMode {
 			fmt.Printf("simulated ")
 		}
 		fmt.Printf("subdomains\n")
+
+		if outFile != nil {
+			fmt.Printf("Results written to: %s\n", *outputFile)
+		}
 
 		if *testMode {
 			fmt.Println("\nNOTE: Results were simulated and no actual DNS queries were performed.")
@@ -248,10 +321,7 @@ func main() {
 	}
 }
 
-// simulateResolution simulates DNS resolution for testing purposes
-// without making actual network requests
 func simulateResolution(domain string, hitRate int, verbose bool) bool {
-	// Always resolve common subdomains for more realistic simulation
 	commonSubdomains := []string{
 		"www", "mail", "ftp", "blog",
 		"api", "dev", "staging", "test",
@@ -260,18 +330,15 @@ func simulateResolution(domain string, hitRate int, verbose bool) bool {
 
 	for _, sub := range commonSubdomains {
 		if strings.HasPrefix(domain, sub+".") {
-			// Simulate a successful lookup for these common subdomains
 			if verbose {
 				fakeTiming := time.Duration(50+rand.Intn(200)) * time.Millisecond
 				fakeIP := fmt.Sprintf("192.168.%d.%d", rand.Intn(255), 1+rand.Intn(254))
 				fmt.Printf("Resolved (SIMULATED): %s (IP: %s) in %s\n", domain, fakeIP, fakeTiming)
 			}
-			// With 90% probability, "resolve" common subdomains
 			return rand.Intn(100) < 90
 		}
 	}
 
-	// For other subdomains, use the hit rate to determine if they resolve
 	result := rand.Intn(100) < hitRate
 
 	if verbose {
@@ -285,6 +352,19 @@ func simulateResolution(domain string, hitRate int, verbose bool) bool {
 	}
 
 	return result
+}
+
+// resolveDomainWithRetry wraps resolveDomain with retry logic for transient failures.
+func resolveDomainWithRetry(domain string, timeout time.Duration, dnsServer string, verbose bool, maxRetries int) bool {
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if resolveDomain(domain, timeout, dnsServer, verbose) {
+			return true
+		}
+		if attempt < maxRetries-1 {
+			time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+		}
+	}
+	return false
 }
 
 func resolveDomain(domain string, timeout time.Duration, dnsServer string, verbose bool) bool {
