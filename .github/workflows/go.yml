@@ -6,18 +6,19 @@ on:
   pull_request:
     branches: [ "main" ]
 
-jobs:
+permissions:
+  contents: write
 
+jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.22'
-        cache: true
 
     - name: Verify dependencies
       run: go mod verify
@@ -26,48 +27,66 @@ jobs:
       run: go build -v -buildvcs=false ./...
 
     - name: Test
-      run: go test -v ./...
-      
+      run: go test -v -race ./...
+
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v6
       with:
         version: latest
 
-  # Create a job for each OS (Windows, macOS, Linux)
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
             artifact_name: subenum
             asset_name: subenum-linux-amd64
           - os: windows-latest
+            goos: windows
+            goarch: amd64
             artifact_name: subenum.exe
             asset_name: subenum-windows-amd64.exe
           - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            artifact_name: subenum
+            asset_name: subenum-macos-arm64
+          - os: ubuntu-latest
+            goos: darwin
+            goarch: amd64
             artifact_name: subenum
             asset_name: subenum-macos-amd64
-    
+
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v4
+
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.22'
-        cache: true
-    
+
     - name: Build
-      run: go build -v -buildvcs=false -o ${{ matrix.artifact_name }}
-    
-    - name: Upload binaries to release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: ${{ matrix.artifact_name }}
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: go build -v -buildvcs=false -o ${{ matrix.artifact_name }}
+
+    - name: Rename for release
+      shell: bash
+      run: |
+        if [ "${{ matrix.artifact_name }}" != "${{ matrix.asset_name }}" ]; then
+          cp ${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+        fi
+
+    - name: Upload binaries to release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ matrix.asset_name }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

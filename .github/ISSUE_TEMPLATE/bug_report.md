@@ -26,7 +26,7 @@ If applicable, add screenshots or copy the terminal output to help explain your 
 **Environment (please complete the following information):**
  - OS: [e.g. Ubuntu 22.04, Windows 11, macOS 13.0]
  - Go Version: [e.g. 1.22.0]
- - subenum Version: [e.g. 0.2.0]
+ - subenum Version: [e.g. 0.3.0]
 
 **Additional context**
 Add any other context about the problem here.
