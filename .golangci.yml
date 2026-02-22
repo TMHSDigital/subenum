@@ -1,6 +1,5 @@
 run:
   timeout: 5m
-  go: "1.22"
 
 linters:
   enable:
@@ -8,24 +7,23 @@ linters:
     - govet
     - staticcheck
     - gofmt
-    - unused
+    - deadcode
     - gosec
     - gocritic
     - misspell
     - unconvert
-
-linters-settings:
-  gosec:
-    excludes:
-      # G304: File path provided as taint input — expected for a wordlist tool
-      - G304
-  errcheck:
-    # These write to stdout/files in hot paths; errors are intentionally ignored
-    exclude-functions:
-      - fmt.Printf
-      - fmt.Fprintln
-      - fmt.Fprintf
-      - fmt.Println
+  settings:
+    gosec:
+      excludes:
+        # G304: File path provided as taint input — expected for a wordlist tool
+        - G304
+    errcheck:
+      # These write to stdout/files in hot paths; errors are intentionally ignored
+      exclude-functions:
+        - fmt.Printf
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Println
 
 issues:
   exclude-rules:
