@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +47,7 @@ func TestResolveDomain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveDomain(tt.domain, timeout, DefaultDNSServer, false)
+			got := resolveDomain(context.Background(), tt.domain, timeout, DefaultDNSServer, false)
 
 			if got != tt.expected {
 				t.Errorf("resolveDomain(%q) = %v, want %v (may be network-dependent)",
@@ -61,7 +64,7 @@ func TestResolveDomainTimeout(t *testing.T) {
 
 	veryShortTimeout := time.Millisecond * 1
 
-	result := resolveDomain("google.com", veryShortTimeout, DefaultDNSServer, false)
+	result := resolveDomain(context.Background(), "google.com", veryShortTimeout, DefaultDNSServer, false)
 
 	if result {
 		t.Errorf("Expected timeout with 1ms deadline, but resolution succeeded")
@@ -84,7 +87,7 @@ func TestResolveDomainWithCustomDNS(t *testing.T) {
 
 	for _, server := range dnsServers {
 		t.Run(fmt.Sprintf("DNS_Server_%s", server), func(t *testing.T) {
-			result := resolveDomain(testDomain, timeout, server, false)
+			result := resolveDomain(context.Background(), testDomain, timeout, server, false)
 
 			if !result {
 				t.Errorf("Expected %s to resolve using DNS server %s, but it failed", testDomain, server)
@@ -100,14 +103,36 @@ func TestResolveDomainWithRetry(t *testing.T) {
 
 	timeout := time.Second * 2
 
-	result := resolveDomainWithRetry("google.com", timeout, DefaultDNSServer, false, 3)
+	result := resolveDomainWithRetry(context.Background(), "google.com", timeout, DefaultDNSServer, false, 3)
 	if !result {
 		t.Errorf("Expected google.com to resolve with retries, but it failed")
 	}
 
-	result = resolveDomainWithRetry("this-domain-should-not-exist-123456789.com", timeout, DefaultDNSServer, false, 2)
+	result = resolveDomainWithRetry(context.Background(), "this-domain-should-not-exist-123456789.com", timeout, DefaultDNSServer, false, 2)
 	if result {
 		t.Errorf("Expected non-existent domain to fail even with retries")
+	}
+}
+
+func TestResolveDomainWithRetryContextCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping context cancellation test in short mode")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	timeout := time.Second * 2
+	start := time.Now()
+	result := resolveDomainWithRetry(ctx, "google.com", timeout, DefaultDNSServer, false, 5)
+	elapsed := time.Since(start)
+
+	if result {
+		t.Errorf("Expected cancelled context to prevent resolution, but got true")
+	}
+	// Should return almost immediately, not wait for 5 retries
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("Expected near-instant return on cancelled context, took %s", elapsed)
 	}
 }
 
@@ -192,15 +217,17 @@ func TestValidateDomain(t *testing.T) {
 }
 
 func TestSimulateResolution(t *testing.T) {
+	// Use 500 runs to make the 90% hit-rate test statistically near-certain.
+	runs := 500
+
 	resolved := 0
-	runs := 100
 	for i := 0; i < runs; i++ {
 		if simulateResolution("www.example.com", 15, false) {
 			resolved++
 		}
 	}
 	if resolved == 0 {
-		t.Errorf("Expected at least some common subdomains to resolve in simulation, got 0/%d", runs)
+		t.Errorf("Expected common subdomains to resolve in simulation, got 0/%d", runs)
 	}
 
 	resolved = 0
@@ -211,5 +238,60 @@ func TestSimulateResolution(t *testing.T) {
 	}
 	if resolved != 0 {
 		t.Errorf("Expected 0%% hit rate to never resolve, got %d/%d", resolved, runs)
+	}
+}
+
+func TestSanitizeLine(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"api", "api"},
+		{"  api  ", "api"},
+		{"\tmail\t", "mail"},
+		{"", ""},
+		{"   ", ""},
+		{"\t\r\n", ""},
+		{"www", "www"},
+	}
+
+	for _, tt := range tests {
+		got := sanitizeLine(tt.in)
+		if got != tt.want {
+			t.Errorf("sanitizeLine(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestOutputFileWriting(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "subenum-test-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	outWriter := bufio.NewWriter(tmpFile)
+
+	domains := []string{"www.example.com", "api.example.com", "mail.example.com"}
+	for _, d := range domains {
+		if _, err := fmt.Fprintln(outWriter, d); err != nil {
+			t.Fatalf("Failed to write domain %q to output file: %v", d, err)
+		}
+	}
+
+	if err := outWriter.Flush(); err != nil {
+		t.Fatalf("Failed to flush output file: %v", err)
+	}
+	tmpFile.Close()
+
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range domains {
+		if !strings.Contains(string(content), d) {
+			t.Errorf("Expected output file to contain %q\nGot:\n%s", d, content)
+		}
 	}
 }

@@ -18,7 +18,7 @@ This guide explains how to use `subenum` with Docker for a containerized subdoma
 
 ```bash
 # Clone the repository (if you haven't already)
-git clone https://github.com/yourusername/subenum.git
+git clone https://github.com/TMHSDigital/subenum.git
 cd subenum
 
 # Build the Docker image
@@ -72,6 +72,47 @@ docker run --rm -v /path/to/your/files:/data subenum -w /data/your-wordlist.txt 
 - `/root/subenum`: The main executable
 - `/root/examples/`: Contains example files and wordlists from the repository
 - `/data/`: Mount point for your custom files
+
+### Saving Results to a File
+
+Use `-o` to write discovered subdomains to a file on the host via the `/data` volume:
+
+```bash
+docker run --rm -v $(pwd)/data:/data subenum \
+  -w /data/wordlist.txt \
+  -o /data/results.txt \
+  example.com
+```
+
+### Using Retries for Unreliable Networks
+
+The `-retries` flag re-attempts failed DNS lookups before marking a subdomain as unresolved:
+
+```bash
+docker run --rm -v $(pwd)/data:/data subenum \
+  -w /data/wordlist.txt \
+  -retries 3 \
+  -timeout 2000 \
+  example.com
+```
+
+### Safe Simulation Mode
+
+Test the tool without making any real DNS queries:
+
+```bash
+docker run --rm subenum \
+  -simulate \
+  -hit-rate 20 \
+  -w /root/examples/sample_wordlist.txt \
+  example.com
+```
+
+Or via Make:
+
+```bash
+make docker-simulate
+```
 
 ## Troubleshooting
 

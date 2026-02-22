@@ -75,6 +75,12 @@ func validateDomain(domain string) error {
 	return nil
 }
 
+// sanitizeLine trims whitespace from a wordlist entry.
+// Returns an empty string for blank or whitespace-only lines.
+func sanitizeLine(s string) string {
+	return strings.TrimSpace(s)
+}
+
 func main() {
 	wordlistFile := flag.String("w", "", "Path to the wordlist file")
 	concurrency := flag.Int("t", 100, "Number of concurrent workers")
@@ -146,16 +152,18 @@ func main() {
 
 	timeout := time.Duration(*timeoutMs) * time.Millisecond
 
-	// Set up output file if requested
-	var outFile *os.File
+	// Set up output file with a buffered writer if requested.
+	// Defers are LIFO: Flush runs before Close.
+	var outWriter *bufio.Writer
 	if *outputFile != "" {
-		var err error
-		outFile, err = os.Create(*outputFile)
+		f, err := os.Create(*outputFile)
 		if err != nil {
 			fmt.Printf("Error creating output file: %v\n", err)
 			os.Exit(1)
 		}
-		defer outFile.Close()
+		defer f.Close()
+		outWriter = bufio.NewWriter(f)
+		defer outWriter.Flush()
 	}
 
 	if *verbose {
@@ -187,33 +195,43 @@ func main() {
 	}
 	defer file.Close()
 
+	// Count non-blank lines for accurate progress reporting.
 	var totalWords int64 = 0
 	if *showProgress {
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
-			totalWords++
+			if sanitizeLine(scanner.Text()) != "" {
+				totalWords++
+			}
 		}
 		if err := scanner.Err(); err != nil {
 			fmt.Printf("Error counting wordlist lines: %v\n", err)
 		}
 
-		file.Seek(0, 0)
+		if _, err := file.Seek(0, 0); err != nil {
+			fmt.Printf("Error seeking wordlist file: %v\n", err)
+			os.Exit(1)
+		}
 
 		if *verbose {
 			fmt.Printf("Total wordlist entries: %d\n", totalWords)
 		}
 	}
 
-	// Set up graceful shutdown via SIGINT/SIGTERM
+	// Set up graceful shutdown via SIGINT/SIGTERM.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
-		<-sigCh
-		fmt.Fprintf(os.Stderr, "\nInterrupt received, shutting down gracefully...\n")
-		cancel()
+		select {
+		case <-sigCh:
+			fmt.Fprintf(os.Stderr, "\nInterrupt received, shutting down gracefully...\n")
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	subdomains := make(chan string)
@@ -235,8 +253,10 @@ func main() {
 					processed := atomic.LoadInt64(&processedWords)
 					found := atomic.LoadInt64(&foundSubdomains)
 					progress := float64(processed) / float64(totalWords) * 100
+					outputMu.Lock()
 					fmt.Printf("\rProgress: %.1f%% (%d/%d) | Found: %d ",
 						progress, processed, totalWords, found)
+					outputMu.Unlock()
 				}
 			}
 		}()
@@ -263,7 +283,7 @@ func main() {
 				if *testMode {
 					resolved = simulateResolution(fullDomain, *testHitRate, *verbose)
 				} else {
-					resolved = resolveDomainWithRetry(fullDomain, timeout, *dnsServer, *verbose, *retries)
+					resolved = resolveDomainWithRetry(ctx, fullDomain, timeout, *dnsServer, *verbose, *retries)
 				}
 
 				if resolved {
@@ -273,8 +293,8 @@ func main() {
 					} else {
 						fmt.Printf("Found: %s\n", fullDomain)
 					}
-					if outFile != nil {
-						fmt.Fprintln(outFile, fullDomain)
+					if outWriter != nil {
+						fmt.Fprintln(outWriter, fullDomain)
 					}
 					outputMu.Unlock()
 					atomic.AddInt64(&foundSubdomains, 1)
@@ -286,10 +306,14 @@ func main() {
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
+		line := sanitizeLine(scanner.Text())
+		if line == "" {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			goto done
-		case subdomains <- scanner.Text():
+		case subdomains <- line:
 		}
 	}
 
@@ -310,7 +334,7 @@ done:
 		}
 		fmt.Printf("subdomains\n")
 
-		if outFile != nil {
+		if outWriter != nil {
 			fmt.Printf("Results written to: %s\n", *outputFile)
 		}
 
@@ -354,33 +378,42 @@ func simulateResolution(domain string, hitRate int, verbose bool) bool {
 	return result
 }
 
-// resolveDomainWithRetry wraps resolveDomain with retry logic for transient failures.
-func resolveDomainWithRetry(domain string, timeout time.Duration, dnsServer string, verbose bool, maxRetries int) bool {
+// resolveDomainWithRetry calls resolveDomain up to maxRetries times, respecting ctx cancellation
+// between attempts with an exponential backoff delay.
+func resolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxRetries int) bool {
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		if resolveDomain(domain, timeout, dnsServer, verbose) {
+		if ctx.Err() != nil {
+			return false
+		}
+		if resolveDomain(ctx, domain, timeout, dnsServer, verbose) {
 			return true
 		}
 		if attempt < maxRetries-1 {
-			time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+			select {
+			case <-time.After(time.Duration(50*(attempt+1)) * time.Millisecond):
+			case <-ctx.Done():
+				return false
+			}
 		}
 	}
 	return false
 }
 
-func resolveDomain(domain string, timeout time.Duration, dnsServer string, verbose bool) bool {
+func resolveDomain(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) bool {
 	resolver := &net.Resolver{
 		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		Dial: func(dialCtx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{Timeout: timeout}
-			return d.DialContext(ctx, "udp", dnsServer)
+			return d.DialContext(dialCtx, "udp", dnsServer)
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// Derive timeout from the caller's context so cancellation is propagated.
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	start := time.Now()
-	ips, err := resolver.LookupHost(ctx, domain)
+	ips, err := resolver.LookupHost(timeoutCtx, domain)
 	elapsed := time.Since(start)
 
 	if verbose && err == nil {

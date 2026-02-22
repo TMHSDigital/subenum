@@ -98,6 +98,8 @@ go build
 -   `-progress`: Show scan progress (default: true, use `-progress=false` to disable).
 -   `-o <file>`: Write discovered subdomains to file (in addition to stdout).
 -   `-retries <number>`: Number of DNS retry attempts per subdomain (default: 1).
+-   `-simulate`: Run in simulation mode — no actual DNS queries are made.
+-   `-hit-rate <number>`: In simulation mode, percentage of subdomains that "resolve" (default: 15, range: 1-100).
 -   `-version`: Show version information and exit.
 
 ### Output:
@@ -110,11 +112,12 @@ Found: mail.example.com
 
 With verbose mode (`-v`), you'll see additional information:
 ```
-Starting subenum v0.2.0
+Starting subenum v0.3.0
 Target domain: example.com
 Wordlist: wordlist.txt
 Concurrency: 100 workers
 Timeout: 1000 ms
+Retries: 1
 DNS Server: 8.8.8.8:53
 ---
 Total wordlist entries: 50

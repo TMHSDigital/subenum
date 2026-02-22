@@ -101,11 +101,65 @@ cd examples
 ./multi_domain_scan.sh sample_domains.txt
 ```
 
+## Saving Results to a File
+
+Use `-o` to write discovered subdomains to a file while still printing them to stdout:
+
+```bash
+./subenum -w wordlist.txt -o results.txt example.com
+```
+
+Combine with other flags for a full scan that saves output:
+
+```bash
+./subenum -w wordlist.txt -v -t 150 -o scan_results.txt example.com
+```
+
+## Retries for Unreliable Networks
+
+Use `-retries` to re-attempt failed DNS lookups before giving up. Useful on flaky connections or rate-limited resolvers:
+
+```bash
+./subenum -w wordlist.txt -retries 3 example.com
+```
+
+Combine with a longer timeout for maximum resilience:
+
+```bash
+./subenum -w wordlist.txt -retries 3 -timeout 2000 -dns-server 1.1.1.1:53 example.com
+```
+
+## Simulation Mode
+
+Use `-simulate` to run without making any real DNS queries. Ideal for demonstrations, CI testing, or exploring the tool's output format:
+
+```bash
+./subenum -simulate -w examples/sample_wordlist.txt example.com
+```
+
+Adjust the simulated hit rate (percentage of subdomains that appear to resolve):
+
+```bash
+./subenum -simulate -hit-rate 30 -w examples/sample_wordlist.txt example.com
+```
+
+Simulation mode with verbose output shows fake IPs and timings:
+
+```bash
+./subenum -simulate -hit-rate 25 -v -w examples/sample_wordlist.txt example.com
+```
+
 ## Continuous Integration / Automated Testing
 
 For CI/CD environments, you can use the version flag to ensure the correct version is installed:
 
 ```bash
 ./subenum -version
-# Output: subenum v0.2.0
+# Output: subenum v0.3.0
+```
+
+Use simulation mode in CI pipelines to test the tool's behaviour without network access:
+
+```bash
+./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt -o /tmp/results.txt example.com
 ``` 
