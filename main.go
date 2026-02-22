@@ -371,15 +371,16 @@ func resolveDomain(domain string, timeout time.Duration, dnsServer string, verbo
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{
-				Timeout: timeout,
-			}
+			d := net.Dialer{Timeout: timeout}
 			return d.DialContext(ctx, "udp", dnsServer)
 		},
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	start := time.Now()
-	ips, err := resolver.LookupHost(context.Background(), domain)
+	ips, err := resolver.LookupHost(ctx, domain)
 	elapsed := time.Since(start)
 
 	if verbose && err == nil {
