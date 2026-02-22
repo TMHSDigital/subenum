@@ -1,118 +1,117 @@
 # subenum
 
+[![Build](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main&label=build)](https://github.com/TMHSDigital/subenum/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main)](https://github.com/TMHSDigital/subenum/actions)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/TMHSDigital/subenum)](https://github.com/TMHSDigital/subenum/releases)
-[![License](https://img.shields.io/github/license/TMHSDigital/subenum)](https://github.com/TMHSDigital/subenum/blob/main/LICENSE)
-[![Docker](https://img.shields.io/badge/docker-supported-blue)](https://github.com/TMHSDigital/subenum/blob/main/docs/docker.md)
+[![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum)](https://github.com/TMHSDigital/subenum/releases)
+[![License](https://img.shields.io/github/license/TMHSDigital/subenum)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-supported-0db7ed)](docs/docker.md)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/codeql.yml?label=CodeQL)](https://github.com/TMHSDigital/subenum/actions/workflows/codeql.yml)
 
-A Go-based CLI tool for subdomain enumeration.
+**Fast, concurrent subdomain enumeration via DNS resolution. Written in Go.**
 
-## Description
+Built for security professionals and students conducting authorized reconnaissance. Uses a configurable worker pool to fire hundreds of DNS queries in parallel, with graceful shutdown, retry logic, and safe simulation mode built in.
 
-`subenum` takes a domain and a wordlist as input. It then attempts to resolve `word.domain` for each word in the wordlist using DNS lookups. Valid subdomains that return an A or CNAME record are printed to the console.
+> **For authorized use only.** Only scan domains you own or have explicit written permission to test.
 
-## Cybersecurity Context & Importance
+---
 
-Subdomain enumeration is a crucial first step in the reconnaissance phase of a penetration test or security assessment. Its primary goal is to map out the target organization's digital footprint. Here's why it's important:
+## How It Works
 
-*   **Expanding Attack Surface Discovery**: Organizations often have numerous subdomains for different services, applications (e.g., `blog.example.com`, `api.example.com`), or development/staging environments (e.g., `dev.example.com`, `staging.app.example.com`). Many of these might not be publicly linked or widely known. Each discovered subdomain is a potential entry point for an attacker.
-*   **Identifying Forgotten or Unmaintained Assets**: Companies might have old subdomains pointing to outdated, unpatched applications or servers. These "forgotten" assets can be highly vulnerable and are prime targets.
-*   **Finding Hidden or Test Environments**: Subdomains like `test.example.com` or `uat.example.com` may have weaker security configurations, use default credentials, or expose sensitive debugging information that could be leveraged.
-*   **Discovering Different Technologies/Services**: Different subdomains can host applications built with various technologies. Knowing this allows security professionals to tailor vulnerability scanning and exploitation techniques to specific technology stacks.
-*   **Bypassing Security Controls**: Security measures like Web Application Firewalls (WAFs) might be rigorously applied to the main domain but not consistently across all subdomains. A vulnerable service on an "unprotected" subdomain could offer a path into the internal network.
-*   **Targeting Specific Services**: Subdomains often give clues about the services they host (e.g., `mail.example.com`, `vpn.example.com`, `ftp.example.com`). This allows for focused attacks against known vulnerabilities in those types of services.
-*   **Information Gathering for Further Attacks**: The structure and naming conventions of subdomains can provide insights into the organization's internal structure, naming schemes, or technologies in use, which can be valuable for social engineering or other targeted attacks.
+```
+wordlist.txt  ──►  worker pool (N goroutines)  ──►  DNS resolver  ──►  stdout / file
+                        │                               │
+                   ctx cancellation              timeout + retries
+                   (SIGINT/SIGTERM)              per query
+```
 
-By discovering more subdomains, security testers can identify a broader range of potential vulnerabilities and provide a more comprehensive assessment of an organization's security posture.
+Each wordlist entry is combined with the target domain (`api` + `example.com` → `api.example.com`) and resolved concurrently. Only entries that return a DNS record are reported.
 
-## Legal & Ethical Usage Disclaimer
-
-**IMPORTANT**: This tool is provided for **educational and legitimate security testing purposes only**. 
-
-*   **Authorization Required**: Only use this tool on systems and domains for which you have explicit permission to test.
-*   **Prohibited Uses**: This software must NOT be used for:
-    *   Unauthorized access to systems or networks
-    *   Data theft or exfiltration
-    *   Disruption of services (DoS/DDoS)
-    *   Any activity prohibited by applicable local, national, or international laws
-*   **Responsible Use**: Always follow responsible disclosure practices if you discover vulnerabilities.
-*   **Legal Compliance**: Users are solely responsible for ensuring their use of this tool complies with all relevant laws, regulations, and organizational policies.
-
-The developers and contributors of `subenum` explicitly prohibit any use of this software for malicious purposes or to cause harm. Violation of these terms may subject you to legal action.
+---
 
 ## Installation
 
-### From Source
+**From source** (requires Go 1.22+):
 
 ```bash
-# Clone the repository
 git clone https://github.com/TMHSDigital/subenum.git
 cd subenum
-
-# Build the tool
-go build -buildvcs=false
+go build -buildvcs=false -o subenum
 ```
 
-### Using Docker
+**From a release binary:**
 
-You can also run `subenum` using Docker:
+Download a pre-built binary for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page.
+
+**Docker:**
 
 ```bash
-# Build the Docker image
 docker build -t subenum .
-
-# Run with Docker
 docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com
 ```
 
-### Using Make
-
-The project includes a Makefile for common tasks:
+**Make:**
 
 ```bash
-# Show available commands
-make help
-
-# Build the binary
-make build
-
-# Run with default settings
-make run
+make build     # compile
+make run       # build and run with defaults
+make help      # list all targets
 ```
+
+---
 
 ## Usage
 
+```
+subenum -w <wordlist> [flags] <domain>
+```
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-w <file>` | — | Wordlist file, one prefix per line **(required)** |
+| `-t <n>` | `100` | Number of concurrent worker goroutines |
+| `-timeout <ms>` | `1000` | Per-query DNS timeout in milliseconds |
+| `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server (IP and port validated on startup) |
+| `-retries <n>` | `1` | Retry attempts per subdomain on failure |
+| `-o <file>` | — | Write results to file in addition to stdout |
+| `-v` | `false` | Verbose output — IPs, timings, per-query status |
+| `-progress` | `true` | Live progress line (disable with `-progress=false`) |
+| `-simulate` | `false` | Simulation mode — no real DNS queries |
+| `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1–100) |
+| `-version` | — | Print version and exit |
+
+---
+
+## Examples
+
+**Basic scan:**
+
 ```bash
-go build
-./subenum -w <wordlist_file> <domain>
+./subenum -w wordlist.txt example.com
 ```
 
-### Flags:
-
--   `-w <file>`: Path to the wordlist file (required).
--   `-t <number>`: Number of concurrent workers (default: 100).
--   `-timeout <ms>`: DNS lookup timeout in milliseconds (default: 1000ms).
--   `-dns-server <ip:port>`: DNS server to use for lookups (default: 8.8.8.8:53).
--   `-v`: Enable verbose output with detailed information about each lookup.
--   `-progress`: Show scan progress (default: true, use `-progress=false` to disable).
--   `-o <file>`: Write discovered subdomains to file (in addition to stdout).
--   `-retries <number>`: Number of DNS retry attempts per subdomain (default: 1).
--   `-simulate`: Run in simulation mode — no actual DNS queries are made.
--   `-hit-rate <number>`: In simulation mode, percentage of subdomains that "resolve" (default: 15, range: 1-100).
--   `-version`: Show version information and exit.
-
-### Output:
-
-Without verbose mode, the tool only outputs successfully resolved subdomains:
 ```
-Found: blog.example.com
+Found: api.example.com
 Found: mail.example.com
+Found: www.example.com
 ```
 
-With verbose mode (`-v`), you'll see additional information:
+**High-throughput scan with Cloudflare DNS, saving results:**
+
+```bash
+./subenum -w wordlist.txt -t 300 -timeout 500 -dns-server 1.1.1.1:53 -o results.txt example.com
+```
+
+**Verbose scan — shows IPs, timings, and a final summary:**
+
+```bash
+./subenum -w wordlist.txt -v example.com
+```
+
 ```
 Starting subenum v0.3.0
+Mode: LIVE DNS RESOLUTION
 Target domain: example.com
 Wordlist: wordlist.txt
 Concurrency: 100 workers
@@ -120,94 +119,97 @@ Timeout: 1000 ms
 Retries: 1
 DNS Server: 8.8.8.8:53
 ---
-Total wordlist entries: 50
-Resolved: www.example.com (IP: 93.184.216.34) in 52.789ms
-Found: www.example.com
-Failed to resolve: nonexistent.example.com (Error: lookup nonexistent.example.com: no such host) in 81.234ms
-Progress: 100.0% (50/50) | Found: 3
+Total wordlist entries: 1842
+Resolved: api.example.com (IP: 93.184.216.34) in 28ms
+Found: api.example.com
+Resolved: mail.example.com (IP: 93.184.216.35) in 31ms
+Found: mail.example.com
+Progress: 100.0% (1842/1842) | Found: 7
 
 Scan completed for example.com
-Processed 50 subdomain prefixes
-Found 3 valid subdomains
+Processed 1842 subdomain prefixes
+Found 7 subdomains
 ```
 
-## Example
-
-Assuming you have a wordlist file named `words.txt` with the following content:
-
-```
-blog
-mail
-www
-shop
-```
-
-And you want to enumerate subdomains for `example.com`:
+**Resilient scan for flaky networks:**
 
 ```bash
-./subenum -w words.txt example.com
+./subenum -w wordlist.txt -retries 3 -timeout 2000 example.com
 ```
 
-Potential output:
-
-```
-Found: blog.example.com
-Found: mail.example.com
-Found: www.example.com
-```
-
-### Examples with Additional Options
-
-Using a custom DNS server:
-```bash
-./subenum -w words.txt -dns-server 1.1.1.1:53 example.com
-```
-
-Enabling verbose output while using higher concurrency and longer timeout:
-```bash
-./subenum -w words.txt -v -t 200 -timeout 2000 example.com
-```
-
-Disabling progress reporting (useful for scripting):
-```bash
-./subenum -w words.txt -progress=false example.com
-```
-
-Saving results to a file:
-```bash
-./subenum -w words.txt -o results.txt example.com
-```
-
-Using retries for unreliable networks:
-```bash
-./subenum -w words.txt -retries 3 example.com
-```
-
-### Simulation Mode for Safe Testing
-
-The tool includes a simulation mode for safely testing functionality without performing actual DNS queries:
+**Clean output for piping into other tools:**
 
 ```bash
-# Safe simulation mode (no actual DNS queries)
-./subenum -simulate -w examples/sample_wordlist.txt example.com
+./subenum -w wordlist.txt -progress=false example.com \
+  | cut -d' ' -f2 \
+  | your-takeover-scanner
 ```
 
-In simulation mode:
-- **No actual DNS queries** are performed (completely network-safe)
-- Results are randomly generated based on common patterns
-- All output is clearly marked as simulated
-- You can adjust the "hit rate" (percentage of domains that resolve):
-  ```bash
-  # Simulate with 25% of domains resolving
-  ./subenum -simulate -hit-rate 25 -w examples/sample_wordlist.txt example.com
-  ```
+**Stop mid-scan cleanly** — press `Ctrl+C`. In-flight queries drain, partial results are printed, and the output file is flushed.
 
-This mode is perfect for:
-- Educational demonstrations
-- Testing the tool functionality
-- Understanding the output format
-- Developing additional features
+---
+
+## Simulation Mode
+
+Run without making any real DNS queries. Useful for demonstrations, CI pipelines, and feature development.
+
+```bash
+./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt example.com
+```
+
+```
+╔════════════════════════════════════════════════════════════════════╗
+║  SIMULATION MODE ACTIVE - NO ACTUAL DNS QUERIES WILL BE PERFORMED  ║
+║  Results are artificially generated for educational purposes only  ║
+╚════════════════════════════════════════════════════════════════════╝
+
+Found (SIMULATED): api.example.com
+Found (SIMULATED): dev.example.com
+Found (SIMULATED): staging.example.com
+```
+
+Common subdomains (`www`, `api`, `mail`, `dev`, `staging`, etc.) resolve at a fixed 90% rate. All other entries use the `-hit-rate` percentage.
+
+---
+
+## Why Subdomain Enumeration
+
+Subdomain enumeration is a standard first step in authorized penetration testing and security assessments. Discovered subdomains can surface:
+
+- Forgotten or unmaintained services running outdated software
+- Development and staging environments with weaker security controls
+- Infrastructure not covered by WAFs or other perimeter defenses
+- Services leaking internal naming conventions and technology choices
+
+This tool exists to help security professionals map that attack surface efficiently — on domains they are authorized to test.
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/ARCHITECTURE.md) | Internals: worker pool, context propagation, output pipeline |
+| [Developer Guide](docs/DEVELOPER_GUIDE.md) | Building, testing, project structure, contribution workflow |
+| [Contributing](docs/CONTRIBUTING.md) | How to report bugs, suggest features, and submit PRs |
+| [Docker Usage](docs/docker.md) | Container setup, volume mounting, simulation in Docker |
+| [Advanced Usage](examples/advanced_usage.md) | Scripting, integration, combined flag examples |
+| [Changelog](logs/CHANGELOG.md) | Release history |
+
+---
+
+## Legal
+
+This software is provided for **educational and authorized security testing purposes only**.
+
+- You must have explicit written permission to scan any domain you do not own.
+- Do not use this tool for unauthorized access, data collection, or disruption of services.
+- Users are solely responsible for compliance with all applicable laws.
+
+The developers explicitly prohibit malicious use. See [LICENSE](LICENSE) for full terms.
+
+---
 
 ## Contributing
 
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for details on how to contribute to this project.
+Pull requests are welcome. See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for the workflow, testing requirements, and ethical guidelines.
