@@ -1,20 +1,21 @@
-// Copyright (c) 2025 TM Hospitality Strategies
-//
 // subenum - A Go-based CLI tool for subdomain enumeration.
+// Copyright (C) 2026 TM Hospitality Strategies
 //
-// IMPORTANT LEGAL NOTICE:
-// This tool is provided for educational and legitimate security testing purposes ONLY.
-// Usage of this tool against any domain without explicit permission from the domain
-// owner may violate applicable local, national, and/or international laws.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 //
-// Users MUST:
-// 1. Only scan domains they own or have explicit permission to test.
-// 2. Comply with all applicable laws and regulations.
-// 3. Use this tool responsibly and ethically.
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
 //
-// The developer(s) explicitly prohibit any malicious or unauthorized use of this tool
-// and assume no liability for any misuse or damages resulting from its use.
-// See the LICENSE file for full terms and conditions.
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// For authorized use only. Only scan domains you own or have explicit
+// written permission to test.
 
 package main
 

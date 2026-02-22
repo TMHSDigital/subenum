@@ -3,7 +3,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main&label=build)](https://github.com/TMHSDigital/subenum/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
 [![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum)](https://github.com/TMHSDigital/subenum/releases)
-[![License](https://img.shields.io/github/license/TMHSDigital/subenum)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-supported-0db7ed)](docs/docker.md)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/codeql.yml?label=CodeQL)](https://github.com/TMHSDigital/subenum/actions/workflows/codeql.yml)
 
@@ -206,7 +206,7 @@ This software is provided for **educational and authorized security testing purp
 - Do not use this tool for unauthorized access, data collection, or disruption of services.
 - Users are solely responsible for compliance with all applicable laws.
 
-The developers explicitly prohibit malicious use. See [LICENSE](LICENSE) for full terms.
+This software is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for full terms. Derivatives must also be distributed under GPL-3.0.
 
 ---
 

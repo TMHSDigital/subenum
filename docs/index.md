@@ -92,4 +92,4 @@ This tool is provided for **educational and legitimate security testing purposes
 
 ## License
 
-This project is licensed under the MIT License with additional restrictions against malicious use. 
+This project is licensed under the GNU General Public License v3.0. See the [LICENSE](https://github.com/TMHSDigital/subenum/blob/main/LICENSE) file for full terms. 
