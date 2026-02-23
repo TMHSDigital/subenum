@@ -36,7 +36,7 @@ CMD ["-version"]
 LABEL org.opencontainers.image.title="subenum"
 LABEL org.opencontainers.image.description="A Go-based CLI tool for subdomain enumeration"
 LABEL org.opencontainers.image.source="https://github.com/TMHSDigital/subenum"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.licenses="GPL-3.0"
 LABEL org.opencontainers.image.documentation="https://github.com/TMHSDigital/subenum/blob/main/README.md"
 LABEL org.opencontainers.image.vendor="Educational Use Only"
 LABEL org.opencontainers.image.usage="For educational and legitimate security testing purposes only" 
