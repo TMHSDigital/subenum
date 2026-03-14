@@ -45,6 +45,8 @@ func (w *Writer) Progress(pct float64, processed, total, found int64) {
 
 // ProgressDone writes the final newline on stderr after progress reporting ends.
 func (w *Writer) ProgressDone() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	fmt.Fprintln(os.Stderr)
 }
 

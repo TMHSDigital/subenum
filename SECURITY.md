@@ -2,22 +2,14 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in `subenum`, please follow these steps to report it responsibly:
+If you discover a security vulnerability in `subenum`, **do not open a public issue.**
 
-1. **Do NOT** disclose the vulnerability publicly until it has been addressed.
-2. Send details of the vulnerability to the repository maintainers via GitHub Issues or create a private report through GitHub's Security tab.
-3. Include the following information:
-   - A description of the vulnerability
-   - Steps to reproduce the issue
-   - Potential impact
-   - Any suggested fixes (if available)
+Report it privately using GitHub's Security Advisory feature:
+1. Go to the [Security tab](https://github.com/TMHSDigital/subenum/security/advisories/new) of this repository.
+2. Click **"Report a vulnerability"**.
+3. Fill in the description, reproduction steps, and impact.
 
-## What to Expect
-
-- You'll receive acknowledgment of your report within 48 hours.
-- We'll investigate and provide an estimated timeline for a fix.
-- You'll be kept informed about the progress.
-- After the issue is resolved, you'll be credited for the discovery (unless you prefer anonymity).
+You will receive acknowledgment within 48 hours. We will investigate, provide a fix timeline, keep you informed throughout, and credit you upon resolution (unless you prefer anonymity).
 
 ## Scope
 
@@ -33,4 +25,4 @@ Using this tool against systems without explicit permission is potentially illeg
 
 ## Thank You
 
-Security researchers and responsible disclosure are vital to maintaining secure software. We appreciate your efforts to disclose vulnerabilities responsibly. 
+Security researchers and responsible disclosure are vital to maintaining secure software. We appreciate your efforts to disclose vulnerabilities responsibly.

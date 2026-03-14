@@ -91,10 +91,14 @@ func main() {
 	force := flag.Bool("force", false, "Continue scanning even if wildcard DNS is detected")
 	flag.Parse()
 
-	// Resolve -attempts / -retries precedence.
-	maxAttempts := resolveAttempts(*attempts, *retries)
+	maxAttempts, err := resolveAttempts(*attempts, *retries)
 
 	out := output.New(nil, *testMode)
+
+	if err != nil {
+		out.Error("%v", err)
+		os.Exit(1)
+	}
 
 	if *testMode {
 		out.Info("")
@@ -325,21 +329,19 @@ done:
 }
 
 // resolveAttempts merges the -attempts and deprecated -retries flags.
-func resolveAttempts(attempts, retries int) int {
+func resolveAttempts(attempts, retries int) (int, error) {
 	attemptsSet := attempts != 0
 	retriesSet := retries != 0
 
 	switch {
 	case attemptsSet && retriesSet:
-		fmt.Fprintln(os.Stderr, "Error: cannot use both -attempts and -retries; use -attempts only")
-		os.Exit(1)
-		return 0
+		return 0, fmt.Errorf("cannot use both -attempts and -retries; use -attempts only")
 	case retriesSet:
 		fmt.Fprintln(os.Stderr, "Warning: -retries is deprecated, use -attempts instead")
-		return retries
+		return retries, nil
 	case attemptsSet:
-		return attempts
+		return attempts, nil
 	default:
-		return 1
+		return 1, nil
 	}
 }

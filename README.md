@@ -8,13 +8,15 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main&style=for-the-badge&label=build)](https://github.com/TMHSDigital/subenum/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](LICENSE)
+<!-- Update Go version badge when go.mod changes -->
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/codeql.yml?label=CodeQL&style=for-the-badge)](https://github.com/TMHSDigital/subenum/actions/workflows/codeql.yml)
 [![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum?style=for-the-badge)](https://github.com/TMHSDigital/subenum/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
 
 `Concurrent Workers` &middot; `Context-Aware Cancellation` &middot; `Retry with Backoff` &middot; `Wildcard Detection` &middot; `Simulation Mode` &middot; `Zero Dependencies`
 
-[Quick Start](#-installation) | [Documentation](./docs) | [Architecture](#-system-architecture) | [Changelog](./logs/CHANGELOG.md)
+[Quick Start](#installation) | [Documentation](./docs) | [Architecture](#system-architecture) | [Changelog](./CHANGELOG.md)
 
 </div>
 
@@ -242,8 +244,6 @@ subenum/
 │   └── wordlist/
 │       ├── reader.go           # LoadWordlist (dedup + sanitize)
 │       └── reader_test.go      # Wordlist loading and dedup tests
-├── logs/
-│   └── CHANGELOG.md            # Versioned release history
 ├── tools/
 │   └── wordlist-gen.go         # Custom wordlist generator utility
 ├── main.go                     # CLI entry point: flag parsing, wiring
@@ -253,6 +253,7 @@ subenum/
 ├── docker-compose.yml          # Compose orchestration
 ├── Makefile                    # Build, test, lint, simulate, Docker targets
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
+├── CHANGELOG.md                # Versioned release history
 ├── SECURITY.md                 # Vulnerability disclosure policy
 └── LICENSE                     # GNU General Public License v3.0
 ```

@@ -18,7 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.22'
+        go-version-file: 'go.mod'
 
     - name: Cache Go build artifacts
       uses: actions/cache@v5
@@ -73,6 +73,11 @@ jobs:
             goarch: amd64
             artifact_name: subenum
             asset_name: subenum-macos-amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            artifact_name: subenum
+            asset_name: subenum-linux-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -82,7 +87,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.22'
+        go-version-file: 'go.mod'
 
     - name: Cache Go build artifacts
       uses: actions/cache@v5
@@ -111,5 +116,16 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: ${{ matrix.asset_name }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Generate checksum
+      shell: bash
+      run: sha256sum ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
+
+    - name: Upload checksum to release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ matrix.asset_name }}.sha256
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

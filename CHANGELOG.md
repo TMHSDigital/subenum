@@ -72,4 +72,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial project setup with basic functionality
 - Concurrent subdomain enumeration using goroutines
 - DNS resolution with configurable timeout
-- Command-line flags for wordlist, concurrency, and timeout 
+- Command-line flags for wordlist, concurrency, and timeout
