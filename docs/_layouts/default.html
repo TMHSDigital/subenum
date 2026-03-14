@@ -114,39 +114,84 @@
       .main-content {
         max-width: 920px;
       }
-      /* Fix Cayman's teal h2/h3 color bleed */
+      /* Fix Cayman's teal color bleed on all heading levels */
       .main-content h1,
       .main-content h2,
       .main-content h3,
-      .main-content h4 {
-        color: #24292f;
+      .main-content h4,
+      .main-content h5,
+      .main-content h6 {
+        color: #24292f !important;
       }
       .main-content h2 {
         border-bottom: 1px solid #d0d7de;
         padding-bottom: 0.4rem;
+        margin-top: 2rem;
       }
-      /* Fix teal paragraph text from Cayman link inheritance */
+      .main-content h3 {
+        margin-top: 1.5rem;
+      }
+      /* Fix teal text from Cayman link color cascade */
       .main-content p,
       .main-content li,
-      .main-content blockquote {
-        color: #24292f;
+      .main-content dt,
+      .main-content dd,
+      .main-content td,
+      .main-content th {
+        color: #24292f !important;
       }
       .main-content blockquote {
         border-left: 4px solid #d0d7de;
-        padding: 0.5rem 1rem;
+        padding: 0.6rem 1rem;
         background: #f6f8fa;
         border-radius: 0 4px 4px 0;
+        margin: 1rem 0;
       }
-      .main-content blockquote p { margin: 0; }
-      .main-content a { color: #0969da; }
+      .main-content blockquote p { margin: 0; color: #57606a !important; }
+      .main-content a { color: #0969da !important; }
+      .main-content a:hover { text-decoration: underline; }
+      /* Inline code */
       .main-content code {
-        background: #f6f8fa;
+        background: #eef0f3;
         border: 1px solid #d0d7de;
         border-radius: 4px;
         padding: 1px 5px;
         font-size: 0.88em;
-        color: #24292f;
+        color: #24292f !important;
       }
+      /* Block code — distinct from page bg */
+      .main-content pre {
+        background: #f0f2f5;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 1rem 1.2rem;
+      }
+      .main-content pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: 0.85em;
+        color: #24292f !important;
+      }
+      /* Tables */
+      .main-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+      }
+      .main-content th {
+        background: #f0f2f5;
+        border: 1px solid #d0d7de;
+        padding: 8px 12px;
+        text-align: left;
+        font-size: 0.85rem;
+      }
+      .main-content td {
+        border: 1px solid #d0d7de;
+        padding: 7px 12px;
+        font-size: 0.85rem;
+      }
+      .main-content tr:nth-child(even) td { background: #f6f8fa; }
 
       /* ── Feature grid ── */
       .feature-grid {
@@ -183,17 +228,20 @@
         margin: 2rem 0 1rem;
       }
       .doc-nav a {
-        background: #161b22;
-        border: 1px solid #21262d;
+        background: #f0f2f5;
+        border: 1px solid #d0d7de;
         border-radius: 6px;
         padding: 6px 14px;
         font-size: 12px;
         font-family: "SFMono-Regular", Consolas, monospace;
-        color: #58a6ff;
-        text-decoration: none;
-        transition: background 0.15s;
+        color: #0969da !important;
+        text-decoration: none !important;
+        transition: background 0.15s, border-color 0.15s;
       }
-      .doc-nav a:hover { background: #1c2128; }
+      .doc-nav a:hover {
+        background: #e6edf3;
+        border-color: #0969da;
+      }
 
       /* ── Screenshot ── */
       .screenshot-wrap {
@@ -215,16 +263,17 @@
 
       /* ── Footer ── */
       .site-footer {
-        border-top: 1px solid #d0d7de;
-        background: #f6f8fa;
-        padding: 1.4rem 2rem;
-        font-size: 0.8rem;
-        color: #57606a;
-        text-align: center;
+        border-top: 1px solid #d0d7de !important;
+        background: #f6f8fa !important;
+        padding: 1.4rem 2rem !important;
+        font-size: 0.8rem !important;
+        color: #57606a !important;
+        text-align: center !important;
       }
+      .site-footer-owner { margin-bottom: 0.25rem; }
       .site-footer-owner a,
-      .site-footer-credits a { color: #0969da; }
-      .site-footer-credits { display: block; margin-top: 0.2rem; }
+      .site-footer-credits a { color: #0969da !important; }
+      .site-footer-credits { margin-top: 0.1rem; }
 
       /* ── Copy button ── */
       .code-block-wrap {
@@ -316,17 +365,17 @@
         {% include page-nav.html %}
       {% endif %}
       <footer class="site-footer">
-        <span class="site-footer-owner">
+        <div class="site-footer-owner">
           <a href="https://github.com/TMHSDigital/subenum">subenum</a> is maintained by
           <a href="https://github.com/TMHSDigital">TMHSDigital</a>
-        </span>
-        <span class="site-footer-credits">
+        </div>
+        <div class="site-footer-credits">
           <a href="{{ '/CONTRIBUTING.html' | relative_url }}">Contributing</a>
           &nbsp;&middot;&nbsp;
           <a href="https://github.com/TMHSDigital/subenum/blob/main/SECURITY.md">Security</a>
           &nbsp;&middot;&nbsp;
           <a href="https://github.com/TMHSDigital/subenum/blob/main/LICENSE">GPL-3.0</a>
-        </span>
+        </div>
       </footer>
     </main>
 
