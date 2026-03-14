@@ -111,18 +111,15 @@
       .btn-hero-primary:hover { background: #2ea043; }
 
       /* ── Content overrides ── */
+      /* Set base text color at the container level to defeat Cayman's teal cascade */
+      .main-content,
+      .main-content * {
+        color: #24292f;
+      }
       .main-content {
         max-width: 920px;
       }
-      /* Fix Cayman's teal color bleed on all heading levels */
-      .main-content h1,
-      .main-content h2,
-      .main-content h3,
-      .main-content h4,
-      .main-content h5,
-      .main-content h6 {
-        color: #24292f !important;
-      }
+      /* Headings */
       .main-content h2 {
         border-bottom: 1px solid #d0d7de;
         padding-bottom: 0.4rem;
@@ -131,15 +128,7 @@
       .main-content h3 {
         margin-top: 1.5rem;
       }
-      /* Fix teal text from Cayman link color cascade */
-      .main-content p,
-      .main-content li,
-      .main-content dt,
-      .main-content dd,
-      .main-content td,
-      .main-content th {
-        color: #24292f !important;
-      }
+      /* Blockquote */
       .main-content blockquote {
         border-left: 4px solid #d0d7de;
         padding: 0.6rem 1rem;
@@ -147,7 +136,8 @@
         border-radius: 0 4px 4px 0;
         margin: 1rem 0;
       }
-      .main-content blockquote p { margin: 0; color: #57606a !important; }
+      .main-content blockquote p { margin: 0; color: #57606a; }
+      /* Links — restore blue on top of the * reset */
       .main-content a { color: #0969da !important; }
       .main-content a:hover { text-decoration: underline; }
       /* Inline code */
@@ -157,21 +147,20 @@
         border-radius: 4px;
         padding: 1px 5px;
         font-size: 0.88em;
-        color: #24292f !important;
       }
-      /* Block code — distinct from page bg */
+      /* Block code — distinct background from page */
       .main-content pre {
         background: #f0f2f5;
         border: 1px solid #d0d7de;
         border-radius: 6px;
         padding: 1rem 1.2rem;
+        overflow-x: auto;
       }
       .main-content pre code {
         background: none;
         border: none;
         padding: 0;
         font-size: 0.85em;
-        color: #24292f !important;
       }
       /* Tables */
       .main-content table {
