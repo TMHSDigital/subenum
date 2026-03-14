@@ -34,9 +34,9 @@ import (
 	"syscall"
 	"time"
 
-	"subenum/internal/dns"
-	"subenum/internal/output"
-	"subenum/internal/wordlist"
+	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 const (
