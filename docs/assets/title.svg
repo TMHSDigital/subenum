@@ -1,23 +1,35 @@
-<svg width="600" height="120" viewBox="0 0 600 120" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&amp;display=swap');
-    </style>
-  </defs>
+<svg width="620" height="110" viewBox="0 0 620 110" xmlns="http://www.w3.org/2000/svg">
+  <!-- terminal card background -->
+  <rect width="620" height="110" rx="8" fill="#0d1117"/>
 
-  <!-- dark terminal background -->
-  <rect width="600" height="120" rx="8" fill="#0d1117"/>
+  <!-- $ prompt -->
+  <text x="28" y="62"
+        font-family="'Courier New', Courier, monospace"
+        font-size="42" font-weight="700"
+        fill="#3fb950">$</text>
 
-  <!-- prompt decoration -->
-  <text x="28" y="58" font-family="'JetBrains Mono', 'Courier New', monospace" font-size="22" fill="#238636" font-weight="700">$</text>
+  <!-- "sub" — white -->
+  <text x="62" y="62"
+        font-family="'Courier New', Courier, monospace"
+        font-size="42" font-weight="700"
+        fill="#e6edf3">sub</text>
 
-  <!-- main wordmark -->
-  <text x="52" y="58" font-family="'JetBrains Mono', 'Courier New', monospace" font-size="40" font-weight="700" letter-spacing="4" fill="#e6edf3">sub</text>
-  <text x="166" y="58" font-family="'JetBrains Mono', 'Courier New', monospace" font-size="40" font-weight="700" letter-spacing="4" fill="#58a6ff">enum</text>
+  <!-- "enum" — blue, immediately after sub (42px font, ~25.2px per char × 3 = ~75.6px + 62 = ~138) -->
+  <text x="138" y="62"
+        font-family="'Courier New', Courier, monospace"
+        font-size="42" font-weight="700"
+        fill="#58a6ff">enum</text>
 
-  <!-- blinking cursor block -->
-  <rect x="303" y="24" width="22" height="40" rx="2" fill="#58a6ff" opacity="0.85"/>
+  <!-- cursor — thin vertical bar right after "enum" (~25.2 × 4 = ~100.8px + 138 = ~239) -->
+  <text x="239" y="62"
+        font-family="'Courier New', Courier, monospace"
+        font-size="42" font-weight="700"
+        fill="#58a6ff">▌</text>
 
   <!-- tagline -->
-  <text x="28" y="92" font-family="'JetBrains Mono', 'Courier New', monospace" font-size="12" fill="#8b949e" letter-spacing="1">fast concurrent subdomain enumeration // written in Go</text>
+  <text x="28" y="90"
+        font-family="'Courier New', Courier, monospace"
+        font-size="12"
+        fill="#8b949e"
+        letter-spacing="0.5">fast concurrent subdomain enumeration // written in Go</text>
 </svg>
