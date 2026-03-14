@@ -1,0 +1,16 @@
+# Normalize all text files to LF on commit.
+* text=auto eol=lf
+
+# Ensure Go source is always LF (gofmt requirement).
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+
+# Keep shell scripts LF.
+*.sh text eol=lf
+
+# Mark binaries as binary.
+*.exe binary
+*.png binary
+*.jpg binary
+*.gif binary
