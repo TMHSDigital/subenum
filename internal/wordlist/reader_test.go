@@ -33,11 +33,13 @@ func TestLoadWordlist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.WriteString(content); err != nil {
 		t.Fatal(err)
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	entries, dupes, err := LoadWordlist(tmp.Name())
 	if err != nil {

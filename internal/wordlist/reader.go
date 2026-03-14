@@ -20,7 +20,7 @@ func LoadWordlist(path string) ([]string, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	seen := make(map[string]struct{})
 	var entries []string

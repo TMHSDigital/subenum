@@ -12,7 +12,7 @@ func TestWriterResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	bw := bufio.NewWriter(tmp)
 	w := New(bw, false)
@@ -21,8 +21,12 @@ func TestWriterResult(t *testing.T) {
 	for _, d := range domains {
 		w.Result(d)
 	}
-	bw.Flush()
-	tmp.Close()
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	content, err := os.ReadFile(tmp.Name())
 	if err != nil {
