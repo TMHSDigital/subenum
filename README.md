@@ -217,6 +217,10 @@ Fill in the form, press `ctrl+r` to scan. Last-used values are saved to `~/.conf
 
 <br>
 
+![subenum TUI — Configure Scan](docs/assets/tui-form.png)
+
+<br>
+
 ---
 
 <br>
