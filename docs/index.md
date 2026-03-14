@@ -96,7 +96,11 @@ docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com
 
 ---
 
+<div style="text-align:center">
+
 ## Documentation
+
+</div>
 
 <div class="doc-nav">
   <a href="ARCHITECTURE.html">Architecture</a>
