@@ -76,6 +76,10 @@ func validateDomain(domain string) error {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	wordlistFile := flag.String("w", "", "Path to the wordlist file")
 	concurrency := flag.Int("t", 100, "Number of concurrent workers")
 	timeoutMs := flag.Int("timeout", 1000, "DNS lookup timeout in milliseconds")
@@ -97,7 +101,7 @@ func main() {
 
 	if err != nil {
 		out.Error("%v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	if *testMode {
@@ -114,46 +118,46 @@ func main() {
 		if *testMode {
 			fmt.Fprintln(os.Stderr, "Running in SIMULATION mode")
 		}
-		os.Exit(0)
+		return 0
 	}
 
 	if *wordlistFile == "" || flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "Usage: subenum -w <wordlist_file> [options] <domain>")
 		flag.PrintDefaults()
-		os.Exit(1)
+		return 1
 	}
 
 	if *concurrency <= 0 {
 		out.Error("Concurrency level (-t) must be greater than 0")
-		os.Exit(1)
+		return 1
 	}
 
 	if *timeoutMs <= 0 {
 		out.Error("Timeout (-timeout) must be greater than 0")
-		os.Exit(1)
+		return 1
 	}
 
 	if *testHitRate < 1 || *testHitRate > 100 {
 		out.Error("Hit rate (-hit-rate) must be between 1 and 100")
-		os.Exit(1)
+		return 1
 	}
 
 	if maxAttempts < 1 {
 		out.Error("Attempts (-attempts) must be at least 1")
-		os.Exit(1)
+		return 1
 	}
 
 	if !*testMode {
 		if err := validateDNSServer(*dnsServer); err != nil {
 			out.Error("DNS server %s: %v", *dnsServer, err)
-			os.Exit(1)
+			return 1
 		}
 	}
 
 	domain := flag.Arg(0)
 	if err := validateDomain(domain); err != nil {
 		out.Error("%v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	timeout := time.Duration(*timeoutMs) * time.Millisecond
@@ -163,7 +167,7 @@ func main() {
 		f, err := os.Create(*outputFile)
 		if err != nil {
 			out.Error("creating output file: %v", err)
-			os.Exit(1)
+			return 1
 		}
 		outWriter = bufio.NewWriter(f)
 		out = output.New(outWriter, *testMode)
@@ -204,13 +208,13 @@ func main() {
 		isWildcard, err := dns.CheckWildcard(context.Background(), domain, timeout, *dnsServer)
 		if err != nil {
 			out.Error("wildcard detection failed: %v", err)
-			os.Exit(1)
+			return 1
 		}
 		if isWildcard {
 			out.Info("WARNING: Wildcard DNS detected for %s — all subdomains resolve.", domain)
 			if !*force {
 				out.Info("Results would be meaningless. Use -force to scan anyway.")
-				os.Exit(1)
+				return 1
 			}
 			out.Info("Continuing because -force is set. Results may contain false positives.")
 		}
@@ -219,7 +223,7 @@ func main() {
 	entries, duplicates, err := wordlist.LoadWordlist(*wordlistFile)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	totalWords := int64(len(entries))
@@ -332,6 +336,7 @@ done:
 			out.Info("This mode is intended for educational and testing purposes only.")
 		}
 	}
+	return 0
 }
 
 // resolveAttempts merges the -attempts and deprecated -retries flags.
