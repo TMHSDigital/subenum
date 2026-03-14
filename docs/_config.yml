@@ -1,7 +1,7 @@
 theme: jekyll-theme-cayman
 title: subenum
-description: A fast, concurrent Go CLI tool for subdomain enumeration — for educational and legitimate security testing
-show_downloads: true
+description: Fast, concurrent subdomain enumeration via DNS brute-forcing — written in pure Go.
+show_downloads: false
 url: "https://tmhsdigital.github.io"
 baseurl: "/subenum"
-repository: TMHSDigital/subenum 
+repository: TMHSDigital/subenum
