@@ -96,14 +96,19 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
+	// Create the context up front so cancel is always assigned to the model
+	// before any early return. This satisfies static analysis tools that
+	// require the cancellation function to be demonstrably reachable.
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+
 	entries, _, err := wordlist.LoadWordlist(vals.wordlist)
 	if err != nil {
+		cancel() // explicitly cancel before returning on error
 		m.form.err = "cannot read wordlist: " + err.Error()
 		return m, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
 	m.state = stateScan
 	m.scanView = newScanViewModel(m.width, m.height, vals.simulate)
 
