@@ -1,8 +1,6 @@
 <div align="center">
 
-<h1>subenum</h1>
-
-<p>Fast, concurrent subdomain enumeration via DNS brute-forcing.<br>Written in pure Go — no CGO, no runtime dependencies.</p>
+<img src="docs/assets/title.svg" alt="subenum" width="600"/>
 
 <br>
 
