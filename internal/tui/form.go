@@ -31,7 +31,6 @@ var (
 	blurredStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	labelStyle    = lipgloss.NewStyle().Width(18)
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).MarginBottom(1)
-	formHeadStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginBottom(1)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginTop(1)
 	toggleOnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
