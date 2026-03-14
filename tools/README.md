@@ -18,7 +18,7 @@ A simple utility for generating custom wordlists for subdomain enumeration.
 
 ```bash
 # Build the tool
-go build -o wordlist-gen wordlist-gen.go
+go build -buildvcs=false -o wordlist-gen wordlist-gen.go
 
 # Generate a basic wordlist with common prefixes
 ./wordlist-gen -o my-wordlist.txt
@@ -59,7 +59,7 @@ Use generated wordlists with subenum for more targeted scanning:
 ```bash
 # Generate a custom wordlist
 cd tools
-go build -o wordlist-gen wordlist-gen.go
+go build -buildvcs=false -o wordlist-gen wordlist-gen.go
 ./wordlist-gen -domain target.com -o ../target-wordlist.txt
 
 # Use with subenum

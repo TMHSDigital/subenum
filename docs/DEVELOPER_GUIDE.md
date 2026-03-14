@@ -54,43 +54,62 @@ To work with `subenum`, you'll need:
 
 ```
 subenum/
-├── main.go                 # Main application code
-├── main_test.go            # Test suite
-├── go.mod                  # Go module definition
-├── Makefile                # Build, test, lint, Docker targets
-├── Dockerfile              # Multi-stage Docker build
-├── docker-compose.yml      # Docker Compose config
-├── .golangci.yml           # Linter configuration
-├── README.md               # Project overview
-├── LICENSE                 # License information
-├── SECURITY.md             # Security policy and disclosure
 ├── .github/
 │   ├── workflows/
-│   │   ├── go.yml          # CI: build, test, lint, release
-│   │   ├── pages.yml       # GitHub Pages deployment
-│   │   └── codeql.yml      # CodeQL security scanning
-│   ├── dependabot.yml      # Automated dependency updates
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   └── ISSUE_TEMPLATE/     # Bug report & feature request templates
-├── docs/                   # Documentation (served via GitHub Pages)
-│   ├── _config.yml         # Jekyll site configuration
-│   ├── index.md            # Site home page
-│   ├── ARCHITECTURE.md     # Architectural details
-│   ├── DEVELOPER_GUIDE.md  # This file
-│   ├── CODE_OF_CONDUCT.md  # Community guidelines
-│   ├── CONTRIBUTING.md     # Contribution guidelines
-│   └── docker.md           # Docker usage guide
+│   │   ├── go.yml              # CI: build, test, lint, release
+│   │   ├── codeql.yml          # Weekly CodeQL security analysis
+│   │   └── pages.yml           # GitHub Pages deployment
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md       # Structured bug report form
+│   │   └── feature_request.md  # Feature proposal template
+│   ├── CODE_OF_CONDUCT.md      # Contributor Covenant v2.1
+│   ├── CONTRIBUTING.md         # Points to docs/CONTRIBUTING.md
+│   ├── dependabot.yml          # Automated dependency updates
+│   └── PULL_REQUEST_TEMPLATE.md
 ├── data/
-│   └── wordlist.txt        # Default wordlist
-├── examples/               # Example files and usage demos
-│   ├── sample_wordlist.txt # Sample subdomain prefixes
-│   ├── sample_domains.txt  # Sample domain list
-│   └── advanced_usage.md   # Advanced usage examples
+│   └── wordlist.txt            # Default wordlist for Docker/Make
+├── docs/
+│   ├── ARCHITECTURE.md         # Internals: worker pool, context, output
+│   ├── CODE_OF_CONDUCT.md      # Community guidelines (Jekyll page)
+│   ├── CONTRIBUTING.md         # PR workflow, testing, ethical guidelines
+│   ├── DEVELOPER_GUIDE.md      # This file
+│   ├── DOCUMENTATION_STRUCTURE.md
+│   ├── docker.md               # Container setup and volume mounting
+│   ├── _config.yml             # Jekyll config for GitHub Pages
+│   └── index.md                # GitHub Pages landing page
+├── examples/
+│   ├── sample_wordlist.txt     # 50-entry starter wordlist
+│   ├── sample_domains.txt      # Sample domain list
+│   ├── advanced_usage.md       # Scripting and integration patterns
+│   ├── demo.sh                 # Quick demo script
+│   └── multi_domain_scan.sh    # Batch scanning example
+├── internal/
+│   ├── dns/
+│   │   ├── resolver.go         # ResolveDomain, ResolveDomainWithRetry, CheckWildcard
+│   │   ├── resolver_test.go    # DNS resolution and wildcard detection tests
+│   │   ├── simulate.go         # SimulateResolution (synthetic DNS)
+│   │   └── simulate_test.go    # Simulation logic tests
+│   ├── output/
+│   │   ├── writer.go           # Thread-safe output (results→stdout, rest→stderr)
+│   │   └── writer_test.go      # Output writer tests
+│   └── wordlist/
+│       ├── reader.go           # LoadWordlist (dedup + sanitize)
+│       └── reader_test.go      # Wordlist loading and dedup tests
 ├── tools/
-│   ├── wordlist-gen.go     # Wordlist generator utility
-│   └── README.md           # Wordlist generator docs
-└── logs/
-    └── CHANGELOG.md        # Project change history
+│   ├── wordlist-gen.go         # Custom wordlist generator utility
+│   └── README.md               # Wordlist generator docs
+├── .gitattributes              # Line-ending normalization rules
+├── .golangci.yml               # Linter configuration (golangci-lint v2)
+├── main.go                     # CLI entry point: flag parsing, wiring
+├── main_test.go                # CLI-level tests: validation, flag logic
+├── go.mod                      # Go module (zero external dependencies)
+├── Dockerfile                  # Multi-stage Alpine build
+├── docker-compose.yml          # Compose orchestration
+├── Makefile                    # Build, test, lint, simulate, Docker targets
+├── CHANGELOG.md                # Versioned release history
+├── README.md                   # Project overview
+├── SECURITY.md                 # Vulnerability disclosure policy
+└── LICENSE                     # GNU General Public License v3.0
 ```
 
 ## Running Tests
@@ -112,12 +131,14 @@ go test -v -short ./...
 When adding new features or modifying existing ones, please ensure you add appropriate tests. Here's a basic structure for tests:
 
 ```go
-package main
+package dns_test
 
 import (
     "context"
     "testing"
     "time"
+
+    "github.com/TMHSDigital/subenum/internal/dns"
 )
 
 func TestResolveDomain(t *testing.T) {
@@ -143,7 +164,7 @@ func TestResolveDomain(t *testing.T) {
 
     for _, tc := range testCases {
         t.Run(tc.name, func(t *testing.T) {
-            result := resolveDomain(context.Background(), tc.domain, tc.timeout, DefaultDNSServer, false)
+            result := dns.ResolveDomain(context.Background(), tc.domain, tc.timeout, "8.8.8.8:53", false)
             if result != tc.expected {
                 t.Errorf("Expected %v for domain %s, got %v", tc.expected, tc.domain, result)
             }
@@ -221,7 +242,6 @@ Areas for potential enhancement include:
 *   **Output Formats**: Supporting different output formats (JSON, CSV) in addition to the current plain text output file (`-o`).
 *   **Result Filtering**: Allowing users to filter results based on DNS record types.
 *   **Recursive Enumeration**: Adding support for recursive subdomain enumeration (e.g., finding subdomains of discovered subdomains).
-*   **Wildcard Detection**: Detecting wildcard DNS records that resolve all subdomains.
 *   **Rate Limiting**: Adding configurable rate limiting for DNS queries to avoid triggering abuse detection.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 

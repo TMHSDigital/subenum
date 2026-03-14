@@ -252,6 +252,7 @@ subenum/
 ├── Dockerfile                  # Multi-stage Alpine build
 ├── docker-compose.yml          # Compose orchestration
 ├── Makefile                    # Build, test, lint, simulate, Docker targets
+├── .gitattributes              # Line-ending normalization rules
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
 ├── CHANGELOG.md                # Versioned release history
 ├── SECURITY.md                 # Vulnerability disclosure policy

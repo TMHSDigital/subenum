@@ -78,8 +78,10 @@ You can save the results to a file using standard shell redirection:
 
 ### Example: Save Only Found Subdomains
 
+Results go to stdout and progress to stderr, so you can pipe stdout directly:
+
 ```bash
-./subenum -w wordlist.txt -progress=false example.com | grep "Found:" > subdomains.txt
+./subenum -w wordlist.txt example.com > subdomains.txt
 ```
 
 ## Integration with Other Tools
@@ -89,7 +91,7 @@ You can save the results to a file using standard shell redirection:
 ### Example: Piping to Subdomain Takeover Scanner
 
 ```bash
-./subenum -w wordlist.txt -progress=false example.com | grep "Found:" | cut -d ' ' -f 2 | your-takeover-tool
+./subenum -w wordlist.txt example.com | your-takeover-tool
 ```
 
 ### Example: Use with Multiple Domains
@@ -115,18 +117,18 @@ Combine with other flags for a full scan that saves output:
 ./subenum -w wordlist.txt -v -t 150 -o scan_results.txt example.com
 ```
 
-## Retries for Unreliable Networks
+## Multiple Attempts for Unreliable Networks
 
-Use `-retries` to re-attempt failed DNS lookups before giving up. Useful on flaky connections or rate-limited resolvers:
+Use `-attempts` to set the total number of DNS resolution attempts per subdomain. Useful on flaky connections or rate-limited resolvers:
 
 ```bash
-./subenum -w wordlist.txt -retries 3 example.com
+./subenum -w wordlist.txt -attempts 3 example.com
 ```
 
 Combine with a longer timeout for maximum resilience:
 
 ```bash
-./subenum -w wordlist.txt -retries 3 -timeout 2000 -dns-server 1.1.1.1:53 example.com
+./subenum -w wordlist.txt -attempts 3 -timeout 2000 -dns-server 1.1.1.1:53 example.com
 ```
 
 ## Simulation Mode
@@ -155,7 +157,7 @@ For CI/CD environments, you can use the version flag to ensure the correct versi
 
 ```bash
 ./subenum -version
-# Output: subenum v0.3.0
+# Output: subenum v0.4.0
 ```
 
 Use simulation mode in CI pipelines to test the tool's behaviour without network access:

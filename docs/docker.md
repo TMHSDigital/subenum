@@ -84,14 +84,14 @@ docker run --rm -v $(pwd)/data:/data subenum \
   example.com
 ```
 
-### Using Retries for Unreliable Networks
+### Using Multiple Attempts for Unreliable Networks
 
-The `-retries` flag re-attempts failed DNS lookups before marking a subdomain as unresolved:
+The `-attempts` flag sets the total DNS resolution attempts per subdomain:
 
 ```bash
 docker run --rm -v $(pwd)/data:/data subenum \
   -w /data/wordlist.txt \
-  -retries 3 \
+  -attempts 3 \
   -timeout 2000 \
   example.com
 ```

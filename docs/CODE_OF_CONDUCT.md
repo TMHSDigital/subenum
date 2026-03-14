@@ -1,12 +1,28 @@
-# Code of Conduct
+---
+layout: default
+title: Code of Conduct
+---
 
-*(A standard Code of Conduct, like the Contributor Covenant, will be added here.)*
+# Contributor Covenant Code of Conduct
 
-Our Pledge
+## Our Pledge
+We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone.
 
-In the interest of fostering an open and welcoming environment, we as
-contributors and maintainers pledge to making participation in our project and
-our community a harassment-free experience for everyone, regardless of age, body
-size, disability, ethnicity, sex characteristics, gender identity and expression,
-level of experience, education, socio-economic status, nationality, personal
-appearance, race, religion, or sexual identity and orientation. 
+## Our Standards
+Examples of behavior that contributes to a positive environment:
+- Using welcoming and inclusive language
+- Being respectful of differing viewpoints and experiences
+- Gracefully accepting constructive criticism
+- Focusing on what is best for the community
+
+Examples of unacceptable behavior:
+- Harassment, trolling, or insulting comments
+- Public or private harassment
+- Publishing others' private information without permission
+- Other conduct which could reasonably be considered inappropriate
+
+## Enforcement
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by opening a [Security Advisory](https://github.com/TMHSDigital/subenum/security/advisories/new) or contacting the maintainers privately.
+
+## Attribution
+This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 2.1.

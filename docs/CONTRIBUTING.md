@@ -7,7 +7,7 @@ title: Contributing
 
 We welcome contributions! Please read this guide to understand how you can contribute.
 
-*Refer to `CODE_OF_CONDUCT.md`.*
+See the [Code of Conduct](CODE_OF_CONDUCT.html).
 
 ## Development Environment Setup
 
@@ -23,7 +23,7 @@ We welcome contributions! Please read this guide to understand how you can contr
 1. **Fork the repository** on GitHub
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/TMHSDigital/subenum.git
+   git clone https://github.com/YOUR-USERNAME/subenum.git
    cd subenum
    ```
 3. **Set up the upstream remote**:

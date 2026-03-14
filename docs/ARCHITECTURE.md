@@ -73,7 +73,7 @@ internal/wordlist/reader.go — LoadWordlist (dedup + sanitize)
             *   `d.DialContext(ctx, "udp", dnsServer)`: Establishes a UDP connection to the configured DNS server.
     *   `resolver.LookupHost(timeoutCtx, domain)`: Performs the DNS lookup for the given domain. The context is derived from the caller via `context.WithTimeout(ctx, timeout)`, so both the per-query timeout and SIGINT cancellation are respected. It attempts to find A or AAAA records for the host.
     *   The function returns `true` if `LookupHost` returns no error (i.e., the domain resolved), and `false` otherwise.
-*   **Interactions**: Workers call `resolveDomainWithRetry`, which delegates to `resolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.
+*   **Interactions**: Workers call `dns.ResolveDomainWithRetry`, which delegates to `dns.ResolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.
 
 ### 2.4. Concurrency Management (Worker Pool)
 
@@ -85,7 +85,7 @@ internal/wordlist/reader.go — LoadWordlist (dedup + sanitize)
         *   `wg.Add(1)`: Increments the `WaitGroup` counter for each worker started.
         *   `go func() { ... }()`: Each worker runs in its own goroutine.
         *   `defer wg.Done()`: Decrements the `WaitGroup` counter when the goroutine exits.
-        *   `for subdomainPrefix := range subdomains { ... }`: Each worker continuously reads subdomain prefixes from the `subdomains` channel until the channel is closed. For each prefix, it constructs the full domain and calls `resolveDomain()`.
+        *   `for subdomainPrefix := range subdomains { ... }`: Each worker continuously reads subdomain prefixes from the `subdomains` channel until the channel is closed. For each prefix, it constructs the full domain and calls `dns.ResolveDomainWithRetry()`.
     *   **Closing the Channel (`close(subdomains)`)**: After all subdomain prefixes from the wordlist have been sent to the `subdomains` channel, the channel is closed. This signals to the worker goroutines that no more work will be added.
     *   **Waiting for Completion (`wg.Wait()`)**: The main goroutine blocks until all worker goroutines have called `wg.Done()`, ensuring all lookups are finished.
 *   **Interactions**: This component orchestrates the parallel execution of DNS lookups. It receives subdomain prefixes from the Wordlist Processing component (via the `subdomains` channel) and utilizes the DNS Resolution Engine within each worker goroutine. The number of workers is controlled by the Argument Parsing component.
@@ -131,12 +131,12 @@ The flow of data through the `subenum` application can be summarized as follows:
 5.  **Work Distribution**: The `subdomains` channel acts as a queue for the **Concurrency Management (Worker Pool)** component.
     *   Worker goroutines (number determined by the `-t` flag) pick up these prefixes from the channel.
 6.  **Subdomain Construction**: Each worker goroutine takes a `subdomainPrefix` and concatenates it with the `targetDomain` (e.g., `subdomainPrefix + "." + targetDomain`) to form a `fullDomain` string.
-7.  **DNS Lookup**: The `fullDomain` string, the `timeout` value, and the DNS server are passed to the `resolveDomain` function within the **DNS Resolution Engine**.
-    *   The `resolveDomain` function attempts to resolve the `fullDomain`.
+7.  **DNS Lookup**: The `fullDomain` string, the `timeout` value, and the DNS server are passed to `dns.ResolveDomainWithRetry` within the **DNS Resolution Engine**.
+    *   `dns.ResolveDomain` attempts to resolve the `fullDomain`.
     *   It returns `true` if the domain resolves successfully, `false` otherwise.
     *   If verbose mode is enabled, it also prints detailed information about the resolution attempt.
 8.  **Output Generation**: 
-    *   If `resolveDomain` returns `true`, the worker goroutine uses the **Output Formatting** component to print the `fullDomain` to the standard output.
+    *   If the resolution returns `true`, the worker goroutine uses the **Output Formatting** component to print the `fullDomain` to the standard output.
     *   The atomic counter for found subdomains is incremented.
 9.  **Progress Tracking**: After each DNS lookup:
     *   The atomic counter for processed entries is incremented.

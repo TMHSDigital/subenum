@@ -12,10 +12,13 @@ A Go-based CLI tool for subdomain enumeration designed for educational purposes 
 - Fast, concurrent DNS lookup of subdomains using customizable wordlists
 - Configurable concurrency level and timeout settings
 - Support for custom DNS servers with proper validation
+- Wildcard DNS detection with double-probe confirmation; continue with `-force`
+- Wordlist deduplication and sanitization on load
+- Clean stdout/stderr separation (results to stdout, progress/verbose to stderr)
+- Configurable resolution attempts per subdomain (`-attempts`)
 - Verbose mode for detailed output
 - Real-time progress tracking
 - Output to file with `-o` flag
-- DNS retry mechanism for transient failure resilience
 - Graceful shutdown on Ctrl+C (SIGINT/SIGTERM)
 - Simulation mode for safe testing without network access
 - Domain and DNS server input validation

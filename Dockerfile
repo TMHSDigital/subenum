@@ -8,6 +8,7 @@ COPY go.mod ./
 # Copy source code
 COPY main.go ./
 COPY main_test.go ./
+COPY internal/ ./internal/
 
 # Build the binary with optimizations
 RUN CGO_ENABLED=0 GOOS=linux go build -o subenum -ldflags="-w -s" .
