@@ -12,7 +12,7 @@
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/codeql.yml?label=CodeQL&style=for-the-badge)](https://github.com/TMHSDigital/subenum/actions/workflows/codeql.yml)
 [![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum?style=for-the-badge)](https://github.com/TMHSDigital/subenum/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
+[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge&v=0.4.0)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
 
 `Concurrent Workers` &middot; `Context-Aware Cancellation` &middot; `Retry with Backoff` &middot; `Wildcard Detection` &middot; `Simulation Mode` &middot; `Zero Dependencies`
 
