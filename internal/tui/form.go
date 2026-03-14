@@ -31,6 +31,7 @@ var (
 	blurredStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	labelStyle    = lipgloss.NewStyle().Width(18)
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).MarginBottom(1)
+	formHeadStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginBottom(1)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginTop(1)
 	toggleOnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
@@ -195,7 +196,8 @@ func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 func (m formModel) View() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("subenum TUI — Configure Scan") + "\n\n")
+	b.WriteString(logo() + "\n\n")
+	b.WriteString(titleStyle.Render("Configure Scan") + "\n")
 
 	row := func(fieldIdx int, label string, content string) {
 		lbl := labelStyle.Render(label + ":")

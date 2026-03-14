@@ -105,7 +105,8 @@ func (m scanViewModel) View() string {
 	if m.simMode {
 		mode = "SIMULATION"
 	}
-	b.WriteString(headerStyle.Render(fmt.Sprintf("subenum — Scanning [%s mode]", mode)) + "\n\n")
+	b.WriteString(logo() + "\n")
+	b.WriteString(headerStyle.Render(fmt.Sprintf("Scanning [%s mode]", mode)) + "\n\n")
 
 	// Extra messages (wildcard, errors)
 	for _, msg := range m.messages {
