@@ -55,25 +55,20 @@
 
       /* ── Hero overrides ── */
       .page-header {
-        padding: 3rem 2rem 2.5rem;
-        background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a2332 100%);
+        padding: 5rem 2rem 4rem;
+        background: linear-gradient(160deg, #0d1117 0%, #161b22 60%, #1a2332 100%);
       }
-      .page-header .project-name {
-        font-size: 2.4rem;
-        letter-spacing: 0.02em;
-        margin-bottom: 0.5rem;
-      }
-      .page-header .project-tagline {
-        font-size: 1rem;
-        opacity: 0.75;
-        margin-bottom: 1.5rem;
-      }
+      /* Hide Cayman's default title/tagline — we render our own */
+      .page-header .project-name,
+      .page-header .project-tagline { display: none; }
+
       .hero-logo {
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        font-size: 2rem;
+        font-size: 3.6rem;
         font-weight: 700;
-        margin-bottom: 0.6rem;
+        margin-bottom: 0.5rem;
         letter-spacing: 0.04em;
+        line-height: 1;
       }
       .hero-logo .prompt { color: #3fb950; }
       .hero-logo .word   { color: #e6edf3; }
@@ -85,13 +80,19 @@
       @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
       .hero-tagline {
         font-family: "SFMono-Regular", Consolas, monospace;
-        font-size: 0.8rem;
+        font-size: 0.82rem;
         color: #8b949e;
-        letter-spacing: 0.06em;
-        margin-bottom: 1.8rem;
+        letter-spacing: 0.07em;
+        margin-bottom: 2rem;
       }
-      .hero-badges { margin-bottom: 1rem; }
-      .hero-badges img { margin: 2px; }
+      .hero-badges {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 4px;
+        margin-bottom: 1.6rem;
+      }
+      .hero-badges img { display: block; }
       .btn-hero {
         display: inline-block;
         margin: 0.3rem 0.4rem;
@@ -106,26 +107,45 @@
         transition: background 0.15s, border-color 0.15s;
       }
       .btn-hero:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.3); }
-      .btn-hero-primary {
-        background: #238636;
-        border-color: #2ea043;
-      }
+      .btn-hero-primary { background: #238636; border-color: #2ea043; }
       .btn-hero-primary:hover { background: #2ea043; }
 
       /* ── Content overrides ── */
       .main-content {
-        max-width: 900px;
+        max-width: 920px;
+      }
+      /* Fix Cayman's teal h2/h3 color bleed */
+      .main-content h1,
+      .main-content h2,
+      .main-content h3,
+      .main-content h4 {
+        color: #24292f;
       }
       .main-content h2 {
-        border-bottom: 1px solid #21262d;
+        border-bottom: 1px solid #d0d7de;
         padding-bottom: 0.4rem;
       }
+      /* Fix teal paragraph text from Cayman link inheritance */
+      .main-content p,
+      .main-content li,
+      .main-content blockquote {
+        color: #24292f;
+      }
+      .main-content blockquote {
+        border-left: 4px solid #d0d7de;
+        padding: 0.5rem 1rem;
+        background: #f6f8fa;
+        border-radius: 0 4px 4px 0;
+      }
+      .main-content blockquote p { margin: 0; }
+      .main-content a { color: #0969da; }
       .main-content code {
-        background: #161b22;
-        border: 1px solid #21262d;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
         border-radius: 4px;
         padding: 1px 5px;
         font-size: 0.88em;
+        color: #24292f;
       }
 
       /* ── Feature grid ── */
@@ -195,11 +215,32 @@
 
       /* ── Footer ── */
       .site-footer {
-        border-top: 1px solid #21262d;
-        background: #0d1117;
+        border-top: 1px solid #d0d7de;
+        background: #f6f8fa;
+        padding: 1.2rem 2rem;
+        font-size: 0.8rem;
+        color: #57606a;
       }
       .site-footer-owner a,
-      .site-footer-credits a { color: #58a6ff; }
+      .site-footer-credits a { color: #0969da; }
+
+      /* ── Screenshot ── */
+      .screenshot-wrap {
+        text-align: center;
+        margin: 1.8rem 0;
+      }
+      .screenshot-wrap img {
+        max-width: 100%;
+        border-radius: 8px;
+        border: 1px solid #d0d7de;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+      }
+      .screenshot-wrap figcaption {
+        font-size: 0.78rem;
+        color: #57606a;
+        margin-top: 8px;
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
     </style>
   </head>
   <body>
