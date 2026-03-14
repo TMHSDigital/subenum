@@ -85,33 +85,142 @@ func main() {
 	os.Exit(run())
 }
 
-func run() int {
+// cliFlags holds all parsed command-line flag values.
+type cliFlags struct {
+	wordlistFile string
+	concurrency  int
+	timeoutMs    int
+	dnsServer    string
+	verbose      bool
+	showVersion  bool
+	showProgress bool
+	testMode     bool
+	testHitRate  int
+	outputFile   string
+	attempts     int
+	retries      int
+	force        bool
+}
+
+func parseFlags() cliFlags {
+	var f cliFlags
 	flag.Bool("tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
-	wordlistFile := flag.String("w", "", "Path to the wordlist file")
-	concurrency := flag.Int("t", 100, "Number of concurrent workers")
-	timeoutMs := flag.Int("timeout", 1000, "DNS lookup timeout in milliseconds")
-	dnsServer := flag.String("dns-server", DefaultDNSServer, "DNS server to use (format: ip:port)")
-	verbose := flag.Bool("v", false, "Enable verbose output")
-	showVersion := flag.Bool("version", false, "Show version information")
-	showProgress := flag.Bool("progress", true, "Show progress during scanning")
-	testMode := flag.Bool("simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
-	testHitRate := flag.Int("hit-rate", 15, "In simulation mode, percentage of subdomains that will 'resolve' (1-100)")
-	outputFile := flag.String("o", "", "Write results to file (in addition to stdout)")
-	attempts := flag.Int("attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
-	retries := flag.Int("retries", 0, "Deprecated: use -attempts instead")
-	force := flag.Bool("force", false, "Continue scanning even if wildcard DNS is detected")
+	flag.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file")
+	flag.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
+	flag.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
+	flag.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server to use (format: ip:port)")
+	flag.BoolVar(&f.verbose, "v", false, "Enable verbose output")
+	flag.BoolVar(&f.showVersion, "version", false, "Show version information")
+	flag.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")
+	flag.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
+	flag.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of subdomains that will 'resolve' (1-100)")
+	flag.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
+	flag.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
+	flag.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
+	flag.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
 	flag.Parse()
+	return f
+}
 
-	maxAttempts, err := resolveAttempts(*attempts, *retries)
+func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, bool) {
+	if f.wordlistFile == "" || flag.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: subenum -w <wordlist_file> [options] <domain>")
+		flag.PrintDefaults()
+		return "", false
+	}
+	if f.concurrency <= 0 {
+		out.Error("Concurrency level (-t) must be greater than 0")
+		return "", false
+	}
+	if f.timeoutMs <= 0 {
+		out.Error("Timeout (-timeout) must be greater than 0")
+		return "", false
+	}
+	if f.testHitRate < 1 || f.testHitRate > 100 {
+		out.Error("Hit rate (-hit-rate) must be between 1 and 100")
+		return "", false
+	}
+	if maxAttempts < 1 {
+		out.Error("Attempts (-attempts) must be at least 1")
+		return "", false
+	}
+	if !f.testMode {
+		if err := validateDNSServer(f.dnsServer); err != nil {
+			out.Error("DNS server %s: %v", f.dnsServer, err)
+			return "", false
+		}
+	}
+	domain := flag.Arg(0)
+	if err := validateDomain(domain); err != nil {
+		out.Error("%v", err)
+		return "", false
+	}
+	return domain, true
+}
 
-	out := output.New(nil, *testMode)
+func openOutputFile(path string, testMode bool, out *output.Writer) (*output.Writer, *bufio.Writer, *os.File, bool) {
+	if path == "" {
+		return out, nil, nil, true
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		out.Error("creating output file: %v", err)
+		return out, nil, nil, false
+	}
+	w := bufio.NewWriter(f)
+	return output.New(w, testMode), w, f, true
+}
 
+func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Writer) {
+	out.Info("Starting %s v%s", ProgramName, Version)
+	if f.testMode {
+		out.Info("Mode: SIMULATION (no actual DNS queries)")
+		out.Info("Simulated hit rate: %d%%", f.testHitRate)
+	} else {
+		out.Info("Mode: LIVE DNS RESOLUTION")
+	}
+	out.Info("Target domain: %s", domain)
+	out.Info("Wordlist: %s", f.wordlistFile)
+	out.Info("Concurrency: %d workers", f.concurrency)
+	out.Info("Timeout: %d ms", f.timeoutMs)
+	out.Info("Attempts: %d", maxAttempts)
+	if !f.testMode {
+		out.Info("DNS Server: %s", f.dnsServer)
+	}
+	if f.outputFile != "" {
+		out.Info("Output file: %s", f.outputFile)
+	}
+	out.Info("---")
+}
+
+func logVerboseDone(ev scan.Event, f cliFlags, outWriter *bufio.Writer, out *output.Writer) {
+	out.Info("\nScan completed for %s", flag.Arg(0))
+	out.Info("Processed %d subdomain prefixes", ev.Processed)
+	if f.testMode {
+		out.Info("Found %d simulated subdomains", ev.Found)
+	} else {
+		out.Info("Found %d subdomains", ev.Found)
+	}
+	if outWriter != nil {
+		out.Info("Results written to: %s", f.outputFile)
+	}
+	if f.testMode {
+		out.Info("\nNOTE: Results were simulated and no actual DNS queries were performed.")
+		out.Info("This mode is intended for educational and testing purposes only.")
+	}
+}
+
+func run() int {
+	f := parseFlags()
+
+	maxAttempts, err := resolveAttempts(f.attempts, f.retries)
+	out := output.New(nil, f.testMode)
 	if err != nil {
 		out.Error("%v", err)
 		return 1
 	}
 
-	if *testMode {
+	if f.testMode {
 		out.Info("")
 		out.Info("╔════════════════════════════════════════════════════════════════════╗")
 		out.Info("║  SIMULATION MODE ACTIVE - NO ACTUAL DNS QUERIES WILL BE PERFORMED  ║")
@@ -120,105 +229,46 @@ func run() int {
 		out.Info("")
 	}
 
-	if *showVersion {
+	if f.showVersion {
 		fmt.Fprintf(os.Stderr, "%s v%s\n", ProgramName, Version)
-		if *testMode {
+		if f.testMode {
 			fmt.Fprintln(os.Stderr, "Running in SIMULATION mode")
 		}
 		return 0
 	}
 
-	if *wordlistFile == "" || flag.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: subenum -w <wordlist_file> [options] <domain>")
-		flag.PrintDefaults()
+	domain, ok := validateFlags(f, out, maxAttempts)
+	if !ok {
 		return 1
 	}
 
-	if *concurrency <= 0 {
-		out.Error("Concurrency level (-t) must be greater than 0")
+	out, outWriter, outFile, ok := openOutputFile(f.outputFile, f.testMode, out)
+	if !ok {
 		return 1
 	}
-
-	if *timeoutMs <= 0 {
-		out.Error("Timeout (-timeout) must be greater than 0")
-		return 1
-	}
-
-	if *testHitRate < 1 || *testHitRate > 100 {
-		out.Error("Hit rate (-hit-rate) must be between 1 and 100")
-		return 1
-	}
-
-	if maxAttempts < 1 {
-		out.Error("Attempts (-attempts) must be at least 1")
-		return 1
-	}
-
-	if !*testMode {
-		if err := validateDNSServer(*dnsServer); err != nil {
-			out.Error("DNS server %s: %v", *dnsServer, err)
-			return 1
-		}
-	}
-
-	domain := flag.Arg(0)
-	if err := validateDomain(domain); err != nil {
-		out.Error("%v", err)
-		return 1
-	}
-
-	timeout := time.Duration(*timeoutMs) * time.Millisecond
-
-	var outWriter *bufio.Writer
-	if *outputFile != "" {
-		f, err := os.Create(*outputFile)
-		if err != nil {
-			out.Error("creating output file: %v", err)
-			return 1
-		}
-		outWriter = bufio.NewWriter(f)
-		out = output.New(outWriter, *testMode)
+	if outFile != nil {
 		defer func() {
 			if flushErr := outWriter.Flush(); flushErr != nil {
 				out.Error("flushing output: %v", flushErr)
 			}
-			if closeErr := f.Close(); closeErr != nil {
+			if closeErr := outFile.Close(); closeErr != nil {
 				out.Error("closing output file: %v", closeErr)
 			}
 		}()
 	}
 
-	if *verbose {
-		out.Info("Starting %s v%s", ProgramName, Version)
-		if *testMode {
-			out.Info("Mode: SIMULATION (no actual DNS queries)")
-			out.Info("Simulated hit rate: %d%%", *testHitRate)
-		} else {
-			out.Info("Mode: LIVE DNS RESOLUTION")
-		}
-		out.Info("Target domain: %s", domain)
-		out.Info("Wordlist: %s", *wordlistFile)
-		out.Info("Concurrency: %d workers", *concurrency)
-		out.Info("Timeout: %d ms", *timeoutMs)
-		out.Info("Attempts: %d", maxAttempts)
-		if !*testMode {
-			out.Info("DNS Server: %s", *dnsServer)
-		}
-		if *outputFile != "" {
-			out.Info("Output file: %s", *outputFile)
-		}
-		out.Info("---")
+	if f.verbose {
+		logVerboseStart(f, domain, maxAttempts, out)
 	}
 
-	entries, duplicates, err := wordlist.LoadWordlist(*wordlistFile)
+	entries, duplicates, err := wordlist.LoadWordlist(f.wordlistFile)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
 		return 1
 	}
 
 	totalWords := int64(len(entries))
-
-	if *verbose {
+	if f.verbose {
 		out.Info("Total wordlist entries: %d", totalWords)
 		if duplicates > 0 {
 			out.Info("Removed %d duplicate wordlist entries", duplicates)
@@ -243,14 +293,14 @@ func run() int {
 	cfg := scan.Config{
 		Domain:      domain,
 		Entries:     entries,
-		Concurrency: *concurrency,
-		Timeout:     timeout,
-		DNSServer:   *dnsServer,
-		Simulate:    *testMode,
-		HitRate:     *testHitRate,
+		Concurrency: f.concurrency,
+		Timeout:     time.Duration(f.timeoutMs) * time.Millisecond,
+		DNSServer:   f.dnsServer,
+		Simulate:    f.testMode,
+		HitRate:     f.testHitRate,
 		Attempts:    maxAttempts,
-		Force:       *force,
-		Verbose:     *verbose,
+		Force:       f.force,
+		Verbose:     f.verbose,
 	}
 
 	events := make(chan scan.Event, 64)
@@ -262,7 +312,7 @@ func run() int {
 		case scan.EventResult:
 			out.Result(ev.Domain)
 		case scan.EventProgress:
-			if *showProgress && totalWords > 0 {
+			if f.showProgress && totalWords > 0 {
 				progressStarted = true
 				pct := float64(ev.Processed) / float64(ev.Total) * 100
 				out.Progress(pct, ev.Processed, ev.Total, ev.Found)
@@ -279,21 +329,8 @@ func run() int {
 			if progressStarted {
 				out.ProgressDone()
 			}
-			if *verbose {
-				out.Info("\nScan completed for %s", domain)
-				out.Info("Processed %d subdomain prefixes", ev.Processed)
-				if *testMode {
-					out.Info("Found %d simulated subdomains", ev.Found)
-				} else {
-					out.Info("Found %d subdomains", ev.Found)
-				}
-				if outWriter != nil {
-					out.Info("Results written to: %s", *outputFile)
-				}
-				if *testMode {
-					out.Info("\nNOTE: Results were simulated and no actual DNS queries were performed.")
-					out.Info("This mode is intended for educational and testing purposes only.")
-				}
+			if f.verbose {
+				logVerboseDone(ev, f, outWriter, out)
 			}
 		}
 	}

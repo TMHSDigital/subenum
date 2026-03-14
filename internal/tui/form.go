@@ -90,13 +90,13 @@ func newFormModel(saved savedConfig) formModel {
 
 	// inputs[0..6] correspond to the non-toggle fields.
 	m.inputs = []textinput.Model{
-		newInput("e.g. example.com", str(saved.Domain, "")),                                     // 0 Domain
+		newInput("e.g. example.com", str(saved.Domain, "")),                                                // 0 Domain
 		newInput("e.g. examples/sample_wordlist.txt", str(saved.Wordlist, "examples/sample_wordlist.txt")), // 1 Wordlist
-		newInput("1–100", intStr(saved.HitRate, "15")),                                          // 2 HitRate
-		newInput("e.g. 8.8.8.8:53", str(saved.DNSServer, "8.8.8.8:53")),                        // 3 DNSServer
-		newInput("e.g. 100", intStr(saved.Concurrency, "100")),                                  // 4 Concurrency
-		newInput("e.g. 1000", intStr(saved.TimeoutMs, "1000")),                                  // 5 Timeout
-		newInput("e.g. 1", intStr(saved.Attempts, "1")),                                         // 6 Attempts
+		newInput("1–100", intStr(saved.HitRate, "15")),                                                     // 2 HitRate
+		newInput("e.g. 8.8.8.8:53", str(saved.DNSServer, "8.8.8.8:53")),                                    // 3 DNSServer
+		newInput("e.g. 100", intStr(saved.Concurrency, "100")),                                             // 4 Concurrency
+		newInput("e.g. 1000", intStr(saved.TimeoutMs, "1000")),                                             // 5 Timeout
+		newInput("e.g. 1", intStr(saved.Attempts, "1")),                                                    // 6 Attempts
 	}
 
 	m.toggles[0] = saved.Simulate
