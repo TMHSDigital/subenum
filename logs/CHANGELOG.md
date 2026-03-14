@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-14
+
+### Added
+- Wildcard DNS detection with double-probe confirmation; exits by default, continue with `-force`
+- Wordlist deduplication (duplicates removed before scanning, count reported in verbose mode)
+- `-attempts` flag replacing `-retries` (deprecated, still accepted with warning)
+
+### Changed
+- Refactored into `internal/dns`, `internal/output`, `internal/wordlist` packages
+- Progress, verbose, and diagnostic output moved to stderr (stdout is now pipe-clean)
+- Version bumped to 0.4.0
+
+### Fixed
+- Progress ticker no longer corrupts piped stdout output
+- `-retries` semantics clarified via rename to `-attempts`
+
 ## [0.3.0] - 2026-02-22
 
 ### Added

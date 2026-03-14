@@ -12,12 +12,23 @@ This document describes the architecture of the `subenum` tool, a Go-based comma
 The `subenum` tool operates through a sequence of steps to discover valid subdomains for a given target domain:
 
 1.  **Initialization**: Parses command-line arguments, including the target domain, path to the wordlist file, concurrency level, and DNS timeout.
-2.  **Wordlist Ingestion**: Opens and reads the specified wordlist file, preparing a list of potential subdomain prefixes.
-3.  **Concurrent Resolution**: A pool of worker goroutines is established. Each worker takes a prefix from the wordlist, constructs a full subdomain string (e.g., `prefix.targetdomain.com`), and attempts to resolve it using DNS.
-4.  **Output**: If a subdomain is successfully resolved (i.e., a DNS record is found), it is printed to the standard output.
-5.  **Completion**: The tool waits for all DNS lookups to complete before exiting.
+2.  **Wildcard Detection**: Resolves two random subdomains to detect wildcard DNS. If detected, exits unless `-force` is set.
+3.  **Wordlist Ingestion**: Reads the wordlist file into memory, deduplicating entries in a single pass.
+4.  **Concurrent Resolution**: A pool of worker goroutines is established. Each worker takes a prefix from the wordlist, constructs a full subdomain string (e.g., `prefix.targetdomain.com`), and attempts to resolve it using DNS.
+5.  **Output**: Resolved subdomains are printed to stdout (pipe-friendly); all progress, verbose, and diagnostic output goes to stderr.
+6.  **Completion**: The tool waits for all DNS lookups to complete before exiting.
 
 This architecture is designed to be efficient by performing multiple DNS lookups concurrently, while also providing control over the level of concurrency and timeout settings.
+
+### Package Structure
+
+```
+main.go                     — CLI entry point (flag parsing, wiring, worker loop)
+internal/dns/resolver.go    — ResolveDomain, ResolveDomainWithRetry, CheckWildcard
+internal/dns/simulate.go    — SimulateResolution
+internal/output/writer.go   — Thread-safe Writer (results→stdout, diagnostics→stderr)
+internal/wordlist/reader.go — LoadWordlist (dedup + sanitize)
+```
 
 ## 2. Key Components / Modules
 
@@ -33,27 +44,28 @@ This architecture is designed to be efficient by performing multiple DNS lookups
     *   `flag.Bool("progress", true, "Show progress during scanning")`: Defines the progress reporting flag.
     *   `flag.Bool("version", false, "Show version information")`: Defines the version flag.
     *   `flag.String("o", "", "Write results to file")`: Defines the output file flag.
-    *   `flag.Int("retries", 1, "Number of DNS retry attempts")`: Defines the retry count flag.
+    *   `flag.Int("attempts", 0, "Total DNS resolution attempts per subdomain")`: Defines the attempt count flag.
+    *   `flag.Int("retries", 0, "Deprecated: alias for -attempts")`: Deprecated retry flag.
+    *   `flag.Bool("force", false, "Continue scanning on wildcard DNS")`: Defines the force flag.
     *   `flag.Parse()`: Parses the provided arguments.
     *   `flag.Arg(0)`: Retrieves the positional argument (the target domain).
 *   **Interactions**: The parsed values are used to configure the subsequent components, such as the Wordlist Processing and DNS Resolution Engine. Input validation is performed to ensure valid values for critical parameters like concurrency, timeout, DNS server format (validated via `validateDNSServer`), and domain syntax (validated via `validateDomain`).
 
-### 2.2. Wordlist Processing
+### 2.2. Wordlist Processing (`internal/wordlist`)
 
-*   **Purpose**: This component is responsible for opening and reading the subdomain prefixes from the user-specified wordlist file. Each line in the file is treated as a potential subdomain prefix.
+*   **Purpose**: This component is responsible for opening, reading, sanitizing, and deduplicating the subdomain prefixes from the user-specified wordlist file.
 *   **Implementation**:
-    *   `os.Open(*wordlistFile)`: Opens the file specified by the `-w` flag.
-    *   `bufio.NewScanner(file)`: Creates a new scanner to read the file content line by line, which is efficient for large files.
-    *   `scanner.Scan()`: Advances the scanner to the next line.
-    *   `scanner.Text()`: Retrieves the current line (subdomain prefix) as a string.
-*   **Interactions**: The prefixes read from the wordlist are sent to the `subdomains` channel, which is consumed by the worker goroutines in the Concurrency Management component. Error handling is in place for issues like the file not being found or being unreadable.
+    *   `wordlist.LoadWordlist(path) ([]string, int, error)`: Reads the entire file in a single pass, trims whitespace from each line, removes blank lines, and deduplicates entries using a map while preserving first-occurrence order. Returns the deduplicated slice, the count of removed duplicates, and any I/O error.
+    *   `wordlist.SanitizeLine(s) string`: Trims whitespace from a single wordlist entry.
+*   **Interactions**: The deduplicated entries are fed into the `subdomains` channel from a slice (no file re-read needed). The duplicate count is reported in verbose mode.
 
-### 2.3. DNS Resolution Engine
+### 2.3. DNS Resolution Engine (`internal/dns`)
 
-*   **Purpose**: This is the core component responsible for performing the actual DNS lookup for each constructed subdomain (e.g., `prefix.targetdomain.com`). It determines if a subdomain has a valid DNS record (typically A or CNAME, though the current implementation checks for any successful resolution).
+*   **Purpose**: This is the core component responsible for performing the actual DNS lookup for each constructed subdomain (e.g., `prefix.targetdomain.com`). It determines if a subdomain has a valid DNS record (typically A or CNAME, though the current implementation checks for any successful resolution). It also provides wildcard DNS detection.
 *   **Implementation**:
-    *   Function: `resolveDomain(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) bool`
-    *   Function: `resolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxRetries int) bool` — wraps `resolveDomain` with configurable retry logic and exponential backoff between attempts.
+    *   Function: `dns.ResolveDomain(ctx, domain, timeout, dnsServer, verbose) bool`
+    *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts) bool` — wraps `ResolveDomain` with configurable retry logic and linear backoff between attempts.
+    *   Function: `dns.CheckWildcard(ctx, domain, timeout, dnsServer) (bool, error)` — resolves two random subdomains to detect wildcard DNS records.
     *   `net.Resolver{}`: A custom DNS resolver is configured.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.
         *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function is provided to control the connection to the DNS server, using the user-specified `dnsServer` address.
@@ -78,47 +90,44 @@ This architecture is designed to be efficient by performing multiple DNS lookups
     *   **Waiting for Completion (`wg.Wait()`)**: The main goroutine blocks until all worker goroutines have called `wg.Done()`, ensuring all lookups are finished.
 *   **Interactions**: This component orchestrates the parallel execution of DNS lookups. It receives subdomain prefixes from the Wordlist Processing component (via the `subdomains` channel) and utilizes the DNS Resolution Engine within each worker goroutine. The number of workers is controlled by the Argument Parsing component.
 
-### 2.5. Output Formatting
+### 2.5. Output Formatting (`internal/output`)
 
-*   **Purpose**: This component is responsible for presenting the successfully resolved subdomains and other information to the user.
+*   **Purpose**: Thread-safe output that keeps stdout pipe-clean. Resolved subdomains go to stdout; everything else (progress, verbose diagnostics, errors) goes to stderr.
 *   **Implementation**:
-    *   **Standard Output**: 
-        *   `fmt.Printf("Found: %s\n", fullDomain)`: When a worker goroutine successfully resolves a subdomain (i.e., `resolveDomain()` returns `true`), this function is used to print the discovered subdomain to the standard output.
+    *   `output.Writer` struct with mutex-protected methods:
+        *   `Result(domain)` — prints `Found: <domain>` to stdout (and to the output file if configured).
+        *   `Progress(pct, processed, total, found)` — writes a carriage-return progress line to stderr.
+        *   `Info(format, args...)` — writes an informational line to stderr.
+        *   `Error(format, args...)` — writes an error line to stderr.
     *   **Verbose Output** (when `-v` flag is enabled):
-        *   Initial configuration summary (domain, wordlist, concurrency, timeout, DNS server)
-        *   Detailed DNS resolution information for each lookup, including success/failure status, IP addresses, and timing information
-        *   Final scan summary with statistics
+        *   Configuration summary, per-query DNS resolution info, and final scan statistics — all via `Info` to stderr.
     *   **Progress Reporting** (when `-progress` flag is enabled):
-        *   A separate goroutine displays and updates a progress line showing:
-            *   Percentage completion based on processed subdomains
-            *   Count of processed entries
-            *   Count of successfully resolved subdomains
-*   **Interactions**: The Output Formatting component interacts with all other components, presenting information from various stages of the scanning process. The level of detail is controlled by command-line flags. Since multiple goroutines can print concurrently, atomic operations are used to ensure thread-safe counts for progress reporting.
+        *   A dedicated goroutine using a 2-second ticker calls `Progress` on stderr.
+*   **Interactions**: All components route output through the `Writer`. Since results are the only thing on stdout, piping (`| cut -d' ' -f2`) works without `-progress=false`.
 
 ### 2.6. Progress Monitoring
 
-*   **Purpose**: This component tracks the progress of the subdomain enumeration process and provides real-time feedback to the user.
+*   **Purpose**: This component tracks the progress of the subdomain enumeration process and provides real-time feedback to the user via stderr.
 *   **Implementation**:
-    *   **Line Counting**: When the `-progress` flag is enabled, the wordlist file is first scanned to count the total number of lines, providing the denominator for percentage calculations.
+    *   **Total Count**: The total word count comes from the length of the deduplicated wordlist slice (no separate file pass needed).
     *   **Atomic Counters**:
         *   `processedWords`: An atomic counter that's incremented each time a subdomain is checked.
         *   `foundSubdomains`: An atomic counter that's incremented each time a valid subdomain is found.
-    *   **Progress Display**:
-        *   A dedicated goroutine using a ticker (running every 2 seconds) to update the progress display
+    *   **Progress Display** (on stderr):
+        *   A dedicated goroutine using a ticker (running every 2 seconds) calls `Writer.Progress`
         *   Uses `\r` carriage return to update the same line repeatedly
         *   Shows percentage completion, processed count, and found count
-*   **Interactions**: The Progress Monitoring component works alongside the worker goroutines, using atomic operations to safely track counts across multiple goroutines.
+*   **Interactions**: The Progress Monitoring component works alongside the worker goroutines, using atomic operations to safely track counts across multiple goroutines. Writing to stderr keeps stdout pipe-clean.
 
 ## 3. Data Flow
 
 The flow of data through the `subenum` application can be summarized as follows:
 
-1.  **Input**: The user provides command-line arguments: the target domain, the path to a wordlist file (`-w`), a concurrency level (`-t`), a DNS timeout (`-timeout`), a DNS server (`-dns-server`), and flags for verbose mode (`-v`) and progress reporting (`-progress`).
+1.  **Input**: The user provides command-line arguments: the target domain, the path to a wordlist file (`-w`), a concurrency level (`-t`), a DNS timeout (`-timeout`), a DNS server (`-dns-server`), attempts (`-attempts`), and flags for verbose mode (`-v`), progress reporting (`-progress`), and force mode (`-force`).
 2.  **Configuration**: These arguments are parsed and validated by the **Argument Parsing** component and used to configure the tool's behavior.
-3.  **Initialization**: If progress reporting is enabled, the wordlist file is scanned once to count total entries.
-4.  **Wordlist Reading**: The **Wordlist Processing** component opens the specified wordlist file.
-    *   It reads the file line by line.
-    *   Each line (a subdomain prefix string) is sent as a message into the `subdomains` channel.
+3.  **Wildcard Detection**: Two random subdomains are resolved against the target domain. If both (or either) resolve, wildcard DNS is detected. The scan aborts unless `-force` is set.
+4.  **Wordlist Loading**: `wordlist.LoadWordlist` reads the file in a single pass, sanitizes lines, and deduplicates entries into a slice.
+    *   Each entry is sent into the `subdomains` channel from the in-memory slice.
 5.  **Work Distribution**: The `subdomains` channel acts as a queue for the **Concurrency Management (Worker Pool)** component.
     *   Worker goroutines (number determined by the `-t` flag) pick up these prefixes from the channel.
 6.  **Subdomain Construction**: Each worker goroutine takes a `subdomainPrefix` and concatenates it with the `targetDomain` (e.g., `subdomainPrefix + "." + targetDomain`) to form a `fullDomain` string.
@@ -183,4 +192,4 @@ When the `-o` flag is provided, resolved subdomains are written to the specified
 
 ### 4.7. Retry Mechanism
 
-The `-retries` flag (default: 1) controls how many times each subdomain is attempted before being marked as unresolved. A short backoff delay is applied between retries to handle transient DNS failures.
+The `-attempts` flag (default: 1) controls the total number of DNS resolution attempts per subdomain. A value of 1 means no retries. A short linear backoff delay is applied between attempts to handle transient DNS failures. The deprecated `-retries` flag is still accepted as an alias but prints a warning to stderr.
