@@ -33,10 +33,16 @@ func main() {
 		fmt.Printf("Error creating output file: %v\n", err)
 		os.Exit(1)
 	}
-	defer file.Close()
 
 	writer := bufio.NewWriter(file)
-	defer writer.Flush()
+	defer func() {
+		if flushErr := writer.Flush(); flushErr != nil {
+			fmt.Printf("Error flushing writer: %v\n", flushErr)
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			fmt.Printf("Error closing file: %v\n", closeErr)
+		}
+	}()
 
 	// Track added words to avoid duplicates
 	addedWords := make(map[string]bool)

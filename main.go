@@ -165,10 +165,16 @@ func main() {
 			out.Error("creating output file: %v", err)
 			os.Exit(1)
 		}
-		defer f.Close()
 		outWriter = bufio.NewWriter(f)
-		defer outWriter.Flush()
 		out = output.New(outWriter, *testMode)
+		defer func() {
+			if flushErr := outWriter.Flush(); flushErr != nil {
+				out.Error("flushing output: %v", flushErr)
+			}
+			if closeErr := f.Close(); closeErr != nil {
+				out.Error("closing output file: %v", closeErr)
+			}
+		}()
 	}
 
 	if *verbose {
