@@ -20,18 +20,18 @@ var (
 
 // scanViewModel is the live-results screen.
 type scanViewModel struct {
-	viewport    viewport.Model
-	progress    progress.Model
-	results     []string
-	messages    []string // wildcard / error messages
-	processed   int64
-	total       int64
-	found       int64
-	done        bool
-	aborted     bool
-	width       int
-	height      int
-	simMode     bool
+	viewport  viewport.Model
+	progress  progress.Model
+	results   []string
+	messages  []string // wildcard / error messages
+	processed int64
+	total     int64
+	found     int64
+	done      bool
+	aborted   bool
+	width     int
+	height    int
+	simMode   bool
 }
 
 func newScanViewModel(width, height int, simMode bool) scanViewModel {
@@ -123,18 +123,19 @@ func (m scanViewModel) View() string {
 	b.WriteString(m.progress.ViewAs(pct) + "\n")
 
 	// Status line
-	if m.done && m.aborted {
+	switch {
+	case m.done && m.aborted:
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
 			"Aborted — processed %d/%d — found %d",
 			m.processed, m.total, m.found,
 		)) + "\n")
-	} else if m.done {
+	case m.done:
 		b.WriteString(summaryStyle.Render(fmt.Sprintf(
 			"Done — processed %d/%d — found %d subdomain(s)",
 			m.processed, m.total, m.found,
 		)) + "\n")
 		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
-	} else {
+	default:
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
 			"  %d/%d processed  •  %d found",
 			m.processed, m.total, m.found,

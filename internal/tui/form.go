@@ -41,15 +41,15 @@ var (
 // Fields 2 (Simulate) and 8 (Force) are toggles, not text inputs.
 // Field 3 (HitRate) is a text input but only rendered when simulate=ON.
 var inputForField = [fieldCount]int{
-	0, // fieldDomain      → inputs[0]
-	1, // fieldWordlist    → inputs[1]
-	-1, // fieldSimulate   → toggle
-	2, // fieldHitRate     → inputs[2]
-	3, // fieldDNSServer   → inputs[3]
-	4, // fieldConcurrency → inputs[4]
-	5, // fieldTimeout     → inputs[5]
-	6, // fieldAttempts    → inputs[6]
-	-1, // fieldForce      → toggle
+	0,  // fieldDomain      → inputs[0]
+	1,  // fieldWordlist    → inputs[1]
+	-1, // fieldSimulate    → toggle
+	2,  // fieldHitRate     → inputs[2]
+	3,  // fieldDNSServer   → inputs[3]
+	4,  // fieldConcurrency → inputs[4]
+	5,  // fieldTimeout     → inputs[5]
+	6,  // fieldAttempts    → inputs[6]
+	-1, // fieldForce       → toggle
 }
 
 // formModel is the configuration form screen.
@@ -179,10 +179,6 @@ func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 		case " ":
 			if m.isToggle() {
 				m.toggles[m.toggleArrayIndex()] = !m.toggles[m.toggleArrayIndex()]
-				// If we just turned simulate OFF and focus is on HitRate, skip past it.
-				if m.focus == fieldSimulate && !m.toggles[0] {
-					// HitRate is now hidden; nudge focus forward if it would land there.
-				}
 			}
 		}
 	}
