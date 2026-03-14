@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/title.svg" alt="subenum" width="600"/>
+<img src="docs/assets/wordmark.svg" alt="subenum" width="600"/>
 
 <br>
 
