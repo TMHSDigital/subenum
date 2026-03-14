@@ -14,7 +14,7 @@
 [![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum?style=for-the-badge)](https://github.com/TMHSDigital/subenum/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge&v=0.4.0)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
 
-`Concurrent Workers` &middot; `Context-Aware Cancellation` &middot; `Retry with Backoff` &middot; `Wildcard Detection` &middot; `Simulation Mode` &middot; `Zero Dependencies`
+`Concurrent Workers` &middot; `Context-Aware Cancellation` &middot; `Retry with Backoff` &middot; `Wildcard Detection` &middot; `Simulation Mode` &middot; `Interactive TUI`
 
 [Quick Start](#installation) | [Documentation](./docs) | [Architecture](#system-architecture) | [Changelog](./CHANGELOG.md)
 
@@ -39,6 +39,7 @@
 | Simulation Mode | Generate synthetic DNS results at a configurable hit rate without network I/O. |
 | Output Pipeline | Stream resolved domains to stdout (pipe-friendly); progress and diagnostics go to stderr. |
 | Progress Reporting | Live terminal progress with atomic counters, updated on a 2-second ticker. |
+| Interactive TUI | Form-based config screen and live-scrolling results view via `-tui` flag (Bubble Tea). No arguments required. |
 
 <br>
 
@@ -141,6 +142,7 @@ make help         # list all targets
 | `-progress` | `true` | Live progress line on stderr (disable with `-progress=false`) |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100) |
+| `-tui` | `false` | Launch the interactive Terminal UI (no other flags required) |
 | `-version` | -- | Print version and exit |
 | `-retries <n>` | -- | **Deprecated:** alias for `-attempts`, prints a warning |
 
@@ -193,6 +195,25 @@ subenum -w <wordlist> [flags] <domain>
 ```
 
 **Graceful shutdown:** press `Ctrl+C` at any time. In-flight queries drain, partial results are flushed.
+
+**Interactive TUI (no arguments):**
+
+```bash
+./subenum -tui
+# or
+make tui
+```
+
+Fill in the form, press `ctrl+r` to scan. Last-used values are saved to `~/.config/subenum/last.json` and restored on next launch.
+
+| Key | Action |
+| :--- | :--- |
+| `tab` / `shift+tab` / `↑↓` | Navigate fields |
+| `space` | Toggle Simulate / Force |
+| `ctrl+r` | Start scan |
+| `ctrl+c` | Abort scan (in scan view) / quit (in form) |
+| `r` | New scan — returns to form with last values pre-filled |
+| `q` | Quit after scan completes |
 
 <br>
 

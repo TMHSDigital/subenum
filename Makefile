@@ -1,4 +1,4 @@
-.PHONY: build test clean lint run docker-build docker-run wordlist wordlist-gen simulate simulate-verbose
+.PHONY: build test clean lint run tui docker-build docker-run wordlist wordlist-gen simulate simulate-verbose
 
 # Default Go parameters
 GOCMD=go
@@ -54,6 +54,10 @@ wordlist: wordlist-gen
 	@echo "Generated wordlist: $(WL_OUTPUT)"
 	@echo "Use it with: make WORDLIST=$(WL_OUTPUT) DOMAIN=$(WL_DOMAIN) run-verbose"
 
+# Launch the interactive TUI (one-click, no arguments needed)
+tui: build
+	./$(BINARY_NAME) -tui
+
 # Run with default parameters
 run: build
 	./$(BINARY_NAME) -w $(WORDLIST) -t $(CONCURRENCY) -timeout $(TIMEOUT) -dns-server $(DNS_SERVER) $(DOMAIN)
@@ -98,6 +102,7 @@ help:
 	@echo "  make test-short       - Run short tests"
 	@echo "  make clean            - Clean build artifacts"
 	@echo "  make lint             - Run linter"
+	@echo "  make tui              - Launch the interactive terminal UI (no arguments needed)"
 	@echo ""
 	@echo "  LIVE MODE (performs real DNS queries):"
 	@echo "  make run              - Build and run with default parameters"

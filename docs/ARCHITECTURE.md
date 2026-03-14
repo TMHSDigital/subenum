@@ -23,11 +23,16 @@ This architecture is designed to be efficient by performing multiple DNS lookups
 ### Package Structure
 
 ```
-main.go                     — CLI entry point (flag parsing, wiring, worker loop)
-internal/dns/resolver.go    — ResolveDomain, ResolveDomainWithRetry, CheckWildcard
-internal/dns/simulate.go    — SimulateResolution
-internal/output/writer.go   — Thread-safe Writer (results→stdout, diagnostics→stderr)
-internal/wordlist/reader.go — LoadWordlist (dedup + sanitize)
+main.go                        — CLI entry point (flag parsing, wiring, -tui dispatch)
+internal/scan/runner.go        — Scan engine: Config, Event types, Run(ctx, cfg, events)
+internal/dns/resolver.go       — ResolveDomain, ResolveDomainWithRetry, CheckWildcard
+internal/dns/simulate.go       — SimulateResolution
+internal/output/writer.go      — Thread-safe Writer (results→stdout, diagnostics→stderr)
+internal/wordlist/reader.go    — LoadWordlist (dedup + sanitize)
+internal/tui/model.go          — Root Bubble Tea model (form → scan state machine)
+internal/tui/form.go           — Config form screen (textinput fields + toggles)
+internal/tui/scan_view.go      — Live results screen (viewport + progress bar)
+internal/tui/config.go         — Session persistence (load/save ~/.config/subenum/last.json)
 ```
 
 ## 2. Key Components / Modules
@@ -75,20 +80,18 @@ internal/wordlist/reader.go — LoadWordlist (dedup + sanitize)
     *   The function returns `true` if `LookupHost` returns no error (i.e., the domain resolved), and `false` otherwise.
 *   **Interactions**: Workers call `dns.ResolveDomainWithRetry`, which delegates to `dns.ResolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.
 
-### 2.4. Concurrency Management (Worker Pool)
+### 2.4. Concurrency Management (`internal/scan`)
 
 *   **Purpose**: To efficiently perform DNS lookups for a large number of potential subdomains, `subenum` employs a worker pool pattern. This allows multiple DNS queries to be in flight concurrently, significantly speeding up the enumeration process compared to sequential lookups.
-*   **Implementation**:
-    *   **`subdomains := make(chan string)`**: A buffered channel (though currently unbuffered in `main.go`, could be buffered for performance tuning) is created to act as a work queue. Subdomain prefixes read from the wordlist are sent to this channel.
-    *   **`var wg sync.WaitGroup`**: A `sync.WaitGroup` is used to wait for all worker goroutines to complete their tasks before the main function exits.
-    *   **Worker Goroutines Loop (`for i := 0; i < *concurrency; i++`)**: A loop launches a number of goroutines specified by the `-t` (concurrency) flag. Each goroutine acts as a worker.
-        *   `wg.Add(1)`: Increments the `WaitGroup` counter for each worker started.
-        *   `go func() { ... }()`: Each worker runs in its own goroutine.
-        *   `defer wg.Done()`: Decrements the `WaitGroup` counter when the goroutine exits.
-        *   `for subdomainPrefix := range subdomains { ... }`: Each worker continuously reads subdomain prefixes from the `subdomains` channel until the channel is closed. For each prefix, it constructs the full domain and calls `dns.ResolveDomainWithRetry()`.
-    *   **Closing the Channel (`close(subdomains)`)**: After all subdomain prefixes from the wordlist have been sent to the `subdomains` channel, the channel is closed. This signals to the worker goroutines that no more work will be added.
-    *   **Waiting for Completion (`wg.Wait()`)**: The main goroutine blocks until all worker goroutines have called `wg.Done()`, ensuring all lookups are finished.
-*   **Interactions**: This component orchestrates the parallel execution of DNS lookups. It receives subdomain prefixes from the Wordlist Processing component (via the `subdomains` channel) and utilizes the DNS Resolution Engine within each worker goroutine. The number of workers is controlled by the Argument Parsing component.
+*   **Implementation**: The worker pool logic lives in `internal/scan/runner.go` as `scan.Run(ctx, cfg, events)`. Both the CLI (`run()` in `main.go`) and the TUI (`internal/tui`) call this function.
+    *   **`scan.Config`**: A struct carrying all scan parameters (domain, entries slice, concurrency, timeout, DNS server, simulate flag, etc.).
+    *   **`scan.Event` / `scan.EventKind`**: Typed events emitted on a `chan<- scan.Event` — `EventResult`, `EventProgress`, `EventWildcard`, `EventError`, `EventDone`.
+    *   **`subdomains := make(chan string)`**: An internal channel acts as a work queue. Entries from the pre-loaded wordlist slice are fed into it.
+    *   **`var wg sync.WaitGroup`**: A `sync.WaitGroup` waits for all worker goroutines to finish.
+    *   **Worker Goroutines Loop**: `cfg.Concurrency` goroutines are launched. Each reads prefixes from the channel, constructs the full domain, and calls `dns.ResolveDomainWithRetry()` (or `dns.SimulateResolution()` in simulate mode).
+    *   **Progress ticker**: A separate goroutine fires every second and emits `EventProgress` events so callers can update their display.
+    *   **Closing the Channel**: After all entries are sent, the channel is closed, signalling workers to exit. `wg.Wait()` blocks until all workers are done, then `EventDone` is emitted.
+*   **Interactions**: `scan.Run` is the single entry point for scanning used by both the CLI output pipeline and the Bubble Tea TUI. It decouples the scan engine from any specific display layer.
 
 ### 2.5. Output Formatting (`internal/output`)
 
@@ -118,6 +121,16 @@ internal/wordlist/reader.go — LoadWordlist (dedup + sanitize)
         *   Uses `\r` carriage return to update the same line repeatedly
         *   Shows percentage completion, processed count, and found count
 *   **Interactions**: The Progress Monitoring component works alongside the worker goroutines, using atomic operations to safely track counts across multiple goroutines. Writing to stderr keeps stdout pipe-clean.
+
+### 2.7. Session Persistence (`internal/tui/config.go`)
+
+*   **Purpose**: Remember the last-used TUI form values across sessions so users don't have to re-type domain, wordlist path, and scan parameters every time.
+*   **Implementation**:
+    *   `savedConfig` struct mirrors `formValues` with JSON tags.
+    *   `configPath()` — returns `os.UserConfigDir()/subenum/last.json` (e.g. `~/.config/subenum/last.json` on Linux/macOS, `%AppData%\subenum\last.json` on Windows).
+    *   `saveConfig(fv formValues) error` — marshals `formValues` to JSON and writes it atomically with `os.WriteFile`. Called in `beginScan()` immediately before launching the scan goroutine. Errors are silently discarded so a write failure never blocks the scan.
+    *   `loadSavedConfig() (savedConfig, bool)` — reads and unmarshals the file. Returns `false` if the file doesn't exist or is unreadable, causing `newFormModel` to fall back to hardcoded defaults.
+*   **Interactions**: `tui.New()` calls `loadSavedConfig()` on startup and passes the result to `newFormModel`. The `r` keybind (new scan) also calls `loadSavedConfig()` so the form is pre-filled with the values from the scan that just completed.
 
 ## 3. Data Flow
 
@@ -151,7 +164,7 @@ The flow of data through the `subenum` application can be summarized as follows:
 
 Visually, this can be seen as:
 
-`User Input -> Argument Parser -> [Wordlist File] -> Wordlist Processor -> subdomains channel -> Worker Goroutines -> DNS Resolver -> Output (if resolved)`
+`User Input -> Argument Parser -> [Wordlist File] -> Wordlist Processor -> scan.Run() -> Worker Goroutines -> DNS Resolver -> Event Channel -> Output (if resolved)`
 
 ## 4. Error Handling Strategy
 

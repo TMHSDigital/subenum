@@ -29,13 +29,12 @@ import (
 	"os/signal"
 	"regexp"
 	"strconv"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/scan"
+	"github.com/TMHSDigital/subenum/internal/tui"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
@@ -76,10 +75,18 @@ func validateDomain(domain string) error {
 }
 
 func main() {
+	// Fast-path: if -tui is the first argument, launch the TUI immediately
+	// before flag.Parse() consumes everything else.
+	for _, arg := range os.Args[1:] {
+		if arg == "-tui" || arg == "--tui" {
+			os.Exit(tui.Start())
+		}
+	}
 	os.Exit(run())
 }
 
 func run() int {
+	flag.Bool("tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
 	wordlistFile := flag.String("w", "", "Path to the wordlist file")
 	concurrency := flag.Int("t", 100, "Number of concurrent workers")
 	timeoutMs := flag.Int("timeout", 1000, "DNS lookup timeout in milliseconds")
@@ -203,23 +210,6 @@ func run() int {
 		out.Info("---")
 	}
 
-	// Wildcard DNS detection (skip in simulation mode).
-	if !*testMode {
-		isWildcard, err := dns.CheckWildcard(context.Background(), domain, timeout, *dnsServer)
-		if err != nil {
-			out.Error("wildcard detection failed: %v", err)
-			return 1
-		}
-		if isWildcard {
-			out.Info("WARNING: Wildcard DNS detected for %s — all subdomains resolve.", domain)
-			if !*force {
-				out.Info("Results would be meaningless. Use -force to scan anyway.")
-				return 1
-			}
-			out.Info("Continuing because -force is set. Results may contain false positives.")
-		}
-	}
-
 	entries, duplicates, err := wordlist.LoadWordlist(*wordlistFile)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
@@ -250,90 +240,61 @@ func run() int {
 		}
 	}()
 
-	subdomains := make(chan string)
-	var wg sync.WaitGroup
-	var processedWords int64
-	var foundSubdomains int64
-
-	if *showProgress && totalWords > 0 {
-		ticker := time.NewTicker(2 * time.Second)
-		done := make(chan bool, 1)
-		go func() {
-			for {
-				select {
-				case <-done:
-					ticker.Stop()
-					return
-				case <-ticker.C:
-					processed := atomic.LoadInt64(&processedWords)
-					found := atomic.LoadInt64(&foundSubdomains)
-					pct := float64(processed) / float64(totalWords) * 100
-					out.Progress(pct, processed, totalWords, found)
-				}
-			}
-		}()
-
-		defer func() {
-			done <- true
-			out.ProgressDone()
-		}()
+	cfg := scan.Config{
+		Domain:      domain,
+		Entries:     entries,
+		Concurrency: *concurrency,
+		Timeout:     timeout,
+		DNSServer:   *dnsServer,
+		Simulate:    *testMode,
+		HitRate:     *testHitRate,
+		Attempts:    maxAttempts,
+		Force:       *force,
+		Verbose:     *verbose,
 	}
 
-	for i := 0; i < *concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for subdomainPrefix := range subdomains {
-				if ctx.Err() != nil {
-					atomic.AddInt64(&processedWords, 1)
-					continue
-				}
+	events := make(chan scan.Event, 64)
+	go scan.Run(ctx, cfg, events)
 
-				fullDomain := subdomainPrefix + "." + domain
-				var resolved bool
-
+	progressStarted := false
+	for ev := range events {
+		switch ev.Kind {
+		case scan.EventResult:
+			out.Result(ev.Domain)
+		case scan.EventProgress:
+			if *showProgress && totalWords > 0 {
+				progressStarted = true
+				pct := float64(ev.Processed) / float64(ev.Total) * 100
+				out.Progress(pct, ev.Processed, ev.Total, ev.Found)
+			}
+		case scan.EventWildcard:
+			out.Info(ev.Message)
+		case scan.EventError:
+			out.Error(ev.Message)
+			if progressStarted {
+				out.ProgressDone()
+			}
+			return 1
+		case scan.EventDone:
+			if progressStarted {
+				out.ProgressDone()
+			}
+			if *verbose {
+				out.Info("\nScan completed for %s", domain)
+				out.Info("Processed %d subdomain prefixes", ev.Processed)
 				if *testMode {
-					resolved = dns.SimulateResolution(fullDomain, *testHitRate, *verbose)
+					out.Info("Found %d simulated subdomains", ev.Found)
 				} else {
-					resolved = dns.ResolveDomainWithRetry(ctx, fullDomain, timeout, *dnsServer, *verbose, maxAttempts)
+					out.Info("Found %d subdomains", ev.Found)
 				}
-
-				if resolved {
-					out.Result(fullDomain)
-					atomic.AddInt64(&foundSubdomains, 1)
+				if outWriter != nil {
+					out.Info("Results written to: %s", *outputFile)
 				}
-				atomic.AddInt64(&processedWords, 1)
+				if *testMode {
+					out.Info("\nNOTE: Results were simulated and no actual DNS queries were performed.")
+					out.Info("This mode is intended for educational and testing purposes only.")
+				}
 			}
-		}()
-	}
-
-	for _, entry := range entries {
-		select {
-		case <-ctx.Done():
-			goto done
-		case subdomains <- entry:
-		}
-	}
-
-done:
-	close(subdomains)
-	wg.Wait()
-
-	if *verbose {
-		out.Info("\nScan completed for %s", domain)
-		out.Info("Processed %d subdomain prefixes", atomic.LoadInt64(&processedWords))
-		found := atomic.LoadInt64(&foundSubdomains)
-		if *testMode {
-			out.Info("Found %d simulated subdomains", found)
-		} else {
-			out.Info("Found %d subdomains", found)
-		}
-		if outWriter != nil {
-			out.Info("Results written to: %s", *outputFile)
-		}
-		if *testMode {
-			out.Info("\nNOTE: Results were simulated and no actual DNS queries were performed.")
-			out.Info("This mode is intended for educational and testing purposes only.")
 		}
 	}
 	return 0

@@ -22,6 +22,7 @@ A Go-based CLI tool for subdomain enumeration designed for educational purposes 
 - Graceful shutdown on Ctrl+C (SIGINT/SIGTERM)
 - Simulation mode for safe testing without network access
 - Domain and DNS server input validation
+- Interactive TUI (`-tui` flag) — form-based config and live-scrolling results, no arguments required; saves last-used values to `~/.config/subenum/last.json`
 - Docker support for containerized usage
 - Extensive documentation and examples
 
@@ -72,6 +73,9 @@ make help
 
 # Build and run with default settings
 make run
+
+# Launch the interactive TUI
+make tui
 
 # Build and run with verbose output
 make run-verbose

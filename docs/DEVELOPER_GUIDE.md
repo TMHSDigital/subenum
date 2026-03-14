@@ -48,6 +48,11 @@ To work with `subenum`, you'll need:
     
     # Or with custom parameters
     ./subenum -w path/to/wordlist.txt -t 50 -timeout 2000 yourtarget.com
+
+    # Launch the interactive TUI (no flags required)
+    ./subenum -tui
+    # or via Make
+    make tui
     ```
 
 ## Project Structure
@@ -92,6 +97,13 @@ subenum/
 │   ├── output/
 │   │   ├── writer.go           # Thread-safe output (results→stdout, rest→stderr)
 │   │   └── writer_test.go      # Output writer tests
+│   ├── scan/
+│   │   └── runner.go           # Scan engine: Config, Event types, Run(ctx, cfg, events)
+│   ├── tui/
+│   │   ├── model.go            # Root Bubble Tea model (form → scan state machine)
+│   │   ├── form.go             # Config form screen (textinput fields + toggles)
+│   │   ├── scan_view.go        # Live results screen (viewport + progress bar)
+│   │   └── config.go           # Session persistence: load/save ~/.config/subenum/last.json
 │   └── wordlist/
 │       ├── reader.go           # LoadWordlist (dedup + sanitize)
 │       └── reader_test.go      # Wordlist loading and dedup tests
@@ -102,7 +114,7 @@ subenum/
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
 ├── main.go                     # CLI entry point: flag parsing, wiring
 ├── main_test.go                # CLI-level tests: validation, flag logic
-├── go.mod                      # Go module (zero external dependencies)
+├── go.mod                      # Go module (Bubble Tea for TUI; zero deps in CLI-only builds)
 ├── Dockerfile                  # Multi-stage Alpine build
 ├── docker-compose.yml          # Compose orchestration
 ├── Makefile                    # Build, test, lint, simulate, Docker targets
@@ -226,7 +238,14 @@ Please follow these style guidelines when contributing:
 
 ## Dependencies Management
 
-`subenum` aims to minimize external dependencies, relying primarily on the Go standard library. If you need to add a dependency:
+`subenum` aims to minimize external dependencies, relying primarily on the Go standard library.
+
+The CLI path (`run()`) has zero external dependencies. The TUI path (`-tui` flag) adds:
+
+- [`github.com/charmbracelet/bubbletea`](https://github.com/charmbracelet/bubbletea) — Elm-architecture terminal UI framework
+- [`github.com/charmbracelet/bubbles`](https://github.com/charmbracelet/bubbles) — reusable TUI components (textinput, viewport, progress bar)
+
+If you need to add a further dependency:
 
 1.  Evaluate whether it's truly necessary or if the functionality can be implemented using the standard library.
 2.  If a dependency is needed, add it with:
@@ -239,6 +258,7 @@ Please follow these style guidelines when contributing:
 
 Areas for potential enhancement include:
 
+*   **Terminal UI**: An interactive TUI (`-tui` flag) built with Bubble Tea. Provides a form-based config screen and a live-scrolling results view — no arguments required to launch. Last-used values persist to `~/.config/subenum/last.json` across sessions.
 *   **Output Formats**: Supporting different output formats (JSON, CSV) in addition to the current plain text output file (`-o`).
 *   **Result Filtering**: Allowing users to filter results based on DNS record types.
 *   **Recursive Enumeration**: Adding support for recursive subdomain enumeration (e.g., finding subdomains of discovered subdomains).

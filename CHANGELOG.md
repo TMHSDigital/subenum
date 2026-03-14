@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Interactive terminal UI (`-tui` flag) built with Bubble Tea — form-based config screen and live-scrolling results view; no CLI arguments required to launch
+- `make tui` Makefile target for one-command TUI launch
+- `internal/scan` package: extracted scan engine (`scan.Run`) with typed `Event` channel, usable by both CLI and TUI
+- TUI session persistence: last-used form values written to `~/.config/subenum/last.json` and restored on next launch or after pressing `r` (new scan)
+
+### Changed
+- CLI scan loop in `main.go` now delegates to `scan.Run()` instead of containing the worker pool inline
+- External dependencies added: `github.com/charmbracelet/bubbletea` and `github.com/charmbracelet/bubbles` (TUI only; CLI path has zero external dependencies)
+- TUI form field order: Simulate toggle promoted to field 3 (was field 8); Hit Rate row is hidden when Simulate is OFF
+- TUI now shows a blinking cursor inside the active text input
+- Pressing `r` on the scan results screen returns to the form with last-used values pre-filled (was reset to defaults)
+
 ## [0.4.0] - 2026-03-14
 
 ### Added
