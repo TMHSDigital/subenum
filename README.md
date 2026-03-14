@@ -242,7 +242,7 @@ No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-u
 
 <div align="center">
 
-![subenum TUI — Configure Scan](docs/assets/tui-form.png)
+![subenum TUI — Configure Scan](docs/asets/tui-form.png)
 
 </div>
 
