@@ -113,7 +113,7 @@ jobs:
         fi
 
     - name: Upload binaries to release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: ${{ matrix.asset_name }}
       env:
@@ -124,7 +124,7 @@ jobs:
       run: sha256sum ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
 
     - name: Upload checksum to release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: ${{ matrix.asset_name }}.sha256
       env:
