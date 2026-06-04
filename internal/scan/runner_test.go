@@ -66,6 +66,94 @@ func TestRunSimulateConcurrent(t *testing.T) {
 	}
 }
 
+// TestRunRecursiveEnqueuesChildren exercises the restructured queue lifecycle:
+// resolved subdomains enqueue depth-capped children mid-scan. It asserts no
+// panic (send on closed channel), clean completion, and that recursion expands
+// the total beyond the initial entry count. Run under -race.
+func TestRunRecursiveEnqueuesChildren(t *testing.T) {
+	// hitRate 100 so every job resolves and spawns children, maximizing the
+	// chance of catching a send-on-closed-channel race.
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     []string{"www", "api", "dev"},
+		Concurrency: 8,
+		Timeout:     time.Second,
+		Simulate:    true,
+		HitRate:     100,
+		Attempts:    1,
+		Recursive:   true,
+		Depth:       3,
+	}
+
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+
+	var done *Event
+	results := 0
+	for ev := range events {
+		switch ev.Kind {
+		case EventResult:
+			results++
+		case EventDone:
+			e := ev
+			done = &e
+		}
+	}
+
+	if done == nil {
+		t.Fatal("no EventDone received")
+	}
+	// Initial 3 entries, each resolving and spawning 3 children to depth 3:
+	// 3 + 3*3 + 3*3*3 = 39 unique jobs.
+	if done.Total <= 3 {
+		t.Errorf("expected recursion to expand total beyond initial 3, got %d", done.Total)
+	}
+	if done.Processed != done.Total {
+		t.Errorf("Processed %d != Total %d", done.Processed, done.Total)
+	}
+	if int64(results) != done.Found {
+		t.Errorf("result events %d != Found %d", results, done.Found)
+	}
+}
+
+// TestRunRecursiveLoopProtection asserts the visited set prevents duplicate or
+// cyclic work: with depth high and full resolution, the job count stays finite
+// and equals the unique domain count.
+func TestRunRecursiveLoopProtection(t *testing.T) {
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     []string{"a", "b"},
+		Concurrency: 4,
+		Timeout:     time.Second,
+		Simulate:    true,
+		HitRate:     100,
+		Attempts:    1,
+		Recursive:   true,
+		Depth:       4,
+	}
+
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+
+	var done *Event
+	for ev := range events {
+		if ev.Kind == EventDone {
+			e := ev
+			done = &e
+		}
+	}
+	if done == nil {
+		t.Fatal("no EventDone received")
+	}
+	// 2 entries to depth 4: 2 + 4 + 8 + 16 = 30 unique jobs.
+	if done.Total != 30 {
+		t.Errorf("expected 30 unique jobs, got %d", done.Total)
+	}
+	if done.Processed != done.Total {
+		t.Errorf("Processed %d != Total %d", done.Processed, done.Total)
+	}
+}
+
 // TestRunRateLimit asserts that -rate paces queries: N queries at R qps should
 // take at least (N-1)/R seconds. Uses simulate mode so it is network-free.
 func TestRunRateLimit(t *testing.T) {

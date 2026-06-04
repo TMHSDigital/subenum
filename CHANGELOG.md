@@ -5,13 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-06-03
 
 ### Added
 - Resolved records are now captured during scans. `internal/dns` exposes `Resolve` and a `Record{Type, Value}` type; `scan.Event` carries `Records` for each resolved subdomain (A/AAAA today, extensible to CNAME and more).
 - `-format text|json|csv` flag (default `text`, byte-for-byte identical to prior output). JSON emits a buffered array of `{"subdomain", "records"}` objects; CSV streams `subdomain,type,value` rows with a header. The `-o` output file honors the selected format. Output formats are CLI-only for now (TUI-pending).
 - `-rate <qps>` flag (default 0 = unlimited) caps total DNS queries per second across the worker pool via a shared stdlib ticker gate inside `scan.Run`. The limiter respects context cancellation so `Ctrl+C` stays responsive.
 - `-type A,AAAA,CNAME` flag (default `A,AAAA`, preserving prior behavior) performs per-type DNS lookups and filters results to the requested types. The resolved record type is carried in the existing `Record` shape, so the JSON/CSV schema is unchanged.
+- `-recursive` and `-depth <n>` flags for recursive enumeration of discovered subdomains. `scan.Run` was restructured around a dispatcher that tracks outstanding work and closes the queue only when it drains to zero, so resolved subdomains can safely enqueue depth-capped children (the previous close-after-feed shape would have panicked on a send to a closed channel). A centralized visited set provides loop and duplicate protection, and the progress total expands as new work is discovered.
+
+### Changed
+- Internal: the scan engine's worker queue lifecycle moved from a feed-then-close channel to a dispatcher-owned queue with a pending-work counter.
 
 ## [0.5.1] - 2026-06-03
 

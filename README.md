@@ -80,6 +80,7 @@ Or launch the interactive terminal UI with no flags:
 | Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), or `csv` via `-format` |
 | Rate Limiting | Cap total DNS queries per second across the worker pool with `-rate` (context-aware) |
 | Record Types | Look up and filter by `A`, `AAAA`, or `CNAME` records with `-type` |
+| Recursive Enumeration | Enumerate subdomains of discovered subdomains with `-recursive` and a `-depth` cap, with loop and duplicate protection |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
 
 <br>
@@ -204,6 +205,8 @@ make help           # list all targets
 | `-format <fmt>` | `text` | Output format: `text`, `json`, or `csv` |
 | `-rate <qps>` | `0` | Max DNS queries per second across all workers (0 = unlimited) |
 | `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME` |
+| `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
+| `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
 | `-progress` | `true` | Live progress line on stderr |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |

@@ -151,6 +151,20 @@ Simulation mode with verbose output shows fake IPs and timings:
 ./subenum -simulate -hit-rate 25 -v -w examples/sample_wordlist.txt example.com
 ```
 
+## Recursive Enumeration
+
+Use `-recursive` with a `-depth` cap to enumerate subdomains of discovered subdomains. Each resolved subdomain is re-scanned with the same wordlist, up to the depth limit. A visited set provides loop and duplicate protection, and the progress total grows as new work is discovered:
+
+```bash
+./subenum -w wordlist.txt -recursive -depth 2 example.com
+```
+
+Combine with simulation mode to see how the work tree expands without any network I/O:
+
+```bash
+./subenum -simulate -hit-rate 100 -recursive -depth 3 -w examples/sample_wordlist.txt example.com
+```
+
 ## Record Types
 
 By default `subenum` looks up `A` and `AAAA` records. Use `-type` to choose which record types to query and treat as a hit. A subdomain counts as found if any requested type resolves:
