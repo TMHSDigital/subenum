@@ -12,13 +12,13 @@ import (
 // network I/O. Common subdomain prefixes resolve ~90% of the time; everything
 // else uses the supplied hitRate (0-100).
 func SimulateResolution(domain string, hitRate int, verbose bool) bool {
-	_, ok := SimulateResolve(domain, hitRate, verbose)
+	_, ok := SimulateResolve(domain, hitRate, verbose, DefaultTypes)
 	return ok
 }
 
-// SimulateResolve is like SimulateResolution but also returns synthetic A
-// records when the domain "resolves".
-func SimulateResolve(domain string, hitRate int, verbose bool) ([]Record, bool) {
+// SimulateResolve is like SimulateResolution but also returns synthetic records
+// for the requested types when the domain "resolves".
+func SimulateResolve(domain string, hitRate int, verbose bool, types []string) ([]Record, bool) {
 	commonSubdomains := []string{
 		"www", "mail", "ftp", "blog",
 		"api", "dev", "staging", "test",
@@ -28,21 +28,35 @@ func SimulateResolve(domain string, hitRate int, verbose bool) ([]Record, bool) 
 	for _, sub := range commonSubdomains {
 		if strings.HasPrefix(domain, sub+".") {
 			if rand.IntN(100) < 90 {
-				return synthResolved(domain, verbose)
+				return synthResolved(domain, types, verbose)
 			}
 			return synthFailed(domain, verbose)
 		}
 	}
 
 	if rand.IntN(100) < hitRate {
-		return synthResolved(domain, verbose)
+		return synthResolved(domain, types, verbose)
 	}
 	return synthFailed(domain, verbose)
 }
 
-func synthResolved(domain string, verbose bool) ([]Record, bool) {
-	records := []Record{
-		{Type: "A", Value: fmt.Sprintf("10.%d.%d.%d", rand.IntN(255), rand.IntN(255), 1+rand.IntN(254))},
+func synthResolved(domain string, types []string, verbose bool) ([]Record, bool) {
+	if len(types) == 0 {
+		types = DefaultTypes
+	}
+	var records []Record
+	for _, t := range types {
+		switch t {
+		case "A":
+			records = append(records, Record{Type: "A", Value: fmt.Sprintf("10.%d.%d.%d", rand.IntN(255), rand.IntN(255), 1+rand.IntN(254))})
+		case "AAAA":
+			records = append(records, Record{Type: "AAAA", Value: fmt.Sprintf("2001:db8::%x", rand.IntN(65535))})
+		case "CNAME":
+			records = append(records, Record{Type: "CNAME", Value: "target." + domain})
+		}
+	}
+	if len(records) == 0 {
+		return nil, false
 	}
 	if verbose {
 		fakeTiming := time.Duration(50+rand.IntN(450)) * time.Millisecond

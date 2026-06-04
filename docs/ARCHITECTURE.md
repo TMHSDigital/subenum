@@ -68,9 +68,9 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 
 *   **Purpose**: This is the core component responsible for performing the actual DNS lookup for each constructed subdomain (e.g., `prefix.targetdomain.com`). It determines if a subdomain has a valid DNS record (typically A or CNAME, though the current implementation checks for any successful resolution). It also provides wildcard DNS detection.
 *   **Implementation**:
-    *   Function: `dns.Resolve(ctx, domain, timeout, dnsServer) ([]Record, time.Duration, error)` - performs the lookup and returns typed `Record{Type, Value}` results (A/AAAA today, extensible to CNAME).
+    *   Function: `dns.Resolve(ctx, domain, timeout, dnsServer) ([]Record, time.Duration, error)` and `dns.ResolveTypes(..., types)` - perform the lookups and return typed `Record{Type, Value}` results. `ResolveTypes` issues per-type lookups (`LookupIP` ip4/ip6 for A/AAAA, `LookupCNAME` for CNAME) and filters to the requested types (default A,AAAA via `-type`).
     *   Function: `dns.ResolveDomain(ctx, domain, timeout, dnsServer, verbose) bool` - convenience wrapper returning a boolean, used by wildcard detection.
-    *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts) ([]Record, bool)` - wraps the lookup with configurable retry logic and linear backoff between attempts, returning the resolved records.
+    *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts, types) ([]Record, bool)` - wraps the lookup with configurable retry logic and linear backoff between attempts, returning the resolved records.
     *   Function: `dns.CheckWildcard(ctx, domain, timeout, dnsServer) (bool, error)` — resolves two random subdomains to detect wildcard DNS records.
     *   `net.Resolver{}`: A custom DNS resolver is configured.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.

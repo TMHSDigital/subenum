@@ -32,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/tui"
@@ -102,6 +103,7 @@ type cliFlags struct {
 	force        bool
 	format       string
 	rate         int
+	recordTypes  string
 }
 
 func parseFlags() cliFlags {
@@ -122,6 +124,7 @@ func parseFlags() cliFlags {
 	flag.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
 	flag.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
 	flag.IntVar(&f.rate, "rate", 0, "Max DNS queries per second across all workers (0 = unlimited)")
+	flag.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
 	flag.Parse()
 	return f
 }
@@ -222,10 +225,15 @@ func run() int {
 	f := parseFlags()
 
 	format, formatErr := output.ParseFormat(f.format)
+	recordTypes, typesErr := dns.ParseTypes(f.recordTypes)
 	maxAttempts, err := resolveAttempts(f.attempts, f.retries)
 	out := output.New(nil, f.testMode, format)
 	if formatErr != nil {
 		out.Error("%v", formatErr)
+		return 1
+	}
+	if typesErr != nil {
+		out.Error("%v", typesErr)
 		return 1
 	}
 	if err != nil {
@@ -318,6 +326,7 @@ func run() int {
 		Force:       f.force,
 		Verbose:     f.verbose,
 		Rate:        f.rate,
+		Types:       recordTypes,
 	}
 
 	events := make(chan scan.Event, 64)
