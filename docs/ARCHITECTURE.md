@@ -91,6 +91,7 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
     *   **`var wg sync.WaitGroup`**: A `sync.WaitGroup` waits for all worker goroutines to finish.
     *   **Worker Goroutines Loop**: `cfg.Concurrency` goroutines are launched. Each reads prefixes from the channel, constructs the full domain, and calls `dns.ResolveDomainWithRetry()` (or `dns.SimulateResolution()` in simulate mode).
     *   **Progress ticker**: A separate goroutine fires every second and emits `EventProgress` events so callers can update their display.
+    *   **Rate limiter** (optional): when `cfg.Rate > 0`, a shared `time.Ticker` gate paces total DNS queries per second across the whole pool. Each worker waits on the gate before issuing a query, selecting on `ctx.Done()` so cancellation stays responsive. `0` means unlimited.
     *   **Closing the Channel**: After all entries are sent, the channel is closed, signalling workers to exit. `wg.Wait()` blocks until all workers are done, then `EventDone` is emitted.
 *   **Interactions**: `scan.Run` is the single entry point for scanning used by both the CLI output pipeline and the Bubble Tea TUI. It decouples the scan engine from any specific display layer.
 

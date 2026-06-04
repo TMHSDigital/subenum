@@ -66,6 +66,41 @@ func TestRunSimulateConcurrent(t *testing.T) {
 	}
 }
 
+// TestRunRateLimit asserts that -rate paces queries: N queries at R qps should
+// take at least (N-1)/R seconds. Uses simulate mode so it is network-free.
+func TestRunRateLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-sensitive rate limit test in short mode")
+	}
+
+	const queries = 20
+	const rate = 10 // qps
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     makeEntries(queries),
+		Concurrency: 8,
+		Timeout:     time.Second,
+		Simulate:    true,
+		HitRate:     50,
+		Attempts:    1,
+		Rate:        rate,
+	}
+
+	events := make(chan Event, 64)
+	start := time.Now()
+	go Run(context.Background(), cfg, events)
+	for range events { //nolint:revive // draining
+	}
+	elapsed := time.Since(start)
+
+	// Floor: the first tick fires after one interval, so expect at least
+	// (queries-1)/rate seconds, with a margin for scheduling jitter.
+	minExpected := time.Duration(float64(queries-1) / float64(rate) * 0.8 * float64(time.Second))
+	if elapsed < minExpected {
+		t.Errorf("rate-limited scan finished too fast: %s < %s", elapsed, minExpected)
+	}
+}
+
 // TestRunContextCancel cancels mid-scan and asserts Run returns and closes the
 // events channel promptly.
 func TestRunContextCancel(t *testing.T) {

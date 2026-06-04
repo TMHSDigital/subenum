@@ -151,6 +151,16 @@ Simulation mode with verbose output shows fake IPs and timings:
 ./subenum -simulate -hit-rate 25 -v -w examples/sample_wordlist.txt example.com
 ```
 
+## Rate Limiting
+
+Use `-rate` to cap the total number of DNS queries per second across the whole worker pool. This is useful against rate-limited resolvers or to stay under a target query budget. `0` (the default) means unlimited:
+
+```bash
+./subenum -w wordlist.txt -rate 50 example.com
+```
+
+The limiter is context-aware, so `Ctrl+C` stays responsive while workers are waiting on it.
+
 ## Output Formats
 
 By default `subenum` prints human-readable `Found:` lines. Use `-format` to emit structured output instead. The `-o` file honors the same format.
