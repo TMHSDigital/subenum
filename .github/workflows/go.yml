@@ -45,8 +45,26 @@ jobs:
       with:
         version: latest
 
-  release:
+  # Single job that owns release creation. It runs once (not a matrix), so
+  # exactly one job ever creates the release for the tag. The upload-assets
+  # matrix below then only adds files to this already-existing release and can
+  # never race to create it (the race that made action-gh-release v3 fail with
+  # "already_exists (tag_name)").
+  create-release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Ensure release exists for tag
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-assets:
+    needs: create-release
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -113,20 +131,18 @@ jobs:
           cp ${{ matrix.artifact_name }} ${{ matrix.asset_name }}
         fi
 
-    - name: Upload binaries to release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: ${{ matrix.asset_name }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Generate checksum
       shell: bash
       run: sha256sum ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
 
-    - name: Upload checksum to release
+    # The release already exists (created by create-release), so each matrix leg
+    # only adds its binary and checksum. No matrix job creates the release, which
+    # avoids the concurrent-create race entirely.
+    - name: Upload assets to release
       uses: softprops/action-gh-release@v2
       with:
-        files: ${{ matrix.asset_name }}.sha256
+        files: |
+          ${{ matrix.asset_name }}
+          ${{ matrix.asset_name }}.sha256
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
