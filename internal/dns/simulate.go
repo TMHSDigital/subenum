@@ -12,6 +12,13 @@ import (
 // network I/O. Common subdomain prefixes resolve ~90% of the time; everything
 // else uses the supplied hitRate (0-100).
 func SimulateResolution(domain string, hitRate int, verbose bool) bool {
+	_, ok := SimulateResolve(domain, hitRate, verbose)
+	return ok
+}
+
+// SimulateResolve is like SimulateResolution but also returns synthetic A
+// records when the domain "resolves".
+func SimulateResolve(domain string, hitRate int, verbose bool) ([]Record, bool) {
 	commonSubdomains := []string{
 		"www", "mail", "ftp", "blog",
 		"api", "dev", "staging", "test",
@@ -20,26 +27,34 @@ func SimulateResolution(domain string, hitRate int, verbose bool) bool {
 
 	for _, sub := range commonSubdomains {
 		if strings.HasPrefix(domain, sub+".") {
-			if verbose {
-				fakeTiming := time.Duration(50+rand.IntN(200)) * time.Millisecond
-				fakeIP := fmt.Sprintf("192.168.%d.%d", rand.IntN(255), 1+rand.IntN(254))
-				fmt.Fprintf(os.Stderr, "Resolved (SIMULATED): %s (IP: %s) in %s\n", domain, fakeIP, fakeTiming)
+			if rand.IntN(100) < 90 {
+				return synthResolved(domain, verbose)
 			}
-			return rand.IntN(100) < 90
+			return synthFailed(domain, verbose)
 		}
 	}
 
-	result := rand.IntN(100) < hitRate
+	if rand.IntN(100) < hitRate {
+		return synthResolved(domain, verbose)
+	}
+	return synthFailed(domain, verbose)
+}
 
+func synthResolved(domain string, verbose bool) ([]Record, bool) {
+	records := []Record{
+		{Type: "A", Value: fmt.Sprintf("10.%d.%d.%d", rand.IntN(255), rand.IntN(255), 1+rand.IntN(254))},
+	}
+	if verbose {
+		fakeTiming := time.Duration(50+rand.IntN(450)) * time.Millisecond
+		fmt.Fprintf(os.Stderr, "Resolved (SIMULATED): %s (%s: %s) in %s\n", domain, records[0].Type, records[0].Value, fakeTiming)
+	}
+	return records, true
+}
+
+func synthFailed(domain string, verbose bool) ([]Record, bool) {
 	if verbose {
 		fakeTiming := time.Duration(100+rand.IntN(500)) * time.Millisecond
-		if result {
-			fakeIP := fmt.Sprintf("10.%d.%d.%d", rand.IntN(255), rand.IntN(255), 1+rand.IntN(254))
-			fmt.Fprintf(os.Stderr, "Resolved (SIMULATED): %s (IP: %s) in %s\n", domain, fakeIP, fakeTiming)
-		} else {
-			fmt.Fprintf(os.Stderr, "Failed to resolve (SIMULATED): %s (Error: no such host) in %s\n", domain, fakeTiming)
-		}
+		fmt.Fprintf(os.Stderr, "Failed to resolve (SIMULATED): %s (Error: no such host) in %s\n", domain, fakeTiming)
 	}
-
-	return result
+	return nil, false
 }

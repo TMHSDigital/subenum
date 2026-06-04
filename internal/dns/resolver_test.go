@@ -100,12 +100,15 @@ func TestResolveDomainWithRetry(t *testing.T) {
 
 	timeout := time.Second * 2
 
-	result := ResolveDomainWithRetry(context.Background(), "google.com", timeout, "8.8.8.8:53", false, 3)
+	records, result := ResolveDomainWithRetry(context.Background(), "google.com", timeout, "8.8.8.8:53", false, 3)
 	if !result {
 		t.Errorf("Expected google.com to resolve with retries, but it failed")
 	}
+	if len(records) == 0 {
+		t.Errorf("Expected resolved records for google.com, got none")
+	}
 
-	result = ResolveDomainWithRetry(context.Background(), "this-domain-should-not-exist-123456789.com", timeout, "8.8.8.8:53", false, 2)
+	_, result = ResolveDomainWithRetry(context.Background(), "this-domain-should-not-exist-123456789.com", timeout, "8.8.8.8:53", false, 2)
 	if result {
 		t.Errorf("Expected non-existent domain to fail even with retries")
 	}
@@ -121,7 +124,7 @@ func TestResolveDomainWithRetryContextCancellation(t *testing.T) {
 
 	timeout := time.Second * 2
 	start := time.Now()
-	result := ResolveDomainWithRetry(ctx, "google.com", timeout, "8.8.8.8:53", false, 5)
+	_, result := ResolveDomainWithRetry(ctx, "google.com", timeout, "8.8.8.8:53", false, 5)
 	elapsed := time.Since(start)
 
 	if result {

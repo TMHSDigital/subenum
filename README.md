@@ -9,7 +9,7 @@
 [![Go](https://img.shields.io/badge/Go-1.24.2+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](LICENSE)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/codeql.yml?label=CodeQL&style=for-the-badge)](https://github.com/TMHSDigital/subenum/actions/workflows/codeql.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge&v=0.5.1)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
+[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge&v=0.6.0)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](./docs/CONTRIBUTING.md)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=for-the-badge)](#installation)
 
@@ -77,6 +77,7 @@ Or launch the interactive terminal UI with no flags:
 | Wordlist Dedup | Deduplicate wordlist entries in a single pass before scanning begins |
 | Simulation Mode | Generate synthetic DNS results at a configurable hit rate, with zero network I/O |
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
+| Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), or `csv` via `-format` |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
 
 <br>
@@ -198,6 +199,7 @@ make help           # list all targets
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
 | `-o <file>` | n/a | Write results to file in addition to stdout |
+| `-format <fmt>` | `text` | Output format: `text`, `json`, or `csv` |
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
 | `-progress` | `true` | Live progress line on stderr |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |

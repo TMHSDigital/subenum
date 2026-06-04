@@ -37,11 +37,12 @@ const (
 // Event is emitted on the events channel during a scan.
 type Event struct {
 	Kind      EventKind
-	Domain    string // EventResult: the resolved subdomain
-	Processed int64  // EventProgress
-	Total     int64  // EventProgress
-	Found     int64  // EventProgress / EventDone
-	Message   string // EventError / EventWildcard
+	Domain    string       // EventResult: the resolved subdomain
+	Records   []dns.Record // EventResult: the resolved records
+	Processed int64        // EventProgress
+	Total     int64        // EventProgress
+	Found     int64        // EventProgress / EventDone
+	Message   string       // EventError / EventWildcard
 }
 
 // Run executes the subdomain scan, sending events to the provided channel.
@@ -114,14 +115,15 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 				}
 				fullDomain := prefix + "." + cfg.Domain
 				var resolved bool
+				var records []dns.Record
 				if cfg.Simulate {
-					resolved = dns.SimulateResolution(fullDomain, cfg.HitRate, cfg.Verbose)
+					records, resolved = dns.SimulateResolve(fullDomain, cfg.HitRate, cfg.Verbose)
 				} else {
-					resolved = dns.ResolveDomainWithRetry(ctx, fullDomain, cfg.Timeout, cfg.DNSServer, cfg.Verbose, cfg.Attempts)
+					records, resolved = dns.ResolveDomainWithRetry(ctx, fullDomain, cfg.Timeout, cfg.DNSServer, cfg.Verbose, cfg.Attempts)
 				}
 				if resolved {
 					atomic.AddInt64(&found, 1)
-					events <- Event{Kind: EventResult, Domain: fullDomain}
+					events <- Event{Kind: EventResult, Domain: fullDomain, Records: records}
 				}
 				atomic.AddInt64(&processed, 1)
 			}

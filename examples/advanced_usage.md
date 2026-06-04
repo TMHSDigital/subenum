@@ -151,13 +151,49 @@ Simulation mode with verbose output shows fake IPs and timings:
 ./subenum -simulate -hit-rate 25 -v -w examples/sample_wordlist.txt example.com
 ```
 
+## Output Formats
+
+By default `subenum` prints human-readable `Found:` lines. Use `-format` to emit structured output instead. The `-o` file honors the same format.
+
+### JSON
+
+Emits a single JSON array of objects, each with the subdomain and its resolved records:
+
+```bash
+./subenum -w wordlist.txt -format json example.com
+```
+
+```json
+[
+  {
+    "subdomain": "www.example.com",
+    "records": [{ "type": "A", "value": "93.184.216.34" }]
+  }
+]
+```
+
+JSON is buffered and written once at completion (it is a single document, so it does not stream like text and CSV).
+
+### CSV
+
+Streams a header followed by one `subdomain,type,value` row per record:
+
+```bash
+./subenum -w wordlist.txt -format csv -o results.csv example.com
+```
+
+```csv
+subdomain,type,value
+www.example.com,A,93.184.216.34
+```
+
 ## Continuous Integration / Automated Testing
 
 For CI/CD environments, you can use the version flag to ensure the correct version is installed:
 
 ```bash
 ./subenum -version
-# Output: subenum v0.5.1
+# Output: subenum v0.6.0
 ```
 
 Use simulation mode in CI pipelines to test the tool's behaviour without network access:

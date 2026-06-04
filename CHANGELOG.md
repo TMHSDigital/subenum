@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Resolved records are now captured during scans. `internal/dns` exposes `Resolve` and a `Record{Type, Value}` type; `scan.Event` carries `Records` for each resolved subdomain (A/AAAA today, extensible to CNAME and more).
+- `-format text|json|csv` flag (default `text`, byte-for-byte identical to prior output). JSON emits a buffered array of `{"subdomain", "records"}` objects; CSV streams `subdomain,type,value` rows with a header. The `-o` output file honors the selected format. Output formats are CLI-only for now (TUI-pending).
+
 ## [0.5.1] - 2026-06-03
 
 ### Fixed

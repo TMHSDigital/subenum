@@ -68,8 +68,9 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 
 *   **Purpose**: This is the core component responsible for performing the actual DNS lookup for each constructed subdomain (e.g., `prefix.targetdomain.com`). It determines if a subdomain has a valid DNS record (typically A or CNAME, though the current implementation checks for any successful resolution). It also provides wildcard DNS detection.
 *   **Implementation**:
-    *   Function: `dns.ResolveDomain(ctx, domain, timeout, dnsServer, verbose) bool`
-    *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts) bool` — wraps `ResolveDomain` with configurable retry logic and linear backoff between attempts.
+    *   Function: `dns.Resolve(ctx, domain, timeout, dnsServer) ([]Record, time.Duration, error)` - performs the lookup and returns typed `Record{Type, Value}` results (A/AAAA today, extensible to CNAME).
+    *   Function: `dns.ResolveDomain(ctx, domain, timeout, dnsServer, verbose) bool` - convenience wrapper returning a boolean, used by wildcard detection.
+    *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts) ([]Record, bool)` - wraps the lookup with configurable retry logic and linear backoff between attempts, returning the resolved records.
     *   Function: `dns.CheckWildcard(ctx, domain, timeout, dnsServer) (bool, error)` — resolves two random subdomains to detect wildcard DNS records.
     *   `net.Resolver{}`: A custom DNS resolver is configured.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.
@@ -98,7 +99,7 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 *   **Purpose**: Thread-safe output that keeps stdout pipe-clean. Resolved subdomains go to stdout; everything else (progress, verbose diagnostics, errors) goes to stderr.
 *   **Implementation**:
     *   `output.Writer` struct with mutex-protected methods:
-        *   `Result(domain)` — prints `Found: <domain>` to stdout (and to the output file if configured).
+        *   `Result(domain, records)` - in `text` format prints `Found: <domain>` to stdout (and the output file if configured); in `json` format buffers `{"subdomain", "records"}` objects and writes a single array at completion; in `csv` format streams `subdomain,type,value` rows with a header. The format is selected with `-format text|json|csv` (default `text`, which is byte-for-byte identical to prior behavior). Output formats are CLI-only for now (TUI-pending).
         *   `Progress(pct, processed, total, found)` — writes a carriage-return progress line to stderr.
         *   `Info(format, args...)` — writes an informational line to stderr.
         *   `Error(format, args...)` — writes an error line to stderr.

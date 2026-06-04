@@ -40,7 +40,7 @@ import (
 
 const (
 	ProgramName      = "subenum"
-	Version          = "0.5.1"
+	Version          = "0.6.0"
 	DefaultDNSServer = "8.8.8.8:53"
 )
 
@@ -100,6 +100,7 @@ type cliFlags struct {
 	attempts     int
 	retries      int
 	force        bool
+	format       string
 }
 
 func parseFlags() cliFlags {
@@ -118,6 +119,7 @@ func parseFlags() cliFlags {
 	flag.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
 	flag.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
 	flag.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
+	flag.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
 	flag.Parse()
 	return f
 }
@@ -158,7 +160,7 @@ func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, boo
 	return domain, true
 }
 
-func openOutputFile(path string, testMode bool, out *output.Writer) (*output.Writer, *bufio.Writer, *os.File, bool) {
+func openOutputFile(path string, testMode bool, format output.Format, out *output.Writer) (*output.Writer, *bufio.Writer, *os.File, bool) {
 	if path == "" {
 		return out, nil, nil, true
 	}
@@ -168,7 +170,7 @@ func openOutputFile(path string, testMode bool, out *output.Writer) (*output.Wri
 		return out, nil, nil, false
 	}
 	w := bufio.NewWriter(f)
-	return output.New(w, testMode), w, f, true
+	return output.New(w, testMode, format), w, f, true
 }
 
 func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Writer) {
@@ -213,8 +215,13 @@ func logVerboseDone(ev scan.Event, f cliFlags, outWriter *bufio.Writer, out *out
 func run() int {
 	f := parseFlags()
 
+	format, formatErr := output.ParseFormat(f.format)
 	maxAttempts, err := resolveAttempts(f.attempts, f.retries)
-	out := output.New(nil, f.testMode)
+	out := output.New(nil, f.testMode, format)
+	if formatErr != nil {
+		out.Error("%v", formatErr)
+		return 1
+	}
 	if err != nil {
 		out.Error("%v", err)
 		return 1
@@ -242,7 +249,7 @@ func run() int {
 		return 1
 	}
 
-	out, outWriter, outFile, ok := openOutputFile(f.outputFile, f.testMode, out)
+	out, outWriter, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
 	if !ok {
 		return 1
 	}
@@ -256,6 +263,9 @@ func run() int {
 			}
 		}()
 	}
+	// Finish runs before the file flush/close defer above (LIFO), so buffered
+	// JSON and streamed CSV are written before the file is closed.
+	defer out.Finish()
 
 	if f.verbose {
 		logVerboseStart(f, domain, maxAttempts, out)
@@ -310,7 +320,7 @@ func run() int {
 	for ev := range events {
 		switch ev.Kind {
 		case scan.EventResult:
-			out.Result(ev.Domain)
+			out.Result(ev.Domain, ev.Records)
 		case scan.EventProgress:
 			if f.showProgress && totalWords > 0 {
 				progressStarted = true
