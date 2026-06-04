@@ -6,19 +6,31 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 )
 
-// ResolveDomain performs a single DNS lookup for the given domain using the
-// specified server and timeout. It returns true if the domain resolves.
-func ResolveDomain(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) bool {
-	resolver := &net.Resolver{
+// Record is a single resolved DNS record. Type is "A", "AAAA", "CNAME", etc.
+// Value is the IP address (for A/AAAA) or target name (for CNAME).
+type Record struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+func newResolver(timeout time.Duration, dnsServer string) *net.Resolver {
+	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{Timeout: timeout}
 			return d.DialContext(dialCtx, "udp", dnsServer)
 		},
 	}
+}
+
+// Resolve performs a single host lookup and returns the resolved records (A and
+// AAAA), the elapsed time, and any error. It performs no logging.
+func Resolve(ctx context.Context, domain string, timeout time.Duration, dnsServer string) ([]Record, time.Duration, error) {
+	resolver := newResolver(timeout, dnsServer)
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -26,35 +38,60 @@ func ResolveDomain(ctx context.Context, domain string, timeout time.Duration, dn
 	start := time.Now()
 	ips, err := resolver.LookupHost(timeoutCtx, domain)
 	elapsed := time.Since(start)
+	if err != nil {
+		return nil, elapsed, err
+	}
 
-	if verbose && err == nil {
-		fmt.Fprintf(os.Stderr, "Resolved: %s (IP: %s) in %s\n", domain, ips[0], elapsed)
+	records := make([]Record, 0, len(ips))
+	for _, ip := range ips {
+		typ := "A"
+		if strings.Contains(ip, ":") {
+			typ = "AAAA"
+		}
+		records = append(records, Record{Type: typ, Value: ip})
+	}
+	return records, elapsed, nil
+}
+
+// ResolveDomain performs a single DNS lookup for the given domain using the
+// specified server and timeout. It returns true if the domain resolves (A/AAAA).
+func ResolveDomain(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) bool {
+	records, _, _ := ResolveWithLog(ctx, domain, timeout, dnsServer, verbose)
+	return len(records) > 0
+}
+
+// ResolveWithLog wraps Resolve with the verbose stderr logging used by the CLI
+// and TUI, returning the resolved records.
+func ResolveWithLog(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) ([]Record, time.Duration, error) {
+	records, elapsed, err := Resolve(ctx, domain, timeout, dnsServer)
+	if verbose && len(records) > 0 {
+		fmt.Fprintf(os.Stderr, "Resolved: %s (%s: %s) in %s\n", domain, records[0].Type, records[0].Value, elapsed)
 	} else if verbose {
 		fmt.Fprintf(os.Stderr, "Failed to resolve: %s (Error: %v) in %s\n", domain, err, elapsed)
 	}
-
-	return err == nil
+	return records, elapsed, err
 }
 
-// ResolveDomainWithRetry calls ResolveDomain up to maxAttempts times, respecting
-// ctx cancellation between attempts with a linear backoff delay.
-func ResolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxAttempts int) bool {
+// ResolveDomainWithRetry calls ResolveWithLog up to maxAttempts times, respecting
+// ctx cancellation between attempts with a linear backoff delay. It returns the
+// resolved records and whether resolution succeeded.
+func ResolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxAttempts int) ([]Record, bool) {
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
-			return false
+			return nil, false
 		}
-		if ResolveDomain(ctx, domain, timeout, dnsServer, verbose) {
-			return true
+		if records, _, _ := ResolveWithLog(ctx, domain, timeout, dnsServer, verbose); len(records) > 0 {
+			return records, true
 		}
 		if attempt < maxAttempts-1 {
 			select {
 			case <-time.After(time.Duration(50*(attempt+1)) * time.Millisecond):
 			case <-ctx.Done():
-				return false
+				return nil, false
 			}
 		}
 	}
-	return false
+	return nil, false
 }
 
 // randomHex returns n random hex characters.
