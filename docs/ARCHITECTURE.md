@@ -87,12 +87,13 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 *   **Implementation**: The worker pool logic lives in `internal/scan/runner.go` as `scan.Run(ctx, cfg, events)`. Both the CLI (`run()` in `main.go`) and the TUI (`internal/tui`) call this function.
     *   **`scan.Config`**: A struct carrying all scan parameters (domain, entries slice, concurrency, timeout, DNS server, simulate flag, etc.).
     *   **`scan.Event` / `scan.EventKind`**: Typed events emitted on a `chan<- scan.Event` — `EventResult`, `EventProgress`, `EventWildcard`, `EventError`, `EventDone`.
-    *   **`subdomains := make(chan string)`**: An internal channel acts as a work queue. Entries from the pre-loaded wordlist slice are fed into it.
+    *   **Dispatcher and work queue**: A dispatcher goroutine owns an internal `jobs` channel, the queue of pending `job{domain, depth}` items, a visited set, and a pending-work counter. It seeds the queue from the wordlist slice and feeds workers. Workers submit newly discovered children back to the dispatcher over an `enqueue` channel and signal each finished job over a `completed` channel. The dispatcher closes `jobs` only when the pending counter reaches zero (or the context is cancelled). This lifecycle lets resolved subdomains enqueue children safely (recursive mode) without risking a send on a closed channel.
     *   **`var wg sync.WaitGroup`**: A `sync.WaitGroup` waits for all worker goroutines to finish.
-    *   **Worker Goroutines Loop**: `cfg.Concurrency` goroutines are launched. Each reads prefixes from the channel, constructs the full domain, and calls `dns.ResolveDomainWithRetry()` (or `dns.SimulateResolution()` in simulate mode).
-    *   **Progress ticker**: A separate goroutine fires every second and emits `EventProgress` events so callers can update their display.
+    *   **Worker Goroutines Loop**: `cfg.Concurrency` goroutines are launched. Each reads a job from `jobs`, constructs nothing further (the job already holds the full domain), and calls `dns.ResolveDomainWithRetry()` (or `dns.SimulateResolve()` in simulate mode).
+    *   **Recursive enumeration** (optional): when `cfg.Recursive` is set and a job at depth `d < cfg.Depth` resolves, the worker enqueues one child per wordlist entry at depth `d+1`. The dispatcher's visited set deduplicates domains (loop and duplicate protection), and the progress total grows as new work is admitted.
+    *   **Progress ticker**: A separate goroutine fires every second and emits `EventProgress` events so callers can update their display. The total is read atomically since recursion can expand it mid-scan.
     *   **Rate limiter** (optional): when `cfg.Rate > 0`, a shared `time.Ticker` gate paces total DNS queries per second across the whole pool. Each worker waits on the gate before issuing a query, selecting on `ctx.Done()` so cancellation stays responsive. `0` means unlimited.
-    *   **Closing the Channel**: After all entries are sent, the channel is closed, signalling workers to exit. `wg.Wait()` blocks until all workers are done, then `EventDone` is emitted.
+    *   **Completion**: `wg.Wait()` blocks until all workers exit (after the dispatcher closes `jobs`), then the progress ticker is stopped and `EventDone` is emitted.
 *   **Interactions**: `scan.Run` is the single entry point for scanning used by both the CLI output pipeline and the Bubble Tea TUI. It decouples the scan engine from any specific display layer.
 
 ### 2.5. Output Formatting (`internal/output`)
@@ -100,7 +101,7 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 *   **Purpose**: Thread-safe output that keeps stdout pipe-clean. Resolved subdomains go to stdout; everything else (progress, verbose diagnostics, errors) goes to stderr.
 *   **Implementation**:
     *   `output.Writer` struct with mutex-protected methods:
-        *   `Result(domain, records)` - in `text` format prints `Found: <domain>` to stdout (and the output file if configured); in `json` format buffers `{"subdomain", "records"}` objects and writes a single array at completion; in `csv` format streams `subdomain,type,value` rows with a header. The format is selected with `-format text|json|csv` (default `text`, which is byte-for-byte identical to prior behavior). Output formats are CLI-only for now (TUI-pending).
+        *   `Result(domain, records)` - in `text` format prints `Found: <domain>` to stdout (and the output file if configured); in `json` format buffers `{"subdomain", "records"}` objects and writes a single array at completion; in `csv` format streams `subdomain,type,value` rows with a header. The format is selected with `-format text|json|csv` (default `text`, which is byte-for-byte identical to prior behavior). The JSON array is buffered because it is a single document and does not stream; JSONL would be the streaming-friendly alternative if needed. Output formats are CLI-only for now (TUI-pending).
         *   `Progress(pct, processed, total, found)` — writes a carriage-return progress line to stderr.
         *   `Info(format, args...)` — writes an informational line to stderr.
         *   `Error(format, args...)` — writes an error line to stderr.

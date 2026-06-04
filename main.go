@@ -104,6 +104,8 @@ type cliFlags struct {
 	format       string
 	rate         int
 	recordTypes  string
+	recursive    bool
+	depth        int
 }
 
 func parseFlags() cliFlags {
@@ -125,6 +127,8 @@ func parseFlags() cliFlags {
 	flag.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
 	flag.IntVar(&f.rate, "rate", 0, "Max DNS queries per second across all workers (0 = unlimited)")
 	flag.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
+	flag.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
+	flag.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	flag.Parse()
 	return f
 }
@@ -153,6 +157,10 @@ func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, boo
 	}
 	if f.rate < 0 {
 		out.Error("Rate (-rate) must be 0 (unlimited) or a positive integer")
+		return "", false
+	}
+	if f.depth < 1 {
+		out.Error("Depth (-depth) must be at least 1")
 		return "", false
 	}
 	if !f.testMode {
@@ -327,6 +335,8 @@ func run() int {
 		Verbose:     f.verbose,
 		Rate:        f.rate,
 		Types:       recordTypes,
+		Recursive:   f.recursive,
+		Depth:       f.depth,
 	}
 
 	events := make(chan scan.Event, 64)
