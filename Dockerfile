@@ -1,13 +1,13 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24.2-alpine AS builder
 
 WORKDIR /app
 
-# Copy go.mod and go.sum first to leverage Docker cache
-COPY go.mod ./
+# Copy module files first and download deps to leverage Docker layer caching
+COPY go.mod go.sum ./
+RUN go mod download
 
 # Copy source code
 COPY main.go ./
-COPY main_test.go ./
 COPY internal/ ./internal/
 
 # Build the binary with optimizations

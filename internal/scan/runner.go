@@ -73,18 +73,27 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	subdomains := make(chan string)
 	var wg sync.WaitGroup
 
-	// Progress ticker — fires every second.
-	// tickerDone is closed to stop the goroutine before we close events.
+	// Progress ticker - fires every second.
+	// tickerDone signals the goroutine to stop; tickerStopped confirms it has
+	// fully exited so we never close events while a send is pending.
 	tickerDone := make(chan struct{})
+	tickerStopped := make(chan struct{})
 	ticker := time.NewTicker(time.Second)
 	go func() {
+		defer close(tickerStopped)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				p := atomic.LoadInt64(&processed)
 				f := atomic.LoadInt64(&found)
-				events <- Event{Kind: EventProgress, Processed: p, Total: total, Found: f}
+				select {
+				case events <- Event{Kind: EventProgress, Processed: p, Total: total, Found: f}:
+				case <-tickerDone:
+					return
+				case <-ctx.Done():
+					return
+				}
 			case <-tickerDone:
 				return
 			case <-ctx.Done():
@@ -131,9 +140,11 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 drain:
 	close(subdomains)
 	wg.Wait()
-	// Stop the ticker goroutine before we close events, preventing a send on
-	// a closed channel if the ticker fires between wg.Wait() and defer close.
+	// Stop the ticker goroutine and wait for it to fully exit before emitting
+	// EventDone, so the deferred close(events) can never race an in-flight
+	// ticker send.
 	close(tickerDone)
+	<-tickerStopped
 
 	events <- Event{
 		Kind:      EventDone,

@@ -142,6 +142,9 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cancel != nil {
 				m.cancel()
 			}
+			// Mark the scan as aborted so the upcoming doneMsg (scan.Run still
+			// drains and emits EventDone) renders the "Aborted" status line.
+			m.scanView.aborted = true
 		case "q":
 			if m.scanView.done {
 				return m, tea.Quit
