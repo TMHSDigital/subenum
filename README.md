@@ -9,11 +9,21 @@
 [![Go](https://img.shields.io/badge/Go-1.24.2+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](LICENSE)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/codeql.yml?label=CodeQL&style=for-the-badge)](https://github.com/TMHSDigital/subenum/actions/workflows/codeql.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge&v=0.5.0)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
+[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge&v=0.5.1)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](./docs/CONTRIBUTING.md)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=for-the-badge)](#installation)
 
 <br>
 
-[Quick Start](#installation) &nbsp;|&nbsp; [Configuration](#configuration) &nbsp;|&nbsp; [Usage](#usage) &nbsp;|&nbsp; [Architecture](#system-architecture) &nbsp;|&nbsp; [Changelog](./CHANGELOG.md)
+**Fast concurrent subdomain enumeration, written in Go.** Point it at a domain and a wordlist; it brute-forces DNS across a worker pool and prints the subdomains that resolve. Built for pentesters, bug-bounty hunters, and operators doing authorized reconnaissance of their own infrastructure.
+
+<br>
+
+<img src="docs/assets/tui-form.png" alt="subenum interactive TUI" width="640"/>
+
+<br>
+
+[Quick Start](#quick-start) &nbsp;|&nbsp; [Configuration](#configuration) &nbsp;|&nbsp; [Usage](#usage) &nbsp;|&nbsp; [Architecture](#system-architecture) &nbsp;|&nbsp; [Changelog](./CHANGELOG.md)
 
 </div>
 
@@ -23,6 +33,33 @@
 
 > [!IMPORTANT]
 > **Authorized use only.** Only scan domains you own or have explicit written permission to test. Unauthorized scanning may violate applicable laws. Users are solely responsible for compliance with all applicable laws and regulations.
+
+---
+
+<br>
+
+## Quick Start
+
+```bash
+git clone https://github.com/TMHSDigital/subenum.git
+cd subenum
+go build -buildvcs=false -o subenum
+./subenum -w examples/sample_wordlist.txt example.com
+```
+
+No network required to try it out. Simulation mode generates synthetic results with zero DNS queries:
+
+```bash
+./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt example.com
+```
+
+Or launch the interactive terminal UI with no flags:
+
+```bash
+./subenum -tui
+```
+
+<br>
 
 ---
 
@@ -38,7 +75,7 @@
 | Graceful Shutdown | Trap SIGINT/SIGTERM, drain in-flight workers, flush partial results |
 | Input Validation | RFC-compliant domain syntax and strict `ip:port` format enforcement |
 | Wordlist Dedup | Deduplicate wordlist entries in a single pass before scanning begins |
-| Simulation Mode | Generate synthetic DNS results at a configurable hit rate — zero network I/O |
+| Simulation Mode | Generate synthetic DNS results at a configurable hit rate, with zero network I/O |
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
 
@@ -134,7 +171,7 @@ docker compose run subenum
 make build          # compile binary
 make test           # run test suite with race detector
 make lint           # run golangci-lint
-make simulate       # safe run — no DNS queries
+make simulate       # safe run - no DNS queries
 make tui            # launch interactive TUI
 make docker-build   # build Docker image
 make help           # list all targets
@@ -154,25 +191,25 @@ make help           # list all targets
 
 | Flag | Default | Description |
 | :--- | :---: | :--- |
-| `-w <file>` | — | Wordlist file, one prefix per line **(required)** |
+| `-w <file>` | n/a | Wordlist file, one prefix per line **(required)** |
 | `-t <n>` | `100` | Concurrent worker goroutines |
 | `-timeout <ms>` | `1000` | Per-query DNS timeout in milliseconds |
 | `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server address (validated on startup) |
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
-| `-o <file>` | — | Write results to file in addition to stdout |
+| `-o <file>` | n/a | Write results to file in addition to stdout |
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
 | `-progress` | `true` | Live progress line on stderr |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
-| `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1–100) |
+| `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100) |
 | `-tui` | `false` | Launch the interactive Terminal UI |
-| `-version` | — | Print version and exit |
-| `-retries <n>` | — | **Deprecated** — alias for `-attempts`, prints a warning |
+| `-version` | n/a | Print version and exit |
+| `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
 
 <br>
 
 > [!NOTE]
-> Wildcard DNS is detected automatically before scanning begins. If the target resolves wildcard records, the tool exits with a warning — all subdomains would match, making results meaningless. Pass `-force` to override.
+> Wildcard DNS is detected automatically before scanning begins. If the target resolves wildcard records, the tool exits with a warning, since all subdomains would match, making results meaningless. Pass `-force` to override.
 
 > [!CAUTION]
 > Simulation mode (`-simulate`) generates synthetic results and performs zero network I/O. Do not confuse simulated output with real DNS data.
@@ -209,7 +246,7 @@ subenum -w <wordlist> [flags] <domain>
 ./subenum -w wordlist.txt -attempts 3 -timeout 2000 example.com
 ```
 
-**Pipe-friendly — only resolved subdomains on stdout**
+**Pipe-friendly - only resolved subdomains on stdout**
 ```bash
 ./subenum -w wordlist.txt example.com | cut -d' ' -f2 | your-takeover-scanner
 ```
@@ -219,7 +256,7 @@ subenum -w <wordlist> [flags] <domain>
 ./subenum -w wordlist.txt -force example.com
 ```
 
-**Simulation — zero network I/O**
+**Simulation - zero network I/O**
 ```bash
 ./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt example.com
 ```
@@ -236,15 +273,7 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain and partial results
 ./subenum -tui
 ```
 
-No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `~/.config/subenum/last.json` and restored on next launch.
-
-<br>
-
-<div align="center">
-
-![subenum TUI — Configure Scan](docs/assets/tui-form.png)
-
-</div>
+No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `~/.config/subenum/last.json` and restored on next launch. The interface is shown at the top of this README.
 
 <br>
 
@@ -257,7 +286,7 @@ No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-u
 | `space` | Toggle Simulate / Force |
 | `ctrl+r` | Start scan |
 | `ctrl+c` | Abort scan (scan view) / quit (form) |
-| `r` | New scan — restores last-used values |
+| `r` | New scan - restores last-used values |
 | `q` | Quit after scan completes |
 
 </details>
