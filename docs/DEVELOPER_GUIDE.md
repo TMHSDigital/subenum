@@ -242,8 +242,8 @@ Please follow these style guidelines when contributing:
 
 The CLI path (`run()`) has zero external dependencies. The TUI path (`-tui` flag) adds:
 
-- [`github.com/charmbracelet/bubbletea`](https://github.com/charmbracelet/bubbletea) — Elm-architecture terminal UI framework
-- [`github.com/charmbracelet/bubbles`](https://github.com/charmbracelet/bubbles) — reusable TUI components (textinput, viewport, progress bar)
+- [`github.com/charmbracelet/bubbletea`](https://github.com/charmbracelet/bubbletea) - Elm-architecture terminal UI framework
+- [`github.com/charmbracelet/bubbles`](https://github.com/charmbracelet/bubbles) - reusable TUI components (textinput, viewport, progress bar)
 
 If you need to add a further dependency:
 
@@ -258,7 +258,7 @@ If you need to add a further dependency:
 
 Areas for potential enhancement include:
 
-*   **Terminal UI**: An interactive TUI (`-tui` flag) built with Bubble Tea. Provides a form-based config screen and a live-scrolling results view — no arguments required to launch. Last-used values persist to `~/.config/subenum/last.json` across sessions.
+*   **Terminal UI**: An interactive TUI (`-tui` flag) built with Bubble Tea. Provides a form-based config screen and a live-scrolling results view - no arguments required to launch. Last-used values persist to `~/.config/subenum/last.json` across sessions.
 *   **Output Formats**: Supporting different output formats (JSON, CSV) in addition to the current plain text output file (`-o`).
 *   **Result Filtering**: Allowing users to filter results based on DNS record types.
 *   **Recursive Enumeration**: Adding support for recursive subdomain enumeration (e.g., finding subdomains of discovered subdomains).

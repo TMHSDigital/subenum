@@ -23,16 +23,16 @@ This architecture is designed to be efficient by performing multiple DNS lookups
 ### Package Structure
 
 ```
-main.go                        — CLI entry point (flag parsing, wiring, -tui dispatch)
-internal/scan/runner.go        — Scan engine: Config, Event types, Run(ctx, cfg, events)
-internal/dns/resolver.go       — ResolveDomain, ResolveDomainWithRetry, CheckWildcard
-internal/dns/simulate.go       — SimulateResolution
-internal/output/writer.go      — Thread-safe Writer (results→stdout, diagnostics→stderr)
-internal/wordlist/reader.go    — LoadWordlist (dedup + sanitize)
-internal/tui/model.go          — Root Bubble Tea model (form → scan state machine)
-internal/tui/form.go           — Config form screen (textinput fields + toggles)
-internal/tui/scan_view.go      — Live results screen (viewport + progress bar)
-internal/tui/config.go         — Session persistence (load/save ~/.config/subenum/last.json)
+main.go                        - CLI entry point (flag parsing, wiring, -tui dispatch)
+internal/scan/runner.go        - Scan engine: Config, Event types, Run(ctx, cfg, events)
+internal/dns/resolver.go       - ResolveDomain, ResolveDomainWithRetry, CheckWildcard
+internal/dns/simulate.go       - SimulateResolution
+internal/output/writer.go      - Thread-safe Writer (results→stdout, diagnostics→stderr)
+internal/wordlist/reader.go    - LoadWordlist (dedup + sanitize)
+internal/tui/model.go          - Root Bubble Tea model (form → scan state machine)
+internal/tui/form.go           - Config form screen (textinput fields + toggles)
+internal/tui/scan_view.go      - Live results screen (viewport + progress bar)
+internal/tui/config.go         - Session persistence (load/save ~/.config/subenum/last.json)
 ```
 
 ## 2. Key Components / Modules
@@ -71,7 +71,7 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
     *   Function: `dns.Resolve(ctx, domain, timeout, dnsServer) ([]Record, time.Duration, error)` and `dns.ResolveTypes(..., types)` - perform the lookups and return typed `Record{Type, Value}` results. `ResolveTypes` issues per-type lookups (`LookupIP` ip4/ip6 for A/AAAA, `LookupCNAME` for CNAME) and filters to the requested types (default A,AAAA via `-type`).
     *   Function: `dns.ResolveDomain(ctx, domain, timeout, dnsServer, verbose) bool` - convenience wrapper returning a boolean, used by wildcard detection.
     *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts, types) ([]Record, bool)` - wraps the lookup with configurable retry logic and linear backoff between attempts, returning the resolved records.
-    *   Function: `dns.CheckWildcard(ctx, domain, timeout, dnsServer) (bool, error)` — resolves two random subdomains to detect wildcard DNS records.
+    *   Function: `dns.CheckWildcard(ctx, domain, timeout, dnsServer) (bool, error)` - resolves two random subdomains to detect wildcard DNS records.
     *   `net.Resolver{}`: A custom DNS resolver is configured.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.
         *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function is provided to control the connection to the DNS server, using the user-specified `dnsServer` address.
@@ -86,7 +86,7 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 *   **Purpose**: To efficiently perform DNS lookups for a large number of potential subdomains, `subenum` employs a worker pool pattern. This allows multiple DNS queries to be in flight concurrently, significantly speeding up the enumeration process compared to sequential lookups.
 *   **Implementation**: The worker pool logic lives in `internal/scan/runner.go` as `scan.Run(ctx, cfg, events)`. Both the CLI (`run()` in `main.go`) and the TUI (`internal/tui`) call this function.
     *   **`scan.Config`**: A struct carrying all scan parameters (domain, entries slice, concurrency, timeout, DNS server, simulate flag, etc.).
-    *   **`scan.Event` / `scan.EventKind`**: Typed events emitted on a `chan<- scan.Event` — `EventResult`, `EventProgress`, `EventWildcard`, `EventError`, `EventDone`.
+    *   **`scan.Event` / `scan.EventKind`**: Typed events emitted on a `chan<- scan.Event` - `EventResult`, `EventProgress`, `EventWildcard`, `EventError`, `EventDone`.
     *   **Dispatcher and work queue**: A dispatcher goroutine owns an internal `jobs` channel, the queue of pending `job{domain, depth}` items, a visited set, and a pending-work counter. It seeds the queue from the wordlist slice and feeds workers. Workers submit newly discovered children back to the dispatcher over an `enqueue` channel and signal each finished job over a `completed` channel. The dispatcher closes `jobs` only when the pending counter reaches zero (or the context is cancelled). This lifecycle lets resolved subdomains enqueue children safely (recursive mode) without risking a send on a closed channel.
     *   **`var wg sync.WaitGroup`**: A `sync.WaitGroup` waits for all worker goroutines to finish.
     *   **Worker Goroutines Loop**: `cfg.Concurrency` goroutines are launched. Each reads a job from `jobs`, constructs nothing further (the job already holds the full domain), and calls `dns.ResolveDomainWithRetry()` (or `dns.SimulateResolve()` in simulate mode).
@@ -102,11 +102,11 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 *   **Implementation**:
     *   `output.Writer` struct with mutex-protected methods:
         *   `Result(domain, records)` - in `text` format prints `Found: <domain>` to stdout (and the output file if configured); in `json` format buffers `{"subdomain", "records"}` objects and writes a single array at completion; in `csv` format streams `subdomain,type,value` rows with a header. The format is selected with `-format text|json|csv` (default `text`, which is byte-for-byte identical to prior behavior). The JSON array is buffered because it is a single document and does not stream; JSONL would be the streaming-friendly alternative if needed. Output formats are CLI-only for now (TUI-pending).
-        *   `Progress(pct, processed, total, found)` — writes a carriage-return progress line to stderr.
-        *   `Info(format, args...)` — writes an informational line to stderr.
-        *   `Error(format, args...)` — writes an error line to stderr.
+        *   `Progress(pct, processed, total, found)` - writes a carriage-return progress line to stderr.
+        *   `Info(format, args...)` - writes an informational line to stderr.
+        *   `Error(format, args...)` - writes an error line to stderr.
     *   **Verbose Output** (when `-v` flag is enabled):
-        *   Configuration summary, per-query DNS resolution info, and final scan statistics — all via `Info` to stderr.
+        *   Configuration summary, per-query DNS resolution info, and final scan statistics - all via `Info` to stderr.
     *   **Progress Reporting** (when `-progress` flag is enabled):
         *   A dedicated goroutine using a 1-second ticker calls `Progress` on stderr.
 *   **Interactions**: All components route output through the `Writer`. Since results are the only thing on stdout, piping (`| cut -d' ' -f2`) works without `-progress=false`.
@@ -130,9 +130,9 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 *   **Purpose**: Remember the last-used TUI form values across sessions so users don't have to re-type domain, wordlist path, and scan parameters every time.
 *   **Implementation**:
     *   `savedConfig` struct mirrors `formValues` with JSON tags.
-    *   `configPath()` — returns `os.UserConfigDir()/subenum/last.json` (e.g. `~/.config/subenum/last.json` on Linux/macOS, `%AppData%\subenum\last.json` on Windows).
-    *   `saveConfig(fv formValues) error` — marshals `formValues` to JSON and writes it atomically with `os.WriteFile`. Called in `beginScan()` immediately before launching the scan goroutine. Errors are silently discarded so a write failure never blocks the scan.
-    *   `loadSavedConfig() (savedConfig, bool)` — reads and unmarshals the file. Returns `false` if the file doesn't exist or is unreadable, causing `newFormModel` to fall back to hardcoded defaults.
+    *   `configPath()` - returns `os.UserConfigDir()/subenum/last.json` (e.g. `~/.config/subenum/last.json` on Linux/macOS, `%AppData%\subenum\last.json` on Windows).
+    *   `saveConfig(fv formValues) error` - marshals `formValues` to JSON and writes it atomically with `os.WriteFile`. Called in `beginScan()` immediately before launching the scan goroutine. Errors are silently discarded so a write failure never blocks the scan.
+    *   `loadSavedConfig() (savedConfig, bool)` - reads and unmarshals the file. Returns `false` if the file doesn't exist or is unreadable, causing `newFormModel` to fall back to hardcoded defaults.
 *   **Interactions**: `tui.New()` calls `loadSavedConfig()` on startup and passes the result to `newFormModel`. The `r` keybind (new scan) also calls `loadSavedConfig()` so the form is pre-filled with the values from the scan that just completed.
 
 ## 3. Data Flow

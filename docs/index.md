@@ -9,12 +9,12 @@ title: Home
 
 ## What it does
 
-subenum brute-forces subdomains by resolving a wordlist against a target domain using a concurrent worker pool. Results stream to stdout — pipe-clean, no noise. Everything else (progress, diagnostics, errors) goes to stderr.
+subenum brute-forces subdomains by resolving a wordlist against a target domain using a concurrent worker pool. Results stream to stdout - pipe-clean, no noise. Everything else (progress, diagnostics, errors) goes to stderr.
 
 <div class="screenshot-wrap">
   <figure>
-    <img src="assets/tui-form.png" alt="subenum TUI — Configure Scan">
-    <figcaption>Interactive TUI — launch with <code>./subenum -tui</code> or <code>make tui</code></figcaption>
+    <img src="assets/tui-form.png" alt="subenum TUI - Configure Scan">
+    <figcaption>Interactive TUI - launch with <code>./subenum -tui</code> or <code>make tui</code></figcaption>
   </figure>
 </div>
 
@@ -37,7 +37,23 @@ subenum brute-forces subdomains by resolving a wordlist against a target domain 
   </div>
   <div class="feature-card">
     <strong>Simulation Mode</strong>
-    <span>Generate synthetic DNS results at a configurable hit rate — zero network I/O. Safe for demos and testing.</span>
+    <span>Generate synthetic DNS results at a configurable hit rate - zero network I/O. Safe for demos and testing.</span>
+  </div>
+  <div class="feature-card">
+    <strong>Output Formats</strong>
+    <span>Emit results as <code>text</code>, <code>json</code> (array of subdomain plus typed records), or <code>csv</code> via <code>-format</code>.</span>
+  </div>
+  <div class="feature-card">
+    <strong>Rate Limiting</strong>
+    <span>Cap total DNS queries per second across the worker pool with <code>-rate</code> (context-aware, stays responsive to Ctrl+C).</span>
+  </div>
+  <div class="feature-card">
+    <strong>Record Types</strong>
+    <span>Look up and filter by <code>A</code>, <code>AAAA</code>, or <code>CNAME</code> records with <code>-type</code>.</span>
+  </div>
+  <div class="feature-card">
+    <strong>Recursive Enumeration</strong>
+    <span>Enumerate subdomains of discovered subdomains with <code>-recursive</code> and a <code>-depth</code> cap, with loop and duplicate protection.</span>
   </div>
   <div class="feature-card">
     <strong>Pipe-Friendly Output</strong>
