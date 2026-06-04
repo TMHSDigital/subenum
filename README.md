@@ -6,7 +6,7 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main&style=for-the-badge&label=build)](https://github.com/TMHSDigital/subenum/actions)
 [![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum?style=for-the-badge)](https://github.com/TMHSDigital/subenum/releases)
-[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.24.2+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](LICENSE)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/codeql.yml?label=CodeQL&style=for-the-badge)](https://github.com/TMHSDigital/subenum/actions/workflows/codeql.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge&v=0.5.0)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
@@ -87,7 +87,7 @@ flowchart LR
 
 ## Installation
 
-**Prerequisites:** Go 1.22+ &middot; Git &middot; Make _(optional)_ &middot; Docker _(optional)_
+**Prerequisites:** Go 1.24.2+ &middot; Git &middot; Make _(optional)_ &middot; Docker _(optional)_
 
 <details>
 <summary><strong>Build from source</strong></summary>
@@ -272,7 +272,7 @@ No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-u
 
 | Layer | Components |
 | :--- | :--- |
-| Core Engine | Go 1.22 &middot; `net.Resolver` &middot; `context` &middot; `sync/atomic` |
+| Core Engine | Go 1.24.2 &middot; `net.Resolver` &middot; `context` &middot; `sync/atomic` |
 | Concurrency | goroutines &middot; channels &middot; `sync.WaitGroup` &middot; `sync.Mutex` |
 | TUI | Bubble Tea &middot; Bubbles (textinput, viewport, progress) &middot; Lip Gloss |
 | Infrastructure | Docker &middot; Alpine &middot; Make &middot; docker-compose |

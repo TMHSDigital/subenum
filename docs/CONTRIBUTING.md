@@ -13,7 +13,7 @@ See the [Code of Conduct](CODE_OF_CONDUCT.html).
 
 ### Prerequisites
 
-- Go 1.22 or later
+- Go 1.24.2 or later
 - Git
 - Make (optional but recommended)
 - Docker (optional, for containerized development)

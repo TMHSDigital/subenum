@@ -40,19 +40,19 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
 ### 2.1. Argument Parsing
 
 *   **Purpose**: This component is responsible for processing the command-line arguments provided by the user when `subenum` is executed. It extracts the target domain, the path to the wordlist file, the desired number of concurrent workers, and the DNS lookup timeout.
-*   **Implementation**: Utilizes Go's standard `flag` package.
-    *   `flag.String("w", "", "Path to the wordlist file")`: Defines the wordlist file flag.
-    *   `flag.Int("t", 100, "Number of concurrent workers")`: Defines the concurrency level flag.
-    *   `flag.Int("timeout", 1000, "DNS lookup timeout in milliseconds")`: Defines the DNS timeout flag.
-    *   `flag.String("dns-server", DefaultDNSServer, "DNS server to use")`: Defines the custom DNS server flag.
-    *   `flag.Bool("v", false, "Enable verbose output")`: Defines the verbose flag.
-    *   `flag.Bool("progress", true, "Show progress during scanning")`: Defines the progress reporting flag.
-    *   `flag.Bool("version", false, "Show version information")`: Defines the version flag.
-    *   `flag.String("o", "", "Write results to file")`: Defines the output file flag.
-    *   `flag.Int("attempts", 0, "Total DNS resolution attempts per subdomain")`: Defines the attempt count flag.
-    *   `flag.Int("retries", 0, "Deprecated: alias for -attempts")`: Deprecated retry flag.
-    *   `flag.Bool("force", false, "Continue scanning on wildcard DNS")`: Defines the force flag.
-    *   `flag.Parse()`: Parses the provided arguments.
+*   **Implementation**: Utilizes Go's standard `flag` package. `parseFlags()` binds every flag into a `cliFlags` struct using the `flag.*Var` forms, then calls `flag.Parse()`.
+    *   `flag.StringVar(&f.wordlistFile, "w", "", ...)`: Binds the wordlist file flag.
+    *   `flag.IntVar(&f.concurrency, "t", 100, ...)`: Binds the concurrency level flag.
+    *   `flag.IntVar(&f.timeoutMs, "timeout", 1000, ...)`: Binds the DNS timeout flag.
+    *   `flag.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, ...)`: Binds the custom DNS server flag.
+    *   `flag.BoolVar(&f.verbose, "v", false, ...)`: Binds the verbose flag.
+    *   `flag.BoolVar(&f.showProgress, "progress", true, ...)`: Binds the progress reporting flag.
+    *   `flag.BoolVar(&f.showVersion, "version", false, ...)`: Binds the version flag.
+    *   `flag.StringVar(&f.outputFile, "o", "", ...)`: Binds the output file flag.
+    *   `flag.IntVar(&f.attempts, "attempts", 0, ...)`: Binds the attempt count flag.
+    *   `flag.IntVar(&f.retries, "retries", 0, ...)`: Binds the deprecated retry flag.
+    *   `flag.BoolVar(&f.force, "force", false, ...)`: Binds the force flag.
+    *   `flag.Parse()`: Parses the provided arguments into the `cliFlags` struct.
     *   `flag.Arg(0)`: Retrieves the positional argument (the target domain).
 *   **Interactions**: The parsed values are used to configure the subsequent components, such as the Wordlist Processing and DNS Resolution Engine. Input validation is performed to ensure valid values for critical parameters like concurrency, timeout, DNS server format (validated via `validateDNSServer`), and domain syntax (validated via `validateDomain`).
 
@@ -105,7 +105,7 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
     *   **Verbose Output** (when `-v` flag is enabled):
         *   Configuration summary, per-query DNS resolution info, and final scan statistics — all via `Info` to stderr.
     *   **Progress Reporting** (when `-progress` flag is enabled):
-        *   A dedicated goroutine using a 2-second ticker calls `Progress` on stderr.
+        *   A dedicated goroutine using a 1-second ticker calls `Progress` on stderr.
 *   **Interactions**: All components route output through the `Writer`. Since results are the only thing on stdout, piping (`| cut -d' ' -f2`) works without `-progress=false`.
 
 ### 2.6. Progress Monitoring
@@ -117,7 +117,7 @@ internal/tui/config.go         — Session persistence (load/save ~/.config/sube
         *   `processedWords`: An atomic counter that's incremented each time a subdomain is checked.
         *   `foundSubdomains`: An atomic counter that's incremented each time a valid subdomain is found.
     *   **Progress Display** (on stderr):
-        *   A dedicated goroutine using a ticker (running every 2 seconds) calls `Writer.Progress`
+        *   A dedicated goroutine using a ticker (running every 1 second) calls `Writer.Progress`
         *   Uses `\r` carriage return to update the same line repeatedly
         *   Shows percentage completion, processed count, and found count
 *   **Interactions**: The Progress Monitoring component works alongside the worker goroutines, using atomic operations to safely track counts across multiple goroutines. Writing to stderr keeps stdout pipe-clean.

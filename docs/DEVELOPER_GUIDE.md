@@ -13,7 +13,7 @@ This guide provides information for developers looking to contribute to or build
 
 To work with `subenum`, you'll need:
 
-*   **Go Programming Language**: [Go 1.22+](https://golang.org/dl/) is required.
+*   **Go Programming Language**: [Go 1.24.2+](https://golang.org/dl/) is required.
 *   **Git**: For version control.
 *   **Text Editor or IDE**: VS Code, GoLand, or any editor with Go support is recommended.
 

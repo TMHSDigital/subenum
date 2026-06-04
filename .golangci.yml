@@ -15,8 +15,10 @@ linters:
   settings:
     gosec:
       excludes:
-        # G304: File path provided as taint input — expected for a wordlist tool
+        # G304: File path provided as taint input, expected for a wordlist tool
         - G304
+        # G404: Weak RNG is fine; math/rand/v2 only drives simulation output, which is not security-sensitive
+        - G404
     errcheck:
       # These write to stdout/files in hot paths; errors are intentionally ignored
       exclude-functions:

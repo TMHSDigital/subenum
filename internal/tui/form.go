@@ -291,9 +291,14 @@ func (m *formModel) validate() (formValues, string) {
 	if err != nil || attempts < 1 {
 		return formValues{}, fmt.Sprintf("Attempts must be >= 1, got %q", m.inputs[6].Value())
 	}
-	hitRate, err := strconv.Atoi(strings.TrimSpace(m.inputs[2].Value()))
-	if err != nil || hitRate < 1 || hitRate > 100 {
-		return formValues{}, fmt.Sprintf("Hit rate must be 1–100, got %q", m.inputs[2].Value())
+	// Hit rate only matters in simulation mode; in live mode it is never used,
+	// so a blank or out-of-range field must not block the scan.
+	hitRate := 15
+	if m.toggles[0] {
+		hitRate, err = strconv.Atoi(strings.TrimSpace(m.inputs[2].Value()))
+		if err != nil || hitRate < 1 || hitRate > 100 {
+			return formValues{}, fmt.Sprintf("Hit rate must be 1-100, got %q", m.inputs[2].Value())
+		}
 	}
 
 	return formValues{

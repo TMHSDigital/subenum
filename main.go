@@ -40,7 +40,7 @@ import (
 
 const (
 	ProgramName      = "subenum"
-	Version          = "0.4.0"
+	Version          = "0.5.1"
 	DefaultDNSServer = "8.8.8.8:53"
 )
 
