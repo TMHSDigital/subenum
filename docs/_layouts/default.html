@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% if page.title == "Home" %}{{ site.title }} — {{ site.description }}{% else %}{{ page.title }} — {{ site.title }}{% endif %}</title>
+    <title>{% if page.title == "Home" %}{{ site.title }} - {{ site.description }}{% else %}{{ page.title }} - {{ site.title }}{% endif %}</title>
     <link rel="stylesheet" href="{{ '/assets/css/style.css?v=' | append: site.github.build_revision | relative_url }}">
     <style>
       /* ── Nav bar ── */
@@ -58,7 +58,7 @@
         padding: 5rem 2rem 4rem;
         background: linear-gradient(160deg, #0d1117 0%, #161b22 60%, #1a2332 100%);
       }
-      /* Hide Cayman's default title/tagline — we render our own */
+      /* Hide Cayman's default title/tagline - we render our own */
       .page-header .project-name,
       .page-header .project-tagline { display: none; }
 
@@ -137,7 +137,7 @@
         margin: 1rem 0;
       }
       .main-content blockquote p { margin: 0; color: #57606a; }
-      /* Links — restore blue on top of the * reset */
+      /* Links - restore blue on top of the * reset */
       .main-content a { color: #0969da !important; }
       .main-content a:hover { text-decoration: underline; }
       /* Inline code */
@@ -148,7 +148,7 @@
         padding: 1px 5px;
         font-size: 0.88em;
       }
-      /* Block code — distinct background from page */
+      /* Block code - distinct background from page */
       .main-content pre {
         background: #f0f2f5;
         border: 1px solid #d0d7de;

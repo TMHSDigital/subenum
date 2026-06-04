@@ -100,6 +100,62 @@ func TestWriterResultJSONFile(t *testing.T) {
 	}
 }
 
+// TestWriterJSONFinishGatesOutput locks in the contract main.run relies on:
+// structured output is emitted only by Finish, so skipping Finish on an error
+// path produces no spurious empty JSON array.
+func TestWriterJSONFinishGatesOutput(t *testing.T) {
+	// Error path: results buffered (or none) but Finish never called.
+	noFinish, err := os.CreateTemp("", "output-json-nofinish-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(noFinish.Name()) }()
+
+	bw := bufio.NewWriter(noFinish)
+	_ = New(bw, false, FormatJSON)
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := noFinish.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(noFinish.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 0 {
+		t.Errorf("expected no structured output without Finish, got:\n%s", content)
+	}
+
+	// Success path: Finish with zero results emits an empty JSON array.
+	withFinish, err := os.CreateTemp("", "output-json-finish-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(withFinish.Name()) }()
+
+	bw2 := bufio.NewWriter(withFinish)
+	w := New(bw2, false, FormatJSON)
+	w.Finish()
+	if err := bw2.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := withFinish.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err = os.ReadFile(withFinish.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var results []Result
+	if err := json.Unmarshal(content, &results); err != nil {
+		t.Fatalf("Finish output is not a valid JSON array: %v\nGot:\n%s", err, content)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected empty array from Finish with no results, got %d", len(results))
+	}
+}
+
 func TestWriterResultCSVFile(t *testing.T) {
 	tmp, err := os.CreateTemp("", "output-csv-*.csv")
 	if err != nil {

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Structured output (`-format json` and `-format csv`) is now finalized only on the successful scan path. The finalizer previously ran via `defer` on every exit, so an early error (such as wildcard detection without `-force`) emitted an empty JSON array. Text output behavior is unchanged.
+
+### Docs
+- GitHub Pages landing page (`docs/index.md`) refreshed to the 0.6.0 feature set, adding cards for Output Formats (`-format`), Rate Limiting (`-rate`), Record Types (`-type`), and Recursive Enumeration (`-recursive`/`-depth`).
+- Normalized em dashes to hyphens across `docs/` for consistency with the no-em-dash convention.
+
 ## [0.6.0] - 2026-06-03
 
 ### Added

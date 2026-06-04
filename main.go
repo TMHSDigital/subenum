@@ -285,10 +285,6 @@ func run() int {
 			}
 		}()
 	}
-	// Finish runs before the file flush/close defer above (LIFO), so buffered
-	// JSON and streamed CSV are written before the file is closed.
-	defer out.Finish()
-
 	if f.verbose {
 		logVerboseStart(f, domain, maxAttempts, out)
 	}
@@ -370,6 +366,11 @@ func run() int {
 			}
 		}
 	}
+	// Finalize structured output only on the success path, so an early error
+	// (such as wildcard detection without -force) does not emit an empty JSON
+	// array or a bare CSV header. The deferred file flush/close registered
+	// above runs after this, persisting buffered output before the file closes.
+	out.Finish()
 	return 0
 }
 
