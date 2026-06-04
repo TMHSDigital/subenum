@@ -101,6 +101,7 @@ type cliFlags struct {
 	retries      int
 	force        bool
 	format       string
+	rate         int
 }
 
 func parseFlags() cliFlags {
@@ -120,6 +121,7 @@ func parseFlags() cliFlags {
 	flag.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
 	flag.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
 	flag.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
+	flag.IntVar(&f.rate, "rate", 0, "Max DNS queries per second across all workers (0 = unlimited)")
 	flag.Parse()
 	return f
 }
@@ -144,6 +146,10 @@ func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, boo
 	}
 	if maxAttempts < 1 {
 		out.Error("Attempts (-attempts) must be at least 1")
+		return "", false
+	}
+	if f.rate < 0 {
+		out.Error("Rate (-rate) must be 0 (unlimited) or a positive integer")
 		return "", false
 	}
 	if !f.testMode {
@@ -311,6 +317,7 @@ func run() int {
 		Attempts:    maxAttempts,
 		Force:       f.force,
 		Verbose:     f.verbose,
+		Rate:        f.rate,
 	}
 
 	events := make(chan scan.Event, 64)

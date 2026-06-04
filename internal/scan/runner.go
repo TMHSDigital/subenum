@@ -21,6 +21,7 @@ type Config struct {
 	Attempts    int
 	Force       bool
 	Verbose     bool
+	Rate        int
 }
 
 // EventKind categorises a scan event.
@@ -74,6 +75,19 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	subdomains := make(chan string)
 	var wg sync.WaitGroup
 
+	// Optional rate limiter: a shared ticker gate paces total queries per second
+	// across the whole worker pool. nil means unlimited.
+	var limiter <-chan time.Time
+	if cfg.Rate > 0 {
+		interval := time.Second / time.Duration(cfg.Rate)
+		if interval <= 0 {
+			interval = time.Nanosecond
+		}
+		rl := time.NewTicker(interval)
+		defer rl.Stop()
+		limiter = rl.C
+	}
+
 	// Progress ticker - fires every second.
 	// tickerDone signals the goroutine to stop; tickerStopped confirms it has
 	// fully exited so we never close events while a send is pending.
@@ -112,6 +126,14 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 				if ctx.Err() != nil {
 					atomic.AddInt64(&processed, 1)
 					continue
+				}
+				if limiter != nil {
+					select {
+					case <-limiter:
+					case <-ctx.Done():
+						atomic.AddInt64(&processed, 1)
+						continue
+					}
 				}
 				fullDomain := prefix + "." + cfg.Domain
 				var resolved bool
