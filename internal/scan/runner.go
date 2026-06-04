@@ -22,6 +22,7 @@ type Config struct {
 	Force       bool
 	Verbose     bool
 	Rate        int
+	Types       []string
 }
 
 // EventKind categorises a scan event.
@@ -139,9 +140,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 				var resolved bool
 				var records []dns.Record
 				if cfg.Simulate {
-					records, resolved = dns.SimulateResolve(fullDomain, cfg.HitRate, cfg.Verbose)
+					records, resolved = dns.SimulateResolve(fullDomain, cfg.HitRate, cfg.Verbose, cfg.Types)
 				} else {
-					records, resolved = dns.ResolveDomainWithRetry(ctx, fullDomain, cfg.Timeout, cfg.DNSServer, cfg.Verbose, cfg.Attempts)
+					records, resolved = dns.ResolveDomainWithRetry(ctx, fullDomain, cfg.Timeout, cfg.DNSServer, cfg.Verbose, cfg.Attempts, cfg.Types)
 				}
 				if resolved {
 					atomic.AddInt64(&found, 1)

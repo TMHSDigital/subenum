@@ -79,6 +79,7 @@ Or launch the interactive terminal UI with no flags:
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
 | Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), or `csv` via `-format` |
 | Rate Limiting | Cap total DNS queries per second across the worker pool with `-rate` (context-aware) |
+| Record Types | Look up and filter by `A`, `AAAA`, or `CNAME` records with `-type` |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
 
 <br>
@@ -202,6 +203,7 @@ make help           # list all targets
 | `-o <file>` | n/a | Write results to file in addition to stdout |
 | `-format <fmt>` | `text` | Output format: `text`, `json`, or `csv` |
 | `-rate <qps>` | `0` | Max DNS queries per second across all workers (0 = unlimited) |
+| `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME` |
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
 | `-progress` | `true` | Live progress line on stderr |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |

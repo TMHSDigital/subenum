@@ -151,6 +151,22 @@ Simulation mode with verbose output shows fake IPs and timings:
 ./subenum -simulate -hit-rate 25 -v -w examples/sample_wordlist.txt example.com
 ```
 
+## Record Types
+
+By default `subenum` looks up `A` and `AAAA` records. Use `-type` to choose which record types to query and treat as a hit. A subdomain counts as found if any requested type resolves:
+
+```bash
+./subenum -w wordlist.txt -type A,AAAA,CNAME example.com
+```
+
+Find only subdomains that are CNAMEs (useful for spotting potential takeovers):
+
+```bash
+./subenum -w wordlist.txt -type CNAME -format json example.com
+```
+
+The record type is captured per result, so JSON and CSV output carry it in the `records` field / `type` column.
+
 ## Rate Limiting
 
 Use `-rate` to cap the total number of DNS queries per second across the whole worker pool. This is useful against rate-limited resolvers or to stay under a target query budget. `0` (the default) means unlimited:
