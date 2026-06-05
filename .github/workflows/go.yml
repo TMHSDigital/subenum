@@ -174,3 +174,43 @@ jobs:
         draft: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Failure-path cleanup. If the upload matrix fails partway, publish-release is
+  # skipped and the draft release created above would otherwise linger
+  # invisibly until someone removes it by hand. This job runs only when a
+  # tag-triggered release run failed. It deletes the draft release for this tag
+  # and the tag ref so a partial release leaves nothing behind. It only ever
+  # deletes a draft (never a published release) and is a no-op when there is
+  # nothing to clean, so it is safe and idempotent.
+  cleanup-failed-release:
+    needs: [create-release, upload-assets]
+    if: ${{ failure() && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Remove draft release and tag for failed run
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.ref_name }}
+        REPO: ${{ github.repository }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        rel=$(gh api "repos/${REPO}/releases" --jq "([.[] | select(.tag_name==\"${TAG}\")][0]) // empty")
+        if [ -z "${rel}" ]; then
+          echo "No release found for ${TAG}; nothing to clean."
+          exit 0
+        fi
+        id=$(printf '%s' "${rel}" | jq -r '.id')
+        draft=$(printf '%s' "${rel}" | jq -r '.draft')
+        if [ "${draft}" != "true" ]; then
+          echo "Release ${id} for ${TAG} is published (draft=${draft}); leaving it intact."
+          exit 0
+        fi
+        echo "Deleting draft release ${id} for ${TAG}."
+        gh api -X DELETE "repos/${REPO}/releases/${id}"
+        echo "Deleting tag ref ${TAG}."
+        gh api -X DELETE "repos/${REPO}/git/refs/tags/${TAG}" || echo "Tag ref already removed."
+        echo "Cleanup complete for ${TAG}."
