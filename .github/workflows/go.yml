@@ -59,7 +59,7 @@ jobs:
 
     steps:
     - name: Ensure release exists for tag
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -139,7 +139,7 @@ jobs:
     # only adds its binary and checksum. No matrix job creates the release, which
     # avoids the concurrent-create race entirely.
     - name: Upload assets to release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           ${{ matrix.asset_name }}
