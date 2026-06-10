@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-func TestSimulateResolution(t *testing.T) {
+func TestSimulateResolve(t *testing.T) {
 	runs := 500
 
 	resolved := 0
 	for i := 0; i < runs; i++ {
-		if SimulateResolution("www.example.com", 15, false) {
+		if _, ok := SimulateResolve("www.example.com", 15, false, DefaultTypes); ok {
 			resolved++
 		}
 	}
@@ -20,7 +20,7 @@ func TestSimulateResolution(t *testing.T) {
 
 	resolved = 0
 	for i := 0; i < runs; i++ {
-		if SimulateResolution("zzz-random-prefix.example.com", 0, false) {
+		if _, ok := SimulateResolve("zzz-random-prefix.example.com", 0, false, DefaultTypes); ok {
 			resolved++
 		}
 	}
@@ -58,10 +58,10 @@ func TestSimulateResolveTypes(t *testing.T) {
 	}
 }
 
-// TestSimulateResolutionConcurrent calls SimulateResolution from many goroutines
-// at once. With math/rand/v2 top-level functions this is race-free; the test
+// TestSimulateResolveConcurrent calls SimulateResolve from many goroutines at
+// once. With math/rand/v2 top-level functions this is race-free; the test
 // exists to be caught by `go test -race`.
-func TestSimulateResolutionConcurrent(t *testing.T) {
+func TestSimulateResolveConcurrent(t *testing.T) {
 	const goroutines = 64
 	const perGoroutine = 200
 
@@ -71,8 +71,8 @@ func TestSimulateResolutionConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
-				SimulateResolution("api.example.com", 50, false)
-				SimulateResolution("zzz-random.example.com", 25, true)
+				SimulateResolve("api.example.com", 50, false, DefaultTypes)
+				SimulateResolve("zzz-random.example.com", 25, true, DefaultTypes)
 			}
 		}()
 	}

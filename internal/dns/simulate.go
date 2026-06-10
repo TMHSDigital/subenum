@@ -8,16 +8,10 @@ import (
 	"time"
 )
 
-// SimulateResolution returns a synthetic DNS result without performing any
-// network I/O. Common subdomain prefixes resolve ~90% of the time; everything
+// SimulateResolve returns a synthetic DNS result without performing any network
+// I/O, along with synthetic records for the requested types when the domain
+// "resolves". Common subdomain prefixes resolve ~90% of the time; everything
 // else uses the supplied hitRate (0-100).
-func SimulateResolution(domain string, hitRate int, verbose bool) bool {
-	_, ok := SimulateResolve(domain, hitRate, verbose, DefaultTypes)
-	return ok
-}
-
-// SimulateResolve is like SimulateResolution but also returns synthetic records
-// for the requested types when the domain "resolves".
 func SimulateResolve(domain string, hitRate int, verbose bool, types []string) ([]Record, bool) {
 	commonSubdomains := []string{
 		"www", "mail", "ftp", "blog",

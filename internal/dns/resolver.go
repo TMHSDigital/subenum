@@ -109,32 +109,6 @@ func ResolveTypes(ctx context.Context, domain string, timeout time.Duration, dns
 	return records, time.Since(start), lastErr
 }
 
-// Resolve performs a single host lookup and returns the resolved records (A and
-// AAAA), the elapsed time, and any error. It performs no logging.
-func Resolve(ctx context.Context, domain string, timeout time.Duration, dnsServer string) ([]Record, time.Duration, error) {
-	resolver := newResolver(timeout, dnsServer)
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	start := time.Now()
-	ips, err := resolver.LookupHost(timeoutCtx, domain)
-	elapsed := time.Since(start)
-	if err != nil {
-		return nil, elapsed, err
-	}
-
-	records := make([]Record, 0, len(ips))
-	for _, ip := range ips {
-		typ := "A"
-		if strings.Contains(ip, ":") {
-			typ = "AAAA"
-		}
-		records = append(records, Record{Type: typ, Value: ip})
-	}
-	return records, elapsed, nil
-}
-
 // ResolveDomain performs a single DNS lookup for the given domain using the
 // specified server and timeout. It returns true if the domain resolves (A/AAAA).
 func ResolveDomain(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) bool {
