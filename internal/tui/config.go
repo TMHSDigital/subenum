@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type savedConfig struct {
@@ -14,8 +15,14 @@ type savedConfig struct {
 	TimeoutMs   int    `json:"timeout_ms"`
 	Attempts    int    `json:"attempts"`
 	HitRate     int    `json:"hit_rate"`
+	Types       string `json:"types"`
+	Depth       int    `json:"depth"`
+	Rate        int    `json:"rate"`
+	Output      string `json:"output"`
+	Format      string `json:"format"`
 	Simulate    bool   `json:"simulate"`
 	Force       bool   `json:"force"`
+	Recursive   bool   `json:"recursive"`
 }
 
 func configPath() (string, error) {
@@ -58,8 +65,14 @@ func saveConfig(fv formValues) error {
 		TimeoutMs:   fv.timeoutMs,
 		Attempts:    fv.attempts,
 		HitRate:     fv.hitRate,
+		Types:       strings.Join(fv.recordTypes, ","),
+		Depth:       fv.depth,
+		Rate:        fv.rate,
+		Output:      fv.outputFile,
+		Format:      fv.formatName,
 		Simulate:    fv.simulate,
 		Force:       fv.force,
+		Recursive:   fv.recursive,
 	}
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {

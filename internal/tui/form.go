@@ -8,6 +8,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
 // Field order — Simulate is now field 2 so it's reachable in 2 tabs.
@@ -22,8 +26,14 @@ const (
 	fieldConcurrency = 5
 	fieldTimeout     = 6
 	fieldAttempts    = 7
-	fieldForce       = 8
-	fieldCount       = 9
+	fieldTypes       = 8
+	fieldRecursive   = 9
+	fieldDepth       = 10 // only active when recursive=ON
+	fieldRate        = 11
+	fieldOutput      = 12
+	fieldFormat      = 13
+	fieldForce       = 14
+	fieldCount       = 15
 )
 
 var (
@@ -49,13 +59,19 @@ var inputForField = [fieldCount]int{
 	4,  // fieldConcurrency → inputs[4]
 	5,  // fieldTimeout     → inputs[5]
 	6,  // fieldAttempts    → inputs[6]
+	7,  // fieldTypes       → inputs[7]
+	-1, // fieldRecursive   → toggle
+	8,  // fieldDepth       → inputs[8]
+	9,  // fieldRate        → inputs[9]
+	10, // fieldOutput      → inputs[10]
+	11, // fieldFormat      → inputs[11]
 	-1, // fieldForce       → toggle
 }
 
 // formModel is the configuration form screen.
 type formModel struct {
 	inputs  []textinput.Model
-	toggles [2]bool // [simulate, force]
+	toggles [3]bool // [simulate, force, recursive]
 	focus   int
 	err     string
 	width   int
@@ -88,7 +104,7 @@ func newFormModel(saved savedConfig) formModel {
 		return ti
 	}
 
-	// inputs[0..6] correspond to the non-toggle fields.
+	// inputs[0..7] correspond to the non-toggle fields.
 	m.inputs = []textinput.Model{
 		newInput("e.g. example.com", str(saved.Domain, "")),                                                // 0 Domain
 		newInput("e.g. examples/sample_wordlist.txt", str(saved.Wordlist, "examples/sample_wordlist.txt")), // 1 Wordlist
@@ -97,10 +113,16 @@ func newFormModel(saved savedConfig) formModel {
 		newInput("e.g. 100", intStr(saved.Concurrency, "100")),                                             // 4 Concurrency
 		newInput("e.g. 1000", intStr(saved.TimeoutMs, "1000")),                                             // 5 Timeout
 		newInput("e.g. 1", intStr(saved.Attempts, "1")),                                                    // 6 Attempts
+		newInput("e.g. A,AAAA,CNAME", str(saved.Types, "A,AAAA")),                                          // 7 Types
+		newInput("e.g. 2", intStr(saved.Depth, "1")),                                                       // 8 Depth
+		newInput("0 = unlimited", intStr(saved.Rate, "0")),                                                 // 9 Rate
+		newInput("optional, e.g. results.txt", str(saved.Output, "")),                                      // 10 Output file
+		newInput("text, json, or csv", str(saved.Format, "text")),                                          // 11 Format
 	}
 
 	m.toggles[0] = saved.Simulate
 	m.toggles[1] = saved.Force
+	m.toggles[2] = saved.Recursive
 
 	// Focus domain on start — cursor blink cmd returned from Init.
 	m.inputs[0].Focus()
@@ -116,22 +138,29 @@ func (m formModel) initCmd() tea.Cmd {
 }
 
 func (m *formModel) isToggle() bool {
-	return m.focus == fieldSimulate || m.focus == fieldForce
+	return m.focus == fieldSimulate || m.focus == fieldForce || m.focus == fieldRecursive
 }
 
 func (m *formModel) toggleArrayIndex() int {
-	if m.focus == fieldSimulate {
+	switch m.focus {
+	case fieldSimulate:
 		return 0
+	case fieldForce:
+		return 1
+	default: // fieldRecursive
+		return 2
 	}
-	return 1
 }
 
-// nextFocus advances focus by delta (+1 or -1), skipping HitRate when simulate is OFF.
+// moveFocus advances focus by delta (+1 or -1), skipping gated fields: HitRate
+// when simulate is OFF and Depth when recursive is OFF.
 func (m *formModel) moveFocus(delta int) {
 	for {
 		m.focus = (m.focus + delta + fieldCount) % fieldCount
-		// Skip HitRate when simulate is OFF.
 		if m.focus == fieldHitRate && !m.toggles[0] {
+			continue
+		}
+		if m.focus == fieldDepth && !m.toggles[2] {
 			continue
 		}
 		break
@@ -240,6 +269,31 @@ func (m formModel) View() string {
 	// Attempts
 	row(fieldAttempts, "Attempts", m.inputs[6].View())
 
+	// Record types
+	row(fieldTypes, "Record Types", m.inputs[7].View())
+
+	// Recursive toggle
+	recurseVal := toggleVal(m.toggles[2])
+	recurseHint := ""
+	if m.focus == fieldRecursive {
+		recurseHint = blurredStyle.Render("  [space to toggle]")
+	}
+	row(fieldRecursive, "Recursive", recurseVal+recurseHint)
+
+	// Depth — only shown when recursive is ON.
+	if m.toggles[2] {
+		row(fieldDepth, "Depth", m.inputs[8].View())
+	} else {
+		b.WriteString(dimmedRow.Render("  Depth:              (enable Recursive)") + "\n")
+	}
+
+	// Rate
+	row(fieldRate, "Rate (qps)", m.inputs[9].View())
+
+	// Output file (optional) and its format
+	row(fieldOutput, "Output File", m.inputs[10].View())
+	row(fieldFormat, "Format", m.inputs[11].View())
+
 	// Force toggle
 	forceVal := toggleVal(m.toggles[1])
 	forceHint := ""
@@ -270,6 +324,9 @@ func (m *formModel) validate() (formValues, string) {
 	if domain == "" {
 		return formValues{}, "Domain is required"
 	}
+	if err := validate.Domain(domain); err != nil {
+		return formValues{}, err.Error()
+	}
 	wl := strings.TrimSpace(m.inputs[1].Value())
 	if wl == "" {
 		return formValues{}, "Wordlist path is required"
@@ -277,6 +334,9 @@ func (m *formModel) validate() (formValues, string) {
 	dnsServer := strings.TrimSpace(m.inputs[3].Value())
 	if dnsServer == "" {
 		dnsServer = "8.8.8.8:53"
+	}
+	if err := validate.DNSServer(dnsServer); err != nil {
+		return formValues{}, err.Error()
 	}
 
 	concurrency, err := strconv.Atoi(strings.TrimSpace(m.inputs[4].Value()))
@@ -301,6 +361,41 @@ func (m *formModel) validate() (formValues, string) {
 		}
 	}
 
+	recordTypes, err := dns.ParseTypes(m.inputs[7].Value())
+	if err != nil {
+		return formValues{}, err.Error()
+	}
+
+	// Depth only matters when recursive is on; a blank field defaults to 1.
+	depth := 1
+	if m.toggles[2] {
+		depth, err = strconv.Atoi(strings.TrimSpace(m.inputs[8].Value()))
+		if err != nil || depth < 1 {
+			return formValues{}, fmt.Sprintf("Depth must be >= 1, got %q", m.inputs[8].Value())
+		}
+	}
+
+	// Rate is optional; a blank field means unlimited (0).
+	rate := 0
+	if rateStr := strings.TrimSpace(m.inputs[9].Value()); rateStr != "" {
+		rate, err = strconv.Atoi(rateStr)
+		if err != nil || rate < 0 {
+			return formValues{}, fmt.Sprintf("Rate must be 0 (unlimited) or a positive integer, got %q", m.inputs[9].Value())
+		}
+	}
+
+	// Output file is optional; the format applies only to that file and is
+	// validated even when no file is set so a typo is caught early.
+	outputFile := strings.TrimSpace(m.inputs[10].Value())
+	formatStr := strings.TrimSpace(m.inputs[11].Value())
+	if formatStr == "" {
+		formatStr = "text"
+	}
+	format, err := output.ParseFormat(formatStr)
+	if err != nil {
+		return formValues{}, err.Error()
+	}
+
 	return formValues{
 		domain:      domain,
 		wordlist:    wl,
@@ -309,6 +404,13 @@ func (m *formModel) validate() (formValues, string) {
 		timeoutMs:   timeout,
 		attempts:    attempts,
 		hitRate:     hitRate,
+		recordTypes: recordTypes,
+		recursive:   m.toggles[2],
+		depth:       depth,
+		rate:        rate,
+		outputFile:  outputFile,
+		format:      format,
+		formatName:  formatStr,
 		simulate:    m.toggles[0],
 		force:       m.toggles[1],
 	}, ""
@@ -322,6 +424,13 @@ type formValues struct {
 	timeoutMs   int
 	attempts    int
 	hitRate     int
+	recordTypes []string
+	recursive   bool
+	depth       int
+	rate        int
+	outputFile  string
+	format      output.Format
+	formatName  string
 	simulate    bool
 	force       bool
 }

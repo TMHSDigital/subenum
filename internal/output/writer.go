@@ -56,6 +56,7 @@ type Writer struct {
 	outWriter *bufio.Writer
 	simulate  bool
 	format    Format
+	stdout    bool // mirror results to os.Stdout (false for the TUI)
 
 	buffered  []Result // FormatJSON: accumulated until Finish
 	csvStdout *csv.Writer
@@ -63,10 +64,18 @@ type Writer struct {
 	csvInit   bool
 }
 
-// New returns a Writer. If outWriter is non-nil, resolved domains are also
-// written there. Set simulate to true to tag text result lines as simulated.
+// New returns a Writer that streams results to stdout. If outWriter is non-nil,
+// resolved domains are also written there. Set simulate to true to tag text
+// result lines as simulated.
 func New(outWriter *bufio.Writer, simulate bool, format Format) *Writer {
-	return &Writer{outWriter: outWriter, simulate: simulate, format: format}
+	return &Writer{outWriter: outWriter, simulate: simulate, format: format, stdout: true}
+}
+
+// NewFile returns a Writer that writes only to outWriter, never to stdout. The
+// TUI uses this so structured results land in the chosen file while the
+// alt-screen viewport keeps full ownership of the terminal.
+func NewFile(outWriter *bufio.Writer, simulate bool, format Format) *Writer {
+	return &Writer{outWriter: outWriter, simulate: simulate, format: format, stdout: false}
 }
 
 // Result records a resolved domain. In text mode it prints immediately; in JSON
@@ -86,10 +95,12 @@ func (w *Writer) Result(domain string, records []dns.Record) {
 }
 
 func (w *Writer) writeText(domain string) {
-	if w.simulate {
-		fmt.Printf("Found (SIMULATED): %s\n", domain)
-	} else {
-		fmt.Printf("Found: %s\n", domain)
+	if w.stdout {
+		if w.simulate {
+			fmt.Printf("Found (SIMULATED): %s\n", domain)
+		} else {
+			fmt.Printf("Found: %s\n", domain)
+		}
 	}
 	if w.outWriter != nil {
 		fmt.Fprintln(w.outWriter, domain)
@@ -101,9 +112,11 @@ func (w *Writer) ensureCSV() {
 		return
 	}
 	w.csvInit = true
-	w.csvStdout = csv.NewWriter(os.Stdout)
 	header := []string{"subdomain", "type", "value"}
-	_ = w.csvStdout.Write(header)
+	if w.stdout {
+		w.csvStdout = csv.NewWriter(os.Stdout)
+		_ = w.csvStdout.Write(header)
+	}
 	if w.outWriter != nil {
 		w.csvFile = csv.NewWriter(w.outWriter)
 		_ = w.csvFile.Write(header)
@@ -118,7 +131,9 @@ func (w *Writer) writeCSVRows(domain string, records []dns.Record) {
 	}
 	for _, r := range rows {
 		row := []string{domain, r.Type, r.Value}
-		_ = w.csvStdout.Write(row)
+		if w.csvStdout != nil {
+			_ = w.csvStdout.Write(row)
+		}
 		if w.csvFile != nil {
 			_ = w.csvFile.Write(row)
 		}
@@ -142,7 +157,9 @@ func (w *Writer) Finish() {
 			fmt.Fprintf(os.Stderr, "Error: encoding JSON output: %v\n", err)
 			return
 		}
-		fmt.Printf("%s\n", data)
+		if w.stdout {
+			fmt.Printf("%s\n", data)
+		}
 		if w.outWriter != nil {
 			fmt.Fprintf(w.outWriter, "%s\n", data)
 		}

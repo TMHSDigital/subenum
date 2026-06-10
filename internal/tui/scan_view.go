@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/TMHSDigital/subenum/internal/dns"
 )
 
 var (
@@ -148,7 +150,10 @@ func (m scanViewModel) View() string {
 }
 
 // Event message types for Bubble Tea.
-type resultMsg struct{ domain string }
+type resultMsg struct {
+	domain  string
+	records []dns.Record
+}
 type progressMsg struct{ processed, total, found int64 }
 type wildcardMsg struct{ text string }
 type errorMsg struct{ text string }

@@ -3,12 +3,120 @@ package output
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 )
+
+// captureStdout redirects os.Stdout for the duration of fn and returns what was
+// written. Used to assert on the streaming text output the Writer prints there.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = orig
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestWriterSimulateTextPrefix(t *testing.T) {
+	w := New(nil, true, FormatText)
+	out := captureStdout(t, func() {
+		w.Result("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+	})
+	if !strings.Contains(out, "Found (SIMULATED): www.example.com") {
+		t.Errorf("expected simulated prefix on stdout, got %q", out)
+	}
+
+	wLive := New(nil, false, FormatText)
+	outLive := captureStdout(t, func() {
+		wLive.Result("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+	})
+	if strings.Contains(outLive, "SIMULATED") {
+		t.Errorf("live mode must not tag results as simulated, got %q", outLive)
+	}
+}
+
+func TestNewFileWriterSkipsStdout(t *testing.T) {
+	tmp, err := os.CreateTemp("", "output-fileonly-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	bw := bufio.NewWriter(tmp)
+	w := NewFile(bw, false, FormatText)
+
+	out := captureStdout(t, func() {
+		w.Result("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+		w.Finish()
+	})
+	if out != "" {
+		t.Errorf("file-only writer must not write to stdout, got %q", out)
+	}
+
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(tmp.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "www.example.com") {
+		t.Errorf("expected file to contain the result, got:\n%s", content)
+	}
+}
+
+func TestWriterCSVEmptyRecords(t *testing.T) {
+	tmp, err := os.CreateTemp("", "output-csv-empty-*.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	bw := bufio.NewWriter(tmp)
+	w := New(bw, false, FormatCSV)
+	// A resolved domain with no records still gets one row with empty fields.
+	// Finish must run inside the capture because csv.Writer buffers until flush.
+	out := captureStdout(t, func() {
+		w.Result("www.example.com", nil)
+		w.Finish()
+	})
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := os.ReadFile(tmp.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "www.example.com,,") {
+		t.Errorf("expected empty-record fallback row in file, got:\n%s", content)
+	}
+	if !strings.Contains(out, "www.example.com,,") {
+		t.Errorf("expected empty-record fallback row on stdout, got:\n%s", out)
+	}
+}
 
 func TestParseFormat(t *testing.T) {
 	cases := map[string]Format{
