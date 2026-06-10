@@ -24,11 +24,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
-	"regexp"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -36,6 +33,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/tui"
+	"github.com/TMHSDigital/subenum/internal/validate"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
@@ -44,36 +42,6 @@ const (
 	Version          = "0.6.0"
 	DefaultDNSServer = "8.8.8.8:53"
 )
-
-var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
-
-func validateDNSServer(server string) error {
-	host, portStr, err := net.SplitHostPort(server)
-	if err != nil {
-		return fmt.Errorf("invalid format, expected ip:port (e.g., %s): %w", DefaultDNSServer, err)
-	}
-	if net.ParseIP(host) == nil {
-		return fmt.Errorf("invalid IP address: %s", host)
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port < 1 || port > 65535 {
-		return fmt.Errorf("invalid port: %s (must be 1-65535)", portStr)
-	}
-	return nil
-}
-
-func validateDomain(domain string) error {
-	if len(domain) == 0 {
-		return fmt.Errorf("domain cannot be empty")
-	}
-	if len(domain) > 253 {
-		return fmt.Errorf("domain exceeds maximum length of 253 characters")
-	}
-	if !domainRegex.MatchString(domain) {
-		return fmt.Errorf("invalid domain format: %s", domain)
-	}
-	return nil
-}
 
 func main() {
 	// Fast-path: if -tui is the first argument, launch the TUI immediately
@@ -164,13 +132,13 @@ func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, boo
 		return "", false
 	}
 	if !f.testMode {
-		if err := validateDNSServer(f.dnsServer); err != nil {
+		if err := validate.DNSServer(f.dnsServer); err != nil {
 			out.Error("DNS server %s: %v", f.dnsServer, err)
 			return "", false
 		}
 	}
 	domain := flag.Arg(0)
-	if err := validateDomain(domain); err != nil {
+	if err := validate.Domain(domain); err != nil {
 		out.Error("%v", err)
 		return "", false
 	}
