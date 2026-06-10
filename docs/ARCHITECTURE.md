@@ -25,8 +25,8 @@ This architecture is designed to be efficient by performing multiple DNS lookups
 ```
 main.go                        - CLI entry point (flag parsing, wiring, -tui dispatch)
 internal/scan/runner.go        - Scan engine: Config, Event types, Run(ctx, cfg, events)
-internal/dns/resolver.go       - ResolveDomain, ResolveDomainWithRetry, CheckWildcard
-internal/dns/simulate.go       - SimulateResolution
+internal/dns/resolver.go       - ResolveTypes, ResolveDomainWithRetry, CheckWildcard, ParseTypes
+internal/dns/simulate.go       - SimulateResolve
 internal/output/writer.go      - Thread-safe Writer (results→stdout, diagnostics→stderr)
 internal/wordlist/reader.go    - LoadWordlist (dedup + sanitize)
 internal/tui/model.go          - Root Bubble Tea model (form → scan state machine)
@@ -68,7 +68,7 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
 
 *   **Purpose**: This is the core component responsible for performing the actual DNS lookup for each constructed subdomain (e.g., `prefix.targetdomain.com`). It determines if a subdomain has a valid DNS record (typically A or CNAME, though the current implementation checks for any successful resolution). It also provides wildcard DNS detection.
 *   **Implementation**:
-    *   Function: `dns.Resolve(ctx, domain, timeout, dnsServer) ([]Record, time.Duration, error)` and `dns.ResolveTypes(..., types)` - perform the lookups and return typed `Record{Type, Value}` results. `ResolveTypes` issues per-type lookups (`LookupIP` ip4/ip6 for A/AAAA, `LookupCNAME` for CNAME) and filters to the requested types (default A,AAAA via `-type`).
+    *   Function: `dns.ResolveTypes(ctx, domain, timeout, dnsServer, types) ([]Record, time.Duration, error)` - performs per-type lookups and returns typed `Record{Type, Value}` results. It issues `LookupIP` ip4/ip6 for A/AAAA and `LookupCNAME` for CNAME, filtering to the requested types (default A,AAAA via `-type`). `dns.ResolveWithLog(...)` wraps it with the verbose stderr logging shared by the CLI and TUI.
     *   Function: `dns.ResolveDomain(ctx, domain, timeout, dnsServer, verbose) bool` - convenience wrapper returning a boolean, used by wildcard detection.
     *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts, types) ([]Record, bool)` - wraps the lookup with configurable retry logic and linear backoff between attempts, returning the resolved records.
     *   Function: `dns.CheckWildcard(ctx, domain, timeout, dnsServer) (bool, error)` - resolves two random subdomains to detect wildcard DNS records.
@@ -77,8 +77,8 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
         *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function is provided to control the connection to the DNS server, using the user-specified `dnsServer` address.
             *   `net.Dialer{Timeout: timeout}`: A `Dialer` is created with the user-specified timeout.
             *   `d.DialContext(ctx, "udp", dnsServer)`: Establishes a UDP connection to the configured DNS server.
-    *   `resolver.LookupHost(timeoutCtx, domain)`: Performs the DNS lookup for the given domain. The context is derived from the caller via `context.WithTimeout(ctx, timeout)`, so both the per-query timeout and SIGINT cancellation are respected. It attempts to find A or AAAA records for the host.
-    *   The function returns `true` if `LookupHost` returns no error (i.e., the domain resolved), and `false` otherwise.
+    *   `resolver.LookupIP` / `resolver.LookupCNAME` (inside `ResolveTypes`): Perform the per-type DNS lookups for the requested record types. The context is derived from the caller via `context.WithTimeout(ctx, timeout)`, so both the per-query timeout and SIGINT cancellation are respected.
+    *   A subdomain is treated as resolved when at least one record is returned for the requested types; `ResolveDomain` collapses this to a boolean for wildcard detection.
 *   **Interactions**: Workers call `dns.ResolveDomainWithRetry`, which delegates to `dns.ResolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.
 
 ### 2.4. Concurrency Management (`internal/scan`)
@@ -139,35 +139,20 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
 
 The flow of data through the `subenum` application can be summarized as follows:
 
-1.  **Input**: The user provides command-line arguments: the target domain, the path to a wordlist file (`-w`), a concurrency level (`-t`), a DNS timeout (`-timeout`), a DNS server (`-dns-server`), attempts (`-attempts`), and flags for verbose mode (`-v`), progress reporting (`-progress`), and force mode (`-force`).
-2.  **Configuration**: These arguments are parsed and validated by the **Argument Parsing** component and used to configure the tool's behavior.
-3.  **Wildcard Detection**: Two random subdomains are resolved against the target domain. If both (or either) resolve, wildcard DNS is detected. The scan aborts unless `-force` is set.
-4.  **Wordlist Loading**: `wordlist.LoadWordlist` reads the file in a single pass, sanitizes lines, and deduplicates entries into a slice.
-    *   Each entry is sent into the `subdomains` channel from the in-memory slice.
-5.  **Work Distribution**: The `subdomains` channel acts as a queue for the **Concurrency Management (Worker Pool)** component.
-    *   Worker goroutines (number determined by the `-t` flag) pick up these prefixes from the channel.
-6.  **Subdomain Construction**: Each worker goroutine takes a `subdomainPrefix` and concatenates it with the `targetDomain` (e.g., `subdomainPrefix + "." + targetDomain`) to form a `fullDomain` string.
-7.  **DNS Lookup**: The `fullDomain` string, the `timeout` value, and the DNS server are passed to `dns.ResolveDomainWithRetry` within the **DNS Resolution Engine**.
-    *   `dns.ResolveDomain` attempts to resolve the `fullDomain`.
-    *   It returns `true` if the domain resolves successfully, `false` otherwise.
-    *   If verbose mode is enabled, it also prints detailed information about the resolution attempt.
-8.  **Output Generation**: 
-    *   If the resolution returns `true`, the worker goroutine uses the **Output Formatting** component to print the `fullDomain` to the standard output.
-    *   The atomic counter for found subdomains is incremented.
-9.  **Progress Tracking**: After each DNS lookup:
-    *   The atomic counter for processed entries is incremented.
-    *   If progress reporting is enabled, a separate goroutine periodically updates the progress display.
-10. **Loop/Termination**:
-    *   Worker goroutines loop back to step 5 to pick up more work from the `subdomains` channel.
-    *   Once all prefixes are read from the wordlist, the **Wordlist Processing** component closes the `subdomains` channel.
-    *   Worker goroutines eventually terminate after the channel is closed and all in-flight DNS lookups are complete.
-    *   The main goroutine, which is waiting on a `sync.WaitGroup`, unblocks.
-    *   If verbose mode is enabled, a final summary is printed.
-    *   The program exits.
+1.  **Input**: The user provides command-line arguments: the target domain, the path to a wordlist file (`-w`), a concurrency level (`-t`), a DNS timeout (`-timeout`), a DNS server (`-dns-server`), attempts (`-attempts`), output options (`-o`, `-format`), and scan tuning (`-rate`, `-type`, `-recursive`, `-depth`), plus flags for verbose mode (`-v`), progress reporting (`-progress`), and force mode (`-force`). The TUI (`-tui`) gathers the equivalent values from its form instead.
+2.  **Configuration**: These arguments are parsed and validated by the **Argument Parsing** component and assembled into a `scan.Config`, which is the single input to the scan engine.
+3.  **Wildcard Detection**: Inside `scan.Run`, two random subdomains are resolved against the target domain (skipped in simulation mode). If either resolves, wildcard DNS is detected and an `EventWildcard` is emitted; the scan aborts with an `EventError` unless `-force` is set.
+4.  **Wordlist Loading**: `wordlist.LoadWordlist` reads the file in a single pass, sanitizes lines, and deduplicates entries into a slice, which is passed to `scan.Run` via `Config.Entries`.
+5.  **Dispatch**: A dispatcher goroutine seeds its queue from the entry slice (constructing `prefix.domain` jobs at depth 1, deduplicated through a visited set) and feeds the internal `jobs` channel. It owns the queue, the visited set, and a pending-work counter; it does not close `jobs` until the counter drains to zero or the context is cancelled.
+6.  **Resolution**: `cfg.Concurrency` worker goroutines read jobs from `jobs` (each job already holds the full domain) and call `dns.ResolveDomainWithRetry` (or `dns.SimulateResolve` in simulation mode) for the requested record types, honoring the optional rate-limiter gate.
+7.  **Result Emission**: On a successful resolution the worker increments the found counter and emits an `EventResult` carrying the domain and its typed records. The caller (CLI `Writer` or TUI scan view) renders it; the `Writer` routes results to stdout and any `-o` file in the selected `-format`.
+8.  **Recursive Expansion** (optional): when `-recursive` is set and a resolved job is below the `-depth` cap, the worker submits one child per wordlist entry back to the dispatcher over the `enqueue` channel. The dispatcher's visited set deduplicates them and grows the progress total as new work is admitted.
+9.  **Progress Tracking**: Workers increment atomic processed/found counters; a separate ticker goroutine emits `EventProgress` once per second so the caller can update its display.
+10. **Termination**: Each worker signals completion of a job over the `completed` channel. When the pending counter reaches zero the dispatcher closes `jobs`, the workers exit, and `scan.Run` waits on the `sync.WaitGroup`, stops the progress ticker, emits `EventDone`, and closes the events channel. On `SIGINT`/`SIGTERM` the context is cancelled, the dispatcher closes `jobs` early, and the same drain-and-finish path runs with partial counts.
 
 Visually, this can be seen as:
 
-`User Input -> Argument Parser -> [Wordlist File] -> Wordlist Processor -> scan.Run() -> Worker Goroutines -> DNS Resolver -> Event Channel -> Output (if resolved)`
+`User Input -> Argument Parser -> scan.Config -> scan.Run() [Dispatcher -> jobs -> Worker Pool -> DNS Resolver] -> Event Channel -> Output (if resolved)`
 
 ## 4. Error Handling Strategy
 
@@ -195,7 +180,7 @@ Visually, this can be seen as:
 
 ### 4.4. Concurrency-Related Issues
 
-*   **Channel Operations**: The tool uses a channel (`subdomains`) to pass work between the wordlist reading goroutine and the worker goroutines. No explicit error handling is implemented for channel operations, as Go's channel semantics ensure that operations like closing an already closed channel would panic. This is avoided by design in the current implementation.
+*   **Channel Operations**: The scan engine uses three internal channels (`jobs`, `enqueue`, `completed`) plus the outbound `events` channel. To avoid the classic send-on-closed and double-close panics, only the dispatcher closes `jobs`, and it does so exactly once (when the pending counter drains to zero or the context is cancelled); `enqueue` and `completed` are never closed. The `events` channel is closed by `scan.Run` only after the worker `WaitGroup` returns and the progress ticker has confirmed its exit, so no in-flight send can race the close. Callers must drain `events` until it is closed: the result and done sends are not individually guarded against a consumer that stops reading early, so a consumer that wants to stop on cancellation should keep draining until close rather than abandoning the channel.
 *   **Worker Goroutine Errors**: Each worker goroutine processes DNS lookups independently. If an error occurs within a worker (outside of the expected DNS resolution failures), it can cause the entire goroutine to terminate. The current implementation doesn't have specific handling for such scenarios.
 
 ### 4.5. Graceful Shutdown

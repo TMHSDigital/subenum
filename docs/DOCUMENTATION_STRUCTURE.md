@@ -88,7 +88,7 @@ Sets expectations for community interaction. Adopt a standard one like the Contr
 
 Specifies how the software can be used, modified, and distributed (e.g., MIT, Apache 2.0, GPL).
 
-## 7. Changelog (`logs/CHANGELOG.md`)
+## 7. Changelog (`CHANGELOG.md`)
 
 A chronological list of notable changes for each version/release.
 

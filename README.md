@@ -357,7 +357,7 @@ subenum/
 │   ├── demo.sh
 │   └── multi_domain_scan.sh
 ├── internal/
-│   ├── dns/                    # ResolveDomain, CheckWildcard, SimulateResolution
+│   ├── dns/                    # ResolveTypes, ResolveDomainWithRetry, CheckWildcard, SimulateResolve
 │   ├── output/                 # Thread-safe Writer (stdout/stderr separation)
 │   ├── scan/                   # Scan engine: Config, Event types, Run()
 │   ├── tui/                    # Bubble Tea UI: form, scan view, session config

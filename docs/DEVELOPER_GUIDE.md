@@ -90,15 +90,16 @@ subenum/
 │   └── multi_domain_scan.sh    # Batch scanning example
 ├── internal/
 │   ├── dns/
-│   │   ├── resolver.go         # ResolveDomain, ResolveDomainWithRetry, CheckWildcard
+│   │   ├── resolver.go         # ResolveTypes, ResolveDomainWithRetry, CheckWildcard, ParseTypes
 │   │   ├── resolver_test.go    # DNS resolution and wildcard detection tests
-│   │   ├── simulate.go         # SimulateResolution (synthetic DNS)
+│   │   ├── simulate.go         # SimulateResolve (synthetic DNS)
 │   │   └── simulate_test.go    # Simulation logic tests
 │   ├── output/
 │   │   ├── writer.go           # Thread-safe output (results→stdout, rest→stderr)
 │   │   └── writer_test.go      # Output writer tests
 │   ├── scan/
-│   │   └── runner.go           # Scan engine: Config, Event types, Run(ctx, cfg, events)
+│   │   ├── runner.go           # Scan engine: Config, Event types, Run(ctx, cfg, events)
+│   │   └── runner_test.go      # Dispatcher lifecycle, recursion, rate, cancellation tests
 │   ├── tui/
 │   │   ├── model.go            # Root Bubble Tea model (form → scan state machine)
 │   │   ├── form.go             # Config form screen (textinput fields + toggles)
@@ -254,14 +255,22 @@ If you need to add a further dependency:
     ```
 3.  Run `go mod tidy` to update the `go.mod` and `go.sum` files.
 
+## Already Shipped
+
+The following capabilities are implemented and available today:
+
+*   **Terminal UI** (`-tui`): a Bubble Tea form-based config screen and live-scrolling results view, no arguments required to launch. Last-used values persist to `~/.config/subenum/last.json` across sessions.
+*   **Output Formats** (`-format text|json|csv`): in addition to the plain text output file (`-o`).
+*   **Record Types** (`-type A,AAAA,CNAME`): per-type lookups filtered to the requested types.
+*   **Recursive Enumeration** (`-recursive` with `-depth`): enumerate subdomains of discovered subdomains, with loop and duplicate protection.
+*   **Rate Limiting** (`-rate`): cap total DNS queries per second across the worker pool.
+
 ## Future Development
 
 Areas for potential enhancement include:
 
-*   **Terminal UI**: An interactive TUI (`-tui` flag) built with Bubble Tea. Provides a form-based config screen and a live-scrolling results view - no arguments required to launch. Last-used values persist to `~/.config/subenum/last.json` across sessions.
-*   **Output Formats**: Supporting different output formats (JSON, CSV) in addition to the current plain text output file (`-o`).
-*   **Result Filtering**: Allowing users to filter results based on DNS record types.
-*   **Recursive Enumeration**: Adding support for recursive subdomain enumeration (e.g., finding subdomains of discovered subdomains).
-*   **Rate Limiting**: Adding configurable rate limiting for DNS queries to avoid triggering abuse detection.
+*   **TUI parity**: surface the remaining CLI options (`-type`, `-recursive`/`-depth`, `-rate`, and structured file output) in the interactive form. See `docs/ROADMAP.md`.
+*   **Additional record types**: extend `dns.ResolveTypes` beyond A/AAAA/CNAME (for example MX, TXT, NS).
+*   **Streaming JSON output**: a JSONL mode for live structured output that, unlike the buffered JSON array, can be piped incrementally.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 

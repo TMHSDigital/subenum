@@ -7,12 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- TUI record-type selection (`-type` parity): a Record Types form field, persisted to the session config and wired into the scan.
+- TUI recursive enumeration (`-recursive`/`-depth` parity): a Recursive toggle with a Depth field gated on it, persisted across sessions.
+- TUI rate limiting (`-rate` parity): a queries-per-second form field, persisted across sessions.
+- TUI output file support (`-o`/`-format` parity): results can be written to a file as `text`, `json`, or `csv`. The format applies only to the file; the live viewport stays human-readable. Backed by a new file-only `output.NewFile` writer so structured output never collides with the alt-screen.
+
+### Changed
+- TUI form now validates domain syntax and DNS server `ip:port` format up front, matching the CLI. The validators were extracted into a shared `internal/validate` package used by both entry points (previously the form only checked for non-empty values).
+
+### Removed
+- Removed the unused `dns.Resolve` function, superseded by `dns.ResolveTypes`.
+- Collapsed the simulation helpers onto `dns.SimulateResolve`, removing the redundant `SimulateResolution` wrapper (its race-detection test was retargeted, not deleted).
+
 ### Fixed
 - Structured output (`-format json` and `-format csv`) is now finalized only on the successful scan path. The finalizer previously ran via `defer` on every exit, so an early error (such as wildcard detection without `-force`) emitted an empty JSON array. Text output behavior is unchanged.
 
 ### Docs
+- Rewrote the ARCHITECTURE data-flow section to describe the dispatcher-owned work queue instead of the removed feed-then-close `subdomains` channel model, and corrected the DNS engine function descriptions.
+- Refreshed the DEVELOPER_GUIDE: removed "Future Development" items that already shipped, updated the file tree, and corrected `dns` package references.
+- Fixed stale references in `DOCUMENTATION_STRUCTURE.md` (changelog path) and README (package blurbs).
+- Added `docs/ROADMAP.md` capturing the prioritized review findings and follow-up plan.
 - GitHub Pages landing page (`docs/index.md`) refreshed to the 0.6.0 feature set, adding cards for Output Formats (`-format`), Rate Limiting (`-rate`), Record Types (`-type`), and Recursive Enumeration (`-recursive`/`-depth`).
 - Normalized em dashes to hyphens across `docs/` for consistency with the no-em-dash convention.
+
+### Tests
+- Added TUI coverage: session-config round-trip, form navigation across gated fields, record-type and depth validation, and structured-output finalization on both the success and error paths.
+- Added output-writer coverage: file-only writer stdout suppression, simulate-mode text prefix, and the CSV empty-record fallback row.
+- Moved the validator tests alongside the new `internal/validate` package.
 
 ## [0.6.0] - 2026-06-03
 
