@@ -22,7 +22,7 @@ jobs:
         go-version-file: 'go.mod'
 
     - name: Cache Go build artifacts
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/go-build
@@ -116,7 +116,7 @@ jobs:
         go-version-file: 'go.mod'
 
     - name: Cache Go build artifacts
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/go-build
