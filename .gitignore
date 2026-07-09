@@ -34,3 +34,4 @@ examples/results_*
 # OS specific
 .DS_Store
 Thumbs.db 
+CLAUDE.md
