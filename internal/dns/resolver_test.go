@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 )
@@ -101,7 +102,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 	timeout := time.Second * 2
 
 	records, result := ResolveDomainWithRetry(context.Background(), "google.com", timeout, "8.8.8.8:53", false, 3, DefaultTypes)
-	if !result {
+	if result != OutcomeFound {
 		t.Errorf("Expected google.com to resolve with retries, but it failed")
 	}
 	if len(records) == 0 {
@@ -109,7 +110,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 	}
 
 	_, result = ResolveDomainWithRetry(context.Background(), "this-domain-should-not-exist-123456789.com", timeout, "8.8.8.8:53", false, 2, DefaultTypes)
-	if result {
+	if result == OutcomeFound {
 		t.Errorf("Expected non-existent domain to fail even with retries")
 	}
 }
@@ -127,7 +128,7 @@ func TestResolveDomainWithRetryContextCancellation(t *testing.T) {
 	_, result := ResolveDomainWithRetry(ctx, "google.com", timeout, "8.8.8.8:53", false, 5, DefaultTypes)
 	elapsed := time.Since(start)
 
-	if result {
+	if result == OutcomeFound {
 		t.Errorf("Expected cancelled context to prevent resolution, but got true")
 	}
 	if elapsed > 500*time.Millisecond {
@@ -158,5 +159,58 @@ func TestCheckWildcardCancelled(t *testing.T) {
 	_, err := CheckWildcard(ctx, "example.com", time.Second, "8.8.8.8:53")
 	if err == nil {
 		t.Errorf("Expected error from cancelled context")
+	}
+}
+
+func TestClassify(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want Outcome
+	}{
+		{name: "nil", err: nil, want: OutcomeFound},
+		{
+			name: "nxdomain",
+			err:  &net.DNSError{Err: "no such host", Name: "missing.example.com", IsNotFound: true},
+			want: OutcomeNXDomain,
+		},
+		{
+			name: "timeout",
+			err:  &net.DNSError{Err: "i/o timeout", Name: "slow.example.com", IsTimeout: true},
+			want: OutcomeTimeout,
+		},
+		{
+			name: "refused",
+			err:  &net.DNSError{Err: "server refused", Name: "blocked.example.com"},
+			want: OutcomeRefused,
+		},
+		{
+			name: "refused mixed case",
+			err:  &net.DNSError{Err: "REFUSED"},
+			want: OutcomeRefused,
+		},
+		{
+			name: "other dns error",
+			err:  &net.DNSError{Err: "server misbehaving", Name: "x.example.com"},
+			want: OutcomeOther,
+		},
+		{
+			name: "generic error",
+			err:  fmt.Errorf("dial udp: connection refused"),
+			want: OutcomeOther,
+		},
+		{
+			name: "wrapped nxdomain",
+			err:  fmt.Errorf("lookup: %w", &net.DNSError{Err: "no such host", IsNotFound: true}),
+			want: OutcomeNXDomain,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Classify(tt.err); got != tt.want {
+				t.Errorf("Classify() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

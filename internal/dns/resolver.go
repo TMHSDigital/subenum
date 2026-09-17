@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,6 +23,39 @@ type Record struct {
 var DefaultTypes = []string{"A", "AAAA"}
 
 var supportedTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true}
+
+// Outcome is a coarse classification of one resolver attempt so callers can
+// tell a definitive negative (NXDOMAIN) apart from an infrastructure failure.
+type Outcome int
+
+const (
+	OutcomeFound Outcome = iota
+	OutcomeNXDomain
+	OutcomeTimeout
+	OutcomeRefused
+	OutcomeOther
+)
+
+// Classify maps a resolver error onto a coarse outcome so callers can tell a
+// definitive negative (NXDOMAIN) apart from an infrastructure failure.
+func Classify(err error) Outcome {
+	if err == nil {
+		return OutcomeFound
+	}
+	var de *net.DNSError
+	if errors.As(err, &de) {
+		switch {
+		case de.IsNotFound:
+			return OutcomeNXDomain
+		case de.IsTimeout:
+			return OutcomeTimeout
+		}
+		if strings.Contains(strings.ToLower(de.Err), "refused") {
+			return OutcomeRefused
+		}
+	}
+	return OutcomeOther
+}
 
 // ParseTypes parses a comma-separated record-type list (for example
 // "A,AAAA,CNAME") into a normalized, de-duplicated, uppercase slice.
@@ -130,24 +164,31 @@ func ResolveWithLog(ctx context.Context, domain string, timeout time.Duration, d
 
 // ResolveDomainWithRetry calls ResolveWithLog up to maxAttempts times, respecting
 // ctx cancellation between attempts with a linear backoff delay. It returns the
-// resolved records and whether resolution succeeded.
-func ResolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxAttempts int, types []string) ([]Record, bool) {
+// resolved records and a classified outcome for the last attempt.
+func ResolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxAttempts int, types []string) ([]Record, Outcome) {
+	last := OutcomeOther
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
-			return nil, false
+			return nil, last
 		}
-		if records, _, _ := ResolveWithLog(ctx, domain, timeout, dnsServer, verbose, types); len(records) > 0 {
-			return records, true
+		records, _, err := ResolveWithLog(ctx, domain, timeout, dnsServer, verbose, types)
+		if len(records) > 0 {
+			return records, OutcomeFound
+		}
+		last = Classify(err)
+		if last == OutcomeFound {
+			// Lookup succeeded but produced no records of the requested types.
+			last = OutcomeOther
 		}
 		if attempt < maxAttempts-1 {
 			select {
 			case <-time.After(time.Duration(50*(attempt+1)) * time.Millisecond):
 			case <-ctx.Done():
-				return nil, false
+				return nil, last
 			}
 		}
 	}
-	return nil, false
+	return nil, last
 }
 
 // randomHex returns n random hex characters.

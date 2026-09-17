@@ -280,7 +280,7 @@ func listenForEvents(events <-chan scan.Event) tea.Cmd {
 		case scan.EventError:
 			return errorMsg{text: ev.Message}
 		case scan.EventDone:
-			return doneMsg{processed: ev.Processed, total: ev.Total, found: ev.Found}
+			return doneMsg{processed: ev.Processed, total: ev.Total, found: ev.Found, stats: ev.Stats}
 		}
 		return nil
 	}

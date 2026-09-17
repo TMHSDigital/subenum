@@ -2,11 +2,17 @@ package scan
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+)
+
+const (
+	reliabilityMinJobs     = 200
+	reliabilityFailPercent = 20
 )
 
 // Config holds all parameters needed to run a subdomain scan.
@@ -25,6 +31,64 @@ type Config struct {
 	Types       []string // record types to look up (A, AAAA, CNAME); empty = A,AAAA
 	Recursive   bool     // enumerate subdomains of discovered subdomains
 	Depth       int      // max recursion depth (1 = no recursion)
+	NoAbort     bool     // keep scanning after the reliability guard fires
+
+	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
+	// Tests inject classified outcomes through this field without network I/O.
+	resolveHook func(ctx context.Context, domain string) ([]dns.Record, dns.Outcome)
+}
+
+// Stats is a snapshot of per-outcome query counters. Populated on EventDone.
+type Stats struct {
+	Found    int64
+	NXDomain int64
+	Timeout  int64
+	Refused  int64
+	Other    int64
+}
+
+// Sum returns the number of classified queries (found + negatives + failures).
+func (s Stats) Sum() int64 {
+	return s.Found + s.NXDomain + s.Timeout + s.Refused + s.Other
+}
+
+func (s Stats) failures() int64 {
+	return s.Timeout + s.Refused + s.Other
+}
+
+type counters struct {
+	found    atomic.Int64
+	nxdomain atomic.Int64
+	timeout  atomic.Int64
+	refused  atomic.Int64
+	other    atomic.Int64
+}
+
+func (c *counters) add(o dns.Outcome) {
+	switch o {
+	case dns.OutcomeFound:
+		c.found.Add(1)
+	case dns.OutcomeNXDomain:
+		c.nxdomain.Add(1)
+	case dns.OutcomeTimeout:
+		c.timeout.Add(1)
+	case dns.OutcomeRefused:
+		c.refused.Add(1)
+	case dns.OutcomeOther:
+		c.other.Add(1)
+	default:
+		c.other.Add(1)
+	}
+}
+
+func (c *counters) snapshot() Stats {
+	return Stats{
+		Found:    c.found.Load(),
+		NXDomain: c.nxdomain.Load(),
+		Timeout:  c.timeout.Load(),
+		Refused:  c.refused.Load(),
+		Other:    c.other.Load(),
+	}
 }
 
 // job is a single unit of work: a fully qualified domain to test and its depth
@@ -54,6 +118,7 @@ type Event struct {
 	Total     int64        // EventProgress
 	Found     int64        // EventProgress / EventDone
 	Message   string       // EventError / EventWildcard
+	Stats     Stats        // EventDone: per-outcome counters
 }
 
 // Run executes the subdomain scan, sending events to the provided channel.
@@ -62,7 +127,12 @@ type Event struct {
 func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	defer close(events)
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var total, processed, found int64
+	var stats counters
+	var guardOnce sync.Once
 	atomic.StoreInt64(&total, int64(len(cfg.Entries)))
 
 	maxDepth := cfg.Depth
@@ -78,7 +148,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			return
 		}
 		if isWildcard {
-			msg := "WARNING: Wildcard DNS detected — all subdomains resolve for " + cfg.Domain
+			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
 			events <- Event{Kind: EventWildcard, Message: msg}
 			if !cfg.Force {
 				events <- Event{Kind: EventError, Message: "Results would be meaningless. Use -force to scan anyway."}
@@ -197,7 +267,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				processJob(ctx, cfg, j, maxDepth, limiter, events, enqueue, &processed, &found)
+				processJob(ctx, cfg, j, maxDepth, limiter, events, enqueue, &processed, &found, &stats, cancel, &guardOnce)
 				select {
 				case completed <- struct{}{}:
 				case <-ctx.Done():
@@ -213,19 +283,19 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	close(tickerDone)
 	<-tickerStopped
 
+	snap := stats.snapshot()
 	events <- Event{
 		Kind:      EventDone,
 		Processed: atomic.LoadInt64(&processed),
 		Total:     atomic.LoadInt64(&total),
 		Found:     atomic.LoadInt64(&found),
+		Stats:     snap,
 	}
 }
 
 // processJob resolves a single job and, on success, optionally enqueues
 // depth-capped children for recursive enumeration.
-func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-chan time.Time, events chan<- Event, enqueue chan<- job, processed, found *int64) {
-	defer atomic.AddInt64(processed, 1)
-
+func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-chan time.Time, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -237,14 +307,28 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-
 		}
 	}
 
-	var resolved bool
+	var outcome dns.Outcome
 	var records []dns.Record
-	if cfg.Simulate {
-		records, resolved = dns.SimulateResolve(j.domain, cfg.HitRate, cfg.Verbose, cfg.Types)
-	} else {
-		records, resolved = dns.ResolveDomainWithRetry(ctx, j.domain, cfg.Timeout, cfg.DNSServer, cfg.Verbose, cfg.Attempts, cfg.Types)
+	switch {
+	case cfg.resolveHook != nil:
+		records, outcome = cfg.resolveHook(ctx, j.domain)
+	case cfg.Simulate:
+		var ok bool
+		records, ok = dns.SimulateResolve(j.domain, cfg.HitRate, cfg.Verbose, cfg.Types)
+		if ok {
+			outcome = dns.OutcomeFound
+		} else {
+			outcome = dns.OutcomeNXDomain
+		}
+	default:
+		records, outcome = dns.ResolveDomainWithRetry(ctx, j.domain, cfg.Timeout, cfg.DNSServer, cfg.Verbose, cfg.Attempts, cfg.Types)
 	}
-	if !resolved {
+
+	st.add(outcome)
+	n := atomic.AddInt64(processed, 1)
+	checkReliability(cfg, n, st, events, cancel, guardOnce)
+
+	if outcome != dns.OutcomeFound {
 		return
 	}
 
@@ -261,4 +345,28 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-
 			}
 		}
 	}
+}
+
+func checkReliability(cfg Config, processed int64, st *counters, events chan<- Event, cancel context.CancelFunc, once *sync.Once) {
+	if processed < reliabilityMinJobs {
+		return
+	}
+	snap := st.snapshot()
+	failures := snap.failures()
+	if failures*100 <= processed*int64(reliabilityFailPercent) {
+		return
+	}
+	once.Do(func() {
+		rate := float64(failures) * 100 / float64(processed)
+		verb := "aborting scan"
+		if cfg.NoAbort {
+			verb = "warning"
+		}
+		msg := fmt.Sprintf("%s: %.0f%% of %d queries failed (timeout/refused/other); likely resolver rate-limiting at -t %d and -rate %d",
+			verb, rate, processed, cfg.Concurrency, cfg.Rate)
+		events <- Event{Kind: EventError, Message: msg}
+		if !cfg.NoAbort {
+			cancel()
+		}
+	})
 }

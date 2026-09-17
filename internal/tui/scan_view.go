@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 var (
@@ -29,6 +30,7 @@ type scanViewModel struct {
 	processed int64
 	total     int64
 	found     int64
+	stats     scan.Stats
 	done      bool
 	aborted   bool
 	width     int
@@ -88,6 +90,7 @@ func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
 		m.processed = msg.processed
 		m.total = msg.total
 		m.found = msg.found
+		m.stats = msg.stats
 
 	case abortedMsg:
 		m.aborted = true
@@ -129,13 +132,13 @@ func (m scanViewModel) View() string {
 	switch {
 	case m.done && m.aborted:
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
-			"Aborted — processed %d/%d — found %d",
-			m.processed, m.total, m.found,
+			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d",
+			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other,
 		)) + "\n")
 	case m.done:
 		b.WriteString(summaryStyle.Render(fmt.Sprintf(
-			"Done — processed %d/%d — found %d subdomain(s)",
-			m.processed, m.total, m.found,
+			"Done - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d",
+			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other,
 		)) + "\n")
 		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
 	default:
@@ -157,6 +160,9 @@ type resultMsg struct {
 type progressMsg struct{ processed, total, found int64 }
 type wildcardMsg struct{ text string }
 type errorMsg struct{ text string }
-type doneMsg struct{ processed, total, found int64 }
+type doneMsg struct {
+	processed, total, found int64
+	stats                   scan.Stats
+}
 type abortedMsg struct{}
 type startScanMsg struct{ cfg formValues }

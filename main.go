@@ -74,6 +74,7 @@ type cliFlags struct {
 	recordTypes  string
 	recursive    bool
 	depth        int
+	noAbort      bool
 }
 
 func parseFlags() cliFlags {
@@ -97,6 +98,7 @@ func parseFlags() cliFlags {
 	flag.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
 	flag.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	flag.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
+	flag.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	flag.Parse()
 	return f
 }
@@ -181,13 +183,7 @@ func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Wri
 }
 
 func logVerboseDone(ev scan.Event, f cliFlags, outWriter *bufio.Writer, out *output.Writer) {
-	out.Info("\nScan completed for %s", flag.Arg(0))
 	out.Info("Processed %d subdomain prefixes", ev.Processed)
-	if f.testMode {
-		out.Info("Found %d simulated subdomains", ev.Found)
-	} else {
-		out.Info("Found %d subdomains", ev.Found)
-	}
 	if outWriter != nil {
 		out.Info("Results written to: %s", f.outputFile)
 	}
@@ -195,6 +191,16 @@ func logVerboseDone(ev scan.Event, f cliFlags, outWriter *bufio.Writer, out *out
 		out.Info("\nNOTE: Results were simulated and no actual DNS queries were performed.")
 		out.Info("This mode is intended for educational and testing purposes only.")
 	}
+}
+
+func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
+	s := ev.Stats
+	out.Info("Scan complete for %s", domain)
+	out.Info("  resolved:  %d", s.Found)
+	out.Info("  nxdomain:  %d", s.NXDomain)
+	out.Info("  timeout:   %d", s.Timeout)
+	out.Info("  refused:   %d", s.Refused)
+	out.Info("  other:     %d", s.Other)
 }
 
 func run() int {
@@ -301,12 +307,21 @@ func run() int {
 		Types:       recordTypes,
 		Recursive:   f.recursive,
 		Depth:       f.depth,
+		NoAbort:     f.noAbort,
 	}
 
 	events := make(chan scan.Event, 64)
 	go scan.Run(ctx, cfg, events)
 
 	progressStarted := false
+	sawError := false
+	sawDone := false
+	finishProgress := func() {
+		if progressStarted {
+			out.ProgressDone()
+			progressStarted = false
+		}
+	}
 	for ev := range events {
 		switch ev.Kind {
 		case scan.EventResult:
@@ -321,14 +336,15 @@ func run() int {
 			out.Info(ev.Message)
 		case scan.EventError:
 			out.Error(ev.Message)
-			if progressStarted {
-				out.ProgressDone()
-			}
-			return 1
+			sawError = true
+			finishProgress()
+			// Keep draining so EventDone (and Stats) can still arrive after a
+			// reliability abort. Early errors such as wildcard detection close
+			// the channel without EventDone.
 		case scan.EventDone:
-			if progressStarted {
-				out.ProgressDone()
-			}
+			finishProgress()
+			sawDone = true
+			logScanBreakdown(domain, ev, out)
 			if f.verbose {
 				logVerboseDone(ev, f, outWriter, out)
 			}
@@ -338,7 +354,14 @@ func run() int {
 	// (such as wildcard detection without -force) does not emit an empty JSON
 	// array or a bare CSV header. The deferred file flush/close registered
 	// above runs after this, persisting buffered output before the file closes.
-	out.Finish()
+	// Reliability abort still emits EventDone with partial results, so Finish
+	// runs there.
+	if sawDone {
+		out.Finish()
+	}
+	if sawError && (!sawDone || !f.noAbort) {
+		return 1
+	}
 	return 0
 }
 
