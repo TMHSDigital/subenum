@@ -36,6 +36,16 @@ jobs:
     - name: Verify dependencies
       run: go mod verify
 
+    - name: Check go directive
+      shell: bash
+      run: |
+        want='go 1.24.2'
+        got=$(grep -m1 '^go ' go.mod)
+        if [ "$got" != "$want" ]; then
+          echo "go.mod directive drifted: got '$got', want '$want'. Run 'make tidy'."
+          exit 1
+        fi
+
     - name: Build
       run: go build -v -buildvcs=false -ldflags "-X main.Version=$(git describe --tags --dirty)" ./...
 
@@ -69,6 +79,7 @@ jobs:
       uses: softprops/action-gh-release@v3
       with:
         draft: true
+        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

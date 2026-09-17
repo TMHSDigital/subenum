@@ -191,6 +191,43 @@ Use `-rate` to cap the total number of DNS queries per second across the whole w
 
 The limiter is context-aware, so `Ctrl+C` stays responsive while workers are waiting on it.
 
+## Reliability Guard and `-no-abort`
+
+Every query is classified as resolved, nxdomain, timeout, refused, or other. The
+breakdown is printed after every scan. Once 200 queries have completed, if more
+than 20% failed as timeout, refused, or other, the scan emits an error naming
+the failure rate and likely resolver rate-limiting at the configured `-t` and
+`-rate`, then aborts. NXDOMAIN is a definitive negative and is not counted as
+a failure.
+
+Pass `-no-abort` to keep the warning but finish the wordlist:
+
+```bash
+./subenum -w wordlist.txt -no-abort example.com
+```
+
+## Query Cap and Recursion Ceiling
+
+`-max-queries` stops admitting new work once the cap is reached (0 = unlimited).
+Recursive scans also compute the theoretical ceiling (`sum n^d` over depth).
+A ceiling above 1e7 refuses to start unless `-max-queries` or `-force` is set.
+
+```bash
+./subenum -w wordlist.txt -recursive -depth 2 -max-queries 50000 example.com
+```
+
+## Wildcard Fingerprint Filter
+
+Wildcard detection keeps the union of both probe answers as a fingerprint.
+Without `-force` the scan still exits. With `-force`, later results whose
+records are a subset of that fingerprint are dropped and counted as
+`wildcard-filtered`. Recursive mode probes each newly resolved parent and
+skips expanding a wildcard branch.
+
+```bash
+./subenum -w wordlist.txt -force example.com
+```
+
 ## Output Formats
 
 By default `subenum` prints human-readable `Found:` lines. Use `-format` to emit structured output instead. The `-o` file honors the same format.
@@ -233,7 +270,7 @@ For CI/CD environments, you can use the version flag to ensure the correct versi
 
 ```bash
 ./subenum -version
-# Output: subenum v0.6.0
+# Output: subenum v0.7.0
 ```
 
 Use simulation mode in CI pipelines to test the tool's behaviour without network access:

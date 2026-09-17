@@ -1,6 +1,6 @@
 module github.com/TMHSDigital/subenum
 
-go 1.24
+go 1.24.2
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0

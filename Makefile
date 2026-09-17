@@ -1,4 +1,4 @@
-.PHONY: build test clean lint run tui docker-build docker-run wordlist wordlist-gen simulate simulate-verbose
+.PHONY: build test clean lint tidy run tui docker-build docker-run wordlist wordlist-gen simulate simulate-verbose
 
 # Default Go parameters
 GOCMD=go
@@ -45,6 +45,10 @@ clean:
 
 lint:
 	golangci-lint run
+
+# go mod tidy. The go directive must stay go 1.24.2 (bubbles requires it).
+tidy:
+	go mod tidy
 
 # Build wordlist generator
 wordlist-gen:
@@ -104,6 +108,7 @@ help:
 	@echo "  make test-short       - Run short tests"
 	@echo "  make clean            - Clean build artifacts"
 	@echo "  make lint             - Run linter"
+	@echo "  make tidy             - go mod tidy (keeps go 1.24.2)"
 	@echo "  make tui              - Launch the interactive terminal UI (no arguments needed)"
 	@echo ""
 	@echo "  LIVE MODE (performs real DNS queries):"

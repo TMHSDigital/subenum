@@ -71,7 +71,9 @@ Or launch the interactive terminal UI with no flags:
 | :--- | :--- |
 | Worker Pool | Spawn N goroutines for parallel DNS resolution with a configurable concurrency ceiling |
 | DNS Engine | Resolve subdomains against any DNS server with per-query timeouts and retry backoff |
-| Wildcard Detection | Double-probe check before scanning; aborts early unless `-force` is set |
+| Wildcard Detection | Double-probe check before scanning; aborts early unless `-force` is set. With `-force`, answers that match the wildcard fingerprint are dropped |
+| Scan Accounting | Every query is counted as resolved, nxdomain, timeout, refused, or other. After 200 queries a >20% infrastructure failure rate aborts unless `-no-abort` is set |
+| Query Cap | `-max-queries` stops admitting work. Recursive scans warn about the theoretical ceiling and refuse to start above 1e7 jobs unless `-max-queries` or `-force` is set |
 | Graceful Shutdown | Trap SIGINT/SIGTERM, drain in-flight workers, flush partial results |
 | Input Validation | RFC-compliant domain syntax and strict `ip:port` format enforcement |
 | Wordlist Dedup | Deduplicate wordlist entries in a single pass before scanning begins |
@@ -201,6 +203,8 @@ make help           # list all targets
 | `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server address (validated on startup) |
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
+| `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
+| `-max-queries <n>` | `0` | Max DNS lookups to admit (0 = unlimited) |
 | `-o <file>` | n/a | Write results to file in addition to stdout |
 | `-format <fmt>` | `text` | Output format: `text`, `json`, or `csv` |
 | `-rate <qps>` | `0` | Max DNS queries per second across all workers (0 = unlimited) |
@@ -218,7 +222,7 @@ make help           # list all targets
 <br>
 
 > [!NOTE]
-> Wildcard DNS is detected automatically before scanning begins. If the target resolves wildcard records, the tool exits with a warning, since all subdomains would match, making results meaningless. Pass `-force` to override.
+> Wildcard DNS is detected automatically before scanning begins. If the target resolves wildcard records, the tool exits with a warning, since all subdomains would match, making results meaningless. Pass `-force` to override. With `-force`, results whose records are a subset of the wildcard fingerprint are still dropped and counted as `wildcard-filtered`. Recursive scans probe each new parent and skip expanding wildcard branches.
 
 > [!CAUTION]
 > Simulation mode (`-simulate`) generates synthetic results and performs zero network I/O. Do not confuse simulated output with real DNS data.

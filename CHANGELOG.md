@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI form now validates domain syntax and DNS server `ip:port` format up front, matching the CLI. The validators were extracted into a shared `internal/validate` package used by both entry points (previously the form only checked for non-empty values).
 - `validate.Domain` now enforces the 63-character per-label limit and accepts punycode TLDs (`xn--...`).
 - `Version` is a `var` injected via `-ldflags "-X main.Version=$(git describe --tags --dirty)"`. `-version` writes to stdout.
-- `go` directive is `1.24`. golangci-lint CI is pinned to v2.12.2. Docker final stage is distroless static nonroot, with builder and runtime images pinned by digest.
+- `go` directive is `1.24.2` (required by charmbracelet/bubbles; a patchless `go 1.24` makes `go build` demand tidy). golangci-lint CI is pinned to v2.12.2. Docker final stage is distroless static nonroot, with builder and runtime images pinned by digest. Tagged releases generate GitHub release notes.
 
 ### Removed
 - Removed the unused `dns.Resolve` function, superseded by `dns.ResolveTypes`.
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refreshed the DEVELOPER_GUIDE: removed "Future Development" items that already shipped, updated the file tree, and corrected `dns` package references.
 - Fixed stale references in `DOCUMENTATION_STRUCTURE.md` (changelog path) and README (package blurbs).
 - Added `docs/ROADMAP.md` capturing the prioritized review findings and follow-up plan.
-- GitHub Pages landing page (`docs/index.md`) refreshed to the 0.6.0 feature set, adding cards for Output Formats (`-format`), Rate Limiting (`-rate`), Record Types (`-type`), and Recursive Enumeration (`-recursive`/`-depth`).
+- GitHub Pages landing page (`docs/index.md`) covers the 0.7.0 feature set: scan accounting, `-no-abort`, `-max-queries`, the recursion ceiling, and wildcard fingerprint filtering.
 - Normalized em dashes to hyphens across `docs/` for consistency with the no-em-dash convention.
 - Documented outcome classification, `EventDone.Stats`, and the reliability guard in ARCHITECTURE.
 - Corrected ARCHITECTURE output-format note (TUI file output shipped in P5) and DEVELOPER_GUIDE "CLI-only zero deps" claim.

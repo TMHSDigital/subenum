@@ -29,7 +29,7 @@ subenum brute-forces subdomains by resolving a wordlist against a target domain 
   </div>
   <div class="feature-card">
     <strong>Wildcard Detection</strong>
-    <span>Double-probe check before scanning; exits early unless <code>-force</code> is set.</span>
+    <span>Double-probe check before scanning; exits early unless <code>-force</code> is set. With <code>-force</code>, answers matching the wildcard fingerprint are dropped. Recursive scans skip expanding wildcard branches.</span>
   </div>
   <div class="feature-card">
     <strong>Interactive TUI</strong>
@@ -70,6 +70,14 @@ subenum brute-forces subdomains by resolving a wordlist against a target domain 
   <div class="feature-card">
     <strong>Input Validation</strong>
     <span>RFC-compliant domain syntax and strict <code>ip:port</code> format enforcement on startup.</span>
+  </div>
+  <div class="feature-card">
+    <strong>Scan Accounting</strong>
+    <span>Every query is counted as resolved, nxdomain, timeout, refused, or other. After 200 queries a greater than 20% infrastructure failure rate aborts unless <code>-no-abort</code> is set.</span>
+  </div>
+  <div class="feature-card">
+    <strong>Query Cap</strong>
+    <span><code>-max-queries</code> stops admitting work. Recursive scans warn about the theoretical ceiling and refuse to start above 1e7 jobs unless <code>-max-queries</code> or <code>-force</code> is set.</span>
   </div>
 </div>
 

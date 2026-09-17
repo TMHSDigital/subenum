@@ -18,6 +18,12 @@ See the [Code of Conduct](CODE_OF_CONDUCT.html).
 - Make (optional but recommended)
 - Docker (optional, for containerized development)
 
+The `go` directive in `go.mod` must stay exactly `go 1.24.2`. CI fails the build
+if it drifts. `github.com/charmbracelet/bubbles` declares `go 1.24.2`, so a
+patchless `go 1.24` line makes `go build` refuse to run until tidy bumps it.
+On PowerShell, unquoted `-go=1.24` is also parsed as `-go=1`. After changing
+dependencies run `make tidy`.
+
 ### Getting Started
 
 1. **Fork the repository** on GitHub
@@ -46,6 +52,9 @@ make test
 
 # Run linter
 make lint
+
+# Tidy modules (keeps the go 1.24.2 pin)
+make tidy
 
 # Clean up build artifacts
 make clean
