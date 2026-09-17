@@ -84,24 +84,26 @@ func ParseTypes(s string) ([]string, error) {
 	return out, nil
 }
 
-func newResolver(timeout time.Duration, dnsServer string) *net.Resolver {
+// NewResolver returns a PreferGo resolver that always dials dnsServer. The Dial
+// hook honors the network argument so a truncated UDP response can fall back to TCP.
+func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
-		Dial: func(dialCtx context.Context, network, address string) (net.Conn, error) {
+		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
 			d := net.Dialer{Timeout: timeout}
-			return d.DialContext(dialCtx, "udp", dnsServer)
+			return d.DialContext(dialCtx, network, dnsServer)
 		},
 	}
 }
 
 // ResolveTypes performs per-type DNS lookups for the requested record types and
 // returns the matching records, the elapsed time, and the last lookup error (if
-// any). An empty types slice falls back to DefaultTypes.
-func ResolveTypes(ctx context.Context, domain string, timeout time.Duration, dnsServer string, types []string) ([]Record, time.Duration, error) {
+// any). An empty types slice falls back to DefaultTypes. The caller should reuse
+// a single *net.Resolver across lookups (see scan.Run).
+func ResolveTypes(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string) ([]Record, time.Duration, error) {
 	if len(types) == 0 {
 		types = DefaultTypes
 	}
-	resolver := newResolver(timeout, dnsServer)
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -144,16 +146,16 @@ func ResolveTypes(ctx context.Context, domain string, timeout time.Duration, dns
 }
 
 // ResolveDomain performs a single DNS lookup for the given domain using the
-// specified server and timeout. It returns true if the domain resolves (A/AAAA).
-func ResolveDomain(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool) bool {
-	records, _, _ := ResolveWithLog(ctx, domain, timeout, dnsServer, verbose, DefaultTypes)
+// specified resolver and timeout. It returns true if the domain resolves (A/AAAA).
+func ResolveDomain(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, verbose bool) bool {
+	records, _, _ := ResolveWithLog(ctx, resolver, domain, timeout, verbose, DefaultTypes)
 	return len(records) > 0
 }
 
 // ResolveWithLog wraps ResolveTypes with the verbose stderr logging used by the
 // CLI and TUI, returning the resolved records for the requested types.
-func ResolveWithLog(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, types []string) ([]Record, time.Duration, error) {
-	records, elapsed, err := ResolveTypes(ctx, domain, timeout, dnsServer, types)
+func ResolveWithLog(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, verbose bool, types []string) ([]Record, time.Duration, error) {
+	records, elapsed, err := ResolveTypes(ctx, resolver, domain, timeout, types)
 	if verbose && len(records) > 0 {
 		fmt.Fprintf(os.Stderr, "Resolved: %s (%s: %s) in %s\n", domain, records[0].Type, records[0].Value, elapsed)
 	} else if verbose {
@@ -165,13 +167,13 @@ func ResolveWithLog(ctx context.Context, domain string, timeout time.Duration, d
 // ResolveDomainWithRetry calls ResolveWithLog up to maxAttempts times, respecting
 // ctx cancellation between attempts with a linear backoff delay. It returns the
 // resolved records and a classified outcome for the last attempt.
-func ResolveDomainWithRetry(ctx context.Context, domain string, timeout time.Duration, dnsServer string, verbose bool, maxAttempts int, types []string) ([]Record, Outcome) {
+func ResolveDomainWithRetry(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, verbose bool, maxAttempts int, types []string) ([]Record, Outcome) {
 	last := OutcomeOther
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return nil, last
 		}
-		records, _, err := ResolveWithLog(ctx, domain, timeout, dnsServer, verbose, types)
+		records, _, err := ResolveWithLog(ctx, resolver, domain, timeout, verbose, types)
 		if len(records) > 0 {
 			return records, OutcomeFound
 		}
@@ -203,12 +205,12 @@ func randomHex(n int) string {
 
 // CheckWildcard probes the domain with two random subdomains. If both resolve
 // the domain almost certainly uses wildcard DNS. Returns (isWildcard, error).
-func CheckWildcard(ctx context.Context, domain string, timeout time.Duration, dnsServer string) (bool, error) {
+func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration) (bool, error) {
 	probe1 := randomHex(32) + "." + domain
 	probe2 := randomHex(32) + "." + domain
 
-	hit1 := ResolveDomain(ctx, probe1, timeout, dnsServer, false)
-	hit2 := ResolveDomain(ctx, probe2, timeout, dnsServer, false)
+	hit1 := ResolveDomain(ctx, resolver, probe1, timeout, false)
+	hit2 := ResolveDomain(ctx, resolver, probe2, timeout, false)
 
 	if ctx.Err() != nil {
 		return false, ctx.Err()

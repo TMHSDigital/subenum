@@ -3,11 +3,16 @@ package dns
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func r8(timeout time.Duration) *net.Resolver {
+	return NewResolver(timeout, "8.8.8.8:53")
+}
 
 func TestResolveDomain(t *testing.T) {
 	timeout := time.Second * 2
@@ -46,7 +51,7 @@ func TestResolveDomain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveDomain(context.Background(), tt.domain, timeout, "8.8.8.8:53", false)
+			got := ResolveDomain(context.Background(), r8(timeout), tt.domain, timeout, false)
 
 			if got != tt.expected {
 				t.Errorf("ResolveDomain(%q) = %v, want %v (may be network-dependent)",
@@ -63,7 +68,7 @@ func TestResolveDomainTimeout(t *testing.T) {
 
 	veryShortTimeout := time.Millisecond * 1
 
-	result := ResolveDomain(context.Background(), "google.com", veryShortTimeout, "8.8.8.8:53", false)
+	result := ResolveDomain(context.Background(), r8(veryShortTimeout), "google.com", veryShortTimeout, false)
 
 	if result {
 		t.Errorf("Expected timeout with 1ms deadline, but resolution succeeded")
@@ -86,7 +91,7 @@ func TestResolveDomainWithCustomDNS(t *testing.T) {
 
 	for _, server := range dnsServers {
 		t.Run(fmt.Sprintf("DNS_Server_%s", server), func(t *testing.T) {
-			result := ResolveDomain(context.Background(), testDomain, timeout, server, false)
+			result := ResolveDomain(context.Background(), NewResolver(timeout, server), testDomain, timeout, false)
 
 			if !result {
 				t.Errorf("Expected %s to resolve using DNS server %s, but it failed", testDomain, server)
@@ -102,7 +107,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 
 	timeout := time.Second * 2
 
-	records, result := ResolveDomainWithRetry(context.Background(), "google.com", timeout, "8.8.8.8:53", false, 3, DefaultTypes)
+	records, result := ResolveDomainWithRetry(context.Background(), r8(timeout), "google.com", timeout, false, 3, DefaultTypes)
 	if result != OutcomeFound {
 		t.Errorf("Expected google.com to resolve with retries, but it failed")
 	}
@@ -110,7 +115,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 		t.Errorf("Expected resolved records for google.com, got none")
 	}
 
-	_, result = ResolveDomainWithRetry(context.Background(), "this-domain-should-not-exist-123456789.com", timeout, "8.8.8.8:53", false, 2, DefaultTypes)
+	_, result = ResolveDomainWithRetry(context.Background(), r8(timeout), "this-domain-should-not-exist-123456789.com", timeout, false, 2, DefaultTypes)
 	if result == OutcomeFound {
 		t.Errorf("Expected non-existent domain to fail even with retries")
 	}
@@ -126,7 +131,7 @@ func TestResolveDomainWithRetryContextCancellation(t *testing.T) {
 
 	timeout := time.Second * 2
 	start := time.Now()
-	_, result := ResolveDomainWithRetry(ctx, "google.com", timeout, "8.8.8.8:53", false, 5, DefaultTypes)
+	_, result := ResolveDomainWithRetry(ctx, r8(timeout), "google.com", timeout, false, 5, DefaultTypes)
 	elapsed := time.Since(start)
 
 	if result == OutcomeFound {
@@ -144,7 +149,7 @@ func TestCheckWildcard(t *testing.T) {
 
 	timeout := time.Second * 3
 
-	isWildcard, err := CheckWildcard(context.Background(), "google.com", timeout, "8.8.8.8:53")
+	isWildcard, err := CheckWildcard(context.Background(), r8(timeout), "google.com", timeout)
 	if err != nil {
 		t.Fatalf("CheckWildcard returned error: %v", err)
 	}
@@ -157,7 +162,7 @@ func TestCheckWildcardCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := CheckWildcard(ctx, "example.com", time.Second, "8.8.8.8:53")
+	_, err := CheckWildcard(ctx, r8(time.Second), "example.com", time.Second)
 	if err == nil {
 		t.Errorf("Expected error from cancelled context")
 	}
@@ -255,11 +260,180 @@ func TestResolveDomainWithRetryNXDomainNoRetry(t *testing.T) {
 	addr, queries, stop := startNXDomainUDP(t)
 	defer stop()
 
-	_, outcome := ResolveDomainWithRetry(context.Background(), "nope.example.com.", time.Second, addr, false, 3, []string{"A"})
+	_, outcome := ResolveDomainWithRetry(context.Background(), NewResolver(time.Second, addr), "nope.example.com.", time.Second, false, 3, []string{"A"})
 	if outcome != OutcomeNXDomain {
 		t.Fatalf("outcome = %v, want NXDomain", outcome)
 	}
 	if got := queries.Load(); got != 1 {
 		t.Fatalf("queries = %d, want 1 (NXDOMAIN must not be retried)", got)
+	}
+}
+
+func skipDNSName(msg []byte, off int) (int, bool) {
+	for off < len(msg) {
+		l := int(msg[off])
+		if l == 0 {
+			return off + 1, true
+		}
+		if l&0xC0 == 0xC0 {
+			if off+1 >= len(msg) {
+				return 0, false
+			}
+			return off + 2, true
+		}
+		off += 1 + l
+	}
+	return 0, false
+}
+
+func dnsAResponse(query []byte, ip [4]byte, truncated bool) []byte {
+	if len(query) < 12 {
+		return nil
+	}
+	qend, ok := skipDNSName(query, 12)
+	if !ok || qend+4 > len(query) {
+		return nil
+	}
+	qend += 4
+	question := query[12:qend]
+
+	flags := uint16(0x8400) // QR + AA
+	if truncated {
+		flags |= 0x0200 // TC
+	}
+	if query[2]&0x01 != 0 {
+		flags |= 0x0100 // RD
+	}
+
+	resp := make([]byte, 0, 64)
+	resp = append(resp, query[0], query[1])
+	resp = append(resp, byte(flags>>8), byte(flags))
+	resp = append(resp, 0, 1) // QDCOUNT
+	if truncated {
+		resp = append(resp, 0, 0) // ANCOUNT
+	} else {
+		resp = append(resp, 0, 1)
+	}
+	resp = append(resp, 0, 0, 0, 0) // NSCOUNT + ARCOUNT
+	resp = append(resp, question...)
+	if !truncated {
+		resp = append(resp,
+			0xC0, 0x0C, // name pointer to question
+			0, 1, // TYPE A
+			0, 1, // CLASS IN
+			0, 0, 0, 60, // TTL
+			0, 4, // RDLENGTH
+			ip[0], ip[1], ip[2], ip[3],
+		)
+	}
+	return resp
+}
+
+func writeTCPDNS(conn net.Conn, msg []byte) error {
+	var hdr [2]byte
+	hdr[0] = byte(len(msg) >> 8)
+	hdr[1] = byte(len(msg))
+	if _, err := conn.Write(hdr[:]); err != nil {
+		return err
+	}
+	_, err := conn.Write(msg)
+	return err
+}
+
+func readTCPDNS(conn net.Conn) ([]byte, error) {
+	var hdr [2]byte
+	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
+		return nil, err
+	}
+	n := int(hdr[0])<<8 | int(hdr[1])
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func startTruncatingDNS(t *testing.T, ip [4]byte) (addr string, udpCount, tcpCount *atomic.Int64, stop func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen tcp: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	pc, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		_ = ln.Close()
+		t.Fatalf("ListenPacket udp: %v", err)
+	}
+
+	var udpN, tcpN atomic.Int64
+	udpDone := make(chan struct{})
+	tcpDone := make(chan struct{})
+
+	go func() {
+		defer close(udpDone)
+		buf := make([]byte, 512)
+		for {
+			n, src, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			udpN.Add(1)
+			resp := dnsAResponse(buf[:n], ip, true)
+			if resp != nil {
+				_, _ = pc.WriteTo(resp, src)
+			}
+		}
+	}()
+
+	go func() {
+		defer close(tcpDone)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			tcpN.Add(1)
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+				q, err := readTCPDNS(c)
+				if err != nil {
+					return
+				}
+				resp := dnsAResponse(q, ip, false)
+				if resp != nil {
+					_ = writeTCPDNS(c, resp)
+				}
+			}(conn)
+		}
+	}()
+
+	return ln.Addr().String(), &udpN, &tcpN, func() {
+		_ = ln.Close()
+		_ = pc.Close()
+		<-udpDone
+		<-tcpDone
+	}
+}
+
+func TestResolveTypesTCPFallbackOnTruncation(t *testing.T) {
+	ip := [4]byte{192, 0, 2, 1}
+	addr, udpN, tcpN, stop := startTruncatingDNS(t, ip)
+	defer stop()
+
+	r := NewResolver(2*time.Second, addr)
+	recs, _, err := ResolveTypes(context.Background(), r, "big.example.com.", 2*time.Second, []string{"A"})
+	if err != nil {
+		t.Fatalf("ResolveTypes: %v", err)
+	}
+	if len(recs) != 1 || recs[0].Type != "A" || recs[0].Value != "192.0.2.1" {
+		t.Fatalf("records = %v, want A 192.0.2.1", recs)
+	}
+	if udpN.Load() == 0 {
+		t.Fatal("expected a truncated UDP query")
+	}
+	if tcpN.Load() == 0 {
+		t.Fatal("expected TCP fallback after TC=1")
 	}
 }

@@ -73,11 +73,9 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
     *   Function: `dns.ResolveDomain(ctx, domain, timeout, dnsServer, verbose) bool` - convenience wrapper returning a boolean, used by wildcard detection.
     *   Function: `dns.ResolveDomainWithRetry(ctx, domain, timeout, dnsServer, verbose, maxAttempts, types) ([]Record, Outcome)` - wraps the lookup with configurable retry logic and linear backoff between attempts, returning the resolved records and a classified outcome (`Found`, `NXDomain`, `Timeout`, `Refused`, `Other`). `dns.Classify(err)` maps a resolver error onto that outcome so callers can tell a definitive negative apart from an infrastructure failure.
     *   Function: `dns.CheckWildcard(ctx, domain, timeout, dnsServer) (bool, error)` - resolves two random subdomains to detect wildcard DNS records.
-    *   `net.Resolver{}`: A custom DNS resolver is configured.
+    *   `net.Resolver{}`: A custom DNS resolver is configured once per scan (`dns.NewResolver`) and reused for every lookup.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.
-        *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function is provided to control the connection to the DNS server, using the user-specified `dnsServer` address.
-            *   `net.Dialer{Timeout: timeout}`: A `Dialer` is created with the user-specified timeout.
-            *   `d.DialContext(ctx, "udp", dnsServer)`: Establishes a UDP connection to the configured DNS server.
+        *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function connects to the configured `dnsServer`. It honors `network` (`udp` or `tcp`) so a truncated UDP response (TC=1) can fall back to TCP. The `address` argument is ignored in favor of the configured server.
     *   `resolver.LookupIP` / `resolver.LookupCNAME` (inside `ResolveTypes`): Perform the per-type DNS lookups for the requested record types. The context is derived from the caller via `context.WithTimeout(ctx, timeout)`, so both the per-query timeout and SIGINT cancellation are respected.
     *   A subdomain is treated as resolved when at least one record is returned for the requested types; `ResolveDomain` collapses this to a boolean for wildcard detection.
 *   **Interactions**: Workers call `dns.ResolveDomainWithRetry`, which delegates to `dns.ResolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.

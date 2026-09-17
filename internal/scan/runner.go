@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,11 +28,12 @@ type Config struct {
 	Attempts    int
 	Force       bool
 	Verbose     bool
-	Rate        int      // max DNS queries per second across all workers (0 = unlimited)
-	Types       []string // record types to look up (A, AAAA, CNAME); empty = A,AAAA
-	Recursive   bool     // enumerate subdomains of discovered subdomains
-	Depth       int      // max recursion depth (1 = no recursion)
-	NoAbort     bool     // keep scanning after the reliability guard fires
+	Rate        int           // max DNS queries per second across all workers (0 = unlimited)
+	Types       []string      // record types to look up (A, AAAA, CNAME); empty = A,AAAA
+	Recursive   bool          // enumerate subdomains of discovered subdomains
+	Depth       int           // max recursion depth (1 = no recursion)
+	NoAbort     bool          // keep scanning after the reliability guard fires
+	Resolver    *net.Resolver // reused across lookups; nil means scan.Run constructs one
 
 	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
 	// Tests inject classified outcomes through this field without network I/O.
@@ -140,9 +142,13 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		maxDepth = 1
 	}
 
+	if cfg.Resolver == nil {
+		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
+	}
+
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
-		isWildcard, err := dns.CheckWildcard(ctx, cfg.Domain, cfg.Timeout, cfg.DNSServer)
+		isWildcard, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout)
 		if err != nil {
 			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error()}
 			return
@@ -321,7 +327,7 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-
 			outcome = dns.OutcomeNXDomain
 		}
 	default:
-		records, outcome = dns.ResolveDomainWithRetry(ctx, j.domain, cfg.Timeout, cfg.DNSServer, cfg.Verbose, cfg.Attempts, cfg.Types)
+		records, outcome = dns.ResolveDomainWithRetry(ctx, cfg.Resolver, j.domain, cfg.Timeout, cfg.Verbose, cfg.Attempts, cfg.Types)
 	}
 
 	st.add(outcome)
