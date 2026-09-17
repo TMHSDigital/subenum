@@ -5,83 +5,60 @@ title: Home
 
 > **Authorized use only.** Only scan domains you own or have explicit written permission to test.
 
----
-
 ## What it does
 
-subenum brute-forces subdomains by resolving a wordlist against a target domain using a concurrent worker pool. Results stream to stdout - pipe-clean, no noise. Everything else (progress, diagnostics, errors) goes to stderr.
+subenum brute-forces subdomains by resolving a wordlist against a target domain using a concurrent worker pool. Results stream to stdout — pipe-clean, no noise. Progress, diagnostics, and errors go to stderr.
 
 <div class="screenshot-wrap">
   <figure>
     <img src="assets/tui-form.png" alt="subenum TUI - Configure Scan">
-    <figcaption>Interactive TUI - launch with <code>./subenum -tui</code> or <code>make tui</code></figcaption>
+    <figcaption>Interactive TUI — <code>./subenum -tui</code> or <code>make tui</code></figcaption>
   </figure>
 </div>
 
----
-
 ## Features
 
-<div class="feature-grid">
-  <div class="feature-card">
-    <strong>Worker Pool</strong>
-    <span>Spawn N goroutines for parallel DNS resolution with a configurable concurrency ceiling.</span>
+<dl class="feature-list">
+  <div>
+    <dt>Worker pool</dt>
+    <dd>N goroutines for parallel DNS resolution. Ceiling via <code>-t</code>.</dd>
   </div>
-  <div class="feature-card">
-    <strong>Wildcard Detection</strong>
-    <span>Double-probe check before scanning; exits early unless <code>-force</code> is set. With <code>-force</code>, answers matching the wildcard fingerprint are dropped. Recursive scans skip expanding wildcard branches.</span>
+  <div>
+    <dt>Wildcard detection</dt>
+    <dd>Double-probe before scanning; exits unless <code>-force</code>. Matching answers are dropped. Recursive scans skip wildcard branches.</dd>
   </div>
-  <div class="feature-card">
-    <strong>Interactive TUI</strong>
-    <span>Form-based config and live-scrolling results via <code>-tui</code>. Session values persisted to <code>~/.config/subenum/last.json</code>.</span>
+  <div>
+    <dt>Interactive TUI</dt>
+    <dd>Form-based config and live-scrolling results via <code>-tui</code>. Last session saved to <code>~/.config/subenum/last.json</code>.</dd>
   </div>
-  <div class="feature-card">
-    <strong>Simulation Mode</strong>
-    <span>Generate synthetic DNS results at a configurable hit rate - zero network I/O. Safe for demos and testing.</span>
+  <div>
+    <dt>Simulation</dt>
+    <dd>Synthetic DNS results at a configurable hit rate — zero network I/O. For demos and tests, not recon.</dd>
   </div>
-  <div class="feature-card">
-    <strong>Output Formats</strong>
-    <span>Emit results as <code>text</code>, <code>json</code> (array of subdomain plus typed records), or <code>csv</code> via <code>-format</code>.</span>
+  <div>
+    <dt>Output formats</dt>
+    <dd><code>text</code>, <code>json</code> (subdomain plus typed records), or <code>csv</code> via <code>-format</code>.</dd>
   </div>
-  <div class="feature-card">
-    <strong>Rate Limiting</strong>
-    <span>Cap total DNS queries per second across the worker pool with <code>-rate</code> (context-aware, stays responsive to Ctrl+C).</span>
+  <div>
+    <dt>Pipe-clean stdout</dt>
+    <dd>Resolved names on stdout only. Compose with other tools; Ctrl+C drains in-flight workers and flushes partial results.</dd>
   </div>
-  <div class="feature-card">
-    <strong>Record Types</strong>
-    <span>Look up and filter by <code>A</code>, <code>AAAA</code>, or <code>CNAME</code> records with <code>-type</code>.</span>
-  </div>
-  <div class="feature-card">
-    <strong>Recursive Enumeration</strong>
-    <span>Enumerate subdomains of discovered subdomains with <code>-recursive</code> and a <code>-depth</code> cap, with loop and duplicate protection.</span>
-  </div>
-  <div class="feature-card">
-    <strong>Pipe-Friendly Output</strong>
-    <span>Resolved subdomains stream to stdout only. Progress and diagnostics go to stderr. Compose freely with other tools.</span>
-  </div>
-  <div class="feature-card">
-    <strong>Graceful Shutdown</strong>
-    <span>Trap SIGINT/SIGTERM, drain in-flight workers, flush partial results before exit.</span>
-  </div>
-  <div class="feature-card">
-    <strong>Retry with Backoff</strong>
-    <span>Configurable DNS resolution attempts per subdomain with linear backoff for flaky networks.</span>
-  </div>
-  <div class="feature-card">
-    <strong>Input Validation</strong>
-    <span>RFC-compliant domain syntax and strict <code>ip:port</code> format enforcement on startup.</span>
-  </div>
-  <div class="feature-card">
-    <strong>Scan Accounting</strong>
-    <span>Every query is counted as resolved, nxdomain, timeout, refused, or other. After 200 queries a greater than 20% infrastructure failure rate aborts unless <code>-no-abort</code> is set.</span>
-  </div>
-  <div class="feature-card">
-    <strong>Query Cap</strong>
-    <span><code>-max-queries</code> stops admitting work. Recursive scans warn about the theoretical ceiling and refuse to start above 1e7 jobs unless <code>-max-queries</code> or <code>-force</code> is set.</span>
-  </div>
-</div>
+</dl>
 
----
+## Flags
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `-w <file>` | required | Wordlist, one prefix per line |
+| `-t <n>` | `100` | Concurrent workers |
+| `-dns-server <ip:port>` | `8.8.8.8:53` | Resolver address |
+| `-force` | `false` | Continue on wildcard DNS |
+| `-format <fmt>` | `text` | `text`, `json`, or `csv` |
+| `-rate <qps>` | `0` | Max queries per second (`0` = unlimited) |
+| `-type <list>` | `A,AAAA` | Record types: `A`, `AAAA`, `CNAME` |
+| `-recursive` | `false` | Enumerate children of hits |
+| `-simulate` | `false` | Synthetic results, no DNS |
+| `-tui` | `false` | Interactive terminal UI |
 
 ## Quick Start
 
@@ -93,21 +70,11 @@ cd subenum
 go build -buildvcs=false -o subenum
 ```
 
-**Run a scan:**
+**Scan / TUI / simulate:**
 
 ```bash
 ./subenum -w wordlist.txt example.com
-```
-
-**Launch the TUI:**
-
-```bash
 ./subenum -tui
-```
-
-**Simulation (zero network I/O):**
-
-```bash
 ./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt example.com
 ```
 
@@ -118,19 +85,14 @@ docker build -t subenum .
 docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com
 ```
 
----
-
-<div style="text-align:center">
-
 ## Documentation
-
-</div>
 
 <div class="doc-nav">
   <a href="ARCHITECTURE.html">Architecture</a>
   <a href="DEVELOPER_GUIDE.html">Developer Guide</a>
   <a href="docker.html">Docker</a>
   <a href="CONTRIBUTING.html">Contributing</a>
+  <a href="ROADMAP.html">Roadmap</a>
   <a href="https://github.com/TMHSDigital/subenum/blob/main/examples/advanced_usage.md">Advanced Usage</a>
   <a href="https://github.com/TMHSDigital/subenum/blob/main/CHANGELOG.md">Changelog</a>
 </div>

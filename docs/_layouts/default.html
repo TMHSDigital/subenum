@@ -5,355 +5,53 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% if page.title == "Home" %}{{ site.title }} - {{ site.description }}{% else %}{{ page.title }} - {{ site.title }}{% endif %}</title>
-    <link rel="stylesheet" href="{{ '/assets/css/style.css?v=' | append: site.github.build_revision | relative_url }}">
-    <style>
-      /* ── Nav bar ── */
-      .site-nav {
-        background: #1b2027;
-        border-bottom: 1px solid #2d333b;
-        padding: 0 24px;
-        display: flex;
-        align-items: center;
-        gap: 0;
-        flex-wrap: wrap;
-      }
-      .site-nav a {
-        display: inline-block;
-        padding: 12px 16px;
-        font-size: 13px;
-        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        color: #8b949e;
-        text-decoration: none;
-        letter-spacing: 0.04em;
-        transition: color 0.15s;
-        border-bottom: 2px solid transparent;
-      }
-      .site-nav a:hover,
-      .site-nav a.active {
-        color: #58a6ff;
-        border-bottom-color: #58a6ff;
-      }
-      .site-nav .nav-brand {
-        color: #e6edf3;
-        font-weight: 700;
-        margin-right: 16px;
-        border-bottom: none !important;
-      }
-      .site-nav .nav-brand span { color: #58a6ff; }
-      .site-nav .nav-right {
-        margin-left: auto;
-      }
-      .site-nav .nav-right a {
-        background: #238636;
-        color: #fff !important;
-        border-radius: 6px;
-        padding: 6px 14px;
-        border-bottom: none !important;
-        font-size: 12px;
-      }
-      .site-nav .nav-right a:hover { background: #2ea043; }
-
-      /* ── Hero overrides ── */
-      .page-header {
-        padding: 5rem 2rem 4rem;
-        background: linear-gradient(160deg, #0d1117 0%, #161b22 60%, #1a2332 100%);
-      }
-      /* Hide Cayman's default title/tagline - we render our own */
-      .page-header .project-name,
-      .page-header .project-tagline { display: none; }
-
-      .hero-logo {
-        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        font-size: 3.6rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-        letter-spacing: 0.04em;
-        line-height: 1;
-      }
-      .hero-logo .prompt { color: #3fb950; }
-      .hero-logo .word   { color: #e6edf3; }
-      .hero-logo .accent { color: #58a6ff; }
-      .hero-logo .cursor {
-        color: #58a6ff;
-        animation: blink 1.1s step-end infinite;
-      }
-      @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-      .hero-tagline {
-        font-family: "SFMono-Regular", Consolas, monospace;
-        font-size: 0.82rem;
-        color: #8b949e;
-        letter-spacing: 0.07em;
-        margin-bottom: 2rem;
-      }
-      .hero-badges {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 4px;
-        margin-bottom: 1.6rem;
-      }
-      .hero-badges img { display: block; }
-      .btn-hero {
-        display: inline-block;
-        margin: 0.3rem 0.4rem;
-        padding: 10px 22px;
-        border-radius: 6px;
-        font-size: 13px;
-        font-weight: 600;
-        text-decoration: none;
-        border: 1px solid rgba(255,255,255,0.15);
-        color: #e6edf3 !important;
-        background: rgba(255,255,255,0.07);
-        transition: background 0.15s, border-color 0.15s;
-      }
-      .btn-hero:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.3); }
-      .btn-hero-primary { background: #238636; border-color: #2ea043; }
-      .btn-hero-primary:hover { background: #2ea043; }
-
-      /* ── Content overrides ── */
-      /* Set base text color at the container level to defeat Cayman's teal cascade */
-      .main-content,
-      .main-content * {
-        color: #24292f;
-      }
-      .main-content {
-        max-width: 920px;
-      }
-      /* Headings */
-      .main-content h2 {
-        border-bottom: 1px solid #d0d7de;
-        padding-bottom: 0.4rem;
-        margin-top: 2rem;
-      }
-      .main-content h3 {
-        margin-top: 1.5rem;
-      }
-      /* Blockquote */
-      .main-content blockquote {
-        border-left: 4px solid #d0d7de;
-        padding: 0.6rem 1rem;
-        background: #f6f8fa;
-        border-radius: 0 4px 4px 0;
-        margin: 1rem 0;
-      }
-      .main-content blockquote p { margin: 0; color: #57606a; }
-      /* Links - restore blue on top of the * reset */
-      .main-content a { color: #0969da !important; }
-      .main-content a:hover { text-decoration: underline; }
-      /* Inline code */
-      .main-content code {
-        background: #eef0f3;
-        border: 1px solid #d0d7de;
-        border-radius: 4px;
-        padding: 1px 5px;
-        font-size: 0.88em;
-      }
-      /* Block code - distinct background from page */
-      .main-content pre {
-        background: #f0f2f5;
-        border: 1px solid #d0d7de;
-        border-radius: 6px;
-        padding: 1rem 1.2rem;
-        overflow-x: auto;
-      }
-      .main-content pre code {
-        background: none;
-        border: none;
-        padding: 0;
-        font-size: 0.85em;
-      }
-      /* Tables */
-      .main-content table {
-        border-collapse: collapse;
-        width: 100%;
-        margin: 1rem 0;
-      }
-      .main-content th {
-        background: #f0f2f5;
-        border: 1px solid #d0d7de;
-        padding: 8px 12px;
-        text-align: left;
-        font-size: 0.85rem;
-      }
-      .main-content td {
-        border: 1px solid #d0d7de;
-        padding: 7px 12px;
-        font-size: 0.85rem;
-      }
-      .main-content tr:nth-child(even) td { background: #f6f8fa; }
-
-      /* ── Feature grid ── */
-      .feature-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin: 1.2rem 0 2rem;
-      }
-      @media (max-width: 600px) { .feature-grid { grid-template-columns: 1fr; } }
-      .feature-card {
-        background: #161b22;
-        border: 1px solid #21262d;
-        border-radius: 8px;
-        padding: 14px 16px;
-      }
-      .feature-card strong {
-        display: block;
-        color: #e6edf3;
-        font-size: 0.85rem;
-        margin-bottom: 4px;
-        letter-spacing: 0.02em;
-      }
-      .feature-card span {
-        font-size: 0.8rem;
-        color: #8b949e;
-        line-height: 1.5;
-      }
-
-      /* ── Nav links strip ── */
-      .doc-nav {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        align-items: center;
-        gap: 8px;
-        margin: 1rem auto 1.5rem;
-        padding: 0;
-        width: 100%;
-        text-align: center;
-      }
-      .doc-nav a {
-        background: #f0f2f5;
-        border: 1px solid #d0d7de;
-        border-radius: 6px;
-        padding: 6px 14px;
-        font-size: 12px;
-        font-family: "SFMono-Regular", Consolas, monospace;
-        color: #0969da !important;
-        text-decoration: none !important;
-        transition: background 0.15s, border-color 0.15s;
-        white-space: nowrap;
-      }
-      .doc-nav a:hover {
-        background: #e6edf3;
-        border-color: #0969da;
-      }
-
-      /* ── Screenshot ── */
-      .screenshot-wrap {
-        text-align: center;
-        margin: 1.5rem 0;
-      }
-      .screenshot-wrap img {
-        max-width: 100%;
-        border-radius: 8px;
-        border: 1px solid #21262d;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-      }
-      .screenshot-wrap figcaption {
-        font-size: 0.78rem;
-        color: #8b949e;
-        margin-top: 8px;
-        font-family: "SFMono-Regular", Consolas, monospace;
-      }
-
-      /* ── Footer ── */
-      .site-footer {
-        border-top: 1px solid #d0d7de !important;
-        background: #f6f8fa !important;
-        padding: 1.4rem 2rem !important;
-        font-size: 0.8rem !important;
-        color: #57606a !important;
-        text-align: center !important;
-      }
-      .site-footer-owner { margin-bottom: 0.25rem; }
-      .site-footer-owner a,
-      .site-footer-credits a { color: #0969da !important; }
-      .site-footer-credits { margin-top: 0.1rem; }
-
-      /* ── Copy button ── */
-      .code-block-wrap {
-        position: relative;
-      }
-      .copy-btn {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        background: #e6edf3;
-        border: 1px solid #d0d7de;
-        border-radius: 5px;
-        padding: 3px 9px;
-        font-size: 11px;
-        font-family: "SFMono-Regular", Consolas, monospace;
-        color: #57606a;
-        cursor: pointer;
-        opacity: 0;
-        transition: opacity 0.15s, background 0.15s;
-        line-height: 1.6;
-        user-select: none;
-      }
-      .code-block-wrap:hover .copy-btn { opacity: 1; }
-      .copy-btn.copied {
-        background: #dafbe1;
-        border-color: #2ea043;
-        color: #116329;
-        opacity: 1;
-      }
-
-      /* ── Screenshot ── */
-      .screenshot-wrap {
-        text-align: center;
-        margin: 1.8rem 0;
-      }
-      .screenshot-wrap img {
-        max-width: 100%;
-        border-radius: 8px;
-        border: 1px solid #d0d7de;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.12);
-      }
-      .screenshot-wrap figcaption {
-        font-size: 0.78rem;
-        color: #57606a;
-        margin-top: 8px;
-        font-family: "SFMono-Regular", Consolas, monospace;
-      }
-    </style>
+    <link rel="icon" href="{{ '/assets/favicon.svg' | relative_url }}" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="{{ '/assets/css/site.css' | relative_url }}">
   </head>
   <body>
+    <a class="skip-link" href="#content">Skip to content</a>
 
-    <!-- ── Nav bar ── -->
-    <nav class="site-nav">
-      <a class="nav-brand" href="{{ '/' | relative_url }}">sub<span>enum</span></a>
-      <a href="{{ '/' | relative_url }}"{% if page.url == '/' or page.url == '/index.html' %} class="active"{% endif %}>Home</a>
-      <a href="{{ '/ARCHITECTURE.html' | relative_url }}"{% if page.title == 'Architecture' %} class="active"{% endif %}>Architecture</a>
-      <a href="{{ '/DEVELOPER_GUIDE.html' | relative_url }}"{% if page.title == 'Developer Guide' %} class="active"{% endif %}>Dev Guide</a>
-      <a href="{{ '/docker.html' | relative_url }}"{% if page.title == 'Docker Usage' %} class="active"{% endif %}>Docker</a>
-      <a href="{{ '/CONTRIBUTING.html' | relative_url }}"{% if page.title == 'Contributing' %} class="active"{% endif %}>Contributing</a>
-      <div class="nav-right">
-        <a href="https://github.com/TMHSDigital/subenum/releases/latest" target="_blank">Download v0.6.0</a>
+    <nav class="site-nav" aria-label="Site">
+      <a class="nav-brand" href="{{ '/' | relative_url }}"><span class="prompt">$ </span>sub<span class="accent">enum</span></a>
+      <div class="nav-links">
+        <a href="{{ '/' | relative_url }}"{% if page.url == '/' or page.url == '/index.html' %} class="active"{% endif %}>Home</a>
+        <a href="{{ '/ARCHITECTURE.html' | relative_url }}"{% if page.title == 'Architecture' %} class="active"{% endif %}>Architecture</a>
+        <a href="{{ '/DEVELOPER_GUIDE.html' | relative_url }}"{% if page.title == 'Developer Guide' %} class="active"{% endif %}>Dev Guide</a>
+        <a href="{{ '/docker.html' | relative_url }}"{% if page.title == 'Docker Usage' %} class="active"{% endif %}>Docker</a>
       </div>
+      <a class="nav-github" href="https://github.com/TMHSDigital/subenum">GitHub</a>
     </nav>
 
-    <!-- ── Hero ── -->
-    <header class="page-header" role="banner">
-      <div class="hero-logo">
-        <span class="prompt">$ </span><span class="word">sub</span><span class="accent">enum</span><span class="cursor">▌</span>
-      </div>
-      <p class="hero-tagline">fast concurrent subdomain enumeration // written in Go</p>
+    {% if page.title == "Home" %}
+    <header class="hero">
+      <div class="hero-inner">
+        <div class="hero-logo">
+          <span class="prompt">$ </span><span class="word">sub</span><span class="accent">enum</span><span class="cursor">▌</span>
+        </div>
+        <p class="hero-tagline">fast concurrent subdomain enumeration // written in Go</p>
 
-      <div class="hero-badges">
-        <img src="https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main&style=flat-square&label=build" alt="build">
-        <img src="https://img.shields.io/github/v/release/TMHSDigital/subenum?style=flat-square" alt="release">
-        <img src="https://img.shields.io/badge/Go-1.24.2+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="go">
-        <img src="https://img.shields.io/badge/License-GPLv3-blue?style=flat-square" alt="license">
-        <img src="https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=flat-square&v=0.6.0" alt="go report">
-      </div>
+        <pre class="hero-commands">$ ./subenum -w wordlist.txt example.com
+$ ./subenum -tui
+$ ./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt example.com</pre>
 
-      <a href="https://github.com/TMHSDigital/subenum/releases/latest" class="btn-hero btn-hero-primary" target="_blank">Download latest release</a>
-      <a href="https://github.com/TMHSDigital/subenum" class="btn-hero" target="_blank">View on GitHub</a>
-      <a href="{{ '/ARCHITECTURE.html' | relative_url }}" class="btn-hero">Architecture</a>
+        <div class="query-ledger" aria-label="Sample scan output">
+          <div class="ledger-row nx"><span class="name">www.example.com</span><span class="rr">NXDOMAIN</span><span class="data"></span></div>
+          <div class="ledger-row hit"><span class="name">mail.example.com</span><span class="rr">A</span><span class="data">203.0.113.10</span></div>
+          <div class="ledger-row hit"><span class="name">api.example.com</span><span class="rr">AAAA</span><span class="data">2001:db8::53</span></div>
+          <div class="ledger-row hit"><span class="name">staging.example.com</span><span class="rr">CNAME</span><span class="data">api.example.com</span></div>
+        </div>
+
+        <div class="hero-actions">
+          <a href="https://github.com/TMHSDigital/subenum/releases/latest" class="btn-hero btn-hero-primary">Download</a>
+          <a href="{{ '/ARCHITECTURE.html' | relative_url }}" class="btn-hero">Architecture</a>
+        </div>
+      </div>
     </header>
+    {% endif %}
 
-    <!-- ── Content ── -->
     <main id="content" class="main-content" role="main">
       {{ content }}
       {% if page.title != "Home" %}
@@ -367,6 +65,8 @@
         <div class="site-footer-credits">
           <a href="{{ '/CONTRIBUTING.html' | relative_url }}">Contributing</a>
           &nbsp;&middot;&nbsp;
+          <a href="{{ '/ROADMAP.html' | relative_url }}">Roadmap</a>
+          &nbsp;&middot;&nbsp;
           <a href="https://github.com/TMHSDigital/subenum/blob/main/SECURITY.md">Security</a>
           &nbsp;&middot;&nbsp;
           <a href="https://github.com/TMHSDigital/subenum/blob/main/LICENSE">GPL-3.0</a>
@@ -375,14 +75,14 @@
     </main>
 
     <script>
-      // Click-to-copy for all code blocks
-      document.querySelectorAll('pre').forEach(function(pre) {
+      document.querySelectorAll('.main-content pre').forEach(function(pre) {
         var wrap = document.createElement('div');
         wrap.className = 'code-block-wrap';
         pre.parentNode.insertBefore(wrap, pre);
         wrap.appendChild(pre);
 
         var btn = document.createElement('button');
+        btn.type = 'button';
         btn.className = 'copy-btn';
         btn.textContent = 'copy';
         wrap.appendChild(btn);
@@ -391,7 +91,7 @@
           var code = pre.querySelector('code');
           var text = code ? code.innerText : pre.innerText;
           navigator.clipboard.writeText(text).then(function() {
-            btn.textContent = 'copied!';
+            btn.textContent = 'copied';
             btn.classList.add('copied');
             setTimeout(function() {
               btn.textContent = 'copy';
