@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -212,5 +213,53 @@ func TestClassify(t *testing.T) {
 				t.Errorf("Classify() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// startNXDomainUDP serves NXDOMAIN for every query on 127.0.0.1:0 and counts
+// datagrams received. The test must request a single record type: ResolveTypes
+// still issues one lookup per requested type per attempt.
+func startNXDomainUDP(t *testing.T) (addr string, queries *atomic.Int64, stop func()) {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket: %v", err)
+	}
+	var n atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 512)
+		for {
+			nread, src, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			n.Add(1)
+			if nread < 12 {
+				continue
+			}
+			resp := append([]byte(nil), buf[:nread]...)
+			resp[2] |= 0x80                   // QR
+			resp[3] = (resp[3] & 0xF0) | 0x03 // NXDOMAIN
+			_, _ = pc.WriteTo(resp, src)
+		}
+	}()
+	return pc.LocalAddr().String(), &n, func() {
+		_ = pc.Close()
+		<-done
+	}
+}
+
+func TestResolveDomainWithRetryNXDomainNoRetry(t *testing.T) {
+	addr, queries, stop := startNXDomainUDP(t)
+	defer stop()
+
+	_, outcome := ResolveDomainWithRetry(context.Background(), "nope.example.com.", time.Second, addr, false, 3, []string{"A"})
+	if outcome != OutcomeNXDomain {
+		t.Fatalf("outcome = %v, want NXDomain", outcome)
+	}
+	if got := queries.Load(); got != 1 {
+		t.Fatalf("queries = %d, want 1 (NXDOMAIN must not be retried)", got)
 	}
 }

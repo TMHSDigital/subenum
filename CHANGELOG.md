@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `dns.ResolveDomainWithRetry` returns `([]Record, Outcome)` instead of `([]Record, bool)`, so callers can distinguish NXDOMAIN from infrastructure failure.
+- `ResolveDomainWithRetry` no longer retries NXDOMAIN. Timeouts, refusals, and unknown errors still retry up to `-attempts`.
 - CLI `EventError` handling now drains the event channel so a reliability abort still delivers `EventDone` with partial stats. Wildcard-without-`-force` still skips structured `Finish`.
 - TUI form now validates domain syntax and DNS server `ip:port` format up front, matching the CLI. The validators were extracted into a shared `internal/validate` package used by both entry points (previously the form only checked for non-empty values).
 
@@ -41,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added output-writer coverage: file-only writer stdout suppression, simulate-mode text prefix, and the CSV empty-record fallback row.
 - Moved the validator tests alongside the new `internal/validate` package.
 - Added resolver `Classify` tests and simulate-mode scan tests for outcome accounting, the reliability abort, and `-no-abort`.
+- Added a local UDP NXDOMAIN responder test proving `-attempts 3` issues exactly one query for a definitive negative.
 
 ## [0.6.0] - 2026-06-03
 

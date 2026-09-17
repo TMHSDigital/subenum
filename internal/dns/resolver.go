@@ -180,6 +180,9 @@ func ResolveDomainWithRetry(ctx context.Context, domain string, timeout time.Dur
 			// Lookup succeeded but produced no records of the requested types.
 			last = OutcomeOther
 		}
+		if last == OutcomeNXDomain {
+			return nil, last
+		}
 		if attempt < maxAttempts-1 {
 			select {
 			case <-time.After(time.Duration(50*(attempt+1)) * time.Millisecond):

@@ -194,4 +194,4 @@ When the `-o` flag is provided, resolved subdomains are written to the specified
 
 ### 4.7. Retry Mechanism
 
-The `-attempts` flag (default: 1) controls the total number of DNS resolution attempts per subdomain. A value of 1 means no retries. A short linear backoff delay is applied between attempts to handle transient DNS failures. The deprecated `-retries` flag is still accepted as an alias but prints a warning to stderr.
+The `-attempts` flag (default: 1) controls the total number of DNS resolution attempts per subdomain. A value of 1 means no retries. A short linear backoff delay is applied between attempts to handle transient DNS failures (timeout, refused, other). NXDOMAIN is a definitive negative and is not retried. The deprecated `-retries` flag is still accepted as an alias but prints a warning to stderr.
