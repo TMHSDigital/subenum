@@ -28,6 +28,7 @@ func TestScanViewSummaryIncludesStats(t *testing.T) {
 		"timeout 5",
 		"refused 3",
 		"other 0",
+		"wildcard-filtered",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)

@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -389,5 +390,261 @@ func TestRunReliabilityGuardNoAbort(t *testing.T) {
 	}
 	if done.Stats.Refused != int64(n) {
 		t.Errorf("Refused = %d, want %d", done.Stats.Refused, n)
+	}
+}
+
+func TestRecordsSubset(t *testing.T) {
+	fp := []dns.Record{{Type: "A", Value: "192.0.2.99"}, {Type: "AAAA", Value: "::1"}}
+	if !recordsSubset([]dns.Record{{Type: "A", Value: "192.0.2.99"}}, fp) {
+		t.Error("A-only should be a subset of A+AAAA fingerprint")
+	}
+	if recordsSubset([]dns.Record{{Type: "A", Value: "192.0.2.1"}}, fp) {
+		t.Error("different IP must not match")
+	}
+	if recordsSubset(fp, nil) {
+		t.Error("empty fingerprint must not filter")
+	}
+}
+
+func skipDNSName(msg []byte, off int) (int, bool) {
+	for off < len(msg) {
+		l := int(msg[off])
+		if l == 0 {
+			return off + 1, true
+		}
+		if l&0xC0 == 0xC0 {
+			if off+1 >= len(msg) {
+				return 0, false
+			}
+			return off + 2, true
+		}
+		off += 1 + l
+	}
+	return 0, false
+}
+
+func dnsQNameType(query []byte) (string, uint16, bool) {
+	if len(query) < 12 {
+		return "", 0, false
+	}
+	var labels []string
+	off := 12
+	for off < len(query) {
+		l := int(query[off])
+		if l == 0 {
+			off++
+			break
+		}
+		if l&0xC0 == 0xC0 {
+			return "", 0, false
+		}
+		if off+1+l > len(query) {
+			return "", 0, false
+		}
+		labels = append(labels, string(query[off+1:off+1+l]))
+		off += 1 + l
+	}
+	if off+2 > len(query) {
+		return "", 0, false
+	}
+	qtype := uint16(query[off])<<8 | uint16(query[off+1])
+	return strings.ToLower(strings.Join(labels, ".")), qtype, true
+}
+
+func dnsAResponse(query []byte, ip [4]byte) []byte {
+	if len(query) < 12 {
+		return nil
+	}
+	qend, ok := skipDNSName(query, 12)
+	if !ok || qend+4 > len(query) {
+		return nil
+	}
+	qend += 4
+	flags := uint16(0x8400)
+	if query[2]&0x01 != 0 {
+		flags |= 0x0100
+	}
+	resp := make([]byte, 0, 64)
+	resp = append(resp, query[0], query[1])
+	resp = append(resp, byte(flags>>8), byte(flags))
+	resp = append(resp, 0, 1, 0, 1, 0, 0, 0, 0)
+	resp = append(resp, query[12:qend]...)
+	resp = append(resp, 0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, ip[0], ip[1], ip[2], ip[3])
+	return resp
+}
+
+func dnsNXDomain(query []byte) []byte {
+	if len(query) < 12 {
+		return nil
+	}
+	resp := append([]byte(nil), query...)
+	resp[2] |= 0x80
+	resp[3] = (resp[3] & 0xF0) | 0x03
+	return resp
+}
+
+func startUDPDNS(t *testing.T, handle func(name string, qtype uint16) ([4]byte, bool)) (addr string, stop func()) {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 512)
+		for {
+			n, src, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			q := buf[:n]
+			name, qtype, ok := dnsQNameType(q)
+			if !ok {
+				continue
+			}
+			var resp []byte
+			if qtype == 1 {
+				if ip, hit := handle(name, qtype); hit {
+					resp = dnsAResponse(q, ip)
+				} else {
+					resp = dnsNXDomain(q)
+				}
+			} else {
+				resp = dnsNXDomain(q)
+			}
+			if resp != nil {
+				_, _ = pc.WriteTo(resp, src)
+			}
+		}
+	}()
+	return pc.LocalAddr().String(), func() {
+		_ = pc.Close()
+		<-done
+	}
+}
+
+func isProbeLabel(name, parent string) bool {
+	suffix := "." + parent
+	if !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	label := strings.TrimSuffix(name, suffix)
+	if strings.Contains(label, ".") || len(label) != 32 {
+		return false
+	}
+	for _, c := range label {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func TestRunWildcardFingerprintFilters(t *testing.T) {
+	wild := [4]byte{192, 0, 2, 99}
+	addr, stop := startUDPDNS(t, func(string, uint16) ([4]byte, bool) {
+		return wild, true
+	})
+	defer stop()
+
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     []string{"www", "mail", "api"},
+		Concurrency: 2,
+		Timeout:     time.Second,
+		Attempts:    1,
+		Force:       true,
+		Types:       []string{"A"},
+		Resolver:    dns.NewResolver(time.Second, addr),
+		DNSServer:   addr,
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+	done, errs, results := collect(events)
+
+	if done == nil {
+		t.Fatal("no EventDone")
+	}
+	for _, e := range errs {
+		t.Fatalf("unexpected error: %s", e.Message)
+	}
+	if results != 0 {
+		t.Errorf("result events = %d, want 0 (all wildcard-filtered)", results)
+	}
+	if done.Found != 0 {
+		t.Errorf("Found = %d, want 0", done.Found)
+	}
+	if done.Stats.WildcardFiltered != 3 {
+		t.Errorf("WildcardFiltered = %d, want 3; stats=%+v", done.Stats.WildcardFiltered, done.Stats)
+	}
+	if done.Stats.Sum() != done.Processed {
+		t.Errorf("stats sum %d != processed %d", done.Stats.Sum(), done.Processed)
+	}
+}
+
+func TestRunWildcardBranchSkipsExpansion(t *testing.T) {
+	realIP := [4]byte{192, 0, 2, 1}
+	wildIP := [4]byte{192, 0, 2, 99}
+	addr, stop := startUDPDNS(t, func(name string, _ uint16) ([4]byte, bool) {
+		switch {
+		case name == "unique.example.com":
+			return realIP, true
+		case isProbeLabel(name, "unique.example.com"):
+			return wildIP, true
+		default:
+			return [4]byte{}, false
+		}
+	})
+	defer stop()
+
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     []string{"unique", "www"},
+		Concurrency: 2,
+		Timeout:     time.Second,
+		Attempts:    1,
+		Types:       []string{"A"},
+		Recursive:   true,
+		Depth:       2,
+		Resolver:    dns.NewResolver(time.Second, addr),
+		DNSServer:   addr,
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+
+	var done *Event
+	var wildMsgs []string
+	results := 0
+	for ev := range events {
+		switch ev.Kind {
+		case EventResult:
+			results++
+		case EventWildcard:
+			wildMsgs = append(wildMsgs, ev.Message)
+		case EventDone:
+			e := ev
+			done = &e
+		case EventError:
+			t.Fatalf("unexpected error: %s", ev.Message)
+		}
+	}
+	if done == nil {
+		t.Fatal("no EventDone")
+	}
+	if results != 1 || done.Found != 1 {
+		t.Errorf("found results=%d Found=%d, want 1", results, done.Found)
+	}
+	if done.Total != 2 {
+		t.Errorf("Total = %d, want 2 (wildcard branch must not expand)", done.Total)
+	}
+	skip := false
+	for _, m := range wildMsgs {
+		if strings.Contains(m, "unique.example.com") && strings.Contains(m, "skipping recursive expansion") {
+			skip = true
+		}
+	}
+	if !skip {
+		t.Errorf("expected skip-expansion event, got %v", wildMsgs)
 	}
 }

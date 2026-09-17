@@ -132,13 +132,13 @@ func (m scanViewModel) View() string {
 	switch {
 	case m.done && m.aborted:
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
-			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d",
-			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other,
+			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
+			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)) + "\n")
 	case m.done:
 		b.WriteString(summaryStyle.Render(fmt.Sprintf(
-			"Done - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d",
-			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other,
+			"Done - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
+			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)) + "\n")
 		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
 	default:

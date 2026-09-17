@@ -201,6 +201,7 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	out.Info("  timeout:   %d", s.Timeout)
 	out.Info("  refused:   %d", s.Refused)
 	out.Info("  other:     %d", s.Other)
+	out.Info("  wildcard-filtered: %d", s.WildcardFiltered)
 }
 
 func run() int {

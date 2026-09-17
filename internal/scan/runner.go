@@ -42,16 +42,18 @@ type Config struct {
 
 // Stats is a snapshot of per-outcome query counters. Populated on EventDone.
 type Stats struct {
-	Found    int64
-	NXDomain int64
-	Timeout  int64
-	Refused  int64
-	Other    int64
+	Found            int64
+	NXDomain         int64
+	Timeout          int64
+	Refused          int64
+	Other            int64
+	WildcardFiltered int64
 }
 
-// Sum returns the number of classified queries (found + negatives + failures).
+// Sum returns the number of classified queries (found + negatives + failures +
+// wildcard-filtered).
 func (s Stats) Sum() int64 {
-	return s.Found + s.NXDomain + s.Timeout + s.Refused + s.Other
+	return s.Found + s.NXDomain + s.Timeout + s.Refused + s.Other + s.WildcardFiltered
 }
 
 func (s Stats) failures() int64 {
@@ -59,11 +61,12 @@ func (s Stats) failures() int64 {
 }
 
 type counters struct {
-	found    atomic.Int64
-	nxdomain atomic.Int64
-	timeout  atomic.Int64
-	refused  atomic.Int64
-	other    atomic.Int64
+	found            atomic.Int64
+	nxdomain         atomic.Int64
+	timeout          atomic.Int64
+	refused          atomic.Int64
+	other            atomic.Int64
+	wildcardFiltered atomic.Int64
 }
 
 func (c *counters) add(o dns.Outcome) {
@@ -85,12 +88,55 @@ func (c *counters) add(o dns.Outcome) {
 
 func (c *counters) snapshot() Stats {
 	return Stats{
-		Found:    c.found.Load(),
-		NXDomain: c.nxdomain.Load(),
-		Timeout:  c.timeout.Load(),
-		Refused:  c.refused.Load(),
-		Other:    c.other.Load(),
+		Found:            c.found.Load(),
+		NXDomain:         c.nxdomain.Load(),
+		Timeout:          c.timeout.Load(),
+		Refused:          c.refused.Load(),
+		Other:            c.other.Load(),
+		WildcardFiltered: c.wildcardFiltered.Load(),
 	}
+}
+
+type wildcardCache struct {
+	mu    sync.Mutex
+	known map[string]bool
+}
+
+func (c *wildcardCache) isWildcard(ctx context.Context, cfg Config, parent string) (bool, error) {
+	c.mu.Lock()
+	if v, ok := c.known[parent]; ok {
+		c.mu.Unlock()
+		return v, nil
+	}
+	c.mu.Unlock()
+
+	is, _, err := dns.CheckWildcard(ctx, cfg.Resolver, parent, cfg.Timeout)
+	if err != nil {
+		return false, err
+	}
+	c.mu.Lock()
+	if c.known == nil {
+		c.known = make(map[string]bool)
+	}
+	c.known[parent] = is
+	c.mu.Unlock()
+	return is, nil
+}
+
+func recordsSubset(got, fp []dns.Record) bool {
+	if len(fp) == 0 || len(got) == 0 {
+		return false
+	}
+	set := make(map[string]struct{}, len(fp))
+	for _, r := range fp {
+		set[r.Type+"\x00"+r.Value] = struct{}{}
+	}
+	for _, r := range got {
+		if _, ok := set[r.Type+"\x00"+r.Value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // job is a single unit of work: a fully qualified domain to test and its depth
@@ -146,13 +192,17 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
 	}
 
+	var fingerprint []dns.Record
+	wc := &wildcardCache{known: make(map[string]bool)}
+
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
-		isWildcard, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout)
+		isWildcard, fp, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout)
 		if err != nil {
 			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error()}
 			return
 		}
+		fingerprint = fp
 		if isWildcard {
 			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
 			events <- Event{Kind: EventWildcard, Message: msg}
@@ -273,7 +323,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				processJob(ctx, cfg, j, maxDepth, limiter, events, enqueue, &processed, &found, &stats, cancel, &guardOnce)
+				processJob(ctx, cfg, j, maxDepth, limiter, events, enqueue, &processed, &found, &stats, cancel, &guardOnce, fingerprint, wc)
 				select {
 				case completed <- struct{}{}:
 				case <-ctx.Done():
@@ -301,7 +351,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 // processJob resolves a single job and, on success, optionally enqueues
 // depth-capped children for recursive enumeration.
-func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-chan time.Time, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once) {
+func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-chan time.Time, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once, fp []dns.Record, wc *wildcardCache) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -330,6 +380,13 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-
 		records, outcome = dns.ResolveDomainWithRetry(ctx, cfg.Resolver, j.domain, cfg.Timeout, cfg.Verbose, cfg.Attempts, cfg.Types)
 	}
 
+	if outcome == dns.OutcomeFound && recordsSubset(records, fp) {
+		st.wildcardFiltered.Add(1)
+		n := atomic.AddInt64(processed, 1)
+		checkReliability(cfg, n, st, events, cancel, guardOnce)
+		return
+	}
+
 	st.add(outcome)
 	n := atomic.AddInt64(processed, 1)
 	checkReliability(cfg, n, st, events, cancel, guardOnce)
@@ -342,6 +399,17 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-
 	events <- Event{Kind: EventResult, Domain: j.domain, Records: records}
 
 	if cfg.Recursive && j.depth < maxDepth {
+		if !cfg.Simulate && cfg.resolveHook == nil {
+			isWild, err := wc.isWildcard(ctx, cfg, j.domain)
+			if err != nil {
+				events <- Event{Kind: EventWildcard, Message: "skipping recursive expansion of " + j.domain + ": wildcard check failed: " + err.Error()}
+				return
+			}
+			if isWild {
+				events <- Event{Kind: EventWildcard, Message: "wildcard DNS at " + j.domain + "; skipping recursive expansion"}
+				return
+			}
+		}
 		for _, entry := range cfg.Entries {
 			child := job{domain: entry + "." + j.domain, depth: j.depth + 1}
 			select {

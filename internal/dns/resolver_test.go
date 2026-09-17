@@ -149,7 +149,7 @@ func TestCheckWildcard(t *testing.T) {
 
 	timeout := time.Second * 3
 
-	isWildcard, err := CheckWildcard(context.Background(), r8(timeout), "google.com", timeout)
+	isWildcard, _, err := CheckWildcard(context.Background(), r8(timeout), "google.com", timeout)
 	if err != nil {
 		t.Fatalf("CheckWildcard returned error: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestCheckWildcardCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := CheckWildcard(ctx, r8(time.Second), "example.com", time.Second)
+	_, _, err := CheckWildcard(ctx, r8(time.Second), "example.com", time.Second)
 	if err == nil {
 		t.Errorf("Expected error from cancelled context")
 	}
@@ -266,6 +266,67 @@ func TestResolveDomainWithRetryNXDomainNoRetry(t *testing.T) {
 	}
 	if got := queries.Load(); got != 1 {
 		t.Fatalf("queries = %d, want 1 (NXDOMAIN must not be retried)", got)
+	}
+}
+
+func startFixedAUDP(t *testing.T, ip [4]byte) (addr string, stop func()) {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 512)
+		for {
+			nread, src, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			q := buf[:nread]
+			off, ok := skipDNSName(q, 12)
+			resp := append([]byte(nil), q...)
+			if !ok || off+2 > len(q) {
+				continue
+			}
+			qtype := uint16(q[off])<<8 | uint16(q[off+1])
+			if qtype == 1 { // A
+				resp = dnsAResponse(q, ip, false)
+			} else if len(resp) >= 12 {
+				resp[2] |= 0x80
+				resp[3] = (resp[3] & 0xF0) | 0x03
+			}
+			if resp != nil {
+				_, _ = pc.WriteTo(resp, src)
+			}
+		}
+	}()
+	return pc.LocalAddr().String(), func() {
+		_ = pc.Close()
+		<-done
+	}
+}
+
+func TestCheckWildcardFingerprint(t *testing.T) {
+	addr, stop := startFixedAUDP(t, [4]byte{192, 0, 2, 99})
+	defer stop()
+
+	is, fp, err := CheckWildcard(context.Background(), NewResolver(time.Second, addr), "example.com", time.Second)
+	if err != nil {
+		t.Fatalf("CheckWildcard: %v", err)
+	}
+	if !is {
+		t.Fatal("expected wildcard")
+	}
+	foundIP := false
+	for _, r := range fp {
+		if r.Type == "A" && r.Value == "192.0.2.99" {
+			foundIP = true
+		}
+	}
+	if !foundIP {
+		t.Fatalf("fingerprint %v missing A 192.0.2.99", fp)
 	}
 }
 

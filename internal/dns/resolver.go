@@ -203,19 +203,37 @@ func randomHex(n int) string {
 	return fmt.Sprintf("%x", b)[:n]
 }
 
-// CheckWildcard probes the domain with two random subdomains. If both resolve
-// the domain almost certainly uses wildcard DNS. Returns (isWildcard, error).
-func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration) (bool, error) {
+// CheckWildcard probes the domain with two random subdomains. If either resolves
+// the domain is treated as wildcard (conservative). The returned record slice is
+// the union of both probe answers and is the fingerprint used to filter later
+// results. Returns (isWildcard, fingerprint, error).
+func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration) (bool, []Record, error) {
 	probe1 := randomHex(32) + "." + domain
 	probe2 := randomHex(32) + "." + domain
 
-	hit1 := ResolveDomain(ctx, resolver, probe1, timeout, false)
-	hit2 := ResolveDomain(ctx, resolver, probe2, timeout, false)
+	r1, _, _ := ResolveTypes(ctx, resolver, probe1, timeout, DefaultTypes)
+	r2, _, _ := ResolveTypes(ctx, resolver, probe2, timeout, DefaultTypes)
 
 	if ctx.Err() != nil {
-		return false, ctx.Err()
+		return false, nil, ctx.Err()
 	}
 
-	// Both hit  -> wildcard.  One hit -> treat as wildcard (conservative).
-	return hit1 || hit2, nil
+	fp := unionRecords(r1, r2)
+	return len(r1) > 0 || len(r2) > 0, fp, nil
+}
+
+func unionRecords(a, b []Record) []Record {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]Record, 0, len(a)+len(b))
+	for _, recs := range [][]Record{a, b} {
+		for _, r := range recs {
+			k := r.Type + "\x00" + r.Value
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			out = append(out, r)
+		}
+	}
+	return out
 }
