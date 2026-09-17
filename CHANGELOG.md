@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Structured output (`-format json` and `-format csv`) is now finalized only on the successful scan path. The finalizer previously ran via `defer` on every exit, so an early error (such as wildcard detection without `-force`) emitted an empty JSON array. Text output behavior is unchanged.
+- `-version` and the startup banner trim a leading `v` from the injected Version so `git describe` tags do not print as `subenum vv0.7.0`.
 
 ### Docs
 - Rewrote the ARCHITECTURE data-flow section to describe the dispatcher-owned work queue instead of the removed feed-then-close `subdomains` channel model, and corrected the DNS engine function descriptions.

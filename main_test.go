@@ -22,3 +22,17 @@ func TestResolveAttempts(t *testing.T) {
 		t.Error("both set: expected error, got nil")
 	}
 }
+
+func TestFormatVersion(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+
+	Version = "0.7.0"
+	if got := formatVersion(); got != "subenum v0.7.0" {
+		t.Errorf("fallback: got %q", got)
+	}
+	Version = "v0.7.0"
+	if got := formatVersion(); got != "subenum v0.7.0" {
+		t.Errorf("git describe tag: got %q", got)
+	}
+}

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,7 +45,12 @@ const (
 
 // Version is the release identifier. go install builds keep this fallback;
 // Makefile and CI override it with -ldflags "-X main.Version=$(git describe --tags --dirty)".
+// formatVersion trims a leading "v" so a tag like v0.7.0 does not print as vv0.7.0.
 var Version = "0.7.0"
+
+func formatVersion() string {
+	return ProgramName + " v" + strings.TrimPrefix(Version, "v")
+}
 
 func main() {
 	// Fast-path: if -tui is the first argument, launch the TUI immediately
@@ -170,7 +176,7 @@ func openOutputFile(path string, testMode bool, format output.Format, out *outpu
 }
 
 func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Writer) {
-	out.Info("Starting %s v%s", ProgramName, Version)
+	out.Info("Starting %s", formatVersion())
 	if f.testMode {
 		out.Info("Mode: SIMULATION (no actual DNS queries)")
 		out.Info("Simulated hit rate: %d%%", f.testHitRate)
@@ -243,7 +249,7 @@ func run() int {
 	}
 
 	if f.showVersion {
-		fmt.Printf("%s v%s\n", ProgramName, Version)
+		fmt.Println(formatVersion())
 		if f.testMode {
 			fmt.Println("Running in SIMULATION mode")
 		}
