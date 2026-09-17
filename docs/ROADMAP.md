@@ -12,9 +12,8 @@ Effort: S (under ~1 hour), M (a few hours), L (a day or more).
 
 ## Shipped in 0.6.x / 0.7.0
 
-### C1 (DEFERRED -> tracked in #23). Guard the events sends against a non-draining consumer
-- **Status:** deferred. PR1 made `EventError` drain so `EventDone` still arrives on a reliability abort, but `EventResult` and `EventDone` sends remain unguarded. The deferral still holds.
-- **Resolve when:** a consumer that stops draining the events channel actually exists. Fix both sends together with a runner test that hangs without the guard and passes with it.
+### C1 (CLOSED as not planned, #23). Guard the events sends against a non-draining consumer
+- **Status:** closed. CLI and TUI both drain until close. Guarding `EventDone` with `ctx.Done()` races TUI/CLI abort (`select` is non-deterministic once ctx is already cancelled). The PR1 `EventError` drain is enough for reliability abort. Reopen if a consumer stops draining.
 
 ### C2 (DONE). Remove dead `dns.Resolve` and its doc reference
 Landed with the unused `LookupHost` path deleted and ARCHITECTURE section 2.3 corrected.
@@ -104,4 +103,4 @@ The scan-view viewport height is unclamped and can go negative on short
 terminals.
 
 ### N7. Event-channel send guards (C1 / #23)
-Still deferred. The EventError drain does not guard EventResult or EventDone.
+Closed as not planned. See C1.

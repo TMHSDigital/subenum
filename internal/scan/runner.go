@@ -418,6 +418,10 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	<-tickerStopped
 
 	snap := stats.snapshot()
+	// EventDone is the abort/finish signal. CLI Finish and TUI aborted=true both
+	// wait for it after cancel, so this send must not be select-guarded on
+	// ctx.Done(): once ctx is cancelled that select is a coin-flip drop.
+	// Contract: consumers drain until close. See #23.
 	events <- Event{
 		Kind:      EventDone,
 		Processed: atomic.LoadInt64(&processed),
@@ -474,6 +478,8 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-
 	}
 
 	atomic.AddInt64(found, 1)
+	// Unguarded: CLI and TUI drain until close. A ctx.Done() guard here would
+	// only matter for a consumer that stops reading with a full buffer.
 	events <- Event{Kind: EventResult, Domain: j.domain, Records: records}
 
 	if cfg.Recursive && j.depth < maxDepth {
