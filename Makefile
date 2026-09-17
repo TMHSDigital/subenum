@@ -8,6 +8,8 @@ GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
 BINARY_NAME=subenum
 WORDLIST_GEN=wordlist-gen
+VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo 0.7.0)
+LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
 
 # Default run parameters - CHANGE THESE!
 WORDLIST=examples/sample_wordlist.txt
@@ -27,7 +29,7 @@ WL_OUTPUT=custom-wordlist.txt
 all: build
 
 build:
-	$(GOBUILD) -buildvcs=false -o $(BINARY_NAME)
+	$(GOBUILD) -buildvcs=false $(LDFLAGS) -o $(BINARY_NAME)
 
 test:
 	$(GOTEST) -v ./...
@@ -84,15 +86,15 @@ run-custom: wordlist build
 
 # Docker commands
 docker-build:
-	docker build -t $(BINARY_NAME) .
+	docker build --build-arg VERSION=$(VERSION) -t $(BINARY_NAME) .
 
 docker-run:
 	docker run --rm -v $(PWD)/data:/data $(BINARY_NAME) -w /data/wordlist.txt -v example.com
 
 # Run Docker in simulation mode (completely safe)
 docker-simulate:
-	docker build -t $(BINARY_NAME) .
-	docker run --rm $(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w /root/examples/sample_wordlist.txt -v example.com
+	docker build --build-arg VERSION=$(VERSION) -t $(BINARY_NAME) .
+	docker run --rm $(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w /home/nonroot/examples/sample_wordlist.txt -v example.com
 
 # Help command
 help:

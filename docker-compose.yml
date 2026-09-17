@@ -2,7 +2,7 @@ services:
   subenum:
     build: .
     volumes:
-      - ./examples:/root/examples
+      - ./examples:/home/nonroot/examples
       - ./data:/data
     tty: true
     stdin_open: true

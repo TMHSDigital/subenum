@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-16
+
 ### Added
 - Scan outcome accounting: each query is classified as found, nxdomain, timeout, refused, or other. The breakdown is printed after every scan (stderr) and carried on `EventDone.Stats` for the TUI summary line.
 - Reliability guard: once 200 queries have completed, if more than 20% failed as timeout/refused/other the scan emits an error naming the failure rate and likely resolver rate-limiting at the configured `-t` and `-rate`, then aborts. `-no-abort` keeps the warning but continues the scan.
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI recursive enumeration (`-recursive`/`-depth` parity): a Recursive toggle with a Depth field gated on it, persisted across sessions.
 - TUI rate limiting (`-rate` parity): a queries-per-second form field, persisted across sessions.
 - TUI output file support (`-o`/`-format` parity): results can be written to a file as `text`, `json`, or `csv`. The format applies only to the file; the live viewport stays human-readable. Backed by a new file-only `output.NewFile` writer so structured output never collides with the alt-screen.
+- Release provenance attestations (`actions/attest-build-provenance`) on tagged builds.
 
 ### Changed
 - `dns.ResolveDomainWithRetry` returns `([]Record, Outcome)` instead of `([]Record, bool)`, so callers can distinguish NXDOMAIN from infrastructure failure.
@@ -23,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `-max-queries` caps admitted work. Recursive scans warn about the theoretical ceiling and refuse to start above 1e7 jobs unless `-max-queries` or `-force` is set. The dispatcher queue uses a head index with periodic compaction. Unreachable resolvers fail a preflight lookup before wildcard probes.
 - CLI `EventError` handling now drains the event channel so a reliability abort still delivers `EventDone` with partial stats. Wildcard-without-`-force` still skips structured `Finish`.
 - TUI form now validates domain syntax and DNS server `ip:port` format up front, matching the CLI. The validators were extracted into a shared `internal/validate` package used by both entry points (previously the form only checked for non-empty values).
+- `validate.Domain` now enforces the 63-character per-label limit and accepts punycode TLDs (`xn--...`).
+- `Version` is a `var` injected via `-ldflags "-X main.Version=$(git describe --tags --dirty)"`. `-version` writes to stdout.
+- `go` directive is `1.24`. golangci-lint CI is pinned to v2.12.2. Docker final stage is distroless static nonroot, with builder and runtime images pinned by digest.
 
 ### Removed
 - Removed the unused `dns.Resolve` function, superseded by `dns.ResolveTypes`.
@@ -39,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Pages landing page (`docs/index.md`) refreshed to the 0.6.0 feature set, adding cards for Output Formats (`-format`), Rate Limiting (`-rate`), Record Types (`-type`), and Recursive Enumeration (`-recursive`/`-depth`).
 - Normalized em dashes to hyphens across `docs/` for consistency with the no-em-dash convention.
 - Documented outcome classification, `EventDone.Stats`, and the reliability guard in ARCHITECTURE.
+- Corrected ARCHITECTURE output-format note (TUI file output shipped in P5) and DEVELOPER_GUIDE "CLI-only zero deps" claim.
 
 ### Tests
 - Added TUI coverage: session-config round-trip, form navigation across gated fields, record-type and depth validation, and structured-output finalization on both the success and error paths.
@@ -49,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a local UDP+TCP responder test proving truncated (TC=1) answers complete over TCP.
 - Added wildcard fingerprint tests: matching answers are filtered, and recursive expansion of a wildcard branch is skipped.
 - Added tests for `-max-queries` admission, the recursive ceiling refusal, and resolver preflight against a black-holed UDP listener.
+- Replaced public-resolver tests with an in-process UDP/TCP responder. Live smoke is gated on `SUBENUM_NETWORK_TESTS=1`.
 
 ## [0.6.0] - 2026-06-03
 

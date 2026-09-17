@@ -51,6 +51,8 @@ func TestDomain(t *testing.T) {
 		"sub.example.com",
 		"a.b.c.example.com",
 		"test-domain.co.uk",
+		"example.xn--p1ai",
+		strings.Repeat("a", 63) + ".com",
 	}
 
 	invalidDomains := []string{
@@ -60,6 +62,7 @@ func TestDomain(t *testing.T) {
 		".example.com",
 		"example..com",
 		strings.Repeat("a", 254) + ".com",
+		strings.Repeat("a", 64) + ".com",
 	}
 
 	for _, domain := range validDomains {

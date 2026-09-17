@@ -69,8 +69,10 @@ docker run --rm -v /path/to/your/files:/data subenum -w /data/your-wordlist.txt 
 
 ## Docker Environment Structure
 
-- `/root/subenum`: The main executable
-- `/root/examples/`: Contains example files and wordlists from the repository
+The image is distroless static nonroot (`USER nonroot`).
+
+- `/usr/local/bin/subenum`: The main executable (ENTRYPOINT)
+- `/home/nonroot/examples/`: Example files and wordlists from the repository
 - `/data/`: Mount point for your custom files
 
 ### Saving Results to a File
@@ -104,7 +106,7 @@ Test the tool without making any real DNS queries:
 docker run --rm subenum \
   -simulate \
   -hit-rate 20 \
-  -w /root/examples/sample_wordlist.txt \
+  -w /home/nonroot/examples/sample_wordlist.txt \
   example.com
 ```
 

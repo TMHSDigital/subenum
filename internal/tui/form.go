@@ -14,7 +14,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
-// Field order — Simulate is now field 2 so it's reachable in 2 tabs.
+// Field order - Simulate is now field 2 so it's reachable in 2 tabs.
 // Hit Rate only shows when Simulate is ON, so fieldCount varies; we handle
 // that in navigation by skipping fieldHitRate when simulate is off.
 const (
@@ -124,7 +124,7 @@ func newFormModel(saved savedConfig) formModel {
 	m.toggles[1] = saved.Force
 	m.toggles[2] = saved.Recursive
 
-	// Focus domain on start — cursor blink cmd returned from Init.
+	// Focus domain on start - cursor blink cmd returned from Init.
 	m.inputs[0].Focus()
 	m.inputs[0].PromptStyle = focusedStyle
 	m.inputs[0].TextStyle = focusedStyle
@@ -250,7 +250,7 @@ func (m formModel) View() string {
 	}
 	row(fieldSimulate, "Simulate", simVal+hint)
 
-	// Hit Rate — only shown when simulate is ON.
+	// Hit Rate - only shown when simulate is ON.
 	if m.toggles[0] {
 		row(fieldHitRate, "Hit Rate (%)", m.inputs[2].View())
 	} else {
@@ -280,7 +280,7 @@ func (m formModel) View() string {
 	}
 	row(fieldRecursive, "Recursive", recurseVal+recurseHint)
 
-	// Depth — only shown when recursive is ON.
+	// Depth - only shown when recursive is ON.
 	if m.toggles[2] {
 		row(fieldDepth, "Depth", m.inputs[8].View())
 	} else {

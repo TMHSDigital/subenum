@@ -13,7 +13,7 @@ See the [Code of Conduct](CODE_OF_CONDUCT.html).
 
 ### Prerequisites
 
-- Go 1.24.2 or later
+- Go 1.24 or later
 - Git
 - Make (optional but recommended)
 - Docker (optional, for containerized development)
@@ -142,4 +142,6 @@ go test -v -race ./...
 ```
 
 New features should include tests. New flags must be covered by at least one test case.
-Add network-dependent tests under `if testing.Short() { t.Skip(...) }` so they can be skipped in offline environments.
+Do not hit public resolvers. Use `-simulate` or the in-process responder in
+`internal/dns/testdns_test.go`. The optional live smoke test is gated on
+`SUBENUM_NETWORK_TESTS=1`.

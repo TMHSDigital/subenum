@@ -7,12 +7,16 @@ import (
 	"net"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // exampleDNSServer is shown in the DNS server format error message.
 const exampleDNSServer = "8.8.8.8:53"
 
-var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
+var (
+	labelRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+	tldRegex   = regexp.MustCompile(`^([a-zA-Z]{2,}|xn--[a-zA-Z0-9-]{1,59})$`)
+)
 
 // DNSServer checks that server is a valid ip:port address with an IP host and a
 // port in the range 1-65535.
@@ -32,7 +36,8 @@ func DNSServer(server string) error {
 }
 
 // Domain checks that domain is non-empty, within the 253-character limit, and
-// conforms to DNS naming rules.
+// conforms to DNS naming rules: 1-63 characters per label, and a TLD that is
+// either alphabetic (2+) or a punycode xn-- prefix.
 func Domain(domain string) error {
 	if len(domain) == 0 {
 		return fmt.Errorf("domain cannot be empty")
@@ -40,8 +45,24 @@ func Domain(domain string) error {
 	if len(domain) > 253 {
 		return fmt.Errorf("domain exceeds maximum length of 253 characters")
 	}
-	if !domainRegex.MatchString(domain) {
+	normalized := strings.ToLower(strings.TrimSuffix(domain, "."))
+	labels := strings.Split(normalized, ".")
+	if len(labels) < 2 {
 		return fmt.Errorf("invalid domain format: %s", domain)
+	}
+	for i, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return fmt.Errorf("invalid domain label length in %s", domain)
+		}
+		if i == len(labels)-1 {
+			if !tldRegex.MatchString(label) {
+				return fmt.Errorf("invalid domain format: %s", domain)
+			}
+			continue
+		}
+		if !labelRegex.MatchString(label) {
+			return fmt.Errorf("invalid domain format: %s", domain)
+		}
 	}
 	return nil
 }

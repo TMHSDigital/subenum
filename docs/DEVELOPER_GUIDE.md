@@ -13,7 +13,7 @@ This guide provides information for developers looking to contribute to or build
 
 To work with `subenum`, you'll need:
 
-*   **Go Programming Language**: [Go 1.24.2+](https://golang.org/dl/) is required.
+*   **Go Programming Language**: [Go 1.24+](https://golang.org/dl/) is required.
 *   **Git**: For version control.
 *   **Text Editor or IDE**: VS Code, GoLand, or any editor with Go support is recommended.
 
@@ -31,11 +31,11 @@ To work with `subenum`, you'll need:
     To build the project, run:
 
     ```bash
-    # Standard build
-    go build
-    
-    # If encountering VCS issues
+    # Standard build (version fallback is the `Version` var in main.go)
     go build -buildvcs=false
+
+    # Inject the git tag into the binary
+    go build -buildvcs=false -ldflags "-X main.Version=$(git describe --tags --dirty)"
     ```
 
 3.  **Run the Tool**
@@ -92,6 +92,7 @@ subenum/
 │   ├── dns/
 │   │   ├── resolver.go         # ResolveTypes, ResolveDomainWithRetry, CheckWildcard, ParseTypes
 │   │   ├── resolver_test.go    # DNS resolution and wildcard detection tests
+│   │   ├── testdns_test.go     # In-process UDP/TCP DNS responder for hermetic tests
 │   │   ├── simulate.go         # SimulateResolve (synthetic DNS)
 │   │   └── simulate_test.go    # Simulation logic tests
 │   ├── output/
@@ -115,8 +116,8 @@ subenum/
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
 ├── main.go                     # CLI entry point: flag parsing, wiring
 ├── main_test.go                # CLI-level tests: validation, flag logic
-├── go.mod                      # Go module (Bubble Tea for TUI; zero deps in CLI-only builds)
-├── Dockerfile                  # Multi-stage Alpine build
+├── go.mod                      # Go module (Bubble Tea TUI is linked into every binary)
+├── Dockerfile                  # Multi-stage distroless static nonroot build
 ├── docker-compose.yml          # Compose orchestration
 ├── Makefile                    # Build, test, lint, simulate, Docker targets
 ├── CHANGELOG.md                # Versioned release history
@@ -133,10 +134,16 @@ To run all tests:
 go test -v -race ./...
 ```
 
-To run only fast, offline tests (skips network-dependent tests):
+Default `go test ./...` is hermetic (in-process DNS responder, no outbound
+network). The optional live resolver smoke test is gated on an env var:
 
 ```bash
-go test -v -short ./...
+# Unix
+SUBENUM_NETWORK_TESTS=1 go test ./internal/dns -run TestLiveResolverSmoke
+
+# PowerShell
+$env:SUBENUM_NETWORK_TESTS = "1"
+go test ./internal/dns -run TestLiveResolverSmoke
 ```
 
 ### Writing Tests
@@ -241,10 +248,12 @@ Please follow these style guidelines when contributing:
 
 `subenum` aims to minimize external dependencies, relying primarily on the Go standard library.
 
-The CLI path (`run()`) has zero external dependencies. The TUI path (`-tui` flag) adds:
+There is no CLI-only build: `main` imports `internal/tui`, so Bubble Tea links
+into every binary. Direct third-party deps:
 
 - [`github.com/charmbracelet/bubbletea`](https://github.com/charmbracelet/bubbletea) - Elm-architecture terminal UI framework
 - [`github.com/charmbracelet/bubbles`](https://github.com/charmbracelet/bubbles) - reusable TUI components (textinput, viewport, progress bar)
+- [`github.com/charmbracelet/lipgloss`](https://github.com/charmbracelet/lipgloss) - terminal styling
 
 If you need to add a further dependency:
 
@@ -267,9 +276,8 @@ The following capabilities are implemented and available today:
 
 ## Future Development
 
-Areas for potential enhancement include:
+See `docs/ROADMAP.md` for the next-pass list. Areas still open:
 
-*   **TUI parity**: surface the remaining CLI options (`-type`, `-recursive`/`-depth`, `-rate`, and structured file output) in the interactive form. See `docs/ROADMAP.md`.
 *   **Additional record types**: extend `dns.ResolveTypes` beyond A/AAAA/CNAME (for example MX, TXT, NS).
 *   **Streaming JSON output**: a JSONL mode for live structured output that, unlike the buffered JSON array, can be piped incrementally.
 

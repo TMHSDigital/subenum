@@ -39,9 +39,12 @@ import (
 
 const (
 	ProgramName      = "subenum"
-	Version          = "0.6.0"
 	DefaultDNSServer = "8.8.8.8:53"
 )
+
+// Version is the release identifier. go install builds keep this fallback;
+// Makefile and CI override it with -ldflags "-X main.Version=$(git describe --tags --dirty)".
+var Version = "0.7.0"
 
 func main() {
 	// Fast-path: if -tui is the first argument, launch the TUI immediately
@@ -240,9 +243,9 @@ func run() int {
 	}
 
 	if f.showVersion {
-		fmt.Fprintf(os.Stderr, "%s v%s\n", ProgramName, Version)
+		fmt.Printf("%s v%s\n", ProgramName, Version)
 		if f.testMode {
-			fmt.Fprintln(os.Stderr, "Running in SIMULATION mode")
+			fmt.Println("Running in SIMULATION mode")
 		}
 		return 0
 	}
