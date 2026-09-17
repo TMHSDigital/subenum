@@ -393,6 +393,143 @@ func TestRunReliabilityGuardNoAbort(t *testing.T) {
 	}
 }
 
+func TestRecursionCeiling(t *testing.T) {
+	got := RecursionCeiling(10000, 3)
+	if got < 1e12 {
+		t.Fatalf("ceiling(10000,3) = %g, want >= 1e12", got)
+	}
+	if RecursionCeiling(0, 3) != 0 || RecursionCeiling(5, 0) != 0 {
+		t.Fatal("empty inputs should be 0")
+	}
+	if RecursionCeiling(1, 4) != 4 {
+		t.Fatalf("ceiling(1,4) = %g, want 4", RecursionCeiling(1, 4))
+	}
+}
+
+func TestRunMaxQueriesStopsAdmission(t *testing.T) {
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     makeEntries(50),
+		Concurrency: 4,
+		Timeout:     time.Second,
+		Simulate:    true,
+		HitRate:     0,
+		Attempts:    1,
+		MaxQueries:  10,
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+
+	var done *Event
+	var capMsg string
+	for ev := range events {
+		switch ev.Kind {
+		case EventWildcard:
+			if strings.Contains(ev.Message, "query cap reached") {
+				capMsg = ev.Message
+			}
+		case EventDone:
+			e := ev
+			done = &e
+		case EventError:
+			t.Fatalf("unexpected error: %s", ev.Message)
+		}
+	}
+	if done == nil {
+		t.Fatal("no EventDone")
+	}
+	if done.Processed != 10 || done.Total != 10 {
+		t.Errorf("Processed/Total = %d/%d, want 10/10", done.Processed, done.Total)
+	}
+	if capMsg == "" || !strings.Contains(capMsg, "skipped 40") {
+		t.Errorf("cap event %q: want skipped 40", capMsg)
+	}
+}
+
+func TestRunRecursionCeilingRefuse(t *testing.T) {
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     makeEntries(100),
+		Concurrency: 1,
+		Timeout:     time.Second,
+		Simulate:    true,
+		Attempts:    1,
+		Recursive:   true,
+		Depth:       4,
+	}
+	events := make(chan Event, 8)
+	go Run(context.Background(), cfg, events)
+	done, errs, _ := collect(events)
+	if len(errs) == 0 {
+		t.Fatal("expected refusal EventError")
+	}
+	if !strings.Contains(errs[0].Message, "refusing to start") {
+		t.Errorf("message %q", errs[0].Message)
+	}
+	if done != nil {
+		t.Error("refused scan should not emit EventDone")
+	}
+}
+
+func TestRunRecursionCeilingForceAllows(t *testing.T) {
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     makeEntries(100),
+		Concurrency: 4,
+		Timeout:     time.Second,
+		Simulate:    true,
+		HitRate:     0,
+		Attempts:    1,
+		Recursive:   true,
+		Depth:       4,
+		Force:       true,
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+	done, errs, _ := collect(events)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected error: %s", errs[0].Message)
+	}
+	if done == nil {
+		t.Fatal("no EventDone")
+	}
+	if done.Processed != 100 {
+		t.Errorf("Processed = %d, want 100 (no expansion at hit-rate 0)", done.Processed)
+	}
+}
+
+func TestRunPreflightFailsOnBlackHole(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pc.Close() }()
+	addr := pc.LocalAddr().String()
+	timeout := 80 * time.Millisecond
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     []string{"www"},
+		Concurrency: 1,
+		Timeout:     timeout,
+		Attempts:    1,
+		Types:       []string{"A"},
+		DNSServer:   addr,
+		Resolver:    dns.NewResolver(timeout, addr),
+	}
+	events := make(chan Event, 8)
+	go Run(context.Background(), cfg, events)
+	done, errs, _ := collect(events)
+	if len(errs) == 0 {
+		t.Fatal("expected preflight EventError")
+	}
+	if !strings.Contains(errs[0].Message, "preflight") || !strings.Contains(errs[0].Message, addr) {
+		t.Errorf("message %q: want preflight and resolver addr", errs[0].Message)
+	}
+	if done != nil {
+		t.Error("failed preflight should not emit EventDone")
+	}
+}
+
 func TestRecordsSubset(t *testing.T) {
 	fp := []dns.Record{{Type: "A", Value: "192.0.2.99"}, {Type: "AAAA", Value: "::1"}}
 	if !recordsSubset([]dns.Record{{Type: "A", Value: "192.0.2.99"}}, fp) {

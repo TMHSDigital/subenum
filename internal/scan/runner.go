@@ -14,6 +14,8 @@ import (
 const (
 	reliabilityMinJobs     = 200
 	reliabilityFailPercent = 20
+	queueCompactEvery      = 1024
+	recursionRefuseCeiling = 1e7
 )
 
 // Config holds all parameters needed to run a subdomain scan.
@@ -33,6 +35,7 @@ type Config struct {
 	Recursive   bool          // enumerate subdomains of discovered subdomains
 	Depth       int           // max recursion depth (1 = no recursion)
 	NoAbort     bool          // keep scanning after the reliability guard fires
+	MaxQueries  int           // cap on admitted jobs (0 = unlimited)
 	Resolver    *net.Resolver // reused across lookups; nil means scan.Run constructs one
 
 	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
@@ -139,6 +142,21 @@ func recordsSubset(got, fp []dns.Record) bool {
 	return true
 }
 
+// RecursionCeiling returns the theoretical job count for a recursive scan:
+// sum over d=1..depth of n^d, as a float so large wordlists do not overflow.
+func RecursionCeiling(n, depth int) float64 {
+	if n <= 0 || depth <= 0 {
+		return 0
+	}
+	var total, term float64
+	term = float64(n)
+	for d := 1; d <= depth; d++ {
+		total += term
+		term *= float64(n)
+	}
+	return total
+}
+
 // job is a single unit of work: a fully qualified domain to test and its depth
 // in the recursion tree (initial entries are depth 1).
 type job struct {
@@ -190,6 +208,40 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	if cfg.Resolver == nil {
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
+	}
+
+	if cfg.Recursive {
+		ceiling := RecursionCeiling(len(cfg.Entries), maxDepth)
+		if ceiling > recursionRefuseCeiling && cfg.MaxQueries == 0 && !cfg.Force {
+			events <- Event{Kind: EventError, Message: fmt.Sprintf(
+				"refusing to start: -recursive -depth %d with %d entries can generate up to %.1e queries; set -max-queries or -force",
+				maxDepth, len(cfg.Entries), ceiling)}
+			return
+		}
+		consider := "Consider -max-queries."
+		if maxDepth > 1 {
+			consider = fmt.Sprintf("Consider -depth %d or -max-queries.", maxDepth-1)
+		}
+		events <- Event{Kind: EventWildcard, Message: fmt.Sprintf(
+			"Warning: -recursive -depth %d with %d entries can generate up to %.1e queries.\n%s",
+			maxDepth, len(cfg.Entries), ceiling, consider)}
+	}
+
+	if !cfg.Simulate && cfg.resolveHook == nil {
+		types := cfg.Types
+		if len(types) == 0 {
+			types = dns.DefaultTypes
+		}
+		records, _, err := dns.ResolveTypes(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, types)
+		outcome := dns.Classify(err)
+		if len(records) > 0 {
+			outcome = dns.OutcomeFound
+		}
+		if outcome != dns.OutcomeFound && outcome != dns.OutcomeNXDomain {
+			msg := fmt.Sprintf("resolver %s failed preflight for %s: %v", cfg.DNSServer, cfg.Domain, err)
+			events <- Event{Kind: EventError, Message: msg}
+			return
+		}
 	}
 
 	var fingerprint []dns.Record
@@ -272,45 +324,71 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	go func() {
 		visited := make(map[string]bool, len(cfg.Entries))
 		queue := make([]job, 0, len(cfg.Entries))
-		for _, entry := range cfg.Entries {
-			d := entry + "." + cfg.Domain
-			if !visited[d] {
-				visited[d] = true
-				queue = append(queue, job{domain: d, depth: 1})
+		head := 0
+		admitted := 0
+		skipped := 0
+		admit := func(j job) bool {
+			if visited[j.domain] {
+				return false
 			}
+			visited[j.domain] = true
+			if cfg.MaxQueries > 0 && admitted >= cfg.MaxQueries {
+				skipped++
+				return false
+			}
+			queue = append(queue, j)
+			admitted++
+			return true
 		}
-		pending := len(queue)
+		for _, entry := range cfg.Entries {
+			_ = admit(job{domain: entry + "." + cfg.Domain, depth: 1})
+		}
+		pending := admitted
 		atomic.StoreInt64(&total, int64(pending))
-		if pending == 0 {
+		closeJobs := func() {
+			if skipped > 0 {
+				select {
+				case events <- Event{Kind: EventWildcard, Message: fmt.Sprintf(
+					"query cap reached (-max-queries %d); skipped %d additional jobs", cfg.MaxQueries, skipped)}:
+				case <-ctx.Done():
+				}
+			}
 			close(jobs)
+		}
+		if pending == 0 {
+			closeJobs()
 			return
 		}
 		for {
 			var out chan job
 			var next job
-			if len(queue) > 0 {
+			if head < len(queue) {
 				out = jobs
-				next = queue[0]
+				next = queue[head]
 			}
 			select {
 			case <-ctx.Done():
-				close(jobs)
+				closeJobs()
 				return
 			case j := <-enqueue:
-				// Children candidates arrive here; dedup centrally so workers
-				// need no shared lock. Only new domains add to pending/total.
-				if !visited[j.domain] {
-					visited[j.domain] = true
-					queue = append(queue, j)
+				if admit(j) {
 					pending++
 					atomic.AddInt64(&total, 1)
 				}
 			case out <- next:
-				queue = queue[1:]
+				head++
+				switch {
+				case head == len(queue):
+					queue = queue[:0]
+					head = 0
+				case head >= queueCompactEvery:
+					queue = append([]job(nil), queue[head:]...)
+					head = 0
+				}
 			case <-completed:
 				pending--
 				if pending == 0 {
-					close(jobs)
+					closeJobs()
 					return
 				}
 			}

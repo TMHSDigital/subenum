@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ResolveDomainWithRetry` no longer retries NXDOMAIN. Timeouts, refusals, and unknown errors still retry up to `-attempts`.
 - The resolver Dial hook honors `network`, so truncated UDP answers fall back to TCP. `scan.Run` builds one `*net.Resolver` and reuses it for every lookup.
 - Wildcard detection keeps a fingerprint of probe answers. Matching results are dropped (`wildcardFiltered`) even with `-force`. Recursive mode probes each new parent and skips expanding wildcard branches.
+- `-max-queries` caps admitted work. Recursive scans warn about the theoretical ceiling and refuse to start above 1e7 jobs unless `-max-queries` or `-force` is set. The dispatcher queue uses a head index with periodic compaction. Unreachable resolvers fail a preflight lookup before wildcard probes.
 - CLI `EventError` handling now drains the event channel so a reliability abort still delivers `EventDone` with partial stats. Wildcard-without-`-force` still skips structured `Finish`.
 - TUI form now validates domain syntax and DNS server `ip:port` format up front, matching the CLI. The validators were extracted into a shared `internal/validate` package used by both entry points (previously the form only checked for non-empty values).
 
@@ -47,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a local UDP NXDOMAIN responder test proving `-attempts 3` issues exactly one query for a definitive negative.
 - Added a local UDP+TCP responder test proving truncated (TC=1) answers complete over TCP.
 - Added wildcard fingerprint tests: matching answers are filtered, and recursive expansion of a wildcard branch is skipped.
+- Added tests for `-max-queries` admission, the recursive ceiling refusal, and resolver preflight against a black-holed UDP listener.
 
 ## [0.6.0] - 2026-06-03
 

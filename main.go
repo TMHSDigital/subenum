@@ -75,6 +75,7 @@ type cliFlags struct {
 	recursive    bool
 	depth        int
 	noAbort      bool
+	maxQueries   int
 }
 
 func parseFlags() cliFlags {
@@ -99,6 +100,7 @@ func parseFlags() cliFlags {
 	flag.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	flag.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	flag.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
+	flag.IntVar(&f.maxQueries, "max-queries", 0, "Max DNS lookups to admit (0 = unlimited)")
 	flag.Parse()
 	return f
 }
@@ -131,6 +133,10 @@ func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, boo
 	}
 	if f.depth < 1 {
 		out.Error("Depth (-depth) must be at least 1")
+		return "", false
+	}
+	if f.maxQueries < 0 {
+		out.Error("Max queries (-max-queries) must be 0 (unlimited) or a positive integer")
 		return "", false
 	}
 	if !f.testMode {
@@ -309,6 +315,7 @@ func run() int {
 		Recursive:   f.recursive,
 		Depth:       f.depth,
 		NoAbort:     f.noAbort,
+		MaxQueries:  f.maxQueries,
 	}
 
 	events := make(chan scan.Event, 64)
