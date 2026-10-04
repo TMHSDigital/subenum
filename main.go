@@ -22,6 +22,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -87,37 +88,69 @@ type cliFlags struct {
 	maxQueries   int
 }
 
-func parseFlags() cliFlags {
+// parseFlags parses args (without the program name). Flags may appear before or
+// after the domain; the returned positionals are every non-flag argument.
+func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	var f cliFlags
-	flag.Bool("tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
-	flag.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file")
-	flag.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
-	flag.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
-	flag.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server to use (format: ip:port)")
-	flag.BoolVar(&f.verbose, "v", false, "Enable verbose output")
-	flag.BoolVar(&f.showVersion, "version", false, "Show version information")
-	flag.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")
-	flag.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
-	flag.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of subdomains that will 'resolve' (1-100)")
-	flag.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
-	flag.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
-	flag.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
-	flag.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
-	flag.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
-	flag.IntVar(&f.rate, "rate", 0, "Max DNS queries per second across all workers (0 = unlimited)")
-	flag.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
-	flag.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
-	flag.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
-	flag.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
-	flag.IntVar(&f.maxQueries, "max-queries", 0, "Max DNS lookups to admit (0 = unlimited)")
-	flag.Parse()
-	return f
+	fs := flag.NewFlagSet(ProgramName, flag.ContinueOnError)
+	fs.Bool("tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
+	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file")
+	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
+	fs.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
+	fs.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server to use (format: ip:port)")
+	fs.BoolVar(&f.verbose, "v", false, "Enable verbose output")
+	fs.BoolVar(&f.showVersion, "version", false, "Show version information")
+	fs.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")
+	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
+	fs.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of subdomains that will 'resolve' (1-100)")
+	fs.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
+	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
+	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
+	fs.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
+	fs.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
+	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second across all workers (0 = unlimited)")
+	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
+	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
+	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
+	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
+	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max DNS lookups to admit (0 = unlimited)")
+	positionals, err := parseInterspersed(fs, args)
+	return f, positionals, fs, err
 }
 
-func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, bool) {
-	if f.wordlistFile == "" || flag.NArg() == 0 {
+// parseInterspersed parses flags that appear anywhere in args. The standard flag
+// package stops at the first non-flag argument, which silently dropped every flag
+// written after the domain (#29). Arguments after a "--" terminator are all
+// treated as positionals.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positionals []string
+	for {
+		before := len(args)
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return positionals, nil
+		}
+		consumed := args[:before-len(rest)]
+		if len(consumed) > 0 && consumed[len(consumed)-1] == "--" {
+			return append(positionals, rest...), nil
+		}
+		positionals = append(positionals, rest[0])
+		args = rest[1:]
+	}
+}
+
+func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
+	if f.wordlistFile == "" || len(positionals) == 0 {
 		fmt.Fprintln(os.Stderr, "Usage: subenum -w <wordlist_file> [options] <domain>")
-		flag.PrintDefaults()
+		fs.SetOutput(os.Stderr)
+		fs.PrintDefaults()
+		return "", false
+	}
+	if len(positionals) > 1 {
+		out.Error("expected exactly one domain, got %d arguments: %s", len(positionals), strings.Join(positionals, " "))
 		return "", false
 	}
 	if f.concurrency <= 0 {
@@ -154,7 +187,7 @@ func validateFlags(f cliFlags, out *output.Writer, maxAttempts int) (string, boo
 			return "", false
 		}
 	}
-	domain := flag.Arg(0)
+	domain := positionals[0]
 	if err := validate.Domain(domain); err != nil {
 		out.Error("%v", err)
 		return "", false
@@ -220,7 +253,14 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 }
 
 func run() int {
-	f := parseFlags()
+	f, positionals, fs, parseErr := parseFlags(os.Args[1:])
+	if parseErr != nil {
+		// The FlagSet has already printed the error and usage.
+		if errors.Is(parseErr, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
 
 	format, formatErr := output.ParseFormat(f.format)
 	recordTypes, typesErr := dns.ParseTypes(f.recordTypes)
@@ -256,7 +296,7 @@ func run() int {
 		return 0
 	}
 
-	domain, ok := validateFlags(f, out, maxAttempts)
+	domain, ok := validateFlags(f, positionals, fs, out, maxAttempts)
 	if !ok {
 		return 1
 	}

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Flags written after the domain (`subenum -w wl.txt example.com -t 50`) are now parsed instead of silently ignored. Extra positional arguments are rejected, `-h` exits 0, and unknown flags exit 2 (#29).
+
 ## [0.7.0] - 2026-09-16
 
 ### Added

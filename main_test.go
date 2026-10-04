@@ -1,8 +1,64 @@
 package main
 
 import (
+	"io"
+	"reflect"
 	"testing"
 )
+
+func TestParseFlagsInterspersed(t *testing.T) {
+	cases := []struct {
+		name        string
+		args        []string
+		wantPos     []string
+		wantThreads int
+		wantSim     bool
+	}{
+		{"flags before domain", []string{"-w", "wl.txt", "-t", "5", "example.com"}, []string{"example.com"}, 5, false},
+		{"flags after domain", []string{"-w", "wl.txt", "example.com", "-t", "5", "-simulate"}, []string{"example.com"}, 5, true},
+		{"flags on both sides", []string{"-simulate", "example.com", "-t", "7", "-w", "wl.txt"}, []string{"example.com"}, 7, true},
+		{"stray positionals kept", []string{"-w", "wl.txt", "a.com", "b.com", "-t", "3"}, []string{"a.com", "b.com"}, 3, false},
+		{"terminator stops flag parsing", []string{"-w", "wl.txt", "--", "example.com", "-t"}, []string{"example.com", "-t"}, 100, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, pos, _, err := parseFlags(tc.args)
+			if err != nil {
+				t.Fatalf("parseFlags: %v", err)
+			}
+			if !reflect.DeepEqual(pos, tc.wantPos) {
+				t.Errorf("positionals = %q, want %q", pos, tc.wantPos)
+			}
+			if f.concurrency != tc.wantThreads {
+				t.Errorf("concurrency = %d, want %d", f.concurrency, tc.wantThreads)
+			}
+			if f.testMode != tc.wantSim {
+				t.Errorf("simulate = %v, want %v", f.testMode, tc.wantSim)
+			}
+			if f.wordlistFile != "wl.txt" {
+				t.Errorf("wordlist = %q, want wl.txt", f.wordlistFile)
+			}
+		})
+	}
+}
+
+func TestParseFlagsInvalidAfterDomain(t *testing.T) {
+	// Previously ignored: an invalid value after the domain must now be parsed
+	// (and rejected by validation) rather than silently dropped.
+	f, pos, _, err := parseFlags([]string{"-w", "wl.txt", "example.com", "-t", "0"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.concurrency != 0 || len(pos) != 1 {
+		t.Fatalf("got concurrency %d, positionals %q", f.concurrency, pos)
+	}
+
+	_, _, fs, err := parseFlags([]string{"example.com", "-bogus"})
+	if err == nil {
+		t.Fatal("unknown flag after domain: expected error")
+	}
+	fs.SetOutput(io.Discard)
+}
 
 func TestResolveAttempts(t *testing.T) {
 	got, err := resolveAttempts(0, 0)
