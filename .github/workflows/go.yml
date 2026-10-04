@@ -203,7 +203,7 @@ jobs:
       run: sha256sum ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
 
     - name: Attest build provenance
-      uses: actions/attest-build-provenance@v3
+      uses: actions/attest-build-provenance@v4
       with:
         subject-path: ${{ matrix.asset_name }}
 
@@ -296,7 +296,7 @@ jobs:
         build-args: VERSION=${{ github.ref_name }}
 
     - name: Attest image provenance
-      uses: actions/attest-build-provenance@v3
+      uses: actions/attest-build-provenance@v4
       with:
         subject-name: ${{ steps.image.outputs.name }}
         subject-digest: ${{ steps.push.outputs.digest }}
