@@ -142,7 +142,10 @@ func (w *Writer) writeCSVRows(domain string, records []dns.Record) {
 
 // Finish flushes any buffered or streamed structured output. It must be called
 // once after the scan completes (before the output file is flushed and closed).
-func (w *Writer) Finish() {
+// It returns the first error writing to the output file, so callers can report
+// an incomplete results file instead of exiting successfully. Errors writing to
+// stdout (for example a closed pipe) are not reported here.
+func (w *Writer) Finish() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -154,14 +157,15 @@ func (w *Writer) Finish() {
 		}
 		data, err := json.MarshalIndent(results, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: encoding JSON output: %v\n", err)
-			return
+			return fmt.Errorf("encoding JSON output: %w", err)
 		}
 		if w.stdout {
 			fmt.Printf("%s\n", data)
 		}
 		if w.outWriter != nil {
-			fmt.Fprintf(w.outWriter, "%s\n", data)
+			if _, err := fmt.Fprintf(w.outWriter, "%s\n", data); err != nil {
+				return err
+			}
 		}
 	case FormatCSV:
 		if w.csvStdout != nil {
@@ -169,8 +173,15 @@ func (w *Writer) Finish() {
 		}
 		if w.csvFile != nil {
 			w.csvFile.Flush()
+			if err := w.csvFile.Error(); err != nil {
+				return err
+			}
 		}
 	}
+	if w.outWriter != nil {
+		return w.outWriter.Flush()
+	}
+	return nil
 }
 
 // Progress writes a progress line to stderr using carriage-return overwrite.

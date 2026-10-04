@@ -63,7 +63,9 @@ func TestNewFileWriterSkipsStdout(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		w.Result("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
-		w.Finish()
+		if err := w.Finish(); err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
 	})
 	if out != "" {
 		t.Errorf("file-only writer must not write to stdout, got %q", out)
@@ -97,7 +99,9 @@ func TestWriterCSVEmptyRecords(t *testing.T) {
 	// Finish must run inside the capture because csv.Writer buffers until flush.
 	out := captureStdout(t, func() {
 		w.Result("www.example.com", nil)
-		w.Finish()
+		if err := w.Finish(); err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
 	})
 	if err := bw.Flush(); err != nil {
 		t.Fatal(err)
@@ -153,7 +157,9 @@ func TestWriterResultText(t *testing.T) {
 	for _, d := range domains {
 		w.Result(d, []dns.Record{{Type: "A", Value: "1.2.3.4"}})
 	}
-	w.Finish()
+	if err := w.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
 	if err := bw.Flush(); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +189,9 @@ func TestWriterResultJSONFile(t *testing.T) {
 	w := New(bw, false, FormatJSON)
 	w.Result("www.example.com", []dns.Record{{Type: "A", Value: "93.184.216.34"}})
 	w.Result("ipv6.example.com", []dns.Record{{Type: "AAAA", Value: "2606:2800:220:1::1"}})
-	w.Finish()
+	if err := w.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
 	if err := bw.Flush(); err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +252,9 @@ func TestWriterJSONFinishGatesOutput(t *testing.T) {
 
 	bw2 := bufio.NewWriter(withFinish)
 	w := New(bw2, false, FormatJSON)
-	w.Finish()
+	if err := w.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
 	if err := bw2.Flush(); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +287,9 @@ func TestWriterResultCSVFile(t *testing.T) {
 		{Type: "A", Value: "1.1.1.1"},
 		{Type: "AAAA", Value: "2606::1"},
 	})
-	w.Finish()
+	if err := w.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
 	if err := bw.Flush(); err != nil {
 		t.Fatal(err)
 	}
@@ -298,5 +310,35 @@ func TestWriterResultCSVFile(t *testing.T) {
 	}
 	if !strings.Contains(got, "www.example.com,AAAA,2606::1") {
 		t.Errorf("expected AAAA row, got:\n%s", got)
+	}
+}
+
+// failWriter accepts limit bytes, then fails every write, like a disk filling
+// up mid-scan.
+type failWriter struct{ limit int }
+
+func (f *failWriter) Write(p []byte) (int, error) {
+	if len(p) <= f.limit {
+		f.limit -= len(p)
+		return len(p), nil
+	}
+	n := f.limit
+	f.limit = 0
+	return n, io.ErrShortWrite
+}
+
+// TestFinishReportsFileWriteErrors covers #30: an output file that cannot be
+// fully written must surface an error from Finish for every format, so the
+// CLI can exit non-zero and the TUI can warn.
+func TestFinishReportsFileWriteErrors(t *testing.T) {
+	for _, format := range []Format{FormatText, FormatJSON, FormatCSV} {
+		buf := bufio.NewWriterSize(&failWriter{limit: 8}, 16)
+		w := NewFile(buf, false, format)
+		for i := 0; i < 20; i++ {
+			w.Result("host"+strings.Repeat("x", i)+".example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}})
+		}
+		if err := w.Finish(); err == nil {
+			t.Errorf("format %d: Finish returned nil after the file writer failed", format)
+		}
 	}
 }

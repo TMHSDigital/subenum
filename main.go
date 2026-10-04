@@ -253,7 +253,7 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	out.Info("  wildcard-filtered: %d", s.WildcardFiltered)
 }
 
-func run() int {
+func run() (code int) {
 	f, positionals, fs, parseErr := parseFlags(os.Args[1:])
 	if parseErr != nil {
 		// The FlagSet has already printed the error and usage.
@@ -302,28 +302,44 @@ func run() int {
 		return 1
 	}
 
-	out, outWriter, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
-	if !ok {
-		return 1
-	}
-	if outFile != nil {
-		defer func() {
-			if flushErr := outWriter.Flush(); flushErr != nil {
-				out.Error("flushing output: %v", flushErr)
-			}
-			if closeErr := outFile.Close(); closeErr != nil {
-				out.Error("closing output file: %v", closeErr)
-			}
-		}()
-	}
 	if f.verbose {
 		logVerboseStart(f, domain, maxAttempts, out)
 	}
 
+	// Load the wordlist before creating the output file so a bad -w path does
+	// not truncate an existing -o target.
 	entries, duplicates, err := wordlist.LoadWordlist(f.wordlistFile)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
 		return 1
+	}
+
+	out, outWriter, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
+	if !ok {
+		return 1
+	}
+	fileErrReported := false
+	if outFile != nil {
+		// Runs after the final return value is chosen; a failed flush or close
+		// means the results file is incomplete, so it must turn a successful
+		// exit into a failure (#30). bufio errors are sticky, so a failure
+		// already reported by Finish is not printed twice.
+		defer func() {
+			if flushErr := outWriter.Flush(); flushErr != nil {
+				if !fileErrReported {
+					out.Error("writing output file: %v", flushErr)
+				}
+				if code == 0 {
+					code = 1
+				}
+			}
+			if closeErr := outFile.Close(); closeErr != nil {
+				out.Error("closing output file: %v", closeErr)
+				if code == 0 {
+					code = 1
+				}
+			}
+		}()
 	}
 
 	totalWords := int64(len(entries))
@@ -417,7 +433,10 @@ func run() int {
 	// Reliability abort still emits EventDone with partial results, so Finish
 	// runs there.
 	if sawDone {
-		out.Finish()
+		if err := out.Finish(); err != nil {
+			out.Error("writing output file: %v", err)
+			fileErrReported = true
+		}
 	}
 	if interrupted.Load() {
 		// Shell convention for SIGINT (128+2): partial results were flushed above,
@@ -425,6 +444,9 @@ func run() int {
 		return 130
 	}
 	if sawError && (!sawDone || !f.noAbort) {
+		return 1
+	}
+	if fileErrReported {
 		return 1
 	}
 	return 0

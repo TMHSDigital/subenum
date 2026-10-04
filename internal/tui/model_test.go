@@ -35,7 +35,9 @@ func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
 	m, path := mkModel(t)
 	defer func() { _ = os.Remove(path) }()
 	m.out.Result("a.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
-	m.finalizeOutput(true)
+	if err := m.finalizeOutput(true); err != nil {
+		t.Fatalf("finalizeOutput: %v", err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +52,9 @@ func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
 	// Error path: finalize(false) closes without Finish, so nothing is written.
 	m2, path2 := mkModel(t)
 	defer func() { _ = os.Remove(path2) }()
-	m2.finalizeOutput(false)
+	if err := m2.finalizeOutput(false); err != nil {
+		t.Fatalf("finalizeOutput: %v", err)
+	}
 	data2, err := os.ReadFile(path2)
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +68,30 @@ func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
 // file is configured must not panic.
 func TestFinalizeOutputNoFile(t *testing.T) {
 	m := &Model{}
-	m.finalizeOutput(true)
-	m.finalizeOutput(false)
+	if err := m.finalizeOutput(true); err != nil {
+		t.Fatalf("finalizeOutput: %v", err)
+	}
+	if err := m.finalizeOutput(false); err != nil {
+		t.Fatalf("finalizeOutput: %v", err)
+	}
+}
+
+// TestFinalizeOutputReportsCloseError covers #30 for the TUI: a failure to
+// complete the results file is returned instead of being discarded.
+func TestFinalizeOutputReportsCloseError(t *testing.T) {
+	f, err := os.CreateTemp("", "tui-out-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(f.Name()) }()
+	buf := bufio.NewWriter(f)
+	m := &Model{out: output.NewFile(buf, false, output.FormatText), outBuf: buf, outFile: f}
+	m.out.Result("a.example.com", nil)
+	// Close the file underneath the writer so the final flush fails.
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.finalizeOutput(true); err == nil {
+		t.Fatal("finalizeOutput returned nil although the file was already closed")
+	}
 }

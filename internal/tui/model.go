@@ -184,7 +184,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Defensive: the output file is normally closed on doneMsg, but
 				// make sure it is not left open before starting a new scan.
-				m.finalizeOutput(false)
+				_ = m.finalizeOutput(false)
 				// Restore last-used values so the user doesn't re-type everything.
 				saved, _ := loadSavedConfig()
 				m.state = stateForm
@@ -216,13 +216,13 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Successful completion (including user abort, which still drains and
 		// emits EventDone): finalize structured output so buffered JSON/CSV is
 		// written and partial results are flushed.
-		m.finalizeOutput(true)
+		m.reportOutputErr(m.finalizeOutput(true))
 		return m, svCmd
 	case abortedMsg:
 		// Channel closed without EventDone (early error such as wildcard without
 		// -force): close the file without finalizing, mirroring the CLI which
 		// skips Finish on the error path to avoid an empty JSON array.
-		m.finalizeOutput(false)
+		m.reportOutputErr(m.finalizeOutput(false))
 		return m, svCmd
 	}
 
@@ -233,22 +233,38 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 // structured writer is finalized first (buffered JSON array emitted, CSV
 // flushed); when false the file is closed without emitting structured output.
 // Safe to call when no output file is configured.
-func (m *Model) finalizeOutput(finish bool) {
+// It returns the first write, flush, or close error so the scan view can tell
+// the user the results file is incomplete.
+func (m *Model) finalizeOutput(finish bool) error {
 	if m.out == nil {
-		return
+		return nil
+	}
+	var firstErr error
+	keep := func(err error) {
+		if firstErr == nil && err != nil {
+			firstErr = err
+		}
 	}
 	if finish {
-		m.out.Finish()
+		keep(m.out.Finish())
 	}
 	if m.outBuf != nil {
-		_ = m.outBuf.Flush()
+		keep(m.outBuf.Flush())
 	}
 	if m.outFile != nil {
-		_ = m.outFile.Close()
+		keep(m.outFile.Close())
 	}
 	m.out = nil
 	m.outBuf = nil
 	m.outFile = nil
+	return firstErr
+}
+
+// reportOutputErr surfaces an output-file failure in the scan view.
+func (m *Model) reportOutputErr(err error) {
+	if err != nil {
+		m.scanView.messages = append(m.scanView.messages, errorStyle.Render("✗ output file incomplete: "+err.Error()))
+	}
 }
 
 // View satisfies tea.Model.

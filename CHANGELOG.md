@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Flags written after the domain (`subenum -w wl.txt example.com -t 50`) are now parsed instead of silently ignored. Extra positional arguments are rejected, `-h` exits 0, and unknown flags exit 2 (#29).
 - `-type CNAME` no longer counts names that exist without a CNAME as resolver failures (`other`). A successful lookup with no records of the requested types is now a definitive negative (counted under `nxdomain`, not retried), so it cannot trip the reliability guard. Wildcard probes now use the requested record types, so CNAME wildcards are fingerprinted and filtered under `-force` (#28).
 - Lookups cut short by Ctrl+C, SIGTERM, or the reliability guard's own cancellation are no longer counted as failures, which previously inflated `other` and could raise a false "likely resolver rate-limiting" abort with exit 1. An interrupted CLI scan now exits 130 after flushing partial results (#42).
+- Output-file write failures (disk full, closed handle) now make the CLI exit 1 instead of 0, and the TUI shows an "output file incomplete" error instead of discarding it. `Writer.Finish` returns the first file write error, including CSV writer errors. The output file is created only after the wordlist loads, so a bad `-w` path no longer truncates an existing `-o` target (#30).
 
 ## [0.7.0] - 2026-09-16
 
