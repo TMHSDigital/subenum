@@ -122,7 +122,7 @@ func fqdn(domain string) string {
 var queriesPerType = map[string]int{"A": 1, "AAAA": 1, "CNAME": 2}
 
 // ResolveTypes performs per-type DNS lookups for the requested record types and
-// returns the matching records, the time spent in lookups, and the last lookup
+// returns the matching records, the time spent in lookups, and the most severe lookup
 // error (if any). An empty types slice falls back to DefaultTypes. The caller
 // should reuse a single *net.Resolver across lookups (see scan.Run).
 //
@@ -137,7 +137,7 @@ func ResolveTypes(ctx context.Context, resolver *net.Resolver, domain string, ti
 	name := fqdn(domain)
 	var elapsed time.Duration
 	var records []Record
-	var lastErr error
+	var worstErr error
 	for _, t := range types {
 		for i := 0; i < queriesPerType[t]; i++ {
 			if err := lim.Wait(ctx); err != nil {
@@ -150,12 +150,27 @@ func ResolveTypes(ctx context.Context, resolver *net.Resolver, domain string, ti
 		elapsed += time.Since(start)
 		cancel()
 		if err != nil {
-			lastErr = err
+			worstErr = worse(worstErr, err)
 			continue
 		}
 		records = append(records, recs...)
 	}
-	return records, elapsed, lastErr
+	return records, elapsed, worstErr
+}
+
+// worse keeps the more severe of two lookup errors. Any infrastructure failure
+// (timeout, refused, SERVFAIL, cancellation) outranks a not-found answer: a name
+// is a definitive negative only if every requested type said so. Otherwise an
+// A SERVFAIL followed by an AAAA NXDOMAIN would read as NXDOMAIN and never be
+// retried (#31).
+func worse(cur, next error) error {
+	if cur == nil {
+		return next
+	}
+	if Classify(cur) == OutcomeNXDomain && Classify(next) != OutcomeNXDomain {
+		return next
+	}
+	return cur
 }
 
 func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t string) ([]Record, error) {

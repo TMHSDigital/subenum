@@ -13,10 +13,13 @@ import (
 
 // testReply is one table entry for startTestDNS. Missing names NXDOMAIN.
 type testReply struct {
-	A         string // IPv4 dotted quad; ignored when NXDomain is set
-	CNAME     string // alias target; A queries chase it one hop within the table
-	NXDomain  bool
-	Truncated bool // UDP responds TC=1; TCP still returns the full A
+	A         string        // IPv4 dotted quad; ignored when NXDomain is set
+	AAAA      string        // IPv6 address; empty means AAAA queries get NXDOMAIN
+	CNAME     string        // alias target; A queries chase it one hop within the table
+	NXDomain  bool          // name does not exist
+	Truncated bool          // UDP responds TC=1; TCP still returns the full A
+	ServFailA bool          // A queries get SERVFAIL (other types answer normally)
+	DelayA    time.Duration // A answers are sent after this delay
 }
 
 type testDNS struct {
@@ -71,10 +74,12 @@ func startTestDNS(t *testing.T, table map[string]testReply) *testDNS {
 				return
 			}
 			s.queries.Add(1)
-			resp := s.reply(buf[:n], true)
-			if resp != nil {
-				_, _ = pc.WriteTo(resp, src)
-			}
+			q := append([]byte(nil), buf[:n]...)
+			go func() {
+				if resp := s.reply(q, true); resp != nil {
+					_, _ = pc.WriteTo(resp, src)
+				}
+			}()
 		}
 	}()
 	go func() {
@@ -137,19 +142,30 @@ func (s *testDNS) reply(query []byte, udp bool) []byte {
 		}
 		return dnsCNAMEResponse(query, r.CNAME, ip)
 	}
-	if qtype != 1 { // only A is served; everything else is NXDOMAIN
+	if r.NXDomain {
 		return dnsNXDomain(query)
 	}
-	if r.NXDomain || r.A == "" {
-		return dnsNXDomain(query)
+	switch qtype {
+	case 1:
+		if r.ServFailA {
+			return dnsRcode(query, 2)
+		}
+		if r.DelayA > 0 {
+			time.Sleep(r.DelayA)
+		}
+		ip := net.ParseIP(r.A).To4()
+		if ip == nil {
+			return dnsNXDomain(query)
+		}
+		return dnsAddrResponse(query, 1, ip, udp && r.Truncated)
+	case 28:
+		ip := net.ParseIP(r.AAAA)
+		if r.AAAA == "" || ip == nil || ip.To4() != nil {
+			return dnsNXDomain(query)
+		}
+		return dnsAddrResponse(query, 28, ip.To16(), udp && r.Truncated)
 	}
-	ip := net.ParseIP(r.A).To4()
-	if ip == nil {
-		return dnsNXDomain(query)
-	}
-	var addr [4]byte
-	copy(addr[:], ip)
-	return dnsAResponse(query, addr, udp && r.Truncated)
+	return dnsNXDomain(query)
 }
 
 func skipDNSName(msg []byte, off int) (int, bool) {
@@ -197,7 +213,9 @@ func dnsQNameType(query []byte) (string, uint16, bool) {
 	return strings.ToLower(strings.Join(labels, ".")), qtype, true
 }
 
-func dnsAResponse(query []byte, ip [4]byte, truncated bool) []byte {
+// dnsAddrResponse answers an A (qtype 1, 4-byte ip) or AAAA (qtype 28, 16-byte
+// ip) query with a single record, or with TC=1 and no answer when truncated.
+func dnsAddrResponse(query []byte, qtype uint16, ip []byte, truncated bool) []byte {
 	if len(query) < 12 {
 		return nil
 	}
@@ -225,7 +243,8 @@ func dnsAResponse(query []byte, ip [4]byte, truncated bool) []byte {
 	resp = append(resp, 0, 0, 0, 0)
 	resp = append(resp, query[12:qend]...)
 	if !truncated {
-		resp = append(resp, 0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, ip[0], ip[1], ip[2], ip[3])
+		resp = append(resp, 0xC0, 0x0C, byte(qtype>>8), byte(qtype), 0, 1, 0, 0, 0, 60, 0, byte(len(ip)))
+		resp = append(resp, ip...)
 	}
 	return resp
 }
@@ -266,13 +285,17 @@ func dnsCNAMEResponse(query []byte, target string, ip *[4]byte) []byte {
 	return resp
 }
 
-func dnsNXDomain(query []byte) []byte {
+func dnsNXDomain(query []byte) []byte { return dnsRcode(query, 3) }
+
+// dnsRcode echoes the query back as a response with the given RCODE
+// (2 = SERVFAIL, 3 = NXDOMAIN) and no answers.
+func dnsRcode(query []byte, rcode byte) []byte {
 	if len(query) < 12 {
 		return nil
 	}
 	resp := append([]byte(nil), query...)
 	resp[2] |= 0x80
-	resp[3] = (resp[3] & 0xF0) | 0x03
+	resp[3] = (resp[3] & 0xF0) | rcode
 	return resp
 }
 

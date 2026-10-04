@@ -53,9 +53,9 @@ and release hygiene.
 
 These are constraints from the v0.7.0 resolver-hardening pass, not footnotes.
 
-- **testdns serves A records only.** AAAA queries return NXDOMAIN, so the hermetic
-  suite does not cover the AAAA path in `ResolveTypes` or the dual-type timeout
-  budget. Anyone touching AAAA handling must extend the responder first.
+- **testdns is still hand-rolled and partial.** It serves A, AAAA, one-hop CNAME
+  chains, per-name SERVFAIL on A, and delayed A answers. Other qtypes and EDNS are
+  not modelled; extend the responder before testing them.
 - **The reliability guard is exercised with injected timeouts, not simulate misses,**
   because simulate misses classify as NXDOMAIN and NXDOMAIN is excluded from the
   failure rate by design. Preserve that when refactoring the guard.
@@ -82,7 +82,7 @@ to wire queries.
 `text` output still prints `Found: <domain>` and discards record type/value.
 JSON and CSV already carry them.
 
-### N3 (timeout DONE in #32; error aggregation tracked in #31). Per-type shared timeout budget
+### N3 (DONE, #31/#32). Per-type shared timeout budget
 `ResolveTypes` uses one `context.WithTimeout` for the whole type loop, so AAAA
 and CNAME starve after a slow A. Give each type its own budget or a remaining
 budget that cannot go negative.

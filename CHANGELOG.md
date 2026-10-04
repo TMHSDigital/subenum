@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lookups cut short by Ctrl+C, SIGTERM, or the reliability guard's own cancellation are no longer counted as failures, which previously inflated `other` and could raise a false "likely resolver rate-limiting" abort with exit 1. An interrupted CLI scan now exits 130 after flushing partial results (#42).
 - Output-file write failures (disk full, closed handle) now make the CLI exit 1 instead of 0, and the TUI shows an "output file incomplete" error instead of discarding it. `Writer.Finish` returns the first file write error, including CSV writer errors. The output file is created only after the wordlist loads, so a bad `-w` path no longer truncates an existing `-o` target (#30).
 - `-rate` now bounds DNS queries on the wire instead of candidate names. Every record type (CNAME counts as two), retry, wildcard probe and the preflight takes a slot, so `-rate 50` with the default `A,AAAA` no longer sends up to 100 qps. A reservation-based `dns.RateLimiter` replaces the ticker, which dropped ticks and under-delivered under load (ROADMAP N1). Time spent waiting for a slot does not count against `-timeout` (#32).
-- Each record type now gets its own `-timeout`, so a slow A answer no longer starves the AAAA/CNAME lookups that shared its budget (ROADMAP N3, part of #31).
+- Each record type now gets its own `-timeout`, so a slow A answer no longer starves the AAAA/CNAME lookups that shared its budget (ROADMAP N3).
+- `ResolveTypes` reports the most severe per-type error instead of the last one. An A SERVFAIL or timeout followed by an AAAA NXDOMAIN is now a failure that `-attempts` retries and the reliability guard sees, instead of a silent NXDOMAIN miss (#31).
 - Lookups use absolute names (trailing dot), so resolv.conf search suffixes (for example Kubernetes `ndots:5`) no longer multiply the queries sent for every missing name.
 
 ### Changed

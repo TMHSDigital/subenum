@@ -287,3 +287,52 @@ func TestLiveResolverSmoke(t *testing.T) {
 		t.Fatal("expected example.com to resolve via 8.8.8.8")
 	}
 }
+
+func TestResolveTypesAAAA(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"v6.example.com": {A: "192.0.2.1", AAAA: "2001:db8::1"}})
+	recs, _, err := ResolveTypes(context.Background(), srv.Resolver(time.Second), "v6.example.com", time.Second, DefaultTypes)
+	if err != nil {
+		t.Fatalf("ResolveTypes: %v", err)
+	}
+	want := []Record{{Type: "A", Value: "192.0.2.1"}, {Type: "AAAA", Value: "2001:db8::1"}}
+	if len(recs) != 2 || recs[0] != want[0] || recs[1] != want[1] {
+		t.Fatalf("records = %v, want %v", recs, want)
+	}
+}
+
+// TestResolveTypesServFailOutranksNXDomain covers #31: SERVFAIL on A followed
+// by NXDOMAIN on AAAA must classify as a failure (and be retried), not as a
+// definitive NXDOMAIN.
+func TestResolveTypesServFailOutranksNXDomain(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"flaky.example.com": {ServFailA: true}})
+	r := srv.Resolver(time.Second)
+
+	_, outcome := ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, false, 1, DefaultTypes)
+	if outcome == OutcomeNXDomain {
+		t.Fatal("SERVFAIL on A was masked by NXDOMAIN on AAAA")
+	}
+	if outcome != OutcomeOther {
+		t.Fatalf("outcome = %v, want Other (SERVFAIL)", outcome)
+	}
+	single := srv.Queries()
+
+	_, _ = ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, false, 3, DefaultTypes)
+	if retried := srv.Queries() - single; retried <= single {
+		t.Fatalf("attempts=3 sent %d queries vs %d for attempts=1; the failure was not retried", retried, single)
+	}
+}
+
+// TestResolveTypesSlowADoesNotStarveAAAA covers ROADMAP N3: each record type has
+// its own timeout, so an A answer slower than -timeout cannot use up the AAAA
+// lookup's budget.
+func TestResolveTypesSlowADoesNotStarveAAAA(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"slow.example.com": {A: "192.0.2.1", AAAA: "2001:db8::2", DelayA: 600 * time.Millisecond}})
+	timeout := 300 * time.Millisecond
+	recs, _, err := ResolveTypes(context.Background(), srv.Resolver(timeout), "slow.example.com", timeout, DefaultTypes)
+	if len(recs) != 1 || recs[0] != (Record{Type: "AAAA", Value: "2001:db8::2"}) {
+		t.Fatalf("records = %v (err %v), want only the AAAA record", recs, err)
+	}
+	if Classify(err) != OutcomeTimeout {
+		t.Fatalf("err = %v, want the A timeout reported", err)
+	}
+}
