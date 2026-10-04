@@ -155,6 +155,8 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 		Recursive:   vals.recursive,
 		Depth:       vals.depth,
 		Rate:        vals.rate,
+		MaxQueries:  vals.maxQueries,
+		NoAbort:     vals.noAbort,
 	}
 
 	// Persist form values for next session (best-effort).

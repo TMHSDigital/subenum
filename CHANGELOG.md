@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `-format jsonl` streams one JSON object per resolved subdomain, so structured output can be piped live (#34).
 - `-show-records` appends `TYPE=value` record pairs to `text` output on stdout and in the `-o` file (#34, ROADMAP N2).
+- TUI form gains *Max Names* (`-max-queries`) and *No Abort* (`-no-abort`), both persisted in `last.json`. A recursive TUI scan above the 1e7 ceiling can now be started with a cap instead of enabling *Force*, which also disables the wildcard abort (#35).
 
 ### Changed
 - When stdout is not a terminal, `text` results are printed as bare subdomain names (no `Found:` prefix), so `subenum ... | sort -u` or `| httpx` works without `cut`. Terminal output is unchanged. `examples/multi_domain_scan.sh` now counts lines instead of `Found:` (#34).

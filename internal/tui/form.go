@@ -30,10 +30,12 @@ const (
 	fieldRecursive   = 9
 	fieldDepth       = 10 // only active when recursive=ON
 	fieldRate        = 11
-	fieldOutput      = 12
-	fieldFormat      = 13
-	fieldForce       = 14
-	fieldCount       = 15
+	fieldMaxQueries  = 12
+	fieldOutput      = 13
+	fieldFormat      = 14
+	fieldForce       = 15
+	fieldNoAbort     = 16
+	fieldCount       = 17
 )
 
 var (
@@ -63,15 +65,17 @@ var inputForField = [fieldCount]int{
 	-1, // fieldRecursive   → toggle
 	8,  // fieldDepth       → inputs[8]
 	9,  // fieldRate        → inputs[9]
+	12, // fieldMaxQueries  → inputs[12]
 	10, // fieldOutput      → inputs[10]
 	11, // fieldFormat      → inputs[11]
 	-1, // fieldForce       → toggle
+	-1, // fieldNoAbort     → toggle
 }
 
 // formModel is the configuration form screen.
 type formModel struct {
 	inputs  []textinput.Model
-	toggles [3]bool // [simulate, force, recursive]
+	toggles [4]bool // [simulate, force, recursive, noAbort]
 	focus   int
 	err     string
 	width   int
@@ -118,11 +122,13 @@ func newFormModel(saved savedConfig) formModel {
 		newInput("0 = unlimited", intStr(saved.Rate, "0")),                                                 // 9 Rate
 		newInput("optional, e.g. results.txt", str(saved.Output, "")),                                      // 10 Output file
 		newInput("text, json, jsonl, csv", str(saved.Format, "text")),                                      // 11 Format
+		newInput("0 = unlimited", intStr(saved.MaxQueries, "0")),                                           // 12 Max queries
 	}
 
 	m.toggles[0] = saved.Simulate
 	m.toggles[1] = saved.Force
 	m.toggles[2] = saved.Recursive
+	m.toggles[3] = saved.NoAbort
 
 	// Focus domain on start - cursor blink cmd returned from Init.
 	m.inputs[0].Focus()
@@ -138,7 +144,7 @@ func (m formModel) initCmd() tea.Cmd {
 }
 
 func (m *formModel) isToggle() bool {
-	return m.focus == fieldSimulate || m.focus == fieldForce || m.focus == fieldRecursive
+	return m.focus == fieldSimulate || m.focus == fieldForce || m.focus == fieldRecursive || m.focus == fieldNoAbort
 }
 
 func (m *formModel) toggleArrayIndex() int {
@@ -147,6 +153,8 @@ func (m *formModel) toggleArrayIndex() int {
 		return 0
 	case fieldForce:
 		return 1
+	case fieldNoAbort:
+		return 3
 	default: // fieldRecursive
 		return 2
 	}
@@ -287,8 +295,9 @@ func (m formModel) View() string {
 		b.WriteString(dimmedRow.Render("  Depth:              (enable Recursive)") + "\n")
 	}
 
-	// Rate
+	// Rate and query cap
 	row(fieldRate, "Rate (qps)", m.inputs[9].View())
+	row(fieldMaxQueries, "Max Names", m.inputs[12].View())
 
 	// Output file (optional) and its format
 	row(fieldOutput, "Output File", m.inputs[10].View())
@@ -301,6 +310,13 @@ func (m formModel) View() string {
 		forceHint = blurredStyle.Render("  [space to toggle]")
 	}
 	row(fieldForce, "Force", forceVal+forceHint)
+
+	// No-abort toggle: keep scanning past the reliability guard.
+	noAbortHint := ""
+	if m.focus == fieldNoAbort {
+		noAbortHint = blurredStyle.Render("  [space to toggle]")
+	}
+	row(fieldNoAbort, "No Abort", toggleVal(m.toggles[3])+noAbortHint)
 
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("  ✗ "+m.err) + "\n")
@@ -384,6 +400,15 @@ func (m *formModel) validate() (formValues, string) {
 		}
 	}
 
+	// Max queries is optional; a blank field means unlimited (0).
+	maxQueries := 0
+	if mqStr := strings.TrimSpace(m.inputs[12].Value()); mqStr != "" {
+		maxQueries, err = strconv.Atoi(mqStr)
+		if err != nil || maxQueries < 0 {
+			return formValues{}, fmt.Sprintf("Max names must be 0 (unlimited) or a positive integer, got %q", m.inputs[12].Value())
+		}
+	}
+
 	// Output file is optional; the format applies only to that file and is
 	// validated even when no file is set so a typo is caught early.
 	outputFile := strings.TrimSpace(m.inputs[10].Value())
@@ -408,6 +433,8 @@ func (m *formModel) validate() (formValues, string) {
 		recursive:   m.toggles[2],
 		depth:       depth,
 		rate:        rate,
+		maxQueries:  maxQueries,
+		noAbort:     m.toggles[3],
 		outputFile:  outputFile,
 		format:      format,
 		formatName:  formatStr,
@@ -428,6 +455,8 @@ type formValues struct {
 	recursive   bool
 	depth       int
 	rate        int
+	maxQueries  int
+	noAbort     bool
 	outputFile  string
 	format      output.Format
 	formatName  string

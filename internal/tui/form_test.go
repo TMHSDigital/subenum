@@ -7,8 +7,8 @@ import (
 
 func TestNewFormModelDefaults(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	if len(m.inputs) != 12 {
-		t.Fatalf("expected 12 text inputs, got %d", len(m.inputs))
+	if len(m.inputs) != 13 {
+		t.Fatalf("expected 13 text inputs, got %d", len(m.inputs))
 	}
 	if m.focus != fieldDomain {
 		t.Errorf("expected initial focus on domain, got %d", m.focus)
@@ -131,5 +131,34 @@ func TestValidateDepthGatedOnRecursive(t *testing.T) {
 	m.toggles[2] = true
 	if _, errStr := m.validate(); errStr == "" {
 		t.Error("recursive ON should reject non-numeric depth")
+	}
+}
+
+// TestValidateMaxQueriesAndNoAbort covers #35: the TUI can set the query cap
+// and no-abort, so a large recursive scan no longer needs Force (which also
+// disables the wildcard abort).
+func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
+	m := newFormModel(savedConfig{})
+	m.inputs[0].SetValue("example.com")
+	m.inputs[12].SetValue("2500")
+	m.toggles[3] = true
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	if vals.maxQueries != 2500 || !vals.noAbort || vals.force {
+		t.Errorf("got maxQueries=%d noAbort=%v force=%v", vals.maxQueries, vals.noAbort, vals.force)
+	}
+
+	m.inputs[12].SetValue("-1")
+	if _, errStr := m.validate(); !strings.Contains(errStr, "Max names") {
+		t.Errorf("negative max queries: got %q", errStr)
+	}
+
+	// The new toggle is reachable and flips with space.
+	m.focus = fieldForce
+	m.moveFocus(+1)
+	if m.focus != fieldNoAbort || !m.isToggle() || m.toggleArrayIndex() != 3 {
+		t.Errorf("focus after Force = %d, want No Abort toggle", m.focus)
 	}
 }

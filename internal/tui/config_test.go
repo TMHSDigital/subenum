@@ -35,6 +35,8 @@ func TestSaveLoadConfigRoundTrip(t *testing.T) {
 		recursive:   true,
 		depth:       4,
 		rate:        25,
+		maxQueries:  5000,
+		noAbort:     true,
 		outputFile:  "out.json",
 		formatName:  "json",
 		simulate:    true,
@@ -67,6 +69,13 @@ func TestSaveLoadConfigRoundTrip(t *testing.T) {
 	}
 	if !sc.Simulate || !sc.Force || !sc.Recursive {
 		t.Errorf("toggle fields did not round-trip: %+v", sc)
+	}
+	if sc.MaxQueries != 5000 || !sc.NoAbort {
+		t.Errorf("max-queries/no-abort did not round-trip: %+v", sc)
+	}
+	m := newFormModel(sc)
+	if got := m.inputs[12].Value(); got != "5000" || !m.toggles[3] {
+		t.Errorf("form not seeded from saved max-queries/no-abort: %q, %v", got, m.toggles[3])
 	}
 }
 

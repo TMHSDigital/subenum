@@ -18,11 +18,13 @@ type savedConfig struct {
 	Types       string `json:"types"`
 	Depth       int    `json:"depth"`
 	Rate        int    `json:"rate"`
+	MaxQueries  int    `json:"max_queries"`
 	Output      string `json:"output"`
 	Format      string `json:"format"`
 	Simulate    bool   `json:"simulate"`
 	Force       bool   `json:"force"`
 	Recursive   bool   `json:"recursive"`
+	NoAbort     bool   `json:"no_abort"`
 }
 
 func configPath() (string, error) {
@@ -68,11 +70,13 @@ func saveConfig(fv formValues) error {
 		Types:       strings.Join(fv.recordTypes, ","),
 		Depth:       fv.depth,
 		Rate:        fv.rate,
+		MaxQueries:  fv.maxQueries,
 		Output:      fv.outputFile,
 		Format:      fv.formatName,
 		Simulate:    fv.simulate,
 		Force:       fv.force,
 		Recursive:   fv.recursive,
+		NoAbort:     fv.noAbort,
 	}
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {
