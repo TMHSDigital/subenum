@@ -76,7 +76,7 @@ Or launch the interactive terminal UI with no flags:
 | Query Cap | `-max-queries` stops admitting work. Recursive scans warn about the theoretical ceiling and refuse to start above 1e7 jobs unless `-max-queries` or `-force` is set |
 | Graceful Shutdown | Trap SIGINT/SIGTERM, drain in-flight workers, flush partial results |
 | Input Validation | RFC-compliant domain syntax and strict `ip:port` format enforcement |
-| Wordlist Dedup | Deduplicate wordlist entries in a single pass before scanning begins |
+| Wordlist Hygiene | Normalize the wordlist in one pass before scanning: skip blank lines and `#` comments, lowercase, deduplicate, and drop entries that are not valid DNS labels or would exceed 253 characters |
 | Simulation Mode | Generate synthetic DNS results at a configurable hit rate, with zero network I/O |
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
 | Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), or `csv` via `-format` |
@@ -197,7 +197,7 @@ make help           # list all targets
 
 | Flag | Default | Description |
 | :--- | :---: | :--- |
-| `-w <file>` | n/a | Wordlist file, one prefix per line **(required)** |
+| `-w <file>` | n/a | Wordlist file, one prefix per line; `#` comments allowed **(required)** |
 | `-t <n>` | `100` | Concurrent worker goroutines |
 | `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
 | `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server address (validated on startup) |

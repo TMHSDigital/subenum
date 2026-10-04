@@ -308,9 +308,16 @@ func run() (code int) {
 
 	// Load the wordlist before creating the output file so a bad -w path does
 	// not truncate an existing -o target.
-	entries, duplicates, err := wordlist.LoadWordlist(f.wordlistFile)
+	entries, duplicates, skipped, err := wordlist.LoadWordlist(f.wordlistFile, domain)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
+		return 1
+	}
+	if skipped > 0 {
+		out.Info("Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)
+	}
+	if len(entries) == 0 {
+		out.Error("wordlist %s has no valid entries", f.wordlistFile)
 		return 1
 	}
 

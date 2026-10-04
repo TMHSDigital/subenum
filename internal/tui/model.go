@@ -112,10 +112,15 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 
-	entries, _, err := wordlist.LoadWordlist(vals.wordlist)
+	entries, _, _, err := wordlist.LoadWordlist(vals.wordlist, vals.domain)
 	if err != nil {
 		cancel() // explicitly cancel before returning on error
 		m.form.err = "cannot read wordlist: " + err.Error()
+		return m, nil
+	}
+	if len(entries) == 0 {
+		cancel()
+		m.form.err = "wordlist has no valid entries"
 		return m, nil
 	}
 
