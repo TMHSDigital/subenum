@@ -276,7 +276,7 @@ subenum -w <wordlist> [flags] <domain>
 
 </details>
 
-Press `Ctrl+C` at any time to abort. In-flight queries drain and partial results are flushed before exit.
+Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results are flushed, and the process exits with code 130. Interrupted lookups are not counted as resolver failures.
 
 <br>
 

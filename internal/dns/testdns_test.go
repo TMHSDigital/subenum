@@ -14,6 +14,7 @@ import (
 // testReply is one table entry for startTestDNS. Missing names NXDOMAIN.
 type testReply struct {
 	A         string // IPv4 dotted quad; ignored when NXDomain is set
+	CNAME     string // alias target; A queries chase it one hop within the table
 	NXDomain  bool
 	Truncated bool // UDP responds TC=1; TCP still returns the full A
 }
@@ -124,6 +125,18 @@ func (s *testDNS) reply(query []byte, udp bool) []byte {
 		return nil
 	}
 	r := s.lookup(name)
+	if r.CNAME != "" && !r.NXDomain {
+		// Answer every qtype with the alias; for A also chase one hop so Go's
+		// resolver sees a complete CNAME -> A chain.
+		var ip *[4]byte
+		if qtype == 1 {
+			if v4 := net.ParseIP(s.lookup(r.CNAME).A).To4(); v4 != nil {
+				ip = new([4]byte)
+				copy(ip[:], v4)
+			}
+		}
+		return dnsCNAMEResponse(query, r.CNAME, ip)
+	}
 	if qtype != 1 { // only A is served; everything else is NXDOMAIN
 		return dnsNXDomain(query)
 	}
@@ -213,6 +226,42 @@ func dnsAResponse(query []byte, ip [4]byte, truncated bool) []byte {
 	resp = append(resp, query[12:qend]...)
 	if !truncated {
 		resp = append(resp, 0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, ip[0], ip[1], ip[2], ip[3])
+	}
+	return resp
+}
+
+// dnsCNAMEResponse answers with "<qname> CNAME target" and, when ip is non-nil,
+// a following "target A ip" record so the chain resolves.
+func dnsCNAMEResponse(query []byte, target string, ip *[4]byte) []byte {
+	qend, ok := skipDNSName(query, 12)
+	if len(query) < 12 || !ok || qend+4 > len(query) {
+		return nil
+	}
+	qend += 4
+	ancount := byte(1)
+	if ip != nil {
+		ancount = 2
+	}
+	flags := uint16(0x8400)
+	if query[2]&0x01 != 0 {
+		flags |= 0x0100
+	}
+	var rdata []byte
+	for _, label := range strings.Split(strings.TrimSuffix(target, "."), ".") {
+		rdata = append(rdata, byte(len(label)))
+		rdata = append(rdata, label...)
+	}
+	rdata = append(rdata, 0)
+
+	resp := make([]byte, 0, 96)
+	resp = append(resp, query[0], query[1], byte(flags>>8), byte(flags))
+	resp = append(resp, 0, 1, 0, ancount, 0, 0, 0, 0)
+	resp = append(resp, query[12:qend]...)
+	resp = append(resp, 0xC0, 0x0C, 0, 5, 0, 1, 0, 0, 0, 60, byte(len(rdata)>>8), byte(len(rdata)))
+	targetOff := len(resp)
+	resp = append(resp, rdata...)
+	if ip != nil {
+		resp = append(resp, 0xC0|byte(targetOff>>8), byte(targetOff), 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, ip[0], ip[1], ip[2], ip[3])
 	}
 	return resp
 }

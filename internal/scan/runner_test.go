@@ -258,6 +258,56 @@ func hookOutcome(o dns.Outcome) func(context.Context, string) ([]dns.Record, dns
 	}
 }
 
+// TestRunCancelDoesNotCountFailures covers #42: lookups in flight when the scan
+// is cancelled must not be counted as failures, so an interrupt can neither
+// inflate the "other" bucket nor trip the reliability guard.
+func TestRunCancelDoesNotCountFailures(t *testing.T) {
+	const fast = reliabilityMinJobs + 50
+	var n atomic.Int64
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     makeEntries(fast + 500),
+		Concurrency: 100,
+		Timeout:     time.Second,
+		Simulate:    true,
+		Attempts:    1,
+		resolveHook: func(ctx context.Context, _ string) ([]dns.Record, dns.Outcome) {
+			if n.Add(1) <= fast {
+				return nil, dns.OutcomeNXDomain
+			}
+			// Block like a slow lookup, then fail the way an interrupted
+			// net.Resolver call surfaces before classification.
+			<-ctx.Done()
+			return nil, dns.OutcomeOther
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan Event, 64)
+	go Run(ctx, cfg, events)
+	go func() {
+		for n.Load() < fast+int64(cfg.Concurrency) {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+	done, errs, _ := collect(events)
+
+	if done == nil {
+		t.Fatal("no EventDone received")
+	}
+	if len(errs) != 0 {
+		t.Fatalf("cancellation produced an error event: %q", errs[0].Message)
+	}
+	if done.Stats.Other != 0 || done.Stats.Timeout != 0 || done.Stats.Refused != 0 {
+		t.Fatalf("cancelled lookups counted as failures: %+v", done.Stats)
+	}
+	if done.Stats.Sum() != done.Processed {
+		t.Errorf("stats sum %d != processed %d", done.Stats.Sum(), done.Processed)
+	}
+}
+
 // TestRunStatsSumToProcessed injects a mix of classified outcomes in simulate
 // mode and asserts every processed job is accounted for. Failure rate stays
 // under the reliability threshold so the scan completes.

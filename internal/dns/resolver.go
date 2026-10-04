@@ -30,10 +30,16 @@ type Outcome int
 
 const (
 	OutcomeFound Outcome = iota
+	// OutcomeNXDomain is a definitive negative: the name does not exist, or it
+	// exists but has no records of the requested types (NODATA). Go's resolver
+	// already reports NODATA as not-found for A/AAAA; CNAME is folded in here too.
 	OutcomeNXDomain
 	OutcomeTimeout
 	OutcomeRefused
 	OutcomeOther
+	// OutcomeCanceled means the scan context was cancelled mid-lookup. It says
+	// nothing about the resolver and must not be counted as a failure.
+	OutcomeCanceled
 )
 
 // Classify maps a resolver error onto a coarse outcome so callers can tell a
@@ -41,6 +47,9 @@ const (
 func Classify(err error) Outcome {
 	if err == nil {
 		return OutcomeFound
+	}
+	if errors.Is(err, context.Canceled) {
+		return OutcomeCanceled
 	}
 	var de *net.DNSError
 	if errors.As(err, &de) {
@@ -171,7 +180,7 @@ func ResolveDomainWithRetry(ctx context.Context, resolver *net.Resolver, domain 
 	last := OutcomeOther
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
-			return nil, last
+			return nil, OutcomeCanceled
 		}
 		records, _, err := ResolveWithLog(ctx, resolver, domain, timeout, verbose, types)
 		if len(records) > 0 {
@@ -179,17 +188,19 @@ func ResolveDomainWithRetry(ctx context.Context, resolver *net.Resolver, domain 
 		}
 		last = Classify(err)
 		if last == OutcomeFound {
-			// Lookup succeeded but produced no records of the requested types.
-			last = OutcomeOther
+			// Lookup succeeded but produced no records of the requested types
+			// (for example -type CNAME on a name with only A records). That is a
+			// definitive negative, not a resolver failure (#28).
+			last = OutcomeNXDomain
 		}
-		if last == OutcomeNXDomain {
+		if last == OutcomeNXDomain || last == OutcomeCanceled {
 			return nil, last
 		}
 		if attempt < maxAttempts-1 {
 			select {
 			case <-time.After(time.Duration(50*(attempt+1)) * time.Millisecond):
 			case <-ctx.Done():
-				return nil, last
+				return nil, OutcomeCanceled
 			}
 		}
 	}
@@ -203,16 +214,21 @@ func randomHex(n int) string {
 	return fmt.Sprintf("%x", b)[:n]
 }
 
-// CheckWildcard probes the domain with two random subdomains. If either resolves
-// the domain is treated as wildcard (conservative). The returned record slice is
-// the union of both probe answers and is the fingerprint used to filter later
-// results. Returns (isWildcard, fingerprint, error).
-func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration) (bool, []Record, error) {
+// CheckWildcard probes the domain with two random subdomains, looking up the
+// same record types the scan will request (empty means DefaultTypes), so a
+// CNAME wildcard is fingerprinted when -type includes CNAME. If either probe
+// resolves the domain is treated as wildcard (conservative). The returned
+// record slice is the union of both probe answers and is the fingerprint used
+// to filter later results. Returns (isWildcard, fingerprint, error).
+func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string) (bool, []Record, error) {
+	if len(types) == 0 {
+		types = DefaultTypes
+	}
 	probe1 := randomHex(32) + "." + domain
 	probe2 := randomHex(32) + "." + domain
 
-	r1, _, _ := ResolveTypes(ctx, resolver, probe1, timeout, DefaultTypes)
-	r2, _, _ := ResolveTypes(ctx, resolver, probe2, timeout, DefaultTypes)
+	r1, _, _ := ResolveTypes(ctx, resolver, probe1, timeout, types)
+	r2, _, _ := ResolveTypes(ctx, resolver, probe2, timeout, types)
 
 	if ctx.Err() != nil {
 		return false, nil, ctx.Err()

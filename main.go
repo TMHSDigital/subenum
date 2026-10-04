@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -339,10 +340,12 @@ func run() int {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
+	var interrupted atomic.Bool
 	go func() {
 		select {
 		case <-sigCh:
 			fmt.Fprintf(os.Stderr, "\nInterrupt received, shutting down gracefully...\n")
+			interrupted.Store(true)
 			cancel()
 		case <-ctx.Done():
 		}
@@ -415,6 +418,11 @@ func run() int {
 	// runs there.
 	if sawDone {
 		out.Finish()
+	}
+	if interrupted.Load() {
+		// Shell convention for SIGINT (128+2): partial results were flushed above,
+		// but callers can tell an interrupted scan apart from success or failure.
+		return 130
 	}
 	if sawError && (!sawDone || !f.noAbort) {
 		return 1

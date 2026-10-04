@@ -113,7 +113,7 @@ func (c *wildcardCache) isWildcard(ctx context.Context, cfg Config, parent strin
 	}
 	c.mu.Unlock()
 
-	is, _, err := dns.CheckWildcard(ctx, cfg.Resolver, parent, cfg.Timeout)
+	is, _, err := dns.CheckWildcard(ctx, cfg.Resolver, parent, cfg.Timeout, cfg.Types)
 	if err != nil {
 		return false, err
 	}
@@ -249,7 +249,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
-		isWildcard, fp, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout)
+		isWildcard, fp, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, cfg.Types)
 		if err != nil {
 			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error()}
 			return
@@ -460,6 +460,13 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-
 		}
 	default:
 		records, outcome = dns.ResolveDomainWithRetry(ctx, cfg.Resolver, j.domain, cfg.Timeout, cfg.Verbose, cfg.Attempts, cfg.Types)
+	}
+
+	// A lookup cut short by cancellation (Ctrl+C, or the reliability guard's own
+	// cancel) says nothing about the resolver. Leave it out of every counter so
+	// an interrupt cannot inflate the failure rate or trip the guard (#42).
+	if outcome == dns.OutcomeCanceled || (outcome != dns.OutcomeFound && ctx.Err() != nil) {
+		return
 	}
 
 	if outcome == dns.OutcomeFound && recordsSubset(records, fp) {

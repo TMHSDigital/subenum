@@ -91,7 +91,7 @@ func TestCheckWildcard(t *testing.T) {
 		"www.example.com": {A: "192.0.2.1"},
 	})
 	timeout := time.Second
-	isWildcard, _, err := CheckWildcard(context.Background(), srv.Resolver(timeout), "example.com", timeout)
+	isWildcard, _, err := CheckWildcard(context.Background(), srv.Resolver(timeout), "example.com", timeout, nil)
 	if err != nil {
 		t.Fatalf("CheckWildcard returned error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestCheckWildcardCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := CheckWildcard(ctx, srv.Resolver(time.Second), "example.com", time.Second)
+	_, _, err := CheckWildcard(ctx, srv.Resolver(time.Second), "example.com", time.Second, nil)
 	if err == nil {
 		t.Errorf("expected error from cancelled context")
 	}
@@ -153,6 +153,11 @@ func TestClassify(t *testing.T) {
 			err:  fmt.Errorf("lookup: %w", &net.DNSError{Err: "no such host", IsNotFound: true}),
 			want: OutcomeNXDomain,
 		},
+		{
+			name: "context canceled",
+			err:  fmt.Errorf("lookup x: %w", context.Canceled),
+			want: OutcomeCanceled,
+		},
 	}
 
 	for _, tt := range tests {
@@ -161,6 +166,65 @@ func TestClassify(t *testing.T) {
 				t.Errorf("Classify() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestResolveDomainWithRetryCNAMENoData covers #28: a name that exists with
+// only an A record has no CNAME. That is a definitive negative, not a resolver
+// failure, and it must not be retried.
+func TestResolveDomainWithRetryCNAMENoData(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10"}})
+	records, outcome := ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, false, 3, []string{"CNAME"})
+	if len(records) != 0 {
+		t.Fatalf("records = %v, want none", records)
+	}
+	if outcome != OutcomeNXDomain {
+		t.Fatalf("outcome = %v, want NXDomain (NODATA)", outcome)
+	}
+	first := srv.Queries()
+
+	// A second identical call with attempts=1 must issue the same number of
+	// queries, proving the attempts=3 call above did not retry.
+	_, _ = ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, false, 1, []string{"CNAME"})
+	if got := srv.Queries() - first; got != first {
+		t.Fatalf("attempts=3 issued %d queries, attempts=1 issued %d; NODATA must not be retried", first, got)
+	}
+}
+
+// TestCheckWildcardCNAMEFingerprint covers the second half of #28: with
+// -type CNAME the wildcard fingerprint must carry the CNAME target, otherwise
+// recordsSubset can never filter CNAME-wildcard answers under -force.
+func TestCheckWildcardCNAMEFingerprint(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{
+		"*":                {CNAME: "edge.example.net"},
+		"edge.example.net": {A: "192.0.2.50"},
+	})
+	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, []string{"CNAME"})
+	if err != nil {
+		t.Fatalf("CheckWildcard: %v", err)
+	}
+	if !is {
+		t.Fatal("expected CNAME wildcard to be detected")
+	}
+	want := Record{Type: "CNAME", Value: "edge.example.net"}
+	if len(fp) != 1 || fp[0] != want {
+		t.Fatalf("fingerprint = %v, want [%v]", fp, want)
+	}
+
+	// A real hit under the same wildcard returns the same CNAME, so it is a
+	// subset of the fingerprint and would be filtered.
+	recs, _, _ := ResolveTypes(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, []string{"CNAME"})
+	if len(recs) != 1 || recs[0] != want {
+		t.Fatalf("www CNAME records = %v, want [%v]", recs, want)
+	}
+}
+
+func TestResolveDomainWithRetryCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, outcome := ResolveDomainWithRetry(ctx, NewResolver(time.Second, startBlackHole(t)), "x.example.com", time.Second, false, 3, nil)
+	if outcome != OutcomeCanceled {
+		t.Fatalf("outcome = %v, want Canceled", outcome)
 	}
 }
 
@@ -179,7 +243,7 @@ func TestCheckWildcardFingerprint(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{
 		"*": {A: "192.0.2.99"},
 	})
-	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second)
+	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, nil)
 	if err != nil {
 		t.Fatalf("CheckWildcard: %v", err)
 	}
