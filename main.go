@@ -81,6 +81,7 @@ type cliFlags struct {
 	retries      int
 	force        bool
 	format       string
+	showRecords  bool
 	rate         int
 	recordTypes  string
 	recursive    bool
@@ -108,7 +109,8 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
 	fs.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
-	fs.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
+	fs.StringVar(&f.format, "format", "text", "Output format: text, json, jsonl, or csv")
+	fs.BoolVar(&f.showRecords, "show-records", false, "In text format, append each result's records (TYPE=value)")
 	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited)")
 	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
@@ -207,6 +209,13 @@ func openOutputFile(path string, testMode bool, format output.Format, out *outpu
 	}
 	w := bufio.NewWriter(f)
 	return output.New(w, testMode, format), w, f, true
+}
+
+// stdoutIsTerminal reports whether stdout is an interactive terminal rather than
+// a pipe or file.
+func stdoutIsTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Writer) {
@@ -325,6 +334,9 @@ func run() (code int) {
 	if !ok {
 		return 1
 	}
+	// Bare names when piped (no "Found:" banner), human-friendly on a terminal.
+	out.SetPlain(!stdoutIsTerminal())
+	out.SetShowRecords(f.showRecords)
 	fileErrReported := false
 	if outFile != nil {
 		// Runs after the final return value is chosen; a failed flush or close

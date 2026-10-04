@@ -230,7 +230,7 @@ skips expanding a wildcard branch.
 
 ## Output Formats
 
-By default `subenum` prints human-readable `Found:` lines. Use `-format` to emit structured output instead. The `-o` file honors the same format.
+By default `subenum` prints human-readable `Found:` lines on a terminal and bare subdomain names when stdout is piped or redirected; add `-show-records` to include record values. Use `-format` to emit structured output instead. The `-o` file honors the same format.
 
 ### JSON
 

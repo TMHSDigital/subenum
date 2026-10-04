@@ -101,7 +101,7 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
 *   **Purpose**: Thread-safe output that keeps stdout pipe-clean. Resolved subdomains go to stdout; everything else (progress, verbose diagnostics, errors) goes to stderr.
 *   **Implementation**:
     *   `output.Writer` struct with mutex-protected methods:
-        *   `Result(domain, records)` - in `text` format prints `Found: <domain>` to stdout (and the output file if configured); in `json` format buffers `{"subdomain", "records"}` objects and writes a single array at completion; in `csv` format streams `subdomain,type,value` rows with a header. The format is selected with `-format text|json|csv` (default `text`, which is byte-for-byte identical to prior behavior). The JSON array is buffered because it is a single document and does not stream; JSONL would be the streaming-friendly alternative if needed. The TUI uses `output.NewFile` for the optional result file; the live viewport stays human-readable text.
+        *   `Result(domain, records)` - in `text` format prints `Found: <domain>` to stdout on a terminal, or the bare name when stdout is piped (`SetPlain`), and the bare name to the output file; `-show-records` (`SetShowRecords`) appends `TYPE=value` pairs. In `json` format it buffers `{"subdomain", "records"}` objects and writes a single array at completion; `jsonl` streams one such object per line; `csv` streams `subdomain,type,value` rows with a header. The format is selected with `-format text|json|jsonl|csv` (default `text`). The TUI uses `output.NewFile` for the optional result file; the live viewport stays human-readable text.
         *   `Progress(pct, processed, total, found)` - writes a carriage-return progress line to stderr.
         *   `Info(format, args...)` - writes an informational line to stderr.
         *   `Error(format, args...)` - writes an error line to stderr.
@@ -109,7 +109,7 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
         *   Configuration summary, per-query DNS resolution info, and final scan statistics - all via `Info` to stderr.
     *   **Progress Reporting** (when `-progress` flag is enabled):
         *   A dedicated goroutine using a 1-second ticker calls `Progress` on stderr.
-*   **Interactions**: All components route output through the `Writer`. Since results are the only thing on stdout, piping (`| cut -d' ' -f2`) works without `-progress=false`.
+*   **Interactions**: All components route output through the `Writer`. Since results are the only thing on stdout, and text results are bare names when piped, `subenum ... | sort -u` works without `-progress=false` or any post-processing.
 
 ### 2.6. Progress Monitoring
 

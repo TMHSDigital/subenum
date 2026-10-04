@@ -78,7 +78,7 @@ Do not expand this list into drive-by fixes in the same PR that notices them.
 Replaced by `dns.RateLimiter` reservations, which also moved pacing from jobs
 to wire queries.
 
-### N2. Text-format record display
+### N2 (DONE, #34). Text-format record display
 `text` output still prints `Found: <domain>` and discards record type/value.
 JSON and CSV already carry them.
 

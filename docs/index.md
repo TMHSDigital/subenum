@@ -53,7 +53,7 @@ subenum brute-forces subdomains by resolving a wordlist against a target domain 
 | `-t <n>` | `100` | Concurrent workers |
 | `-dns-server <ip:port>` | `8.8.8.8:53` | Resolver address |
 | `-force` | `false` | Continue on wildcard DNS |
-| `-format <fmt>` | `text` | `text`, `json`, or `csv` |
+| `-format <fmt>` | `text` | `text`, `json`, `jsonl`, or `csv` |
 | `-rate <qps>` | `0` | Max queries per second (`0` = unlimited) |
 | `-type <list>` | `A,AAAA` | Record types: `A`, `AAAA`, `CNAME` |
 | `-recursive` | `false` | Enumerate children of hits |

@@ -79,7 +79,7 @@ Or launch the interactive terminal UI with no flags:
 | Wordlist Hygiene | Normalize the wordlist in one pass before scanning: skip blank lines and `#` comments, lowercase, deduplicate, and drop entries that are not valid DNS labels or would exceed 253 characters |
 | Simulation Mode | Generate synthetic DNS results at a configurable hit rate, with zero network I/O |
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
-| Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), or `csv` via `-format` |
+| Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), streaming `jsonl`, or `csv` via `-format`; `-show-records` adds record values to text output |
 | Rate Limiting | Cap DNS queries per second on the wire with `-rate`: every record type, retry and wildcard probe takes a slot, and queueing never eats into `-timeout` |
 | Record Types | Look up and filter by `A`, `AAAA`, or `CNAME` records with `-type` |
 | Recursive Enumeration | Enumerate subdomains of discovered subdomains with `-recursive` and a `-depth` cap, with loop and duplicate protection |
@@ -206,7 +206,8 @@ make help           # list all targets
 | `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
 | `-max-queries <n>` | `0` | Max candidate names to test (0 = unlimited). Each name sends one query per record type per attempt (`CNAME` costs two) |
 | `-o <file>` | n/a | Write results to file in addition to stdout |
-| `-format <fmt>` | `text` | Output format: `text`, `json`, or `csv` |
+| `-format <fmt>` | `text` | Output format: `text`, `json`, `jsonl` (one object per line, streamed), or `csv` |
+| `-show-records` | `false` | In `text` format, append each result's records as `TYPE=value` |
 | `-rate <qps>` | `0` | Max DNS queries per second on the wire, all workers combined, including every record type, retry, wildcard probe and the preflight (0 = unlimited) |
 | `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME` |
 | `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
@@ -261,7 +262,7 @@ subenum -w <wordlist> [flags] <domain>
 
 **Pipe-friendly - only resolved subdomains on stdout**
 ```bash
-./subenum -w wordlist.txt example.com | cut -d' ' -f2 | your-takeover-scanner
+./subenum -w wordlist.txt example.com | your-takeover-scanner
 ```
 
 **Force scan on a wildcard domain**

@@ -63,7 +63,8 @@ while IFS= read -r domain || [ -n "$domain" ]; do
     $SUBENUM_PATH -w "$WORDLIST" -t "$CONCURRENCY" -timeout "$TIMEOUT" "$domain" | tee "$output_file"
     
     # Count results
-    count=$(grep -c "Found:" "$output_file")
+    # Piped output is one bare subdomain per line.
+    count=$(grep -c . "$output_file")
     echo "Found $count subdomains for $domain"
     echo "Results saved to: $output_file"
     echo ""
@@ -83,7 +84,7 @@ for result_file in "$OUTPUT_DIR"/*.txt; do
     [[ "$result_file" == "$summary_file" ]] && continue
     
     domain=$(basename "$result_file" .txt)
-    count=$(grep -c "Found:" "$result_file")
+    count=$(grep -c . "$result_file")
     echo "$domain: $count subdomains" >> "$summary_file"
 done
 

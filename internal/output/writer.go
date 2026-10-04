@@ -22,11 +22,10 @@ const (
 	// FormatJSON buffers results and emits a single JSON array at completion.
 	FormatJSON
 	// FormatCSV streams "subdomain,type,value" rows with a header.
-	//
-	// Note: the JSON format buffers the whole document and therefore does not
-	// stream like text and CSV do. If live JSON piping is ever needed, JSONL
-	// (one JSON object per line) is the streaming-friendly alternative.
 	FormatCSV
+	// FormatJSONL streams one JSON object per resolved subdomain, one per line.
+	// Unlike FormatJSON it needs no Finish to be complete, so it pipes live.
+	FormatJSONL
 )
 
 // ParseFormat converts a flag string into a Format.
@@ -38,8 +37,10 @@ func ParseFormat(s string) (Format, error) {
 		return FormatJSON, nil
 	case "csv":
 		return FormatCSV, nil
+	case "jsonl", "ndjson":
+		return FormatJSONL, nil
 	default:
-		return FormatText, fmt.Errorf("invalid format %q (want text, json, or csv)", s)
+		return FormatText, fmt.Errorf("invalid format %q (want text, json, jsonl, or csv)", s)
 	}
 }
 
@@ -57,6 +58,8 @@ type Writer struct {
 	simulate  bool
 	format    Format
 	stdout    bool // mirror results to os.Stdout (false for the TUI)
+	plain     bool // text stdout prints bare names, no "Found:" banner
+	records   bool // text output appends record types and values
 
 	buffered  []Result // FormatJSON: accumulated until Finish
 	csvStdout *csv.Writer
@@ -78,8 +81,17 @@ func NewFile(outWriter *bufio.Writer, simulate bool, format Format) *Writer {
 	return &Writer{outWriter: outWriter, simulate: simulate, format: format, stdout: false}
 }
 
+// SetPlain makes text-mode stdout print bare subdomain names, one per line,
+// without the "Found:" banner, so output pipes straight into other tools. The
+// CLI enables it when stdout is not a terminal.
+func (w *Writer) SetPlain(plain bool) { w.plain = plain }
+
+// SetShowRecords makes text-mode output (stdout and file) append each
+// result's records as TYPE=value pairs.
+func (w *Writer) SetShowRecords(show bool) { w.records = show }
+
 // Result records a resolved domain. In text mode it prints immediately; in JSON
-// mode it is buffered for Finish; in CSV mode rows are streamed.
+// mode it is buffered for Finish; in CSV and JSONL mode it is streamed.
 func (w *Writer) Result(domain string, records []dns.Record) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -89,21 +101,56 @@ func (w *Writer) Result(domain string, records []dns.Record) {
 		w.buffered = append(w.buffered, Result{Subdomain: domain, Records: records})
 	case FormatCSV:
 		w.writeCSVRows(domain, records)
+	case FormatJSONL:
+		w.writeJSONL(domain, records)
 	default:
-		w.writeText(domain)
+		w.writeText(domain, records)
 	}
 }
 
-func (w *Writer) writeText(domain string) {
+func (w *Writer) writeText(domain string, records []dns.Record) {
+	line := domain
+	if w.records {
+		line += formatRecords(records)
+	}
 	if w.stdout {
-		if w.simulate {
-			fmt.Printf("Found (SIMULATED): %s\n", domain)
-		} else {
-			fmt.Printf("Found: %s\n", domain)
+		switch {
+		case w.plain:
+			fmt.Println(line)
+		case w.simulate:
+			fmt.Printf("Found (SIMULATED): %s\n", line)
+		default:
+			fmt.Printf("Found: %s\n", line)
 		}
 	}
 	if w.outWriter != nil {
-		fmt.Fprintln(w.outWriter, domain)
+		fmt.Fprintln(w.outWriter, line)
+	}
+}
+
+// formatRecords renders records as " A=192.0.2.1 AAAA=2001:db8::1".
+func formatRecords(records []dns.Record) string {
+	var b strings.Builder
+	for _, r := range records {
+		b.WriteString(" " + r.Type + "=" + r.Value)
+	}
+	return b.String()
+}
+
+func (w *Writer) writeJSONL(domain string, records []dns.Record) {
+	if records == nil {
+		records = []dns.Record{}
+	}
+	data, err := json.Marshal(Result{Subdomain: domain, Records: records})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: encoding JSON output: %v\n", err)
+		return
+	}
+	if w.stdout {
+		fmt.Printf("%s\n", data)
+	}
+	if w.outWriter != nil {
+		fmt.Fprintf(w.outWriter, "%s\n", data)
 	}
 }
 

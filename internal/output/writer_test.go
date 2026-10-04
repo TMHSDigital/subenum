@@ -313,6 +313,69 @@ func TestWriterResultCSVFile(t *testing.T) {
 	}
 }
 
+// TestWriterPlainAndRecords covers #34: piped text output is bare names, and
+// -show-records appends TYPE=value pairs on stdout and in the file.
+func TestWriterPlainAndRecords(t *testing.T) {
+	recs := []dns.Record{{Type: "A", Value: "192.0.2.1"}, {Type: "AAAA", Value: "2001:db8::1"}}
+
+	w := New(nil, true, FormatText)
+	w.SetPlain(true)
+	out := captureStdout(t, func() { w.Result("www.example.com", recs) })
+	if out != "www.example.com\n" {
+		t.Errorf("plain stdout = %q, want bare name", out)
+	}
+
+	var buf strings.Builder
+	bw := bufio.NewWriter(&buf)
+	w = New(bw, false, FormatText)
+	w.SetPlain(true)
+	w.SetShowRecords(true)
+	out = captureStdout(t, func() { w.Result("www.example.com", recs) })
+	if err := w.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	want := "www.example.com A=192.0.2.1 AAAA=2001:db8::1\n"
+	if out != want {
+		t.Errorf("stdout = %q, want %q", out, want)
+	}
+	if buf.String() != want {
+		t.Errorf("file = %q, want %q", buf.String(), want)
+	}
+}
+
+func TestWriterJSONLStreams(t *testing.T) {
+	var buf strings.Builder
+	bw := bufio.NewWriter(&buf)
+	w := New(bw, false, FormatJSONL)
+	out := captureStdout(t, func() {
+		w.Result("a.example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}})
+		w.Result("b.example.com", nil)
+	})
+	// Streamed before Finish: each line is a complete JSON object.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d stdout lines, want 2: %q", len(lines), out)
+	}
+	for _, l := range lines {
+		var r Result
+		if err := json.Unmarshal([]byte(l), &r); err != nil {
+			t.Fatalf("line %q is not valid JSON: %v", l, err)
+		}
+		if r.Records == nil {
+			t.Errorf("line %q: records should be [] not null", l)
+		}
+	}
+	if err := w.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(buf.String()) != strings.TrimSpace(out) {
+		t.Errorf("file output %q differs from stdout %q", buf.String(), out)
+	}
+	if f, err := ParseFormat("jsonl"); err != nil || f != FormatJSONL {
+		t.Errorf("ParseFormat(jsonl) = %v, %v", f, err)
+	}
+}
+
 // failWriter accepts limit bytes, then fails every write, like a disk filling
 // up mid-scan.
 type failWriter struct{ limit int }
@@ -331,7 +394,7 @@ func (f *failWriter) Write(p []byte) (int, error) {
 // fully written must surface an error from Finish for every format, so the
 // CLI can exit non-zero and the TUI can warn.
 func TestFinishReportsFileWriteErrors(t *testing.T) {
-	for _, format := range []Format{FormatText, FormatJSON, FormatCSV} {
+	for _, format := range []Format{FormatText, FormatJSON, FormatCSV, FormatJSONL} {
 		buf := bufio.NewWriterSize(&failWriter{limit: 8}, 16)
 		w := NewFile(buf, false, format)
 		for i := 0; i < 20; i++ {

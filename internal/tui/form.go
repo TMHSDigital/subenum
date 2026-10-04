@@ -117,7 +117,7 @@ func newFormModel(saved savedConfig) formModel {
 		newInput("e.g. 2", intStr(saved.Depth, "1")),                                                       // 8 Depth
 		newInput("0 = unlimited", intStr(saved.Rate, "0")),                                                 // 9 Rate
 		newInput("optional, e.g. results.txt", str(saved.Output, "")),                                      // 10 Output file
-		newInput("text, json, or csv", str(saved.Format, "text")),                                          // 11 Format
+		newInput("text, json, jsonl, csv", str(saved.Format, "text")),                                      // 11 Format
 	}
 
 	m.toggles[0] = saved.Simulate

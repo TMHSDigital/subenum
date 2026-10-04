@@ -17,7 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ResolveTypes` reports the most severe per-type error instead of the last one. An A SERVFAIL or timeout followed by an AAAA NXDOMAIN is now a failure that `-attempts` retries and the reliability guard sees, instead of a silent NXDOMAIN miss (#31).
 - Lookups use absolute names (trailing dot), so resolv.conf search suffixes (for example Kubernetes `ndots:5`) no longer multiply the queries sent for every missing name.
 
+### Added
+- `-format jsonl` streams one JSON object per resolved subdomain, so structured output can be piped live (#34).
+- `-show-records` appends `TYPE=value` record pairs to `text` output on stdout and in the `-o` file (#34, ROADMAP N2).
+
 ### Changed
+- When stdout is not a terminal, `text` results are printed as bare subdomain names (no `Found:` prefix), so `subenum ... | sort -u` or `| httpx` works without `cut`. Terminal output is unchanged. `examples/multi_domain_scan.sh` now counts lines instead of `Found:` (#34).
 - Wordlists are normalized on load: blank lines and `#` comments are ignored, entries are lowercased before deduplication (so `WWW` and `www` are one query), and entries that are not valid DNS labels (whitespace, `*`, empty or over-long labels) or whose full name would exceed 253 characters are skipped and reported on stderr. Underscore labels such as `_dmarc` are kept. A wordlist with no valid entries is an error (#33).
 - `-max-queries` help text and docs now say what it counts: candidate names (jobs), not wire queries.
 
