@@ -233,7 +233,8 @@ make help           # list all targets
 
 | Flag | Default | Description |
 | :--- | :---: | :--- |
-| `-w <file>` | n/a | Wordlist file, one prefix per line; `#` comments allowed **(required)** |
+| `-w <file>` | n/a | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin **(required)** |
+| `-dL <file>` | n/a | File of apex domains to scan, one per line (`-` reads stdin), instead of a `<domain>` argument. Each domain is an independent scan; results share one output |
 | `-t <n>` | `100` | Concurrent worker goroutines |
 | `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
 | `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server address (validated on startup) |
@@ -277,6 +278,7 @@ make help           # list all targets
 
 ```bash
 subenum -w <wordlist> [flags] <domain>
+subenum -w <wordlist> [flags] -dL <domains_file>
 ```
 
 <details>
@@ -396,8 +398,7 @@ subenum/
 ├── examples/
 │   ├── sample_wordlist.txt
 │   ├── advanced_usage.md
-│   ├── demo.sh
-│   └── multi_domain_scan.sh
+│   └── demo.sh
 ├── internal/
 │   ├── dns/                    # ResolveTypes, ResolveDomainWithRetry, CheckWildcard, SimulateResolve
 │   ├── output/                 # Thread-safe Writer (stdout/stderr separation)

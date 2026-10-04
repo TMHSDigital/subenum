@@ -96,12 +96,20 @@ Results go to stdout and progress to stderr, so you can pipe stdout directly:
 
 ### Example: Use with Multiple Domains
 
-Using the provided `multi_domain_scan.sh` script:
+Pass a file of apex domains (one per line, `#` comments allowed) with `-dL`. Each domain is scanned in turn as an independent scan, with its own preflight, wildcard check, `-max-queries` budget and reliability guard. Results go to a single output, so `-format json` produces one array:
 
 ```bash
-cd examples
-./multi_domain_scan.sh sample_domains.txt
+./subenum -w wordlist.txt -dL examples/sample_domains.txt -format jsonl -o results.jsonl
 ```
+
+Either input can come from standard input with `-` (but not both):
+
+```bash
+cat targets.txt | ./subenum -w wordlist.txt -dL -
+generate-words | ./subenum -w - example.com
+```
+
+The exit code is non-zero if any domain fails, for example a wildcard domain without `-force`. The remaining domains are still scanned.
 
 ## Saving Results to a File
 

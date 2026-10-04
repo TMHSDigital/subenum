@@ -88,6 +88,7 @@ func main() {
 // cliFlags holds all parsed command-line flag values.
 type cliFlags struct {
 	wordlistFile string
+	domainList   string
 	concurrency  int
 	timeoutMs    int
 	dnsServer    string
@@ -117,7 +118,8 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	var f cliFlags
 	fs := flag.NewFlagSet(ProgramName, flag.ContinueOnError)
 	fs.Bool("tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
-	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file")
+	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file (- for stdin)")
+	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
 	fs.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
 	fs.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server to use (format: ip:port)")
@@ -168,14 +170,23 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 }
 
 func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
-	if f.wordlistFile == "" || len(positionals) == 0 {
+	if f.wordlistFile == "" || (len(positionals) == 0 && f.domainList == "") {
 		fmt.Fprintln(os.Stderr, "Usage: subenum -w <wordlist_file> [options] <domain>")
+		fmt.Fprintln(os.Stderr, "       subenum -w <wordlist_file> [options] -dL <domains_file>")
 		fs.SetOutput(os.Stderr)
 		fs.PrintDefaults()
 		return "", false
 	}
+	if f.domainList != "" && len(positionals) > 0 {
+		out.Error("use either a <domain> argument or -dL, not both")
+		return "", false
+	}
 	if len(positionals) > 1 {
-		out.Error("expected exactly one domain, got %d arguments: %s", len(positionals), strings.Join(positionals, " "))
+		out.Error("expected exactly one domain, got %d arguments: %s (use -dL for several)", len(positionals), strings.Join(positionals, " "))
+		return "", false
+	}
+	if f.wordlistFile == wordlist.Stdin && f.domainList == wordlist.Stdin {
+		out.Error("-w and -dL cannot both read standard input")
 		return "", false
 	}
 	if f.concurrency <= 0 {
@@ -212,12 +223,50 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 			return "", false
 		}
 	}
+	if f.domainList != "" {
+		return "", true // targets come from loadTargets
+	}
 	domain := positionals[0]
 	if err := validate.Domain(domain); err != nil {
 		out.Error("%v", err)
 		return "", false
 	}
 	return domain, true
+}
+
+// loadTargets returns the apex domains to scan: the single positional domain,
+// or the entries of the -dL file ("-" for stdin). Blank lines, # comments and
+// duplicates are skipped; invalid domains are reported and skipped.
+func loadTargets(f cliFlags, domain string, out *output.Writer) ([]string, bool) {
+	if f.domainList == "" {
+		return []string{domain}, true
+	}
+	lines, err := wordlist.ReadLines(f.domainList)
+	if err != nil {
+		out.Error("reading domain list: %v", err)
+		return nil, false
+	}
+	var targets []string
+	seen := make(map[string]bool)
+	for _, line := range lines {
+		if wordlist.IsComment(line) {
+			continue
+		}
+		d := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(line), "."))
+		if err := validate.Domain(d); err != nil {
+			out.Info("Skipping invalid domain %q in %s: %v", strings.TrimSpace(line), f.domainList, err)
+			continue
+		}
+		if !seen[d] {
+			seen[d] = true
+			targets = append(targets, d)
+		}
+	}
+	if len(targets) == 0 {
+		out.Error("domain list %s has no valid domains", f.domainList)
+		return nil, false
+	}
+	return targets, true
 }
 
 func openOutputFile(path string, testMode bool, format output.Format, out *output.Writer) (*output.Writer, *bufio.Writer, *os.File, bool) {
@@ -337,21 +386,28 @@ func run() (code int) {
 		return 1
 	}
 
+	targets, ok := loadTargets(f, domain, out)
+	if !ok {
+		return 1
+	}
+	targetDesc := targets[0]
+	if len(targets) > 1 {
+		targetDesc = fmt.Sprintf("%d domains from %s", len(targets), f.domainList)
+	}
 	if f.verbose {
-		logVerboseStart(f, domain, maxAttempts, out)
+		logVerboseStart(f, targetDesc, maxAttempts, out)
 	}
 
-	// Load the wordlist before creating the output file so a bad -w path does
-	// not truncate an existing -o target.
-	entries, duplicates, skipped, err := wordlist.LoadWordlist(f.wordlistFile, domain)
+	// Read the wordlist before creating the output file so a bad -w path does
+	// not truncate an existing -o target. It is read once (stdin can only be
+	// read once) and normalized per target, since the name-length limit
+	// depends on the domain.
+	wordLines, err := wordlist.ReadLines(f.wordlistFile)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
 		return 1
 	}
-	if skipped > 0 {
-		out.Info("Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)
-	}
-	if len(entries) == 0 {
+	if probe, _, _ := wordlist.Build(wordLines, ""); len(probe) == 0 {
 		out.Error("wordlist %s has no valid entries", f.wordlistFile)
 		return 1
 	}
@@ -387,14 +443,6 @@ func run() (code int) {
 		}()
 	}
 
-	totalWords := int64(len(entries))
-	if f.verbose {
-		out.Info("Total wordlist entries: %d", totalWords)
-		if duplicates > 0 {
-			out.Info("Removed %d duplicate wordlist entries", duplicates)
-		}
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -412,6 +460,63 @@ func run() (code int) {
 		}
 	}()
 
+	// Each target is an independent scan: its own preflight, wildcard check,
+	// -max-queries budget and reliability guard. Results share one writer, so
+	// -format json is a single array and CSV has a single header.
+	anyDone, anyFailed := false, false
+	for i, target := range targets {
+		if ctx.Err() != nil {
+			break
+		}
+		if len(targets) > 1 {
+			out.Info("=== [%d/%d] %s ===", i+1, len(targets), target)
+		}
+		entries, duplicates, skipped := wordlist.Build(wordLines, target)
+		if skipped > 0 {
+			out.Info("Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)
+		}
+		if f.verbose {
+			out.Info("Total wordlist entries: %d", len(entries))
+			if duplicates > 0 {
+				out.Info("Removed %d duplicate wordlist entries", duplicates)
+			}
+		}
+		if len(entries) == 0 {
+			out.Error("no valid wordlist entries for %s", target)
+			anyFailed = true
+			continue
+		}
+		done, failed := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter)
+		anyDone = anyDone || done
+		anyFailed = anyFailed || failed
+	}
+
+	// Finalize structured output only if at least one scan finished, so an
+	// early error (such as wildcard detection without -force) does not emit an
+	// empty JSON array or a bare CSV header. The deferred file flush/close
+	// registered above runs after this. Reliability abort still emits
+	// EventDone with partial results, so Finish runs there.
+	if anyDone {
+		if err := out.Finish(); err != nil {
+			out.Error("writing output file: %v", err)
+			fileErrReported = true
+		}
+	}
+	if interrupted.Load() {
+		// Shell convention for SIGINT (128+2): partial results were flushed above,
+		// but callers can tell an interrupted scan apart from success or failure.
+		return 130
+	}
+	if anyFailed || fileErrReported {
+		return 1
+	}
+	return 0
+}
+
+// scanTarget runs one domain's scan and streams its events to out. It reports
+// whether the scan finished (EventDone arrived) and whether it should count as
+// a failure for the exit code.
+func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (sawDone, failed bool) {
 	cfg := scan.Config{
 		Domain:      domain,
 		Entries:     entries,
@@ -438,7 +543,6 @@ func run() (code int) {
 
 	progressStarted := false
 	sawError := false
-	sawDone := false
 	finishProgress := func() {
 		if progressStarted {
 			out.ProgressDone()
@@ -450,7 +554,7 @@ func run() (code int) {
 		case scan.EventResult:
 			out.Result(ev.Domain, ev.Records)
 		case scan.EventProgress:
-			if f.showProgress && totalWords > 0 {
+			if f.showProgress && ev.Total > 0 {
 				progressStarted = true
 				pct := float64(ev.Processed) / float64(ev.Total) * 100
 				out.Progress(pct, ev.Processed, ev.Total, ev.Found)
@@ -473,30 +577,8 @@ func run() (code int) {
 			}
 		}
 	}
-	// Finalize structured output only on the success path, so an early error
-	// (such as wildcard detection without -force) does not emit an empty JSON
-	// array or a bare CSV header. The deferred file flush/close registered
-	// above runs after this, persisting buffered output before the file closes.
-	// Reliability abort still emits EventDone with partial results, so Finish
-	// runs there.
-	if sawDone {
-		if err := out.Finish(); err != nil {
-			out.Error("writing output file: %v", err)
-			fileErrReported = true
-		}
-	}
-	if interrupted.Load() {
-		// Shell convention for SIGINT (128+2): partial results were flushed above,
-		// but callers can tell an interrupted scan apart from success or failure.
-		return 130
-	}
-	if sawError && (!sawDone || !f.noAbort) {
-		return 1
-	}
-	if fileErrReported {
-		return 1
-	}
-	return 0
+	// An error fails the run unless the scan finished under -no-abort.
+	return sawDone, sawError && (!sawDone || !f.noAbort)
 }
 
 // resolveAttempts merges the -attempts and deprecated -retries flags.

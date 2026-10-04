@@ -2,8 +2,12 @@ package main
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/TMHSDigital/subenum/internal/output"
 )
 
 func TestParseFlagsInterspersed(t *testing.T) {
@@ -39,6 +43,60 @@ func TestParseFlagsInterspersed(t *testing.T) {
 				t.Errorf("wordlist = %q, want wl.txt", f.wordlistFile)
 			}
 		})
+	}
+}
+
+// TestLoadTargets covers #41: -dL skips comments, invalid and duplicate
+// domains, and normalizes case and trailing dots.
+func TestLoadTargets(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "domains.txt")
+	if err := os.WriteFile(p, []byte("# list\nA.example\nb.example.\n\nnot a domain\na.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := output.New(nil, false, output.FormatText)
+	got, ok := loadTargets(cliFlags{domainList: p}, "", out)
+	if !ok || !reflect.DeepEqual(got, []string{"a.example", "b.example"}) {
+		t.Fatalf("loadTargets = %q, %v", got, ok)
+	}
+
+	if got, ok := loadTargets(cliFlags{}, "example.com", out); !ok || !reflect.DeepEqual(got, []string{"example.com"}) {
+		t.Fatalf("single domain: %q, %v", got, ok)
+	}
+
+	empty := filepath.Join(t.TempDir(), "empty.txt")
+	if err := os.WriteFile(empty, []byte("# nothing\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadTargets(cliFlags{domainList: empty}, "", out); ok {
+		t.Error("a list with no valid domains should fail")
+	}
+}
+
+func TestValidateFlagsDomainListConflicts(t *testing.T) {
+	base := func() cliFlags {
+		f, _, _, err := parseFlags([]string{"-w", "wl.txt"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	out := output.New(nil, false, output.FormatText)
+	_, _, fs, _ := parseFlags(nil)
+	fs.SetOutput(io.Discard)
+
+	f := base()
+	f.domainList = "d.txt"
+	if _, ok := validateFlags(f, []string{"example.com"}, fs, out, 1); ok {
+		t.Error("domain argument plus -dL should be rejected")
+	}
+	f.wordlistFile, f.domainList = "-", "-"
+	if _, ok := validateFlags(f, nil, fs, out, 1); ok {
+		t.Error("-w - with -dL - should be rejected")
+	}
+	f = base()
+	f.domainList = "d.txt"
+	if d, ok := validateFlags(f, nil, fs, out, 1); !ok || d != "" {
+		t.Errorf("-dL alone: got %q, %v", d, ok)
 	}
 }
 

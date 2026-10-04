@@ -2,6 +2,7 @@ package wordlist
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -14,6 +15,9 @@ var labelRegex = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$`)
 
 // maxNameLen is the longest presentation-format domain name (RFC 1035).
 const maxNameLen = 253
+
+// Stdin is the path that makes ReadLines read standard input.
+const Stdin = "-"
 
 // SanitizeLine trims whitespace from a wordlist entry.
 // Returns an empty string for blank or whitespace-only lines.
@@ -40,32 +44,44 @@ func Normalize(line string) (entry string, ok bool) {
 	return entry, true
 }
 
-// isComment reports whether a line is blank or a # comment, which are skipped
+// IsComment reports whether a line is blank or a # comment, which are skipped
 // silently rather than counted as invalid.
-func isComment(line string) bool {
+func IsComment(line string) bool {
 	s := SanitizeLine(line)
 	return s == "" || strings.HasPrefix(s, "#")
 }
 
-// LoadWordlist reads a wordlist file into a normalized, deduplicated slice,
-// preserving first-occurrence order. Blank lines and # comments are ignored.
-// Invalid entries, and entries whose full name under domain would exceed 253
+// ReadLines reads every line of path, or of standard input when path is "-".
+func ReadLines(path string) ([]string, error) {
+	var r io.Reader
+	if path == Stdin {
+		r = os.Stdin
+	} else {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = f.Close() }()
+		r = f
+	}
+	var lines []string
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	return lines, scanner.Err()
+}
+
+// Build normalizes raw wordlist lines for one target domain, preserving
+// first-occurrence order. Blank lines and # comments are ignored. Invalid
+// entries, and entries whose full name under domain would exceed 253
 // characters, are counted in skipped. duplicates counts case-insensitive
 // repeats.
-func LoadWordlist(path, domain string) (entries []string, duplicates, skipped int, err error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	defer func() { _ = f.Close() }()
-
+func Build(lines []string, domain string) (entries []string, duplicates, skipped int) {
 	apexLen := len(strings.TrimSuffix(domain, "."))
 	seen := make(map[string]struct{})
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if isComment(line) {
+	for _, line := range lines {
+		if IsComment(line) {
 			continue
 		}
 		entry, ok := Normalize(line)
@@ -80,5 +96,16 @@ func LoadWordlist(path, domain string) (entries []string, duplicates, skipped in
 		seen[entry] = struct{}{}
 		entries = append(entries, entry)
 	}
-	return entries, duplicates, skipped, scanner.Err()
+	return entries, duplicates, skipped
+}
+
+// LoadWordlist reads a wordlist (path "-" means standard input) and builds it
+// for domain; see Build.
+func LoadWordlist(path, domain string) (entries []string, duplicates, skipped int, err error) {
+	lines, err := ReadLines(path)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	entries, duplicates, skipped = Build(lines, domain)
+	return entries, duplicates, skipped, nil
 }

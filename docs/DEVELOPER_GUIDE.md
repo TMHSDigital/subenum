@@ -84,10 +84,9 @@ subenum/
 │   └── index.md                # GitHub Pages landing page
 ├── examples/
 │   ├── sample_wordlist.txt     # 50-entry starter wordlist
-│   ├── sample_domains.txt      # Sample domain list
+│   ├── sample_domains.txt      # Sample domain list for -dL
 │   ├── advanced_usage.md       # Scripting and integration patterns
-│   ├── demo.sh                 # Quick demo script
-│   └── multi_domain_scan.sh    # Batch scanning example
+│   └── demo.sh                 # Quick demo script
 ├── internal/
 │   ├── dns/
 │   │   ├── resolver.go         # ResolveTypes, ResolveDomainWithRetry, CheckWildcard, ParseTypes

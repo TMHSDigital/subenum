@@ -27,14 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI form gains *Max Names* (`-max-queries`) and *No Abort* (`-no-abort`), both persisted in `last.json`. A recursive TUI scan above the 1e7 ceiling can now be started with a cap instead of enabling *Force*, which also disables the wildcard abort (#35).
 - `-seed <n>` makes simulation mode reproducible: each outcome, record and reported timing is derived from the seed and the name, so the same seed gives the same results. Without `-seed` a random seed is chosen and printed in the simulation banner (#44).
 - Tagged releases publish a multi-arch (`linux/amd64`, `linux/arm64`) image to `ghcr.io/tmhsdigital/subenum` with build provenance, tagged `X.Y.Z`, `X.Y`, and `latest` (non-prereleases only). The Dockerfile now cross-compiles in a build-platform builder stage, so no QEMU emulation is needed (#40).
+- `-dL <file>` scans every apex domain in a file (one per line, `#` comments allowed, `-` for stdin) in one process. Each domain is an independent scan with its own preflight, wildcard check, `-max-queries` budget and reliability guard; results share one output, so `-format json` stays a single array. A failing domain (for example a wildcard without `-force`) sets a non-zero exit code but does not stop the others. `-w -` reads the wordlist from stdin (#41, ROADMAP N4).
 
 ### Changed
-- When stdout is not a terminal, `text` results are printed as bare subdomain names (no `Found:` prefix), so `subenum ... | sort -u` or `| httpx` works without `cut`. Terminal output is unchanged. `examples/multi_domain_scan.sh` now counts lines instead of `Found:` (#34).
+- When stdout is not a terminal, `text` results are printed as bare subdomain names (no `Found:` prefix), so `subenum ... | sort -u` or `| httpx` works without `cut`. Terminal output is unchanged (#34).
 - Wordlists are normalized on load: blank lines and `#` comments are ignored, entries are lowercased before deduplication (so `WWW` and `www` are one query), and entries that are not valid DNS labels (whitespace, `*`, empty or over-long labels) or whose full name would exceed 253 characters are skipped and reported on stderr. Underscore labels such as `_dmarc` are kept. A wordlist with no valid entries is an error (#33).
 - `-max-queries` help text and docs now say what it counts: candidate names (jobs), not wire queries.
 - Release binaries and the Docker image are built with the latest stable Go toolchain (Docker builder `golang:1.27.1-alpine`, digest-pinned) instead of Go 1.24.2. `go.mod` still declares 1.24.2 as the minimum, and CI now tests both the minimum and the latest stable toolchain. CI runs `govulncheck` on every push and PR, and Dependabot tracks the Dockerfile base images. Release jobs build without a shared cache (#38).
 - `-version` no longer relies on a hand-maintained `0.7.0` fallback. Without ldflags it reports the module version recorded by `go install` (for example `v0.7.0`), or `dev` for local builds; the Makefile and Dockerfile fallbacks are `dev` too. README and the landing page document `go install github.com/TMHSDigital/subenum@latest` and add a "Why subenum" section (#39).
 - Simulation mode applies `-hit-rate` uniformly. Previously 12 common prefixes (`www`, `api`, `dev`, ...) always resolved about 90% of the time, so `-hit-rate 1` still produced many hits and recursive simulate scans grew much faster than the rate suggested (#44).
+
+### Removed
+- Removed `examples/multi_domain_scan.sh`, which was bash-only; use `-dL` (#41).
 
 ## [0.7.0] - 2026-09-16
 

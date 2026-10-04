@@ -1,4 +1,4 @@
-# Sample domains list file for use with multi_domain_scan.sh
+# Sample domain list for use with: subenum -w <wordlist> -dL examples/sample_domains.txt
 # Each domain should be on a separate line
 # Lines starting with # are comments and will be ignored
 #

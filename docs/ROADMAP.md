@@ -87,7 +87,7 @@ JSON and CSV already carry them.
 and CNAME starve after a slow A. Give each type its own budget or a remaining
 budget that cannot go negative.
 
-### N4. `-dL` multi-domain input
+### N4 (DONE, #41). `-dL` multi-domain input
 A domain-list file (one apex per line) so a single process can scan more than
 one target. This would retire the Windows-hostile `examples/multi_domain_scan.sh`.
 Needs a clear interaction with `-recursive`, `-max-queries`, and the reliability
