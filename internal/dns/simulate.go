@@ -3,7 +3,6 @@ package dns
 import (
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"strings"
 	"time"
 )
@@ -12,7 +11,7 @@ import (
 // I/O, along with synthetic records for the requested types when the domain
 // "resolves". Common subdomain prefixes resolve ~90% of the time; everything
 // else uses the supplied hitRate (0-100).
-func SimulateResolve(domain string, hitRate int, verbose bool, types []string) ([]Record, bool) {
+func SimulateResolve(domain string, hitRate int, logf Logf, types []string) ([]Record, bool) {
 	commonSubdomains := []string{
 		"www", "mail", "ftp", "blog",
 		"api", "dev", "staging", "test",
@@ -22,19 +21,19 @@ func SimulateResolve(domain string, hitRate int, verbose bool, types []string) (
 	for _, sub := range commonSubdomains {
 		if strings.HasPrefix(domain, sub+".") {
 			if rand.IntN(100) < 90 {
-				return synthResolved(domain, types, verbose)
+				return synthResolved(domain, types, logf)
 			}
-			return synthFailed(domain, verbose)
+			return synthFailed(domain, logf)
 		}
 	}
 
 	if rand.IntN(100) < hitRate {
-		return synthResolved(domain, types, verbose)
+		return synthResolved(domain, types, logf)
 	}
-	return synthFailed(domain, verbose)
+	return synthFailed(domain, logf)
 }
 
-func synthResolved(domain string, types []string, verbose bool) ([]Record, bool) {
+func synthResolved(domain string, types []string, logf Logf) ([]Record, bool) {
 	if len(types) == 0 {
 		types = DefaultTypes
 	}
@@ -52,17 +51,17 @@ func synthResolved(domain string, types []string, verbose bool) ([]Record, bool)
 	if len(records) == 0 {
 		return nil, false
 	}
-	if verbose {
+	if logf != nil {
 		fakeTiming := time.Duration(50+rand.IntN(450)) * time.Millisecond
-		fmt.Fprintf(os.Stderr, "Resolved (SIMULATED): %s (%s: %s) in %s\n", domain, records[0].Type, records[0].Value, fakeTiming)
+		logf("Resolved (SIMULATED): %s (%s: %s) in %s", domain, records[0].Type, records[0].Value, fakeTiming)
 	}
 	return records, true
 }
 
-func synthFailed(domain string, verbose bool) ([]Record, bool) {
-	if verbose {
+func synthFailed(domain string, logf Logf) ([]Record, bool) {
+	if logf != nil {
 		fakeTiming := time.Duration(100+rand.IntN(500)) * time.Millisecond
-		fmt.Fprintf(os.Stderr, "Failed to resolve (SIMULATED): %s (Error: no such host) in %s\n", domain, fakeTiming)
+		logf("Failed to resolve (SIMULATED): %s (Error: no such host) in %s", domain, fakeTiming)
 	}
 	return nil, false
 }

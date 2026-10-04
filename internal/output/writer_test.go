@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
@@ -373,6 +374,48 @@ func TestWriterJSONLStreams(t *testing.T) {
 	}
 	if f, err := ParseFormat("jsonl"); err != nil || f != FormatJSONL {
 		t.Errorf("ParseFormat(jsonl) = %v, %v", f, err)
+	}
+}
+
+// lockedBuf is a goroutine-safe buffer for capturing stderr.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+// TestInfoDoesNotSpliceIntoProgress covers #36: verbose lines logged from many
+// goroutines while the progress line redraws must each land on a clean line.
+func TestInfoDoesNotSpliceIntoProgress(t *testing.T) {
+	var buf lockedBuf
+	w := New(nil, false, FormatText)
+	w.stderr = &buf
+
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				w.Info("Resolved: host%d.example.com", i)
+				w.Progress(50, int64(i), 100, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	w.ProgressDone()
+
+	for _, line := range strings.Split(buf.b.String(), "\n") {
+		// The visible text of a line is whatever follows its last carriage return.
+		visible := strings.TrimSpace(line[strings.LastIndex(line, "\r")+1:])
+		if strings.Contains(line, "Resolved:") && !strings.HasPrefix(visible, "Resolved:") {
+			t.Fatalf("verbose line spliced into progress output: %q", line)
+		}
 	}
 }
 

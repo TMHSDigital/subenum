@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lookups use absolute names (trailing dot), so resolv.conf search suffixes (for example Kubernetes `ndots:5`) no longer multiply the queries sent for every missing name.
 - TUI scan view: the viewport height is clamped to at least one row, so terminals shorter than the layout no longer produce a negative height (#37, ROADMAP N6). The layout reserve also accounts for the hint margin, which previously overflowed the screen by one line.
 - TUI scan view: wildcard and error notices are capped at the latest three (with a "+N earlier notices" line) and the viewport shrinks to fit them, so recursive scans no longer push the progress bar and status off-screen. Ctrl+C on a finished scan now quits instead of relabelling it "Aborted". The results buffer is capped at 10,000 lines and re-rendered on progress ticks once past 200 results, so large scans no longer slow the UI and back-pressure the workers. `~/` paths in the wordlist and output fields are expanded (#43).
+- `-v` lines no longer splice into the progress line. The `dns` package no longer writes to stderr; lookups log through `scan.Config.Logf` (the CLI passes `output.Writer.Info`), and `Info`/`Error` now take the writer mutex and blank the in-place progress line before printing (#36, ROADMAP N5).
 
 ### Added
 - `-format jsonl` streams one JSON object per resolved subdomain, so structured output can be piped live (#34).

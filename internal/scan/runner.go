@@ -29,7 +29,8 @@ type Config struct {
 	HitRate     int
 	Attempts    int
 	Force       bool
-	Verbose     bool
+	Verbose     bool          // log every lookup; through Logf when set, else unsynchronized to stderr
+	Logf        dns.Logf      // receives verbose lines when Verbose is set
 	Rate        int           // max DNS messages per second on the wire, all workers combined (0 = unlimited)
 	Types       []string      // record types to look up (A, AAAA, CNAME); empty = A,AAAA
 	Recursive   bool          // enumerate subdomains of discovered subdomains
@@ -41,6 +42,17 @@ type Config struct {
 	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
 	// Tests inject classified outcomes through this field without network I/O.
 	resolveHook func(ctx context.Context, domain string) ([]dns.Record, dns.Outcome)
+}
+
+// logf returns the verbose logger for lookups, or nil when Verbose is off.
+func (c Config) logf() dns.Logf {
+	if !c.Verbose {
+		return nil
+	}
+	if c.Logf != nil {
+		return c.Logf
+	}
+	return dns.StderrLogf
 }
 
 // Stats is a snapshot of per-outcome query counters. Populated on EventDone.
@@ -446,14 +458,14 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 		records, outcome = cfg.resolveHook(ctx, j.domain)
 	case cfg.Simulate:
 		var ok bool
-		records, ok = dns.SimulateResolve(j.domain, cfg.HitRate, cfg.Verbose, cfg.Types)
+		records, ok = dns.SimulateResolve(j.domain, cfg.HitRate, cfg.logf(), cfg.Types)
 		if ok {
 			outcome = dns.OutcomeFound
 		} else {
 			outcome = dns.OutcomeNXDomain
 		}
 	default:
-		records, outcome = dns.ResolveDomainWithRetry(ctx, cfg.Resolver, j.domain, cfg.Timeout, cfg.Verbose, cfg.Attempts, cfg.Types)
+		records, outcome = dns.ResolveDomainWithRetry(ctx, cfg.Resolver, j.domain, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
 	}
 
 	// A lookup cut short by cancellation (Ctrl+C, or the reliability guard's own

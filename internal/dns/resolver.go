@@ -202,21 +202,32 @@ func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t str
 	return nil, nil
 }
 
+// Logf receives verbose per-lookup lines. The dns package never writes to
+// stderr itself, so the caller can serialize these lines with its own output
+// (for example the CLI progress line). A nil Logf discards them.
+type Logf func(format string, args ...any)
+
+// StderrLogf writes verbose lines straight to stderr, unsynchronized. It is
+// the fallback for callers that set scan.Config.Verbose without a Logf.
+func StderrLogf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
+
 // ResolveDomain performs a single DNS lookup for the given domain using the
 // specified resolver and timeout. It returns true if the domain resolves (A/AAAA).
-func ResolveDomain(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, verbose bool) bool {
-	records, _, _ := ResolveWithLog(ctx, resolver, domain, timeout, verbose, DefaultTypes)
+func ResolveDomain(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, logf Logf) bool {
+	records, _, _ := ResolveWithLog(ctx, resolver, domain, timeout, logf, DefaultTypes)
 	return len(records) > 0
 }
 
-// ResolveWithLog wraps ResolveTypes with the verbose stderr logging used by the
-// CLI and TUI, returning the resolved records for the requested types.
-func ResolveWithLog(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, verbose bool, types []string) ([]Record, time.Duration, error) {
+// ResolveWithLog wraps ResolveTypes with the verbose per-lookup logging used by
+// the CLI, returning the resolved records for the requested types.
+func ResolveWithLog(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, logf Logf, types []string) ([]Record, time.Duration, error) {
 	records, elapsed, err := ResolveTypes(ctx, resolver, domain, timeout, types)
-	if verbose && len(records) > 0 {
-		fmt.Fprintf(os.Stderr, "Resolved: %s (%s: %s) in %s\n", domain, records[0].Type, records[0].Value, elapsed)
-	} else if verbose {
-		fmt.Fprintf(os.Stderr, "Failed to resolve: %s (Error: %v) in %s\n", domain, err, elapsed)
+	if logf != nil && len(records) > 0 {
+		logf("Resolved: %s (%s: %s) in %s", domain, records[0].Type, records[0].Value, elapsed)
+	} else if logf != nil {
+		logf("Failed to resolve: %s (Error: %v) in %s", domain, err, elapsed)
 	}
 	return records, elapsed, err
 }
@@ -224,13 +235,13 @@ func ResolveWithLog(ctx context.Context, resolver *net.Resolver, domain string, 
 // ResolveDomainWithRetry calls ResolveWithLog up to maxAttempts times, respecting
 // ctx cancellation between attempts with a linear backoff delay. It returns the
 // resolved records and a classified outcome for the last attempt.
-func ResolveDomainWithRetry(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, verbose bool, maxAttempts int, types []string) ([]Record, Outcome) {
+func ResolveDomainWithRetry(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, logf Logf, maxAttempts int, types []string) ([]Record, Outcome) {
 	last := OutcomeOther
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return nil, OutcomeCanceled
 		}
-		records, _, err := ResolveWithLog(ctx, resolver, domain, timeout, verbose, types)
+		records, _, err := ResolveWithLog(ctx, resolver, domain, timeout, logf, types)
 		if len(records) > 0 {
 			return records, OutcomeFound
 		}

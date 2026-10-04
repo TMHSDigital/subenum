@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -60,6 +61,9 @@ type Writer struct {
 	stdout    bool // mirror results to os.Stdout (false for the TUI)
 	plain     bool // text stdout prints bare names, no "Found:" banner
 	records   bool // text output appends record types and values
+
+	stderr      io.Writer // diagnostics destination; nil means os.Stderr
+	progressLen int       // width of the progress line currently on screen
 
 	buffered  []Result // FormatJSON: accumulated until Finish
 	csvStdout *csv.Writer
@@ -143,7 +147,7 @@ func (w *Writer) writeJSONL(domain string, records []dns.Record) {
 	}
 	data, err := json.Marshal(Result{Subdomain: domain, Records: records})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: encoding JSON output: %v\n", err)
+		fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
 		return
 	}
 	if w.stdout {
@@ -231,27 +235,58 @@ func (w *Writer) Finish() error {
 	return nil
 }
 
+// errOut is where diagnostics go; tests may swap it.
+func (w *Writer) errOut() io.Writer {
+	if w.stderr != nil {
+		return w.stderr
+	}
+	return os.Stderr
+}
+
 // Progress writes a progress line to stderr using carriage-return overwrite.
 func (w *Writer) Progress(pct float64, processed, total, found int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	fmt.Fprintf(os.Stderr, "\rProgress: %.1f%% (%d/%d) | Found: %d ",
-		pct, processed, total, found)
+	line := fmt.Sprintf("Progress: %.1f%% (%d/%d) | Found: %d ", pct, processed, total, found)
+	// Pad over a longer previous line so no stale characters remain.
+	pad := max(0, w.progressLen-len(line))
+	_, _ = fmt.Fprint(w.errOut(), "\r"+line+strings.Repeat(" ", pad))
+	w.progressLen = len(line)
 }
 
-// ProgressDone writes the final newline on stderr after progress reporting ends.
+// ProgressDone ends the progress line with a newline on stderr.
 func (w *Writer) ProgressDone() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	fmt.Fprintln(os.Stderr)
+	if w.progressLen > 0 {
+		fmt.Fprintln(w.errOut())
+		w.progressLen = 0
+	}
 }
 
-// Info writes an informational line to stderr.
+// clearProgressLocked blanks the in-place progress line so a diagnostic can be
+// printed on a clean line; the next progress tick redraws it. Overwriting with
+// spaces instead of an ANSI erase keeps legacy Windows consoles working.
+func (w *Writer) clearProgressLocked() {
+	if w.progressLen > 0 {
+		_, _ = fmt.Fprint(w.errOut(), "\r"+strings.Repeat(" ", w.progressLen)+"\r")
+		w.progressLen = 0
+	}
+}
+
+// Info writes an informational line to stderr. It is serialized with the
+// progress line, so concurrent verbose logging cannot splice into it (#36).
 func (w *Writer) Info(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", a...)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.clearProgressLocked()
+	fmt.Fprintf(w.errOut(), format+"\n", a...)
 }
 
-// Error writes an error line to stderr.
+// Error writes an error line to stderr, serialized like Info.
 func (w *Writer) Error(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", a...)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.clearProgressLocked()
+	fmt.Fprintf(w.errOut(), "Error: "+format+"\n", a...)
 }

@@ -93,7 +93,7 @@ one target. This would retire the Windows-hostile `examples/multi_domain_scan.sh
 Needs a clear interaction with `-recursive`, `-max-queries`, and the reliability
 guard.
 
-### N5. Verbose logging bypasses the output mutex
+### N5 (DONE, #36). Verbose logging bypasses the output mutex
 `-v` writes to stderr without going through the output writer mutex, so verbose
 lines mangle the carriage-return progress line.
 

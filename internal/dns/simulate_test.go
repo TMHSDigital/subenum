@@ -10,7 +10,7 @@ func TestSimulateResolve(t *testing.T) {
 
 	resolved := 0
 	for i := 0; i < runs; i++ {
-		if _, ok := SimulateResolve("www.example.com", 15, false, DefaultTypes); ok {
+		if _, ok := SimulateResolve("www.example.com", 15, nil, DefaultTypes); ok {
 			resolved++
 		}
 	}
@@ -20,7 +20,7 @@ func TestSimulateResolve(t *testing.T) {
 
 	resolved = 0
 	for i := 0; i < runs; i++ {
-		if _, ok := SimulateResolve("zzz-random-prefix.example.com", 0, false, DefaultTypes); ok {
+		if _, ok := SimulateResolve("zzz-random-prefix.example.com", 0, nil, DefaultTypes); ok {
 			resolved++
 		}
 	}
@@ -49,7 +49,7 @@ func TestParseTypes(t *testing.T) {
 
 func TestSimulateResolveTypes(t *testing.T) {
 	// Force a resolve with hitRate 100 and request only CNAME.
-	recs, ok := SimulateResolve("zzz.example.com", 100, false, []string{"CNAME"})
+	recs, ok := SimulateResolve("zzz.example.com", 100, nil, []string{"CNAME"})
 	if !ok {
 		t.Fatal("expected simulate to resolve at hitRate 100")
 	}
@@ -71,8 +71,8 @@ func TestSimulateResolveConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
-				SimulateResolve("api.example.com", 50, false, DefaultTypes)
-				SimulateResolve("zzz-random.example.com", 25, true, DefaultTypes)
+				SimulateResolve("api.example.com", 50, nil, DefaultTypes)
+				SimulateResolve("zzz-random.example.com", 25, func(string, ...any) {}, DefaultTypes)
 			}
 		}()
 	}

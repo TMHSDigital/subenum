@@ -30,7 +30,7 @@ func TestResolveDomain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveDomain(context.Background(), r, tt.domain, timeout, false)
+			got := ResolveDomain(context.Background(), r, tt.domain, timeout, nil)
 			if got != tt.expected {
 				t.Errorf("ResolveDomain(%q) = %v, want %v", tt.domain, got, tt.expected)
 			}
@@ -42,7 +42,7 @@ func TestResolveDomainTimeout(t *testing.T) {
 	addr := startBlackHole(t)
 	veryShortTimeout := time.Millisecond
 	r := NewResolver(veryShortTimeout, addr)
-	if ResolveDomain(context.Background(), r, "example.com.", veryShortTimeout, false) {
+	if ResolveDomain(context.Background(), r, "example.com.", veryShortTimeout, nil) {
 		t.Errorf("expected timeout against a black-holed resolver")
 	}
 }
@@ -54,7 +54,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 	timeout := time.Second
 	r := srv.Resolver(timeout)
 
-	records, result := ResolveDomainWithRetry(context.Background(), r, "example.com.", timeout, false, 3, []string{"A"})
+	records, result := ResolveDomainWithRetry(context.Background(), r, "example.com.", timeout, nil, 3, []string{"A"})
 	if result != OutcomeFound {
 		t.Errorf("expected example.com to resolve, got %v", result)
 	}
@@ -62,7 +62,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 		t.Errorf("expected records, got none")
 	}
 
-	_, result = ResolveDomainWithRetry(context.Background(), r, "missing.example.com.", timeout, false, 2, []string{"A"})
+	_, result = ResolveDomainWithRetry(context.Background(), r, "missing.example.com.", timeout, nil, 2, []string{"A"})
 	if result == OutcomeFound {
 		t.Errorf("expected missing name to fail")
 	}
@@ -75,7 +75,7 @@ func TestResolveDomainWithRetryContextCancellation(t *testing.T) {
 
 	timeout := time.Second
 	start := time.Now()
-	_, result := ResolveDomainWithRetry(ctx, srv.Resolver(timeout), "example.com.", timeout, false, 5, []string{"A"})
+	_, result := ResolveDomainWithRetry(ctx, srv.Resolver(timeout), "example.com.", timeout, nil, 5, []string{"A"})
 	elapsed := time.Since(start)
 
 	if result == OutcomeFound {
@@ -174,7 +174,7 @@ func TestClassify(t *testing.T) {
 // failure, and it must not be retried.
 func TestResolveDomainWithRetryCNAMENoData(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10"}})
-	records, outcome := ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, false, 3, []string{"CNAME"})
+	records, outcome := ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, nil, 3, []string{"CNAME"})
 	if len(records) != 0 {
 		t.Fatalf("records = %v, want none", records)
 	}
@@ -185,7 +185,7 @@ func TestResolveDomainWithRetryCNAMENoData(t *testing.T) {
 
 	// A second identical call with attempts=1 must issue the same number of
 	// queries, proving the attempts=3 call above did not retry.
-	_, _ = ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, false, 1, []string{"CNAME"})
+	_, _ = ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, nil, 1, []string{"CNAME"})
 	if got := srv.Queries() - first; got != first {
 		t.Fatalf("attempts=3 issued %d queries, attempts=1 issued %d; NODATA must not be retried", first, got)
 	}
@@ -222,7 +222,7 @@ func TestCheckWildcardCNAMEFingerprint(t *testing.T) {
 func TestResolveDomainWithRetryCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, outcome := ResolveDomainWithRetry(ctx, NewResolver(time.Second, startBlackHole(t)), "x.example.com", time.Second, false, 3, nil)
+	_, outcome := ResolveDomainWithRetry(ctx, NewResolver(time.Second, startBlackHole(t)), "x.example.com", time.Second, nil, 3, nil)
 	if outcome != OutcomeCanceled {
 		t.Fatalf("outcome = %v, want Canceled", outcome)
 	}
@@ -230,7 +230,7 @@ func TestResolveDomainWithRetryCanceled(t *testing.T) {
 
 func TestResolveDomainWithRetryNXDomainNoRetry(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{})
-	_, outcome := ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "nope.example.com.", time.Second, false, 3, []string{"A"})
+	_, outcome := ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "nope.example.com.", time.Second, nil, 3, []string{"A"})
 	if outcome != OutcomeNXDomain {
 		t.Fatalf("outcome = %v, want NXDomain", outcome)
 	}
@@ -283,7 +283,7 @@ func TestLiveResolverSmoke(t *testing.T) {
 	}
 	timeout := 3 * time.Second
 	r := NewResolver(timeout, "8.8.8.8:53")
-	if !ResolveDomain(context.Background(), r, "example.com.", timeout, false) {
+	if !ResolveDomain(context.Background(), r, "example.com.", timeout, nil) {
 		t.Fatal("expected example.com to resolve via 8.8.8.8")
 	}
 }
@@ -307,7 +307,7 @@ func TestResolveTypesServFailOutranksNXDomain(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"flaky.example.com": {ServFailA: true}})
 	r := srv.Resolver(time.Second)
 
-	_, outcome := ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, false, 1, DefaultTypes)
+	_, outcome := ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, nil, 1, DefaultTypes)
 	if outcome == OutcomeNXDomain {
 		t.Fatal("SERVFAIL on A was masked by NXDOMAIN on AAAA")
 	}
@@ -316,7 +316,7 @@ func TestResolveTypesServFailOutranksNXDomain(t *testing.T) {
 	}
 	single := srv.Queries()
 
-	_, _ = ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, false, 3, DefaultTypes)
+	_, _ = ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, nil, 3, DefaultTypes)
 	if retried := srv.Queries() - single; retried <= single {
 		t.Fatalf("attempts=3 sent %d queries vs %d for attempts=1; the failure was not retried", retried, single)
 	}

@@ -379,7 +379,7 @@ func run() (code int) {
 	go func() {
 		select {
 		case <-sigCh:
-			fmt.Fprintf(os.Stderr, "\nInterrupt received, shutting down gracefully...\n")
+			out.Info("Interrupt received, shutting down gracefully...")
 			interrupted.Store(true)
 			cancel()
 		case <-ctx.Done():
@@ -397,6 +397,7 @@ func run() (code int) {
 		Attempts:    maxAttempts,
 		Force:       f.force,
 		Verbose:     f.verbose,
+		Logf:        out.Info, // serialized with the progress line (#36)
 		Rate:        f.rate,
 		Types:       recordTypes,
 		Recursive:   f.recursive,
