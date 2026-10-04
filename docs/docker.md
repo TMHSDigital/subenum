@@ -14,7 +14,7 @@ This guide explains how to use `subenum` with Docker for a containerized subdoma
 
 ## Pulling the published image
 
-Releases after v0.7.0 publish a multi-arch (`linux/amd64`, `linux/arm64`) image to the GitHub Container Registry, with build provenance attached. Tags follow the release: `X.Y.Z`, `X.Y`, and `latest` for the newest non-prerelease.
+Releases from v0.8.0 onward publish a multi-arch (`linux/amd64`, `linux/arm64`) image to the GitHub Container Registry, with build provenance attached. Tags follow the release: `X.Y.Z`, `X.Y`, and `latest` for the newest non-prerelease.
 
 ```bash
 docker run --rm ghcr.io/tmhsdigital/subenum:latest -version

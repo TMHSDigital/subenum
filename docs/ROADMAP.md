@@ -5,7 +5,7 @@ title: Roadmap
 
 # Roadmap
 
-Status as of v0.7.0. Items below the fold are the next pass; they were
+Status as of v0.8.0, which shipped N1-N6 below. Items below the fold were the next pass; they were
 noticed during resolver-layer hardening and left alone on purpose.
 
 Effort: S (under ~1 hour), M (a few hours), L (a day or more).
