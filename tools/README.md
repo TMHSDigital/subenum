@@ -11,8 +11,9 @@ A simple utility for generating custom wordlists for subdomain enumeration.
 - Includes common subdomain prefixes 
 - Extracts meaningful terms from domain names
 - Creates combinations with custom prefixes
-- Ensures no duplicate entries
-- Smart formatting for better enumeration results
+- Ensures no duplicate entries (case-insensitive)
+- Deterministic: the same flags always produce a byte-identical file
+- Strips the public suffix, including second-level ones such as `.co.uk`
 
 ### Usage
 
@@ -38,6 +39,7 @@ go build -buildvcs=false -o wordlist-gen wordlist-gen.go
 | `-common` | Include common subdomain prefixes | `true` |
 | `-domain` | Domain to extract terms from | `""` (empty) |
 | `-combine` | Comma-separated prefixes to combine with other terms | `""` (empty) |
+| `-v` | Print every generated entry to stdout | `false` |
 
 ### Example
 
