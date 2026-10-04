@@ -27,6 +27,7 @@ type Config struct {
 	DNSServer   string
 	Simulate    bool
 	HitRate     int
+	Seed        uint64 // simulation seed: the same seed reproduces the same simulated results
 	Attempts    int
 	Force       bool
 	Verbose     bool          // log every lookup; through Logf when set, else unsynchronized to stderr
@@ -458,7 +459,7 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 		records, outcome = cfg.resolveHook(ctx, j.domain)
 	case cfg.Simulate:
 		var ok bool
-		records, ok = dns.SimulateResolve(j.domain, cfg.HitRate, cfg.logf(), cfg.Types)
+		records, ok = dns.SimulateResolve(j.domain, cfg.HitRate, cfg.Seed, cfg.logf(), cfg.Types)
 		if ok {
 			outcome = dns.OutcomeFound
 		} else {

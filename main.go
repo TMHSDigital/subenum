@@ -25,6 +25,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -95,6 +96,7 @@ type cliFlags struct {
 	showProgress bool
 	testMode     bool
 	testHitRate  int
+	seed         uint64
 	outputFile   string
 	attempts     int
 	retries      int
@@ -123,7 +125,8 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.BoolVar(&f.showVersion, "version", false, "Show version information")
 	fs.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
-	fs.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of subdomains that will 'resolve' (1-100)")
+	fs.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of names that resolve (1-100)")
+	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
 	fs.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
@@ -309,11 +312,15 @@ func run() (code int) {
 	}
 
 	if f.testMode {
+		if f.seed == 0 {
+			f.seed = rand.Uint64()
+		}
 		out.Info("")
 		out.Info("╔════════════════════════════════════════════════════════════════════╗")
 		out.Info("║  SIMULATION MODE ACTIVE - NO ACTUAL DNS QUERIES WILL BE PERFORMED  ║")
 		out.Info("║  Results are artificially generated for educational purposes only  ║")
 		out.Info("╚════════════════════════════════════════════════════════════════════╝")
+		out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
 		out.Info("")
 	}
 
@@ -413,6 +420,7 @@ func run() (code int) {
 		DNSServer:   f.dnsServer,
 		Simulate:    f.testMode,
 		HitRate:     f.testHitRate,
+		Seed:        f.seed,
 		Attempts:    maxAttempts,
 		Force:       f.force,
 		Verbose:     f.verbose,

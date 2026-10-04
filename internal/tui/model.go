@@ -4,6 +4,7 @@ package tui
 import (
 	"bufio"
 	"context"
+	"math/rand/v2"
 	"os"
 	"time"
 
@@ -149,6 +150,7 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 		DNSServer:   vals.dnsServer,
 		Simulate:    vals.simulate,
 		HitRate:     vals.hitRate,
+		Seed:        rand.Uint64(),
 		Attempts:    vals.attempts,
 		Force:       vals.force,
 		Types:       vals.recordTypes,

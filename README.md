@@ -243,7 +243,8 @@ make help           # list all targets
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
 | `-progress` | `true` | Live progress line on stderr |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
-| `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100) |
+| `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
+| `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-version` | n/a | Print version and exit |
 | `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
