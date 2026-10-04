@@ -4,7 +4,8 @@ FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3
 
 WORKDIR /app
 
-ARG VERSION=0.7.0
+# Overridden by `make docker-build` and release CI; "dev" for ad-hoc builds.
+ARG VERSION=dev
 
 # Copy module files first and download deps to leverage Docker layer caching
 COPY go.mod go.sum ./

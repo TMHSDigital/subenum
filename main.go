@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -45,13 +46,31 @@ const (
 	DefaultDNSServer = "8.8.8.8:53"
 )
 
-// Version is the release identifier. go install builds keep this fallback;
-// Makefile and CI override it with -ldflags "-X main.Version=$(git describe --tags --dirty)".
-// formatVersion trims a leading "v" so a tag like v0.7.0 does not print as vv0.7.0.
-var Version = "0.7.0"
+// Version is the release identifier. Makefile, CI and the Dockerfile set it
+// with -ldflags "-X main.Version=$(git describe --tags --dirty)". When it is
+// empty (go install, plain go build), the module version from the build info
+// is used, so there is no hand-maintained copy to drift between releases.
+var Version = ""
 
+// resolveVersion returns Version, else the main module version recorded by
+// go install (for example v0.7.0), else "dev".
+func resolveVersion() string {
+	if Version != "" {
+		return Version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "dev"
+}
+
+// formatVersion trims a leading "v" so a tag like v0.7.0 does not print as vv0.7.0.
 func formatVersion() string {
-	return ProgramName + " v" + strings.TrimPrefix(Version, "v")
+	v := resolveVersion()
+	if v == "dev" {
+		return ProgramName + " dev"
+	}
+	return ProgramName + " v" + strings.TrimPrefix(v, "v")
 }
 
 func main() {

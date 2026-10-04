@@ -8,7 +8,7 @@ GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
 BINARY_NAME=subenum
 WORDLIST_GEN=wordlist-gen
-VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo 0.7.0)
+VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
 LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
 
 # Default run parameters - CHANGE THESE!

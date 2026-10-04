@@ -41,6 +41,12 @@
 ## Quick Start
 
 ```bash
+go install github.com/TMHSDigital/subenum@latest
+```
+
+Or build from a clone, which also gives you the sample wordlists used below:
+
+```bash
 git clone https://github.com/TMHSDigital/subenum.git
 cd subenum
 go build -buildvcs=false -o subenum
@@ -58,6 +64,17 @@ Or launch the interactive terminal UI with no flags:
 ```bash
 ./subenum -tui
 ```
+
+<br>
+
+## Why subenum
+
+Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://github.com/projectdiscovery/shuffledns) and [dnsx](https://github.com/projectdiscovery/dnsx) are faster at mass resolution across large resolver pools, and [subfinder](https://github.com/projectdiscovery/subfinder) covers passive sources. subenum is a single static binary that brute-forces against one resolver you choose and focuses on telling you how much to trust the result:
+
+- **It accounts for every query.** Each lookup is classified as resolved, nxdomain, timeout, refused or other, and the breakdown is printed after every scan. When more than 20% of queries fail, the scan stops and blames the resolver instead of returning a quietly incomplete list.
+- **It handles wildcards.** Wildcard DNS is detected before the scan starts. With `-force`, answers matching the wildcard fingerprint are dropped, and recursive scans skip wildcard branches.
+- **Its rate limit is real.** `-rate` caps DNS packets on the wire, including retries, every record type and wildcard probes, so it can be quoted in rules of engagement.
+- **It can be taught and demoed.** `-simulate` produces realistic output with zero network traffic, and `-tui` gives a form-driven interface for people who don't live in a shell.
 
 <br>
 
@@ -131,6 +148,17 @@ flowchart LR
 ## Installation
 
 **Prerequisites:** Go 1.24+ &middot; Git &middot; Make _(optional)_ &middot; Docker _(optional)_
+
+<details>
+<summary><strong>go install</strong></summary>
+
+```bash
+go install github.com/TMHSDigital/subenum@latest
+```
+
+Requires Go 1.24.2 or newer. The binary lands in `$(go env GOPATH)/bin` and reports the installed module version with `-version`.
+
+</details>
 
 <details>
 <summary><strong>Build from source</strong></summary>

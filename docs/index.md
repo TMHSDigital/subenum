@@ -62,7 +62,13 @@ subenum brute-forces subdomains by resolving a wordlist against a target domain 
 
 ## Quick Start
 
-**Build from source:**
+**Install:**
+
+```bash
+go install github.com/TMHSDigital/subenum@latest
+```
+
+**Or build from source:**
 
 ```bash
 git clone https://github.com/TMHSDigital/subenum.git

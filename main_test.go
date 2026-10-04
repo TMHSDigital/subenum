@@ -91,4 +91,11 @@ func TestFormatVersion(t *testing.T) {
 	if got := formatVersion(); got != "subenum v0.7.0" {
 		t.Errorf("git describe tag: got %q", got)
 	}
+
+	// No ldflags: fall back to build info. A test binary has no module
+	// version, so this must read "dev" rather than a stale hard-coded number.
+	Version = ""
+	if got := formatVersion(); got != "subenum dev" {
+		t.Errorf("no ldflags: got %q, want %q", got, "subenum dev")
+	}
 }
