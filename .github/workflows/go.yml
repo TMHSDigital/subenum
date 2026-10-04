@@ -9,8 +9,8 @@ on:
 
 jobs:
   # Two legs: "minimum" proves the go.mod floor (1.24.2) still builds and
-  # passes; "stable" is the supported toolchain releases are built with, and
-  # is where lint and govulncheck run (#38).
+  # passes and is linted; "stable" is the toolchain releases are built with,
+  # and is where govulncheck runs (#38).
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -69,8 +69,11 @@ jobs:
     - name: Test
       run: go test -v -race ./...
 
+    # Lint runs on the minimum leg: the pinned golangci-lint cannot type-check
+    # newer standard libraries (Go 1.27 adds generic methods). Move it to the
+    # stable leg when bumping golangci-lint.
     - name: Run golangci-lint
-      if: matrix.go == 'stable'
+      if: matrix.go == 'minimum'
       uses: golangci/golangci-lint-action@v9
       with:
         version: v2.12.2
