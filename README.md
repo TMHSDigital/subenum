@@ -185,6 +185,14 @@ SHA-256 checksums are provided alongside each binary.
 <details>
 <summary><strong>Docker</strong></summary>
 
+Releases after v0.7.0 publish a multi-arch image (`linux/amd64`, `linux/arm64`) to GHCR:
+
+```bash
+docker run --rm -v "$(pwd)/data:/data" ghcr.io/tmhsdigital/subenum:latest -w /data/wordlist.txt example.com
+```
+
+Or build it locally:
+
 ```bash
 docker build -t subenum .
 docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com

@@ -12,6 +12,17 @@ This guide explains how to use `subenum` with Docker for a containerized subdoma
 - Docker installed on your system
 - Docker Compose (optional, for easy management)
 
+## Pulling the published image
+
+Releases after v0.7.0 publish a multi-arch (`linux/amd64`, `linux/arm64`) image to the GitHub Container Registry, with build provenance attached. Tags follow the release: `X.Y.Z`, `X.Y`, and `latest` for the newest non-prerelease.
+
+```bash
+docker run --rm ghcr.io/tmhsdigital/subenum:latest -version
+docker run --rm -v "$(pwd)/data:/data" ghcr.io/tmhsdigital/subenum:latest -w /data/wordlist.txt example.com
+```
+
+Verify provenance with `gh attestation verify oci://ghcr.io/tmhsdigital/subenum:latest --owner TMHSDigital`.
+
 ## Building the Docker Image
 
 ### Using docker build

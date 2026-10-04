@@ -84,6 +84,27 @@ jobs:
       if: matrix.go == 'stable'
       run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+  # Builds the Dockerfile for both published platforms without pushing, so a
+  # broken image is caught on the PR rather than during a release.
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build image (no push)
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: false
+        build-args: VERSION=ci
+
   # Single job that owns release creation. It runs once (not a matrix), so
   # exactly one job ever creates the release for the tag. The upload-assets
   # matrix below then only adds files to this already-existing release and can
@@ -95,7 +116,7 @@ jobs:
   # published only after all assets are present, so the public never sees a
   # partial or empty release.
   create-release:
-    needs: build
+    needs: [ build, docker ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -219,6 +240,68 @@ jobs:
         draft: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publishes a multi-arch image to GHCR once the release itself is public
+  # (#40). The Dockerfile cross-compiles in a build-platform builder stage, so
+  # arm64 needs no QEMU. `latest` only moves for non-prerelease tags.
+  publish-image:
+    needs: publish-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+    - uses: actions/checkout@v7
+
+    # GHCR requires lowercase repository names; the owner is mixed case.
+    - name: Compute image name
+      id: image
+      shell: bash
+      env:
+        OWNER: ${{ github.repository_owner }}
+      run: echo "name=ghcr.io/${OWNER,,}/subenum" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Image metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.image.outputs.name }}
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+    - name: Build and push
+      id: push
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: VERSION=${{ github.ref_name }}
+
+    - name: Attest image provenance
+      uses: actions/attest-build-provenance@v3
+      with:
+        subject-name: ${{ steps.image.outputs.name }}
+        subject-digest: ${{ steps.push.outputs.digest }}
+        push-to-registry: true
 
   # Failure-path cleanup. If the upload matrix fails partway, publish-release is
   # skipped and the draft release created above would otherwise linger
