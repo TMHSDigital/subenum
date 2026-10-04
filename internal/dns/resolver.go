@@ -105,53 +105,86 @@ func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 	}
 }
 
+// fqdn makes domain absolute. Without the trailing dot Go's resolver may also
+// try every resolv.conf search suffix (and try them first when the name has
+// fewer dots than ndots, as in Kubernetes pods), multiplying queries for each
+// missing name.
+func fqdn(domain string) string {
+	if strings.HasSuffix(domain, ".") {
+		return domain
+	}
+	return domain + "."
+}
+
+// queriesPerType is how many DNS queries one lookup of each type puts on the
+// wire. Go's LookupCNAME resolves the name with both A and AAAA queries and
+// reads the canonical name from the answer chain.
+var queriesPerType = map[string]int{"A": 1, "AAAA": 1, "CNAME": 2}
+
 // ResolveTypes performs per-type DNS lookups for the requested record types and
-// returns the matching records, the elapsed time, and the last lookup error (if
-// any). An empty types slice falls back to DefaultTypes. The caller should reuse
-// a single *net.Resolver across lookups (see scan.Run).
+// returns the matching records, the time spent in lookups, and the last lookup
+// error (if any). An empty types slice falls back to DefaultTypes. The caller
+// should reuse a single *net.Resolver across lookups (see scan.Run).
+//
+// Each type gets its own timeout, so a slow A answer cannot starve AAAA or
+// CNAME. If ctx carries a RateLimiter (see WithLimiter), each type first waits
+// for one slot per query it will send; the timeout starts only after that.
 func ResolveTypes(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string) ([]Record, time.Duration, error) {
 	if len(types) == 0 {
 		types = DefaultTypes
 	}
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	start := time.Now()
+	lim := limiterFrom(ctx)
+	name := fqdn(domain)
+	var elapsed time.Duration
 	var records []Record
 	var lastErr error
 	for _, t := range types {
-		switch t {
-		case "A":
-			ips, err := resolver.LookupIP(timeoutCtx, "ip4", domain)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			for _, ip := range ips {
-				records = append(records, Record{Type: "A", Value: ip.String()})
-			}
-		case "AAAA":
-			ips, err := resolver.LookupIP(timeoutCtx, "ip6", domain)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			for _, ip := range ips {
-				records = append(records, Record{Type: "AAAA", Value: ip.String()})
-			}
-		case "CNAME":
-			cname, err := resolver.LookupCNAME(timeoutCtx, domain)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			// LookupCNAME returns the domain itself when there is no CNAME chain.
-			if cname != "" && !strings.EqualFold(strings.TrimSuffix(cname, "."), strings.TrimSuffix(domain, ".")) {
-				records = append(records, Record{Type: "CNAME", Value: strings.TrimSuffix(cname, ".")})
+		for i := 0; i < queriesPerType[t]; i++ {
+			if err := lim.Wait(ctx); err != nil {
+				return records, elapsed, err
 			}
 		}
+		lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+		start := time.Now()
+		recs, err := lookupType(lookupCtx, resolver, name, domain, t)
+		elapsed += time.Since(start)
+		cancel()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		records = append(records, recs...)
 	}
-	return records, time.Since(start), lastErr
+	return records, elapsed, lastErr
+}
+
+func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t string) ([]Record, error) {
+	switch t {
+	case "A", "AAAA":
+		network := "ip4"
+		if t == "AAAA" {
+			network = "ip6"
+		}
+		ips, err := resolver.LookupIP(ctx, network, name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(ips))
+		for _, ip := range ips {
+			recs = append(recs, Record{Type: t, Value: ip.String()})
+		}
+		return recs, nil
+	case "CNAME":
+		cname, err := resolver.LookupCNAME(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		// LookupCNAME returns the domain itself when there is no CNAME chain.
+		if cname != "" && !strings.EqualFold(strings.TrimSuffix(cname, "."), strings.TrimSuffix(domain, ".")) {
+			return []Record{{Type: "CNAME", Value: strings.TrimSuffix(cname, ".")}}, nil
+		}
+	}
+	return nil, nil
 }
 
 // ResolveDomain performs a single DNS lookup for the given domain using the

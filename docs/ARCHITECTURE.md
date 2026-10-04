@@ -53,7 +53,7 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
     *   `flag.IntVar(&f.retries, "retries", 0, ...)`: Binds the deprecated retry flag.
     *   `flag.BoolVar(&f.force, "force", false, ...)`: Binds the force flag.
     *   `flag.BoolVar(&f.noAbort, "no-abort", false, ...)`: Binds the reliability-guard opt-out flag.
-    *   `flag.IntVar(&f.maxQueries, "max-queries", 0, ...)`: Binds the admitted-query cap (0 = unlimited).
+    *   `flag.IntVar(&f.maxQueries, "max-queries", 0, ...)`: Binds the cap on admitted candidate names (0 = unlimited). It counts jobs, not wire queries.
     *   `flag.Parse()`: Parses the provided arguments into the `cliFlags` struct.
     *   `flag.Arg(0)`: Retrieves the positional argument (the target domain).
 *   **Interactions**: The parsed values are used to configure the subsequent components, such as the Wordlist Processing and DNS Resolution Engine. Input validation is performed to ensure valid values for critical parameters like concurrency, timeout, DNS server format (validated via `validateDNSServer`), and domain syntax (validated via `validateDomain`).
@@ -77,7 +77,7 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
     *   `net.Resolver{}`: A custom DNS resolver is configured once per scan (`dns.NewResolver`) and reused for every lookup.
         *   `PreferGo: true`: Instructs the resolver to use the pure Go DNS client.
         *   `Dial func(ctx context.Context, network, address string) (net.Conn, error)`: A custom dial function connects to the configured `dnsServer`. It honors `network` (`udp` or `tcp`) so a truncated UDP response (TC=1) can fall back to TCP. The `address` argument is ignored in favor of the configured server.
-    *   `resolver.LookupIP` / `resolver.LookupCNAME` (inside `ResolveTypes`): Perform the per-type DNS lookups for the requested record types. The context is derived from the caller via `context.WithTimeout(ctx, timeout)`, so both the per-query timeout and SIGINT cancellation are respected.
+    *   `resolver.LookupIP` / `resolver.LookupCNAME` (inside `ResolveTypes`): Perform the per-type DNS lookups for the requested record types. Each record type gets its own `context.WithTimeout(ctx, timeout)`, so a slow A answer cannot starve AAAA or CNAME, and SIGINT cancellation is respected. Names are queried as absolute (trailing dot) so resolv.conf search suffixes never multiply queries.
     *   A subdomain is treated as resolved when at least one record is returned for the requested types; `ResolveDomain` collapses this to a boolean.
 *   **Interactions**: Workers call `dns.ResolveDomainWithRetry`, which delegates to `dns.ResolveDomain` with retry logic. It takes a fully qualified domain name, timeout duration, DNS server address, verbose flag, and retry count as input. It outputs a boolean indicating whether the domain resolved successfully. The result is used to decide if the domain should be printed to the console and/or written to the output file.
 
@@ -92,7 +92,7 @@ internal/tui/config.go         - Session persistence (load/save ~/.config/subenu
     *   **Worker Goroutines Loop**: `cfg.Concurrency` goroutines are launched. Each reads a job from `jobs`, constructs nothing further (the job already holds the full domain), and calls `dns.ResolveDomainWithRetry()` (or `dns.SimulateResolve()` in simulate mode). Each attempt is classified and counted. Once 200 jobs have completed, if more than 20% failed as timeout/refused/other, the scan emits `EventError` and cancels unless `-no-abort` is set.
     *   **Recursive enumeration** (optional): when `cfg.Recursive` is set and a job at depth `d < cfg.Depth` resolves, the worker enqueues one child per wordlist entry at depth `d+1`. The dispatcher's visited set deduplicates domains (loop and duplicate protection), and the progress total grows as new work is admitted.
     *   **Progress ticker**: A separate goroutine fires every second and emits `EventProgress` events so callers can update their display. The total is read atomically since recursion can expand it mid-scan.
-    *   **Rate limiter** (optional): when `cfg.Rate > 0`, a shared `time.Ticker` gate paces total DNS queries per second across the whole pool. Each worker waits on the gate before issuing a query, selecting on `ctx.Done()` so cancellation stays responsive. `0` means unlimited.
+    *   **Rate limiter** (optional): when `cfg.Rate > 0`, a shared `dns.RateLimiter` hands out evenly spaced reservations (no dropped ticks under load). Live scans attach it to the scan context with `dns.WithLimiter`; `ResolveTypes` takes one slot per DNS query it is about to send (two for CNAME, which Go resolves via A and AAAA) before starting that lookup's timeout, so retries, wildcard probes and the preflight all count against `-rate`, and queueing never turns into a timeout. Simulated scans take one slot per job. Cancellation stays responsive. `0` means unlimited.
     *   **Completion**: `wg.Wait()` blocks until all workers exit (after the dispatcher closes `jobs`), then the progress ticker is stopped and `EventDone` is emitted.
 *   **Interactions**: `scan.Run` is the single entry point for scanning used by both the CLI output pipeline and the Bubble Tea TUI. It decouples the scan engine from any specific display layer.
 

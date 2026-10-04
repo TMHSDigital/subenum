@@ -80,7 +80,7 @@ Or launch the interactive terminal UI with no flags:
 | Simulation Mode | Generate synthetic DNS results at a configurable hit rate, with zero network I/O |
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
 | Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), or `csv` via `-format` |
-| Rate Limiting | Cap total DNS queries per second across the worker pool with `-rate` (context-aware) |
+| Rate Limiting | Cap DNS queries per second on the wire with `-rate`: every record type, retry and wildcard probe takes a slot, and queueing never eats into `-timeout` |
 | Record Types | Look up and filter by `A`, `AAAA`, or `CNAME` records with `-type` |
 | Recursive Enumeration | Enumerate subdomains of discovered subdomains with `-recursive` and a `-depth` cap, with loop and duplicate protection |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
@@ -199,15 +199,15 @@ make help           # list all targets
 | :--- | :---: | :--- |
 | `-w <file>` | n/a | Wordlist file, one prefix per line **(required)** |
 | `-t <n>` | `100` | Concurrent worker goroutines |
-| `-timeout <ms>` | `1000` | Per-query DNS timeout in milliseconds |
+| `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
 | `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server address (validated on startup) |
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
 | `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
-| `-max-queries <n>` | `0` | Max DNS lookups to admit (0 = unlimited) |
+| `-max-queries <n>` | `0` | Max candidate names to test (0 = unlimited). Each name sends one query per record type per attempt (`CNAME` costs two) |
 | `-o <file>` | n/a | Write results to file in addition to stdout |
 | `-format <fmt>` | `text` | Output format: `text`, `json`, or `csv` |
-| `-rate <qps>` | `0` | Max DNS queries per second across all workers (0 = unlimited) |
+| `-rate <qps>` | `0` | Max DNS queries per second on the wire, all workers combined, including every record type, retry, wildcard probe and the preflight (0 = unlimited) |
 | `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME` |
 | `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |

@@ -109,12 +109,12 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
 	fs.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
 	fs.StringVar(&f.format, "format", "text", "Output format: text, json, or csv")
-	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second across all workers (0 = unlimited)")
+	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited)")
 	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
-	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max DNS lookups to admit (0 = unlimited)")
+	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
 	positionals, err := parseInterspersed(fs, args)
 	return f, positionals, fs, err
 }

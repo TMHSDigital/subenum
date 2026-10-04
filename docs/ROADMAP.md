@@ -74,16 +74,15 @@ These are constraints from the v0.7.0 resolver-hardening pass, not footnotes.
 
 Do not expand this list into drive-by fixes in the same PR that notices them.
 
-### N1. `-rate` ticker under-delivers
-A ticker channel drops ticks when workers are busy, so observed QPS can fall
-below `-rate` under load. Revisit pacing without changing the `scan.Event`
-boundary.
+### N1 (DONE, #32). `-rate` ticker under-delivers
+Replaced by `dns.RateLimiter` reservations, which also moved pacing from jobs
+to wire queries.
 
 ### N2. Text-format record display
 `text` output still prints `Found: <domain>` and discards record type/value.
 JSON and CSV already carry them.
 
-### N3. Per-type shared timeout budget
+### N3 (timeout DONE in #32; error aggregation tracked in #31). Per-type shared timeout budget
 `ResolveTypes` uses one `context.WithTimeout` for the whole type loop, so AAAA
 and CNAME starve after a slow A. Give each type its own budget or a remaining
 budget that cannot go negative.

@@ -30,12 +30,12 @@ type Config struct {
 	Attempts    int
 	Force       bool
 	Verbose     bool
-	Rate        int           // max DNS queries per second across all workers (0 = unlimited)
+	Rate        int           // max DNS messages per second on the wire, all workers combined (0 = unlimited)
 	Types       []string      // record types to look up (A, AAAA, CNAME); empty = A,AAAA
 	Recursive   bool          // enumerate subdomains of discovered subdomains
 	Depth       int           // max recursion depth (1 = no recursion)
 	NoAbort     bool          // keep scanning after the reliability guard fires
-	MaxQueries  int           // cap on admitted jobs (0 = unlimited)
+	MaxQueries  int           // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
 	Resolver    *net.Resolver // reused across lookups; nil means scan.Run constructs one
 
 	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
@@ -206,8 +206,19 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		maxDepth = 1
 	}
 
+	// One limiter paces the whole scan. Live lookups carry it on ctx and take a
+	// slot per DNS query they send (every record type, every retry, wildcard
+	// probes and the preflight), so -rate bounds wire queries, not names (#32).
+	// Simulated and hooked lookups have no wire traffic and take one slot per job.
+	limiter := dns.NewRateLimiter(cfg.Rate)
 	if cfg.Resolver == nil {
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
+	}
+	var jobLimiter *dns.RateLimiter
+	if cfg.Simulate || cfg.resolveHook != nil {
+		jobLimiter = limiter
+	} else {
+		ctx = dns.WithLimiter(ctx, limiter)
 	}
 
 	if cfg.Recursive {
@@ -275,19 +286,6 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	jobs := make(chan job)
 	enqueue := make(chan job)
 	completed := make(chan struct{})
-
-	// Optional rate limiter: a shared ticker gate paces total queries per second
-	// across the whole worker pool. nil means unlimited.
-	var limiter <-chan time.Time
-	if cfg.Rate > 0 {
-		interval := time.Second / time.Duration(cfg.Rate)
-		if interval <= 0 {
-			interval = time.Nanosecond
-		}
-		rl := time.NewTicker(interval)
-		defer rl.Stop()
-		limiter = rl.C
-	}
 
 	// Progress ticker - fires every second.
 	// tickerDone signals the goroutine to stop; tickerStopped confirms it has
@@ -401,7 +399,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				processJob(ctx, cfg, j, maxDepth, limiter, events, enqueue, &processed, &found, &stats, cancel, &guardOnce, fingerprint, wc)
+				processJob(ctx, cfg, j, maxDepth, jobLimiter, events, enqueue, &processed, &found, &stats, cancel, &guardOnce, fingerprint, wc)
 				select {
 				case completed <- struct{}{}:
 				case <-ctx.Done():
@@ -433,16 +431,12 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 // processJob resolves a single job and, on success, optionally enqueues
 // depth-capped children for recursive enumeration.
-func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter <-chan time.Time, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once, fp []dns.Record, wc *wildcardCache) {
+func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *dns.RateLimiter, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once, fp []dns.Record, wc *wildcardCache) {
 	if ctx.Err() != nil {
 		return
 	}
-	if limiter != nil {
-		select {
-		case <-limiter:
-		case <-ctx.Done():
-			return
-		}
+	if err := limiter.Wait(ctx); err != nil {
+		return
 	}
 
 	var outcome dns.Outcome
