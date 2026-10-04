@@ -174,6 +174,11 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
+			// Once the scan has finished there is nothing to abort; quit
+			// instead of relabelling a completed scan as "Aborted" (#43).
+			if m.scanView.done {
+				return m, tea.Quit
+			}
 			if m.cancel != nil {
 				m.cancel()
 			}

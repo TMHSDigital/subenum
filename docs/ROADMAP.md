@@ -97,7 +97,7 @@ guard.
 `-v` writes to stderr without going through the output writer mutex, so verbose
 lines mangle the carriage-return progress line.
 
-### N6. TUI viewport height goes negative below 9 rows
+### N6 (DONE, #37). TUI viewport height goes negative below 9 rows
 The scan-view viewport height is unclamped and can go negative on short
 terminals.
 

@@ -299,7 +299,7 @@ No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-u
 | `tab` / `shift+tab` / `↑` `↓` | Navigate fields |
 | `space` | Toggle Simulate / Force |
 | `ctrl+r` | Start scan |
-| `ctrl+c` | Abort scan (scan view) / quit (form) |
+| `ctrl+c` | Abort a running scan; quit the form or a finished scan |
 | `r` | New scan - restores last-used values |
 | `q` | Quit after scan completes |
 

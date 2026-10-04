@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 )
@@ -73,6 +75,23 @@ func TestFinalizeOutputNoFile(t *testing.T) {
 	}
 	if err := m.finalizeOutput(false); err != nil {
 		t.Fatalf("finalizeOutput: %v", err)
+	}
+}
+
+// TestCtrlCAfterDoneQuits covers #43: Ctrl+C on a finished scan quits instead
+// of relabelling it "Aborted".
+func TestCtrlCAfterDoneQuits(t *testing.T) {
+	m := Model{state: stateScan, scanView: newScanViewModel(80, 24, false)}
+	m.scanView.done = true
+	next, cmd := m.updateScan(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected a quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("ctrl+c after done did not quit")
+	}
+	if next.(Model).scanView.aborted {
+		t.Error("finished scan was relabelled as aborted")
 	}
 }
 

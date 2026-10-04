@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -334,6 +336,19 @@ func toggleVal(on bool) string {
 	return blurredStyle.Render("OFF")
 }
 
+// expandHome expands a leading "~/" (or a bare "~"). The form has no shell to
+// do it, so without this "~/lists/words.txt" fails as a relative path.
+func expandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[1:])
+}
+
 // validate checks all inputs and returns a scan config or an error string.
 func (m *formModel) validate() (formValues, string) {
 	domain := strings.TrimSpace(m.inputs[0].Value())
@@ -343,7 +358,7 @@ func (m *formModel) validate() (formValues, string) {
 	if err := validate.Domain(domain); err != nil {
 		return formValues{}, err.Error()
 	}
-	wl := strings.TrimSpace(m.inputs[1].Value())
+	wl := expandHome(strings.TrimSpace(m.inputs[1].Value()))
 	if wl == "" {
 		return formValues{}, "Wordlist path is required"
 	}
@@ -411,7 +426,7 @@ func (m *formModel) validate() (formValues, string) {
 
 	// Output file is optional; the format applies only to that file and is
 	// validated even when no file is set so a typo is caught early.
-	outputFile := strings.TrimSpace(m.inputs[10].Value())
+	outputFile := expandHome(strings.TrimSpace(m.inputs[10].Value()))
 	formatStr := strings.TrimSpace(m.inputs[11].Value())
 	if formatStr == "" {
 		formatStr = "text"
