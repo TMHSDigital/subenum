@@ -23,6 +23,8 @@ func TestParseFlagsInterspersed(t *testing.T) {
 		{"flags on both sides", []string{"-simulate", "example.com", "-t", "7", "-w", "wl.txt"}, []string{"example.com"}, 7, true},
 		{"stray positionals kept", []string{"-w", "wl.txt", "a.com", "b.com", "-t", "3"}, []string{"a.com", "b.com"}, 3, false},
 		{"terminator stops flag parsing", []string{"-w", "wl.txt", "--", "example.com", "-t"}, []string{"example.com", "-t"}, 100, false},
+		{"-- as a flag value is not a terminator", []string{"-w", "wl.txt", "-o", "--", "example.com", "-t", "5"}, []string{"example.com"}, 5, false},
+		{"terminator after a bool flag", []string{"-w", "wl.txt", "-simulate", "--", "-weird.example"}, []string{"-weird.example"}, 100, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

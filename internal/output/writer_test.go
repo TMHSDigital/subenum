@@ -419,6 +419,30 @@ func TestInfoDoesNotSpliceIntoProgress(t *testing.T) {
 	}
 }
 
+// TestResultClearsProgressOnTerminal: on a terminal a result must not be
+// appended to the in-place progress line.
+func TestResultClearsProgressOnTerminal(t *testing.T) {
+	var buf lockedBuf
+	w := New(nil, false, FormatText)
+	w.stderr = &buf
+	w.Progress(10, 1, 10, 0)
+	_ = captureStdout(t, func() { w.Result("www.example.com", nil) })
+	if w.progressLen != 0 || !strings.HasSuffix(buf.b.String(), "\r") {
+		t.Errorf("progress line not cleared before result: %q", buf.b.String())
+	}
+
+	// Piped stdout never shares the screen, so nothing is cleared.
+	var buf2 lockedBuf
+	p := New(nil, false, FormatText)
+	p.stderr = &buf2
+	p.SetPlain(true)
+	p.Progress(10, 1, 10, 0)
+	_ = captureStdout(t, func() { p.Result("www.example.com", nil) })
+	if p.progressLen == 0 {
+		t.Error("plain mode should leave the progress line alone")
+	}
+}
+
 // failWriter accepts limit bytes, then fails every write, like a disk filling
 // up mid-scan.
 type failWriter struct{ limit int }

@@ -161,12 +161,36 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 			return positionals, nil
 		}
 		consumed := args[:before-len(rest)]
-		if len(consumed) > 0 && consumed[len(consumed)-1] == "--" {
+		if endsWithTerminator(fs, consumed) {
 			return append(positionals, rest...), nil
 		}
 		positionals = append(positionals, rest[0])
 		args = rest[1:]
 	}
+}
+
+// endsWithTerminator reports whether the parsed arguments ended at a "--"
+// terminator, as opposed to "--" being the value of a flag such as "-o --".
+func endsWithTerminator(fs *flag.FlagSet, consumed []string) bool {
+	n := len(consumed)
+	if n == 0 || consumed[n-1] != "--" {
+		return false
+	}
+	if n < 2 {
+		return true
+	}
+	prev := consumed[n-2]
+	if !strings.HasPrefix(prev, "-") || strings.Contains(prev, "=") {
+		return true
+	}
+	fl := fs.Lookup(strings.TrimLeft(prev, "-"))
+	if fl == nil {
+		return true
+	}
+	if b, ok := fl.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+		return true // bool flags take no separate value
+	}
+	return false // "--" was the value of the preceding flag
 }
 
 func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
@@ -453,7 +477,10 @@ func run() (code int) {
 	go func() {
 		select {
 		case <-sigCh:
-			out.Info("Interrupt received, shutting down gracefully...")
+			// Restore default handling so a second Ctrl+C force-quits a run
+			// that is stuck draining (for example on a blocked stdout pipe).
+			signal.Stop(sigCh)
+			out.Info("Interrupt received, shutting down gracefully (Ctrl+C again to force quit)...")
 			interrupted.Store(true)
 			cancel()
 		case <-ctx.Done():
@@ -560,9 +587,9 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 				out.Progress(pct, ev.Processed, ev.Total, ev.Found)
 			}
 		case scan.EventWildcard:
-			out.Info(ev.Message)
+			out.Info("%s", ev.Message)
 		case scan.EventError:
-			out.Error(ev.Message)
+			out.Error("%s", ev.Message)
 			sawError = true
 			finishProgress()
 			// Keep draining so EventDone (and Stats) can still arrive after a

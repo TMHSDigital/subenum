@@ -81,7 +81,11 @@ func newScanViewModel(width, height int, simMode bool) scanViewModel {
 // the notices currently shown, never going below one row (#37, #43).
 func (m *scanViewModel) layout() {
 	m.viewport.Width = max(1, m.width)
-	m.viewport.Height = max(1, m.height-chromeLines-lipgloss.Height(m.messagesView()))
+	msgLines := 0
+	if mv := m.messagesView(); mv != "" {
+		msgLines = lipgloss.Height(mv)
+	}
+	m.viewport.Height = max(1, m.height-chromeLines-msgLines)
 	m.progress.Width = max(1, m.width-4)
 }
 

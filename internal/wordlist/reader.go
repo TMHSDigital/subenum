@@ -67,7 +67,13 @@ func ReadLines(path string) ([]string, error) {
 	var lines []string
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		line := scanner.Text()
+		if len(lines) == 0 {
+			// Windows editors often prepend a UTF-8 byte order mark, which
+			// TrimSpace does not remove; it would invalidate the first entry.
+			line = strings.TrimPrefix(line, "\ufeff")
+		}
+		lines = append(lines, line)
 	}
 	return lines, scanner.Err()
 }

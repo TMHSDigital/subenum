@@ -261,6 +261,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		if len(records) > 0 {
 			outcome = dns.OutcomeFound
 		}
+		if ctx.Err() != nil {
+			return // interrupted during preflight: not a resolver failure
+		}
 		if outcome != dns.OutcomeFound && outcome != dns.OutcomeNXDomain {
 			msg := fmt.Sprintf("resolver %s failed preflight for %s: %v", cfg.DNSServer, cfg.Domain, err)
 			events <- Event{Kind: EventError, Message: msg}
@@ -274,6 +277,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
 		isWildcard, fp, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, cfg.Types)
+		if ctx.Err() != nil {
+			return // interrupted during wildcard probes
+		}
 		if err != nil {
 			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error()}
 			return
@@ -499,6 +505,9 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 	if cfg.Recursive && j.depth < maxDepth {
 		if !cfg.Simulate && cfg.resolveHook == nil {
 			isWild, err := wc.isWildcard(ctx, cfg, j.domain)
+			if ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				events <- Event{Kind: EventWildcard, Message: "skipping recursive expansion of " + j.domain + ": wildcard check failed: " + err.Error()}
 				return

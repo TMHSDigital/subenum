@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI scan view: wildcard and error notices are capped at the latest three (with a "+N earlier notices" line) and the viewport shrinks to fit them, so recursive scans no longer push the progress bar and status off-screen. Ctrl+C on a finished scan now quits instead of relabelling it "Aborted". The results buffer is capped at 10,000 lines and re-rendered on progress ticks once past 200 results, so large scans no longer slow the UI and back-pressure the workers. `~/` paths in the wordlist and output fields are expanded (#43).
 - `-v` lines no longer splice into the progress line. The `dns` package no longer writes to stderr; lookups log through `scan.Config.Logf` (the CLI passes `output.Writer.Info`), and `Info`/`Error` now take the writer mutex and blank the in-place progress line before printing (#36, ROADMAP N5).
 - `tools/wordlist-gen` output is deterministic: `-combine` no longer iterates a Go map, so the same flags give a byte-identical file. Write errors go to stderr and exit non-zero instead of being swallowed, suffixes such as `.co.uk` are stripped correctly, a prefix is no longer combined with itself, per-entry logging moved behind `-v`, and the generator has unit tests (#45).
+- The reliability-guard message printed as `aborting scan: 50%!o(MISSING)f 200 queries failed`: scan event messages were passed to `Info`/`Error` as format strings. They are now printed verbatim (present since 0.7.0).
+- Ctrl+C during the preflight lookup or wildcard probes no longer reports a misleading "resolver failed preflight" or "wildcard detection failed" error. A second Ctrl+C now force-quits a run that is stuck draining.
+- `-o --` (a flag whose value is `--`) is no longer mistaken for the `--` terminator.
+- On a terminal, results no longer start on the same line as the progress indicator, and a UTF-8 byte order mark at the start of a wordlist or `-dL` file no longer invalidates its first entry.
 
 ### Added
 - `-format jsonl` streams one JSON object per resolved subdomain, so structured output can be piped live (#34).

@@ -277,7 +277,7 @@ func (m *Model) finalizeOutput(finish bool) error {
 // reportOutputErr surfaces an output-file failure in the scan view.
 func (m *Model) reportOutputErr(err error) {
 	if err != nil {
-		m.scanView.messages = append(m.scanView.messages, errorStyle.Render("✗ output file incomplete: "+err.Error()))
+		m.scanView.addMessage(errorStyle.Render("✗ output file incomplete: " + err.Error()))
 	}
 }
 

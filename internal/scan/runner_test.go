@@ -548,6 +548,35 @@ func TestRunRecursionCeilingForceAllows(t *testing.T) {
 	}
 }
 
+// TestRunInterruptDuringPreflightIsSilent: Ctrl+C while the preflight lookup is
+// in flight must not be reported as a resolver failure.
+func TestRunInterruptDuringPreflightIsSilent(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pc.Close() }()
+	addr := pc.LocalAddr().String()
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     []string{"www"},
+		Concurrency: 1,
+		Timeout:     5 * time.Second, // the black hole never answers; cancel first
+		Attempts:    1,
+		Types:       []string{"A"},
+		DNSServer:   addr,
+		Resolver:    dns.NewResolver(5*time.Second, addr),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	events := make(chan Event, 8)
+	go Run(ctx, cfg, events)
+	time.AfterFunc(100*time.Millisecond, cancel)
+	_, errs, _ := collect(events)
+	if len(errs) != 0 {
+		t.Fatalf("interrupt reported as error: %q", errs[0].Message)
+	}
+}
+
 func TestRunPreflightFailsOnBlackHole(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {

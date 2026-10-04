@@ -100,6 +100,12 @@ func (w *Writer) Result(domain string, records []dns.Record) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// On a terminal, stdout and the stderr progress line share the screen;
+	// blank the progress line so the result starts on a clean line.
+	if w.stdout && !w.plain {
+		w.clearProgressLocked()
+	}
+
 	switch w.format {
 	case FormatJSON:
 		w.buffered = append(w.buffered, Result{Subdomain: domain, Records: records})

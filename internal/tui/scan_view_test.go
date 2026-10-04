@@ -46,6 +46,22 @@ func TestScanViewNoticesDoNotOverflow(t *testing.T) {
 	}
 }
 
+// TestScanViewFillsTerminalExactly checks the chrome arithmetic both ways: with
+// and without notices, the finished view uses the full height and no more.
+func TestScanViewFillsTerminalExactly(t *testing.T) {
+	const width, height = 100, 30
+	for _, notices := range []int{0, 1, 5} {
+		m := newScanViewModel(width, height, false)
+		for i := 0; i < notices; i++ {
+			m, _ = m.Update(wildcardMsg{text: "notice"})
+		}
+		m, _ = m.Update(doneMsg{processed: 1, total: 1})
+		if got := lipgloss.Height(m.View()); got != height {
+			t.Errorf("%d notices: view is %d lines, want exactly %d", notices, got, height)
+		}
+	}
+}
+
 // TestScanViewLargeResultSetBounded covers the #43 render-cost fix: the
 // buffer is capped and content is refreshed lazily past the live limit.
 func TestScanViewLargeResultSetBounded(t *testing.T) {

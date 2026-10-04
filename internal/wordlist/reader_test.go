@@ -116,6 +116,19 @@ func TestLoadWordlistSkipsOverlongNames(t *testing.T) {
 	}
 }
 
+// TestReadLinesStripsBOM: a UTF-8 byte order mark from a Windows editor must
+// not invalidate the first entry.
+func TestReadLinesStripsBOM(t *testing.T) {
+	p := writeTemp(t, string([]byte{0xEF, 0xBB, 0xBF})+"www\nmail\n")
+	entries, _, skipped, err := LoadWordlist(p, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(entries, []string{"www", "mail"}) || skipped != 0 {
+		t.Errorf("entries = %q, skipped = %d", entries, skipped)
+	}
+}
+
 func TestNormalize(t *testing.T) {
 	tests := []struct {
 		in   string
