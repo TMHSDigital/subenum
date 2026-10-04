@@ -8,20 +8,37 @@ on:
     branches: [ "main" ]
 
 jobs:
+  # Two legs: "minimum" proves the go.mod floor (1.24.2) still builds and
+  # passes; "stable" is the supported toolchain releases are built with, and
+  # is where lint and govulncheck run (#38).
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        go: [ minimum, stable ]
 
     steps:
     - uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
-    - name: Set up Go
+    - name: Set up Go (go.mod minimum)
+      if: matrix.go == 'minimum'
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
+        cache: false
+
+    - name: Set up Go (latest stable)
+      if: matrix.go == 'stable'
+      uses: actions/setup-go@v7
+      with:
+        go-version: stable
+        check-latest: true
+        cache: false
 
     - name: Cache Go build artifacts
       uses: actions/cache@v6
@@ -29,9 +46,9 @@ jobs:
         path: |
           ~/.cache/go-build
           ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.mod') }}
+        key: ${{ runner.os }}-go-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
         restore-keys: |
-          ${{ runner.os }}-go-
+          ${{ runner.os }}-go-${{ matrix.go }}-
 
     - name: Verify dependencies
       run: go mod verify
@@ -53,9 +70,16 @@ jobs:
       run: go test -v -race ./...
 
     - name: Run golangci-lint
+      if: matrix.go == 'stable'
       uses: golangci/golangci-lint-action@v9
       with:
         version: v2.12.2
+
+    # Fails on vulnerabilities reachable from this code, in dependencies or in
+    # the Go standard library of the toolchain releases are built with.
+    - name: Run govulncheck
+      if: matrix.go == 'stable'
+      run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   # Single job that owns release creation. It runs once (not a matrix), so
   # exactly one job ever creates the release for the tag. The upload-assets
@@ -127,20 +151,15 @@ jobs:
       with:
         fetch-depth: 0
 
+    # Release binaries use the latest stable Go so they ship a patched
+    # standard library; go.mod's 1.24.2 is only the minimum (#38). No build
+    # cache here, so release artifacts are always built from scratch.
     - name: Set up Go
       uses: actions/setup-go@v7
       with:
-        go-version-file: 'go.mod'
-
-    - name: Cache Go build artifacts
-      uses: actions/cache@v6
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.mod') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+        go-version: stable
+        check-latest: true
+        cache: false
 
     - name: Build
       env:

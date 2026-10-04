@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When stdout is not a terminal, `text` results are printed as bare subdomain names (no `Found:` prefix), so `subenum ... | sort -u` or `| httpx` works without `cut`. Terminal output is unchanged. `examples/multi_domain_scan.sh` now counts lines instead of `Found:` (#34).
 - Wordlists are normalized on load: blank lines and `#` comments are ignored, entries are lowercased before deduplication (so `WWW` and `www` are one query), and entries that are not valid DNS labels (whitespace, `*`, empty or over-long labels) or whose full name would exceed 253 characters are skipped and reported on stderr. Underscore labels such as `_dmarc` are kept. A wordlist with no valid entries is an error (#33).
 - `-max-queries` help text and docs now say what it counts: candidate names (jobs), not wire queries.
+- Release binaries and the Docker image are built with the latest stable Go toolchain (Docker builder `golang:1.27.1-alpine`, digest-pinned) instead of Go 1.24.2. `go.mod` still declares 1.24.2 as the minimum, and CI now tests both the minimum and the latest stable toolchain. CI runs `govulncheck` on every push and PR, and Dependabot tracks the Dockerfile base images. Release jobs build without a shared cache (#38).
 
 ## [0.7.0] - 2026-09-16
 

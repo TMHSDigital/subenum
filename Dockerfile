@@ -1,4 +1,6 @@
-FROM golang:1.24.2-alpine@sha256:7772cb5322baa875edd74705556d08f0eeca7b9c4b5367754ce3f2f00041ccee AS builder
+# Builder uses a current, supported Go toolchain (go.mod 1.24.2 is only the
+# minimum); Dependabot keeps both digests fresh.
+FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
 
 WORKDIR /app
 

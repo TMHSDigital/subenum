@@ -15,3 +15,12 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+
+  # Dockerfile base images are pinned by digest and would otherwise go stale.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
