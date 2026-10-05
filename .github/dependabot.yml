@@ -1,4 +1,6 @@
 version: 2
+# Work happens directly on main, so each ecosystem's updates are grouped into
+# a single weekly PR rather than one PR per package.
 updates:
   - package-ecosystem: "gomod"
     directory: "/"
@@ -7,6 +9,9 @@ updates:
     # Include indirect modules (x/sys, x/text), which otherwise go stale (#83).
     allow:
       - dependency-type: "all"
+    groups:
+      go-modules:
+        patterns: ["*"]
     labels:
       - "dependencies"
       - "go"
@@ -15,6 +20,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
     labels:
       - "dependencies"
       - "github-actions"
@@ -24,6 +32,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      docker:
+        patterns: ["*"]
     labels:
       - "dependencies"
       - "docker"
