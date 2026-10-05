@@ -35,11 +35,12 @@ const (
 	fieldDepth       = 10 // only active when recursive=ON
 	fieldRate        = 11
 	fieldMaxQueries  = 12
-	fieldOutput      = 13
-	fieldFormat      = 14
-	fieldForce       = 15
-	fieldNoAbort     = 16
-	fieldCount       = 17
+	fieldExclude     = 13
+	fieldOutput      = 14
+	fieldFormat      = 15
+	fieldForce       = 16
+	fieldNoAbort     = 17
+	fieldCount       = 18
 )
 
 var (
@@ -70,6 +71,7 @@ var inputForField = [fieldCount]int{
 	8,  // fieldDepth       → inputs[8]
 	9,  // fieldRate        → inputs[9]
 	12, // fieldMaxQueries  → inputs[12]
+	13, // fieldExclude     → inputs[13]
 	10, // fieldOutput      → inputs[10]
 	11, // fieldFormat      → inputs[11]
 	-1, // fieldForce       → toggle
@@ -128,6 +130,7 @@ func newFormModel(saved savedConfig) formModel {
 		newInput("optional, e.g. results.txt", str(saved.Output, "")),                                      // 10 Output file
 		newInput("text, json, jsonl, csv", str(saved.Format, "text")),                                      // 11 Format
 		newInput("0 = unlimited", intStr(saved.MaxQueries, "0")),                                           // 12 Max queries
+		newInput("optional, e.g. vpn.example.com,*.corp.example.com", str(saved.Exclude, "")),              // 13 Exclude
 	}
 
 	m.toggles[0] = saved.Simulate
@@ -303,6 +306,7 @@ func (m formModel) View() string {
 	// Rate and query cap
 	row(fieldRate, "Rate (qps)", m.inputs[9].View())
 	row(fieldMaxQueries, "Max Names", m.inputs[12].View())
+	row(fieldExclude, "Exclude", m.inputs[13].View())
 
 	// Output file (optional) and its format
 	row(fieldOutput, "Output File", m.inputs[10].View())
@@ -408,6 +412,12 @@ func (m *formModel) validate() (formValues, string) {
 	}
 	rate := num(9, "Rate", 0)               // blank means unlimited
 	maxQueries := num(12, "Max queries", 0) // blank means unlimited
+	var exclude []string                    // out-of-scope names, never queried (#87)
+	for _, p := range strings.Split(m.inputs[13].Value(), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			exclude = append(exclude, p)
+		}
+	}
 	if err != nil {
 		return formValues{}, err.Error()
 	}
@@ -442,6 +452,7 @@ func (m *formModel) validate() (formValues, string) {
 		depth:       depth,
 		rate:        rate,
 		maxQueries:  maxQueries,
+		exclude:     exclude,
 		noAbort:     m.toggles[3],
 		outputFile:  outputFile,
 		format:      format,
@@ -474,6 +485,7 @@ func (v formValues) options(entries []string, seed uint64) scan.Options {
 		Depth:       v.depth,
 		Rate:        v.rate,
 		MaxQueries:  v.maxQueries,
+		Exclude:     v.exclude,
 		NoAbort:     v.noAbort,
 	}
 }
@@ -491,6 +503,7 @@ type formValues struct {
 	depth       int
 	rate        int
 	maxQueries  int
+	exclude     []string
 	noAbort     bool
 	outputFile  string
 	format      output.Format

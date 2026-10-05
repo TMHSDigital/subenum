@@ -11,8 +11,8 @@ import (
 
 func TestNewFormModelDefaults(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	if len(m.inputs) != 13 {
-		t.Fatalf("expected 13 text inputs, got %d", len(m.inputs))
+	if len(m.inputs) != 14 {
+		t.Fatalf("expected 14 text inputs, got %d", len(m.inputs))
 	}
 	if m.focus != fieldDomain {
 		t.Errorf("expected initial focus on domain, got %d", m.focus)
@@ -205,5 +205,24 @@ func TestFormBuildsSharedConfig(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("TUI config:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// TestValidateExclude covers #87 in the TUI: the Exclude field reaches the
+// scan config, and an invalid pattern is rejected on the form.
+func TestValidateExclude(t *testing.T) {
+	m := newFormModel(savedConfig{})
+	m.inputs[0].SetValue("example.com")
+	m.inputs[13].SetValue(" vpn.example.com , *.corp.example.com ")
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	if got := vals.options(nil, 0).Config().Exclude; !reflect.DeepEqual(got, []string{"vpn.example.com", "*.corp.example.com"}) {
+		t.Errorf("Exclude = %q", got)
+	}
+	m.inputs[13].SetValue("not a domain")
+	if _, errStr := m.validate(); !strings.Contains(errStr, "-exclude") {
+		t.Errorf("invalid pattern: got %q", errStr)
 	}
 }

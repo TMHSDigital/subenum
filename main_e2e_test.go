@@ -372,3 +372,41 @@ func TestE2ESummary(t *testing.T) {
 		t.Fatalf("failed-run summary = %s", data)
 	}
 }
+
+// TestE2EExclude covers #87: a recursive simulated scan with -exclude never
+// reports names in the excluded branch, and the summary counts them.
+func TestE2EExclude(t *testing.T) {
+	wl := writeFile(t, "wl.txt", "dev\nwww\napi\n")
+	stats := filepath.Join(t.TempDir(), "run.json")
+	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-recursive", "-depth", "2",
+		"-exclude", "*.dev.example.com", "-stats", stats, "-w", wl, "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	for _, line := range strings.Fields(out) {
+		if strings.HasSuffix(line, ".dev.example.com") {
+			t.Fatalf("excluded name in results: %s", line)
+		}
+	}
+	if !strings.Contains(out, "dev.example.com") || !strings.Contains(out, "dev.www.example.com") {
+		t.Fatalf("in-scope names missing:\n%s", out)
+	}
+	data, err := os.ReadFile(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum struct {
+		Targets []struct {
+			Outcomes struct {
+				Excluded int `json:"excluded"`
+			} `json:"outcomes"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(data, &sum); err != nil || len(sum.Targets) != 1 || sum.Targets[0].Outcomes.Excluded != 3 {
+		t.Fatalf("summary excluded count wrong (err %v): %s", err, data)
+	}
+
+	if code, _ := runCLI(t, "", "-simulate", "-exclude", "not a domain", "-w", wl, "example.com"); code != 2 {
+		t.Errorf("invalid -exclude pattern: exit %d, want 2", code)
+	}
+}

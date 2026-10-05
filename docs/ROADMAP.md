@@ -26,8 +26,6 @@ Work in progress or next up.
 Planned features that make results more trustworthy and the tool easier to get.
 
 - **Resolver pool with trusted re-validation** ([#69](https://github.com/TMHSDigital/subenum/issues/69)), `-r resolvers.txt`.
-- **Scope control for bug-bounty programs** ([#87](https://github.com/TMHSDigital/subenum/issues/87)):
-  `-exclude` patterns and an out-of-scope file.
 - **Monitoring mode** ([#84](https://github.com/TMHSDigital/subenum/issues/84)):
   diff against a previous run, plus a GitHub Action for scheduled checks.
 - **Release pipeline** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):

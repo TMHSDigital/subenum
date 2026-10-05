@@ -81,6 +81,7 @@ func targetSummary(domain, status string, res targetResult) output.TargetSummary
 		Refused:          st.Refused,
 		Other:            st.Other,
 		WildcardFiltered: st.WildcardFiltered,
+		Excluded:         st.Excluded,
 	}
 	t.QueriesSent = st.QueriesSent
 	t.SkippedCap = st.Skipped

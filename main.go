@@ -133,6 +133,9 @@ type cliFlags struct {
 	noAbort      bool
 	maxQueries   int
 	statsFile    string
+	exclude      string
+	excludeFile  string
+	excludes     []string // -exclude and -exclude-file patterns, merged
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
@@ -165,6 +168,8 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
 	fs.StringVar(&f.statsFile, "stats", "", "Write a JSON run-quality report (outcomes, queries sent, verdict) to this file")
+	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
+	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
 	fs.Usage = func() {
 		w := fs.Output()
 		_, _ = fmt.Fprintln(w, "Usage: subenum -w <wordlist_file> [options] <domain>")
@@ -269,6 +274,30 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 		out.Info("Note: %s", n)
 	}
 	return domain, true
+}
+
+// loadExcludes merges the -exclude list and the -exclude-file lines (#87).
+// Patterns are validated with the other options.
+func loadExcludes(f cliFlags) ([]string, error) {
+	var patterns []string
+	for _, p := range strings.Split(f.exclude, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			patterns = append(patterns, p)
+		}
+	}
+	if f.excludeFile == "" {
+		return patterns, nil
+	}
+	lines, err := wordlist.ReadLines(f.excludeFile)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range lines {
+		if !wordlist.IsComment(line) {
+			patterns = append(patterns, strings.TrimSpace(line))
+		}
+	}
+	return patterns, nil
 }
 
 // loadTargets returns the apex domains to scan: the single positional domain,
@@ -381,6 +410,9 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	out.Info("  refused:   %d", s.Refused)
 	out.Info("  other:     %d", s.Other)
 	out.Info("  wildcard-filtered: %d", s.WildcardFiltered)
+	if s.Excluded > 0 {
+		out.Info("  excluded (out of scope): %d", s.Excluded)
+	}
 }
 
 func run() (code int) {
@@ -437,6 +469,13 @@ func run() (code int) {
 		out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
 		out.Info("")
 	}
+
+	excludes, err := loadExcludes(f)
+	if err != nil {
+		out.Error("reading -exclude-file: %v", err)
+		return exitFailure
+	}
+	f.excludes = excludes
 
 	domain, ok := validateFlags(f, positionals, fs, out, maxAttempts)
 	if !ok {
@@ -664,6 +703,7 @@ func scanOptions(f cliFlags, domain string, entries []string, maxAttempts int, r
 		Depth:       f.depth,
 		Rate:        f.rate,
 		MaxQueries:  f.maxQueries,
+		Exclude:     f.excludes,
 		NoAbort:     f.noAbort,
 		Verbose:     f.verbose,
 		Logf:        logf,

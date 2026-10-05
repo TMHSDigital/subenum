@@ -19,6 +19,7 @@ type savedConfig struct {
 	Depth       int    `json:"depth"`
 	Rate        int    `json:"rate"`
 	MaxQueries  int    `json:"max_queries"`
+	Exclude     string `json:"exclude,omitempty"`
 	Output      string `json:"output"`
 	Format      string `json:"format"`
 	Simulate    bool   `json:"simulate"`
@@ -71,6 +72,7 @@ func saveConfig(fv formValues) error {
 		Depth:       fv.depth,
 		Rate:        fv.rate,
 		MaxQueries:  fv.maxQueries,
+		Exclude:     strings.Join(fv.exclude, ","),
 		Output:      fv.outputFile,
 		Format:      fv.formatName,
 		Simulate:    fv.simulate,

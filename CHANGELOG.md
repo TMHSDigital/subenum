@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Scope control: `-exclude 'vpn.example.com,*.corp.example.com'` and `-exclude-file` keep out-of-scope names out of a scan. Excluded names are never queried, wildcard-probed or expanded recursively (a found parent whose whole subtree is excluded costs no queries), they are counted as `excluded` in the breakdown and the run-quality report, and a target that is itself out of scope is refused. The TUI has a matching Exclude field (#87).
 - Run-quality report: `-stats <file>` writes a schema-versioned JSON summary of a run (outcomes per target, DNS queries actually sent, achieved query rate, wildcard fingerprint, candidates skipped by `-max-queries`) with a `complete` / `degraded` / `unreliable` verdict and its reason. `-format jsonl` ends with the same object as its last line. The README documents the schema and how to gate CI on the verdict (#70).
 
 ### Changed

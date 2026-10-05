@@ -27,6 +27,7 @@ type Options struct {
 	Depth       int
 	Rate        int
 	MaxQueries  int
+	Exclude     []string
 	NoAbort     bool
 	Verbose     bool
 	Logf        dns.Logf
@@ -57,7 +58,7 @@ func (o Options) Validate() error {
 			return fmt.Errorf("DNS server %s: %w", o.DNSServer, err)
 		}
 	}
-	return nil
+	return ValidateExcludes(o.Exclude)
 }
 
 // Config builds the scan.Config for these options.
@@ -81,5 +82,6 @@ func (o Options) Config() Config {
 		Depth:       o.Depth,
 		NoAbort:     o.NoAbort,
 		MaxQueries:  o.MaxQueries,
+		Exclude:     o.Exclude,
 	}
 }

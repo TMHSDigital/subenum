@@ -60,6 +60,7 @@ type Outcomes struct {
 	Refused          int64 `json:"refused"`
 	Other            int64 `json:"other"`
 	WildcardFiltered int64 `json:"wildcard_filtered"`
+	Excluded         int64 `json:"excluded"` // out of scope (-exclude); never queried
 }
 
 // Summary writes s as the final line of jsonl output (stdout and the -o

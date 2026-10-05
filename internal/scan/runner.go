@@ -42,11 +42,14 @@ type Config struct {
 	Depth       int           // max recursion depth (1 = no recursion)
 	NoAbort     bool          // keep scanning after the reliability guard fires
 	MaxQueries  int           // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
+	Exclude     []string      // out-of-scope names and *.parent patterns; never queried (#87)
 	Resolver    *net.Resolver // reused across lookups; nil means scan.Run constructs one
 
 	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
 	// Tests inject classified outcomes through this field without network I/O.
 	resolveHook func(ctx context.Context, domain string) ([]dns.Record, dns.Outcome)
+
+	scope *scope // built from Exclude by Run
 }
 
 // logf returns the verbose logger for lookups, or nil when Verbose is off.
@@ -72,6 +75,7 @@ type Stats struct {
 	// Run facts for the quality report (#70); not part of Sum.
 	QueriesSent int64        // DNS queries dialed, retries included (0 when simulated)
 	Skipped     int64        // candidates not tested because -max-queries was reached
+	Excluded    int64        // candidates not tested because -exclude put them out of scope
 	Aborted     bool         // the reliability guard cancelled the scan
 	Wildcard    bool         // the root domain is a wildcard (scanned under -force)
 	Fingerprint []dns.Record // final wildcard fingerprint, empty when none
@@ -95,6 +99,7 @@ type counters struct {
 	other            atomic.Int64
 	wildcardFiltered atomic.Int64
 	skipped          atomic.Int64
+	excluded         atomic.Int64
 	aborted          atomic.Bool
 }
 
@@ -124,6 +129,7 @@ func (c *counters) snapshot() Stats {
 		Other:            c.other.Load(),
 		WildcardFiltered: c.wildcardFiltered.Load(),
 		Skipped:          c.skipped.Load(),
+		Excluded:         c.excluded.Load(),
 		Aborted:          c.aborted.Load(),
 	}
 }
@@ -380,6 +386,15 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	ctx = dns.WithQueryCounter(ctx, &queriesSent)
 	wildcardRoot := false
 
+	// Out-of-scope names are never queried (#87). A target that is itself
+	// out of scope, or whose every candidate would be, is refused outright.
+	sc := newScope(cfg.Exclude)
+	cfg.scope = sc
+	if sc.excluded(cfg.Domain) || sc.subtreeExcluded(cfg.Domain) {
+		events <- Event{Kind: EventError, Message: "refusing to scan " + cfg.Domain + ": it is out of scope (-exclude)"}
+		return
+	}
+
 	if cfg.Recursive {
 		ceiling := RecursionCeiling(len(cfg.Entries), maxDepth)
 		if ceiling > recursionRefuseCeiling && cfg.MaxQueries == 0 && !cfg.Force {
@@ -500,6 +515,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		remaining := n // candidates not yet generated
 		admitted := 0
 		skipped := 0
+		excluded := 0
 		capped := false
 		pending := 0 // dispatched jobs not yet completed
 
@@ -546,6 +562,10 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 					continue
 				}
 				visited[key] = struct{}{}
+				if sc.excluded(name) {
+					excluded++
+					continue
+				}
 				admitted++
 				return job{domain: name, depth: e.depth}, true
 			}
@@ -553,6 +573,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		}
 		closeJobs := func() {
 			stats.skipped.Store(int64(skipped))
+			stats.excluded.Store(int64(excluded))
 			if skipped > 0 {
 				select {
 				case events <- Event{Kind: EventNotice, Notice: NoticeCap, Message: fmt.Sprintf(
@@ -585,6 +606,11 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			case parent := <-enqueue:
 				if capped {
 					skipped += n
+					continue
+				}
+				// Every child would be out of scope: count them, build none.
+				if sc.subtreeExcluded(parent.domain) {
+					excluded += n
 					continue
 				}
 				frontier = append(frontier, expansion{parent: parent.domain, depth: parent.depth + 1})
@@ -694,7 +720,9 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 	events <- Event{Kind: EventResult, Domain: j.domain, Records: records}
 
 	if cfg.Recursive && j.depth < maxDepth {
-		if !cfg.Simulate && cfg.resolveHook == nil {
+		// The wildcard probe would query inside the branch, so an out-of-scope
+		// subtree is not probed; the dispatcher counts its children as excluded.
+		if !cfg.Simulate && cfg.resolveHook == nil && !cfg.scope.subtreeExcluded(j.domain) {
 			isWild, err := wc.isWildcard(ctx, cfg, j.domain)
 			if ctx.Err() != nil {
 				return
