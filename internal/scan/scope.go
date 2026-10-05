@@ -76,3 +76,9 @@ func parentOf(name string) string {
 	}
 	return ""
 }
+
+// IsExcluded reports whether name is out of scope under the -exclude
+// patterns, using the same rules as a scan.
+func IsExcluded(patterns []string, name string) bool {
+	return newScope(patterns).excluded(name)
+}

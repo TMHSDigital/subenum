@@ -35,6 +35,16 @@ type Summary struct {
 	// Resolvers is the -r pool's per-resolver accounting; Resolver is then
 	// the trusted resolver every pool hit was re-validated against.
 	Resolvers []dns.ResolverStats `json:"resolvers,omitempty"`
+	// Diff counts the -diff changes against the previous results file.
+	Diff *DiffSummary `json:"diff,omitempty"`
+}
+
+// DiffSummary is the -diff part of a Summary (#84). Removed stays 0 when the
+// run was not complete, because missing names may only be failed lookups.
+type DiffSummary struct {
+	Previous string `json:"previous"`
+	Added    int    `json:"added"`
+	Removed  int    `json:"removed"`
 }
 
 // TargetSummary is one scanned domain's part of a Summary.

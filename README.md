@@ -255,6 +255,7 @@ make help           # list all targets
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
+| `-diff <file>` | n/a | Compare with a previous results file (any format): print only names added (`+`) or removed (`-`), exit `4` when anything changed. See [Monitoring](docs/monitoring.md) |
 | `-r <file>` | n/a | Resolver pool: one `ip` or `ip:port` per line. Lookups rotate over the healthy resolvers (a resolver failing over half its recent lookups is benched for 30s), retries go to a different resolver, and every hit is re-validated against `-dns-server`, whose answer is the one reported. Preflight and wildcard checks use `-dns-server` |
 | `-exclude <list>` | n/a | Comma-separated out-of-scope names: exact (`vpn.example.com`) or `*.parent` (every name below `parent`, not `parent` itself). Excluded names are never queried, probed or expanded, and are counted as `excluded` |
 | `-exclude-file <file>` | n/a | Same patterns, one per line (`#` comments allowed), e.g. a bug-bounty program's out-of-scope list |
@@ -331,10 +332,19 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 | `1` | A scan, the wordlist, the domain list or the output file failed |
 | `2` | Invalid flags or arguments |
 | `3` | `-dL`: some targets failed while others completed |
+| `4` | `-diff`: names were added or removed since the previous run |
 | `130` | Interrupted (SIGINT, `Ctrl+C`); partial results are kept |
 | `143` | Terminated (SIGTERM); partial results are kept |
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
+
+### Monitoring for new subdomains
+
+`-diff previous.jsonl` reports only what changed since an earlier run: `+ name` for new subdomains and `- name` for ones that disappeared (only when the run's verdict is `complete`, so failed lookups are never mistaken for removals). The `-o` file keeps the full current results for the next comparison, and the exit code is `4` when anything changed. [docs/monitoring.md](docs/monitoring.md) has a ready-to-use scheduled GitHub Actions workflow that opens an issue when new names appear.
+
+```bash
+subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl example.com
+```
 
 ### Subdomain takeover hints
 

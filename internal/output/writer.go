@@ -57,6 +57,8 @@ type Result struct {
 	// Takeover is a DNS-only subdomain-takeover hint ("dangling",
 	// "provider:<name>" or "dangling:<name>"); verify it by hand (#71).
 	Takeover string `json:"takeover_candidate,omitempty"`
+	// Change is "added" or "removed" in -diff mode (#84).
+	Change string `json:"change,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
@@ -81,6 +83,7 @@ type Writer struct {
 
 	seed           uint64 // simulation seed, named in the text file header
 	takeoverColumn bool   // CSV carries a takeover_candidate column
+	diff           bool   // -diff output: +/- prefixes and a CSV change column
 	headerDone     bool   // text file header written
 
 	buffered  []Result // FormatJSON: accumulated until Finish
@@ -114,6 +117,17 @@ func (w *Writer) SetPlain(plain bool) { w.plain = plain }
 // result glued onto a progress line (#78).
 func (w *Writer) SetProgressLines(lines bool) { w.lineMode = lines }
 
+// SetDiff switches to -diff output (#84): text lines get a "+ " or "- "
+// prefix and CSV gains a change column. JSON and JSONL carry Change as is.
+func (w *Writer) SetDiff(on bool) { w.diff = on }
+
+func diffPrefix(change string) string {
+	if change == "removed" {
+		return "- "
+	}
+	return "+ "
+}
+
 // SetTakeoverColumn adds a takeover_candidate column to CSV output. The CLI
 // sets it when CNAME records are requested, the only case that yields hints.
 func (w *Writer) SetTakeoverColumn(on bool) { w.takeoverColumn = on }
@@ -133,9 +147,15 @@ func (w *Writer) Result(domain string, records []dns.Record) {
 
 // ResultWithHint is Result with a subdomain-takeover hint attached.
 func (w *Writer) ResultWithHint(domain string, records []dns.Record, takeover string) {
+	w.Emit(Result{Subdomain: domain, Records: records, Takeover: takeover})
+}
+
+// Emit writes one result in the configured format. Simulated is set from the
+// writer; Change marks a -diff result.
+func (w *Writer) Emit(res Result) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	res := Result{Subdomain: domain, Records: records, Simulated: w.simulate, Takeover: takeover}
+	res.Simulated = w.simulate
 
 	// stdout and the stderr progress line may share a screen or a merged
 	// stream; blank the progress line so the result starts on a clean line.
@@ -157,6 +177,9 @@ func (w *Writer) ResultWithHint(domain string, records []dns.Record, takeover st
 
 func (w *Writer) writeText(res Result) {
 	line := res.Subdomain
+	if w.diff {
+		line = diffPrefix(res.Change) + line
+	}
 	if w.records {
 		line += formatRecords(res.Records)
 		if res.Takeover != "" {
@@ -228,6 +251,9 @@ func (w *Writer) ensureCSV() {
 	if w.takeoverColumn {
 		header = append(header, "takeover_candidate")
 	}
+	if w.diff {
+		header = append(header, "change")
+	}
 	if w.stdout {
 		w.csvStdout = csv.NewWriter(os.Stdout)
 		_ = w.csvStdout.Write(header)
@@ -251,6 +277,9 @@ func (w *Writer) writeCSVRows(res Result) {
 		}
 		if w.takeoverColumn {
 			row = append(row, res.Takeover)
+		}
+		if w.diff {
+			row = append(row, res.Change)
 		}
 		if w.csvStdout != nil {
 			_ = w.csvStdout.Write(row)

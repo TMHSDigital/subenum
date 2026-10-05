@@ -218,3 +218,28 @@ func TestCLIBuildsSharedConfig(t *testing.T) {
 		t.Fatalf("CLI config:\n got %+v\nwant %+v", got, want)
 	}
 }
+
+// TestLoadPrevious covers #84: -diff accepts a previous run in any format.
+func TestLoadPrevious(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"text":    "# SIMULATED\nwww.example.com\nMail.Example.com.\n",
+		"records": "Found: www.example.com A=192.0.2.1\nmail.example.com A=192.0.2.2 TAKEOVER?=dangling\n",
+		"jsonl":   `{"subdomain":"www.example.com","records":[]}` + "\n" + `{"subdomain":"mail.example.com","records":[]}` + "\n" + `{"type":"summary","schema":1}` + "\n",
+		"json":    `[{"subdomain":"www.example.com","records":[]},{"subdomain":"mail.example.com","records":[]}]`,
+		"csv":     "subdomain,type,value\nwww.example.com,A,192.0.2.1\nwww.example.com,AAAA,2001:db8::1\nmail.example.com,A,192.0.2.2\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := loadPrevious(path)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		want := map[string]struct{}{"www.example.com": {}, "mail.example.com": {}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: names = %v, want www and mail", name, got)
+		}
+	}
+}

@@ -484,3 +484,67 @@ func TestE2EResolverPool(t *testing.T) {
 		t.Errorf("invalid resolver list: exit %d, want 2", code)
 	}
 }
+
+// TestE2EDiff covers #84: -diff reports only added and removed names, exits
+// 4 on changes, keeps the full results in -o, and suppresses "removed" when
+// the run was not complete.
+func TestE2EDiff(t *testing.T) {
+	dir := t.TempDir()
+	prev := filepath.Join(dir, "prev.jsonl")
+	sim := []string{"-simulate", "-seed", "1", "-hit-rate", "100", "-progress=false"}
+	run := func(words string, extra ...string) (int, string) {
+		wl := writeFile(t, "wl.txt", words)
+		return runCLI(t, "", append(append(append([]string{}, sim...), extra...), "-w", wl, "example.com")...)
+	}
+	if code, _ := run("www\nmail\napi\n", "-format", "jsonl", "-o", prev); code != 0 {
+		t.Fatalf("baseline exit %d", code)
+	}
+
+	cur := filepath.Join(dir, "cur.jsonl")
+	code, out := run("www\nmail\ndev\n", "-format", "jsonl", "-diff", prev, "-o", cur)
+	if code != 4 {
+		t.Fatalf("exit %d, want 4 (changes)", code)
+	}
+	changes := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var r struct {
+			Type      string `json:"type"`
+			Subdomain string `json:"subdomain"`
+			Change    string `json:"change"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("bad jsonl line %q: %v", line, err)
+		}
+		if r.Type != "summary" {
+			changes[r.Subdomain] = r.Change
+		}
+	}
+	if len(changes) != 2 || changes["dev.example.com"] != "added" || changes["api.example.com"] != "removed" {
+		t.Fatalf("changes = %v, want dev added and api removed only", changes)
+	}
+	full, err := os.ReadFile(cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"www.example.com", "mail.example.com", "dev.example.com"} {
+		if !strings.Contains(string(full), `"subdomain":"`+name+`"`) {
+			t.Errorf("-o is missing %s; it should hold the full results:\n%s", name, full)
+		}
+	}
+	if strings.Contains(string(full), `"change"`) {
+		t.Errorf("-o should hold plain results, not changes:\n%s", full)
+	}
+
+	// Text format, no changes against the file just written: exit 0, no output.
+	if code, out := run("www\nmail\ndev\n", "-diff", cur); code != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("unchanged run: exit %d, output %q", code, out)
+	}
+	// Text prefixes.
+	if _, out := run("www\nmail\ndev\nvpn\n", "-diff", cur); !strings.Contains(out, "+ vpn.example.com") {
+		t.Fatalf("text diff = %q, want '+ vpn.example.com'", out)
+	}
+	// A capped (degraded) run must not claim names were removed.
+	if _, out := run("www\nmail\ndev\n", "-diff", cur, "-max-queries", "1"); strings.Contains(out, "- ") {
+		t.Fatalf("degraded run reported removals: %q", out)
+	}
+}

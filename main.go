@@ -61,6 +61,7 @@ const (
 	exitFailure = 1 // a scan, the wordlist, the domain list or the output file failed
 	exitUsage   = 2 // invalid flags or arguments
 	exitPartial = 3 // -dL: some targets failed while others completed
+	exitChanges = 4 // -diff: names were added or removed since the previous run
 )
 
 const exitCodesHelp = `Exit codes:
@@ -68,6 +69,7 @@ const exitCodesHelp = `Exit codes:
   1    a scan, the wordlist, the domain list or the output file failed
   2    invalid flags or arguments
   3    -dL: some targets failed while others completed
+  4    -diff: names were added or removed since the previous run
   130  interrupted (SIGINT, Ctrl+C); partial results are kept
   143  terminated (SIGTERM); partial results are kept
 `
@@ -137,6 +139,7 @@ type cliFlags struct {
 	exclude      string
 	excludeFile  string
 	resolvers    string    // -r: file of resolver addresses for a pool
+	diff         string    // -diff: previous results file to compare against
 	pool         *dns.Pool // built from -r; nil means the single -dns-server
 	excludes     []string  // -exclude and -exclude-file patterns, merged
 }
@@ -173,6 +176,7 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.StringVar(&f.statsFile, "stats", "", "Write a JSON run-quality report (outcomes, queries sent, verdict) to this file")
 	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
+	fs.StringVar(&f.diff, "diff", "", "Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes")
 	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")
 	fs.Usage = func() {
 		w := fs.Output()
@@ -562,7 +566,17 @@ func run() (code int) {
 		return 1
 	}
 
-	out, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
+	var diff *differ
+	if f.diff != "" {
+		previous, err := loadPrevious(f.diff)
+		if err != nil {
+			out.Error("reading -diff file: %v", err)
+			return exitFailure
+		}
+		diff = &differ{previous: previous, current: map[string]struct{}{}}
+	}
+
+	combined, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
 	if !ok {
 		return 1
 	}
@@ -570,11 +584,37 @@ func run() (code int) {
 	if outFile != nil {
 		outWriter = outFile.Writer
 	}
-	// Bare names when piped (no "Found:" banner), human-friendly on a terminal.
-	out.SetPlain(!stdoutIsTerminal())
-	out.SetShowRecords(f.showRecords)
-	out.SetSeed(f.seed)
-	out.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
+	// In -diff mode stdout carries only the changes while the -o file keeps
+	// the full current results, ready to be the next run's -diff input (#84).
+	var fileOut *output.Writer
+	if diff != nil && outFile != nil {
+		fileOut = output.NewFile(outFile.Writer, f.testMode, format)
+	} else {
+		out = combined
+	}
+	out.SetDiff(diff != nil)
+	for _, w := range []*output.Writer{out, fileOut} {
+		if w == nil {
+			continue
+		}
+		// Bare names when piped (no "Found:" banner), human-friendly on a terminal.
+		w.SetPlain(!stdoutIsTerminal())
+		w.SetShowRecords(f.showRecords)
+		w.SetSeed(f.seed)
+		w.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
+	}
+	emit := func(ev scan.Event) {
+		if diff == nil {
+			out.ResultWithHint(ev.Domain, ev.Records, ev.Takeover)
+			return
+		}
+		if fileOut != nil {
+			fileOut.ResultWithHint(ev.Domain, ev.Records, ev.Takeover)
+		}
+		if diff.observe(ev.Domain) {
+			out.Emit(output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Change: "added"})
+		}
+	}
 	// A carriage-return progress line only makes sense on a terminal. When
 	// stderr is a pipe or file (2>&1, tee, CI logs) progress is off unless
 	// -progress was given explicitly, and then printed as whole lines (#78).
@@ -667,7 +707,7 @@ func run() (code int) {
 			failedTargets++
 			continue
 		}
-		res := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter)
+		res := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter, emit)
 		results[i] = res
 		anyDone = anyDone || res.done
 		anyFailed = anyFailed || res.failed
@@ -708,6 +748,13 @@ func run() (code int) {
 
 	// The run-quality report (#70): the last jsonl line, and the -stats file.
 	summary := buildSummary(f, targets, status, results, started, time.Since(started))
+	if diff != nil {
+		emitRemoved(diff, targets, f, summary, out)
+		summary.Diff = &output.DiffSummary{Previous: f.diff, Added: diff.added, Removed: diff.removed}
+		if fileOut != nil {
+			fileOut.Summary(summary)
+		}
+	}
 	out.Summary(summary)
 	if f.statsFile != "" {
 		if err := output.WriteSummaryFile(f.statsFile, summary); err != nil {
@@ -716,6 +763,12 @@ func run() (code int) {
 		}
 	}
 	if anyDone {
+		if fileOut != nil {
+			if err := fileOut.Finish(); err != nil {
+				out.Error("writing output file: %v", err)
+				fileErrReported = true
+			}
+		}
 		if err := out.Finish(); err != nil {
 			out.Error("writing output file: %v", err)
 			fileErrReported = true
@@ -737,6 +790,9 @@ func run() (code int) {
 	}
 	if anyFailed {
 		return exitFailure
+	}
+	if diff != nil && diff.added+diff.removed > 0 {
+		return exitChanges
 	}
 	return exitOK
 }
@@ -778,7 +834,7 @@ type targetResult struct {
 }
 
 // scanTarget runs one domain's scan and streams its events to out.
-func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (res targetResult) {
+func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer, emit func(scan.Event)) (res targetResult) {
 	// Logf is serialized with the progress line (#36).
 	cfg := scanOptions(f, domain, entries, maxAttempts, recordTypes, out.Info).Config()
 
@@ -796,7 +852,7 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 	for ev := range events {
 		switch ev.Kind {
 		case scan.EventResult:
-			out.ResultWithHint(ev.Domain, ev.Records, ev.Takeover)
+			emit(ev)
 		case scan.EventProgress:
 			if f.showProgress && ev.Total > 0 {
 				progressStarted = true

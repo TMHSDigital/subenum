@@ -25,8 +25,8 @@ Work in progress or next up.
 
 Planned features that make results more trustworthy and the tool easier to get.
 
-- **Monitoring mode** ([#84](https://github.com/TMHSDigital/subenum/issues/84)):
-  diff against a previous run, plus a GitHub Action for scheduled checks.
+- **A packaged GitHub Action** for scheduled monitoring, building on `-diff`
+  and the example workflow in [Monitoring](monitoring.html).
 - **Release pipeline** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):
   GoReleaser archives, checksums, SBOM and signatures.
 - **Package managers** ([#62](https://github.com/TMHSDigital/subenum/issues/62)):
@@ -57,7 +57,7 @@ surprises:
   first (as `-retries` was for `-attempts`).
 - **Stable output schemas.** The JSON, JSONL and CSV fields are documented and
   only ever gain fields, never lose or rename them.
-- **Documented exit codes**, already in place (0, 1, 2, 3, 130, 143).
+- **Documented exit codes**, already in place (0, 1, 2, 3, 4, 130, 143).
 - **A run-quality report**, already in place (`-stats`, schema 1), so a result
   set says how far it can be trusted.
 - **Verifiable releases** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):
