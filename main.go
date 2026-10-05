@@ -150,7 +150,7 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	var f cliFlags
 	fs := flag.NewFlagSet(ProgramName, flag.ContinueOnError)
 	fs.BoolVar(&f.tui, "tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
-	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file (- for stdin)")
+	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file (- for stdin); omitted: the bundled top-5000 list")
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
 	fs.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
@@ -180,8 +180,8 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")
 	fs.Usage = func() {
 		w := fs.Output()
-		_, _ = fmt.Fprintln(w, "Usage: subenum -w <wordlist_file> [options] <domain>")
-		_, _ = fmt.Fprintln(w, "       subenum -w <wordlist_file> [options] -dL <domains_file>")
+		_, _ = fmt.Fprintln(w, "Usage: subenum [-w <wordlist_file>] [options] <domain>")
+		_, _ = fmt.Fprintln(w, "       subenum [-w <wordlist_file>] [options] -dL <domains_file>")
 		fs.PrintDefaults()
 		_, _ = fmt.Fprint(w, "\n"+exitCodesHelp)
 	}
@@ -238,14 +238,9 @@ func endsWithTerminator(fs *flag.FlagSet, consumed []string) bool {
 }
 
 func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
-	if f.wordlistFile == "" || (len(positionals) == 0 && f.domainList == "") {
+	if len(positionals) == 0 && f.domainList == "" {
 		// Say what is missing before the full flag list (#58).
-		if f.wordlistFile == "" {
-			out.Error("-w <wordlist> is required")
-		}
-		if len(positionals) == 0 && f.domainList == "" {
-			out.Error("missing <domain> (or -dL <domains_file>)")
-		}
+		out.Error("missing <domain> (or -dL <domains_file>)")
 		fs.SetOutput(os.Stderr)
 		fs.Usage()
 		return "", false
@@ -423,7 +418,11 @@ func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Wri
 		out.Info("Mode: LIVE DNS RESOLUTION")
 	}
 	out.Info("Target domain: %s", domain)
-	out.Info("Wordlist: %s", f.wordlistFile)
+	if f.wordlistFile == "" {
+		out.Info("Wordlist: %s", bundledWordlistName)
+	} else {
+		out.Info("Wordlist: %s", f.wordlistFile)
+	}
 	out.Info("Concurrency: %d workers", f.concurrency)
 	out.Info("Timeout: %d ms", f.timeoutMs)
 	out.Info("Attempts: %d", maxAttempts)
@@ -556,7 +555,10 @@ func run() (code int) {
 	// not truncate an existing -o target. It is read once (stdin can only be
 	// read once) and normalized per target, since the name-length limit
 	// depends on the domain.
-	wordLines, err := wordlist.ReadLines(f.wordlistFile)
+	if f.wordlistFile == "" {
+		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", bundledWordlistName)
+	}
+	wordLines, err := readWordlist(f)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
 		return 1

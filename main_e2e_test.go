@@ -293,16 +293,18 @@ func TestE2EDomainFormsGiveIdenticalOutput(t *testing.T) {
 // TestE2ECLIPolish covers #58: missing arguments are named before the usage
 // text, and -version prints before any simulation banner.
 func TestE2ECLIPolish(t *testing.T) {
-	_, out := runCLIMerged(t, "example.com")
-	if !strings.Contains(out, "Error: -w <wordlist> is required") {
-		t.Errorf("missing -w not named:\n%s", out)
+	// Without -w the bundled list is used, and the user is told so (#63).
+	// Simulated, so no DNS traffic leaves the test.
+	code, out := runCLIMerged(t, "-simulate", "-hit-rate", "1", "-seed", "1", "example.com")
+	if code != 0 || !strings.Contains(out, "No -w given: using the bundled top-5000 list") {
+		t.Errorf("no -w: exit %d, output lacks the bundled-list notice:\n%.400s", code, out)
 	}
 	wl := writeFile(t, "wl.txt", e2eWords)
 	_, out = runCLIMerged(t, "-w", wl)
 	if !strings.Contains(out, "Error: missing <domain>") {
 		t.Errorf("missing domain not named:\n%s", out)
 	}
-	code, out := runCLIMerged(t, "-simulate", "-version")
+	code, out = runCLIMerged(t, "-simulate", "-version")
 	if code != 0 || !strings.HasPrefix(out, ProgramName) || strings.Contains(out, "SIMULATION MODE ACTIVE") {
 		t.Errorf("-simulate -version: exit %d, output:\n%s", code, out)
 	}

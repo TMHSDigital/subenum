@@ -42,7 +42,10 @@
 
 ```bash
 go install github.com/TMHSDigital/subenum@latest
+subenum yourdomain.com     # a domain you own or are authorized to test
 ```
+
+With no `-w`, subenum uses its built-in list of the 5,000 most common subdomain labels (from SecLists, MIT-licensed), so a first scan finds real results without hunting for a wordlist. See [Choosing a wordlist](#choosing-a-wordlist) for larger lists.
 
 Or build from a clone, which also gives you the sample wordlists used below:
 
@@ -234,7 +237,7 @@ make help           # list all targets
 
 | Flag | Default | Description |
 | :--- | :---: | :--- |
-| `-w <file>` | n/a | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin **(required)** |
+| `-w <file>` | bundled top-5000 | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin. Omit it to use the built-in list (see [Choosing a wordlist](#choosing-a-wordlist)) |
 | `-dL <file>` | n/a | File of apex domains to scan, one per line (`-` reads stdin), instead of a `<domain>` argument. Each domain is an independent scan; results share one output |
 | `-t <n>` | `100` | Concurrent worker goroutines |
 | `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
@@ -337,6 +340,19 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 | `143` | Terminated (SIGTERM); partial results are kept |
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
+
+### Choosing a wordlist
+
+Results can only be as good as the wordlist. Without `-w`, subenum uses its bundled top-5000 list (`data/subdomains-5k.txt`, from SecLists' `subdomains-top1million-5000.txt`), a good first pass that takes seconds. For deeper coverage:
+
+| List | Size | Notes |
+|------|------|-------|
+| [SecLists `Discovery/DNS`](https://github.com/danielmiessler/SecLists/tree/master/Discovery/DNS) | 5k to 1M+ | `subdomains-top1million-20000.txt` and `-110000.txt` are the usual next steps |
+| [Assetnote wordlists](https://wordlists.assetnote.io/) (`best-dns-wordlist.txt`) | ~9M | Built from real DNS data; for long, thorough scans |
+| [n0kovo subdomains](https://github.com/n0kovo/n0kovo_subdomains) | 50k to 3M | Tiered lists from scraped certificates |
+| [trickest wordlists](https://github.com/trickest/wordlists) | varies | Also maintains a public resolver list for `-r` |
+
+List size sets the query volume: each entry costs one query per record type (two with the default `A,AAAA`), per attempt, per recursion level. A 1M-entry list at `-rate 500` is about 70 minutes of wire time per target, so pair big lists with `-rate` (and `-r` for a resolver pool), and use `-max-queries` as a budget. `tools/wordlist-gen` builds a small target-specific list from a domain's own terms.
 
 ### Monitoring for new subdomains
 

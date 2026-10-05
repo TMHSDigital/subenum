@@ -22,6 +22,8 @@ RUN go mod download
 # main_summary.go, ...); _test.go files are ignored by go build.
 COPY *.go ./
 COPY internal/ ./internal/
+# The default wordlist is embedded in the binary (#63).
+COPY data/subdomains-5k.txt ./data/
 
 # Build the binary with optimizations
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o subenum -ldflags="-w -s -X main.Version=${VERSION}" .

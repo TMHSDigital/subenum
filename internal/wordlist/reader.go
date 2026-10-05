@@ -70,6 +70,12 @@ func ReadLines(path string) ([]string, error) {
 		defer func() { _ = f.Close() }()
 		r = f
 	}
+	return ReadLinesFrom(r)
+}
+
+// ReadLinesFrom is ReadLines for an already open reader, such as the
+// wordlist embedded in the binary.
+func ReadLinesFrom(r io.Reader) ([]string, error) {
 	var lines []string
 	br := bufio.NewReaderSize(r, 64<<10)
 	for {
