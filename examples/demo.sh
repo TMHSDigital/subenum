@@ -6,23 +6,39 @@
 # IMPORTANT: This script is for EDUCATIONAL PURPOSES ONLY
 # Only use against domains you own or have explicit permission to test
 
+set -euo pipefail
+
 # Ensure we're in the project root directory
 cd "$(dirname "$0")/.."
 
-# Parse arguments
-SIMULATION_MODE=false
-while getopts ":s" opt; do
+# Parse arguments. Simulation is the default; a live run needs an explicit
+# domain, so the demo never sends DNS traffic at a target you did not name.
+SIMULATION_MODE=true
+TARGET_DOMAIN="example.com"
+usage() {
+  echo "Usage: $0 [-l <domain>]"
+  echo "  (default)    : simulation mode against example.com, no DNS queries"
+  echo "  -l <domain>  : LIVE mode against <domain>; only use a domain you own"
+  echo "                 or have explicit permission to test"
+  exit 1
+}
+while getopts ":l:s" opt; do
   case ${opt} in
-    s )
-      SIMULATION_MODE=true
+    l )
+      SIMULATION_MODE=false
+      TARGET_DOMAIN="$OPTARG"
       ;;
-    \? )
-      echo "Usage: $0 [-s]"
-      echo "  -s : Run in simulation mode (no actual DNS queries)"
-      exit 1
+    s )
+      SIMULATION_MODE=true # kept for compatibility; simulation is the default
+      ;;
+    * )
+      usage
       ;;
   esac
 done
+
+# pause waits for Enter; EOF (non-interactive stdin) just continues.
+pause() { read -r || true; }
 
 echo "============================================================="
 echo "  SUBENUM DEMONSTRATION WORKFLOW - EDUCATIONAL USE ONLY"
@@ -35,12 +51,12 @@ if [ "$SIMULATION_MODE" = true ]; then
     echo ""
     SIMULATE_FLAG="-simulate"
 else
-    echo "⚠️  IMPORTANT: Running in LIVE mode - Actual DNS queries will be performed"
-    echo "⚠️  Only proceed if you have explicit permission to scan the target domain"
-    echo "⚠️  To run in safe simulation mode instead, use: $0 -s"
+    echo "⚠️  IMPORTANT: Running in LIVE mode against $TARGET_DOMAIN - Actual DNS queries will be performed"
+    echo "⚠️  Only proceed if you have explicit permission to scan this domain"
+    echo "⚠️  To run in safe simulation mode instead, run: $0"
     echo ""
     echo "Press Ctrl+C now to cancel, or Enter to continue..."
-    read -r
+    pause
     SIMULATE_FLAG=""
 fi
 
@@ -50,9 +66,6 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
-
-# Set target domain (EXAMPLE ONLY - replace with authorized domain)
-TARGET_DOMAIN="example.com"
 
 # Setup phase
 echo -e "${YELLOW}[1/7] Building subenum tool...${NC}"
@@ -68,7 +81,7 @@ echo ""
 
 # Generate a custom wordlist
 echo -e "${YELLOW}[3/7] Generating domain-specific wordlist...${NC}"
-tools/wordlist-gen -domain $TARGET_DOMAIN -combine "dev,api,staging,test,v1,v2" -o demo-wordlist.txt
+tools/wordlist-gen -domain "$TARGET_DOMAIN" -combine "dev,api,staging,test,v1,v2" -o demo-wordlist.txt
 echo -e "${GREEN}✓ Custom wordlist generated${NC}"
 echo ""
 
@@ -76,7 +89,7 @@ echo ""
 echo -e "${YELLOW}[4/7] Running basic scan...${NC}"
 echo -e "${BLUE}Command: ./subenum $SIMULATE_FLAG -w examples/sample_wordlist.txt $TARGET_DOMAIN${NC}"
 echo "Press Enter to continue..."
-read -r
+pause
 ./subenum $SIMULATE_FLAG -w examples/sample_wordlist.txt $TARGET_DOMAIN
 echo -e "${GREEN}✓ Basic scan complete${NC}"
 echo ""
@@ -86,12 +99,12 @@ echo -e "${YELLOW}[5/7] Running advanced scan with custom options...${NC}"
 if [ "$SIMULATION_MODE" = true ]; then
     echo -e "${BLUE}Command: ./subenum $SIMULATE_FLAG -hit-rate 30 -w demo-wordlist.txt -t 200 -timeout 1500 -v $TARGET_DOMAIN${NC}"
     echo "Press Enter to continue..."
-    read -r
+    pause
     ./subenum $SIMULATE_FLAG -hit-rate 30 -w demo-wordlist.txt -t 200 -timeout 1500 -v $TARGET_DOMAIN
 else
     echo -e "${BLUE}Command: ./subenum $SIMULATE_FLAG -w demo-wordlist.txt -t 200 -timeout 1500 -dns-server 1.1.1.1:53 -v $TARGET_DOMAIN${NC}"
     echo "Press Enter to continue..."
-    read -r
+    pause
     ./subenum $SIMULATE_FLAG -w demo-wordlist.txt -t 200 -timeout 1500 -dns-server 1.1.1.1:53 -v $TARGET_DOMAIN
 fi
 echo -e "${GREEN}✓ Advanced scan complete${NC}"
@@ -105,11 +118,11 @@ else
     echo -e "${BLUE}Command: docker build -t subenum . && docker run --rm subenum -version${NC}"
 fi
 echo "Press Enter to continue (skip with Ctrl+C)..."
-read -r
+pause
 if [ "$SIMULATION_MODE" = true ]; then
-    docker build -t subenum . && docker run --rm subenum -simulate -version
+    docker build -t subenum . && docker run --rm subenum -simulate -version || echo "Docker step failed or Docker is not available; skipping"
 else
-    docker build -t subenum . && docker run --rm subenum -version
+    docker build -t subenum . && docker run --rm subenum -version || echo "Docker step failed or Docker is not available; skipping"
 fi
 echo -e "${GREEN}✓ Docker demonstration complete${NC}"
 echo ""

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simulated results identify themselves wherever they are saved: JSON and JSONL objects carry `"simulated": true`, CSV gets a `simulated` column, `-o` text files start with a `# SIMULATED ... -seed N` comment line, and the CLI ends a simulated run with a stderr reminder. Piped bare names stay unmarked (#53).
 - The preflight lookup of the target domain is retried up to `-attempts`, so one dropped packet no longer aborts the scan (#57).
 - `-max-queries` now stops memory growth in recursive mode: once the cap is reached, remaining and future candidates are counted as skipped without being built or recorded (#51).
+- No default command sends DNS traffic at a domain you did not name. `docker compose up`, `make simulate*` and `examples/demo.sh` run in simulation mode; `make run`, `run-verbose`, `run-custom` and `docker-run` require `DOMAIN=` and stop with a message without it; `demo.sh -l <domain>` opts into a live run. `demo.sh` now uses `set -euo pipefail`, `docker-run` uses `$(CURDIR)` so it works under Windows make, and `.PHONY` lists every target (#81).
 - Release binaries are built with `CGO_ENABLED=0 -trimpath -s -w`, so `subenum-linux-amd64` is statically linked again and CI fails if a Linux asset is not (#46).
 
 ## [0.8.0] - 2026-10-04

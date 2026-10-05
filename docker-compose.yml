@@ -6,6 +6,7 @@ services:
       - ./data:/data
     tty: true
     stdin_open: true
-    command: ["-w", "/data/wordlist.txt", "-v", "example.com"]
-    # Replace the command above with your desired parameters
-    # For interactive use, run: docker-compose run --rm subenum [args] 
+    # Simulation by default: a bare `docker compose up` sends no DNS traffic.
+    # For a live scan, name a domain you own or are authorized to test:
+    #   docker compose run --rm subenum -w /data/wordlist.txt -v yourdomain.com
+    command: ["-simulate", "-w", "/data/wordlist.txt", "-v", "example.com"]

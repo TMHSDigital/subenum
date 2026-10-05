@@ -201,7 +201,8 @@ docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com
 Or with Compose:
 
 ```bash
-docker compose run subenum
+docker compose run --rm subenum            # simulated demo, no DNS traffic
+docker compose run --rm subenum -w /data/wordlist.txt yourdomain.com   # live
 ```
 
 </details>

@@ -1,4 +1,5 @@
-.PHONY: build test bench clean lint tidy run tui docker-build docker-run wordlist wordlist-gen simulate simulate-verbose
+.PHONY: all build test test-short bench clean lint tidy tui run run-verbose run-custom require-domain \
+	simulate simulate-verbose simulate-custom wordlist wordlist-gen docker-build docker-run docker-simulate help
 
 # Default Go parameters
 GOCMD=go
@@ -11,18 +12,21 @@ WORDLIST_GEN=wordlist-gen
 VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
 LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
 
-# Default run parameters - CHANGE THESE!
+# Default run parameters. Live targets (run, run-verbose, run-custom,
+# docker-run) have no default DOMAIN: they send real DNS queries, so you must
+# name a domain you own or are authorized to test, e.g. make run DOMAIN=...
 WORDLIST=examples/sample_wordlist.txt
-DOMAIN=example.com # Always use authorized domains
 CONCURRENCY=100
 TIMEOUT=1000
 DNS_SERVER=8.8.8.8:53
 
-# Simulation parameters
+# Simulation parameters. Simulated targets send no DNS traffic, so they fall
+# back to example.com when DOMAIN is not set.
 HIT_RATE=15
+SIM_DOMAIN=$(or $(DOMAIN),example.com)
 
 # Wordlist generator parameters
-WL_DOMAIN=$(DOMAIN)
+WL_DOMAIN ?= $(SIM_DOMAIN)
 WL_COMBINE=dev,staging,test,api
 WL_OUTPUT=custom-wordlist.txt
 
@@ -69,41 +73,48 @@ wordlist: wordlist-gen
 tui: build
 	./$(BINARY_NAME) -tui
 
-# Run with default parameters
-run: build
+# Live targets refuse to run without an explicit DOMAIN.
+require-domain:
+ifndef DOMAIN
+	$(error Live scans send real DNS queries. Set DOMAIN to a domain you own or are authorized to test, e.g. make run DOMAIN=yourdomain.com, or use make simulate)
+endif
+
+# Run with default parameters (LIVE)
+run: require-domain build
 	./$(BINARY_NAME) -w $(WORDLIST) -t $(CONCURRENCY) -timeout $(TIMEOUT) -dns-server $(DNS_SERVER) $(DOMAIN)
 
-# Run with verbose output
-run-verbose: build
+# Run with verbose output (LIVE)
+run-verbose: require-domain build
 	./$(BINARY_NAME) -w $(WORDLIST) -t $(CONCURRENCY) -timeout $(TIMEOUT) -dns-server $(DNS_SERVER) -v $(DOMAIN)
 
 # Run in simulation mode (safe, no actual DNS queries)
 simulate: build
-	./$(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w $(WORDLIST) -t $(CONCURRENCY) -timeout $(TIMEOUT) $(DOMAIN)
+	./$(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w $(WORDLIST) -t $(CONCURRENCY) -timeout $(TIMEOUT) $(SIM_DOMAIN)
 
 # Run in simulation mode with verbose output (safe, no actual DNS queries)
 simulate-verbose: build
-	./$(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w $(WORDLIST) -t $(CONCURRENCY) -timeout $(TIMEOUT) -v $(DOMAIN)
+	./$(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w $(WORDLIST) -t $(CONCURRENCY) -timeout $(TIMEOUT) -v $(SIM_DOMAIN)
 
 # Generate a wordlist and use it with simulation mode
 simulate-custom: wordlist build
 	./$(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w $(WL_OUTPUT) -t $(CONCURRENCY) -timeout $(TIMEOUT) -v $(WL_DOMAIN)
 
-# Generate a wordlist and immediately use it
-run-custom: wordlist build
-	./$(BINARY_NAME) -w $(WL_OUTPUT) -t $(CONCURRENCY) -timeout $(TIMEOUT) -dns-server $(DNS_SERVER) -v $(WL_DOMAIN)
+# Generate a wordlist and immediately use it (LIVE)
+run-custom: require-domain wordlist build
+	./$(BINARY_NAME) -w $(WL_OUTPUT) -t $(CONCURRENCY) -timeout $(TIMEOUT) -dns-server $(DNS_SERVER) -v $(DOMAIN)
 
 # Docker commands
 docker-build:
 	docker build --build-arg VERSION=$(VERSION) -t $(BINARY_NAME) .
 
-docker-run:
-	docker run --rm -v $(PWD)/data:/data $(BINARY_NAME) -w /data/wordlist.txt -v example.com
+# LIVE. $(CURDIR) rather than $(PWD), which is empty under Windows make.
+docker-run: require-domain
+	docker run --rm -v "$(CURDIR)/data:/data" $(BINARY_NAME) -w /data/wordlist.txt -v $(DOMAIN)
 
 # Run Docker in simulation mode (completely safe)
 docker-simulate:
 	docker build --build-arg VERSION=$(VERSION) -t $(BINARY_NAME) .
-	docker run --rm $(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w /home/nonroot/examples/sample_wordlist.txt -v example.com
+	docker run --rm $(BINARY_NAME) -simulate -hit-rate $(HIT_RATE) -w /home/nonroot/examples/sample_wordlist.txt -v $(SIM_DOMAIN)
 
 # Help command
 help:
@@ -117,9 +128,9 @@ help:
 	@echo "  make tui              - Launch the interactive terminal UI (no arguments needed)"
 	@echo ""
 	@echo "  LIVE MODE (performs real DNS queries):"
-	@echo "  make run              - Build and run with default parameters"
-	@echo "  make run-verbose      - Build and run with verbose output"
-	@echo "  make run-custom       - Generate a wordlist and scan with it"
+	@echo "  make run DOMAIN=x     - Build and scan DOMAIN (required, no default)"
+	@echo "  make run-verbose DOMAIN=x - Build and scan DOMAIN with verbose output"
+	@echo "  make run-custom DOMAIN=x  - Generate a wordlist and scan DOMAIN with it"
 	@echo ""
 	@echo "  SIMULATION MODE (safe, no real DNS queries):"
 	@echo "  make simulate         - Run in simulation mode (no actual DNS queries)"
@@ -132,14 +143,14 @@ help:
 	@echo ""
 	@echo "  DOCKER:"
 	@echo "  make docker-build     - Build Docker image"
-	@echo "  make docker-run       - Run Docker container (live mode)"
+	@echo "  make docker-run DOMAIN=x  - Run Docker container (live mode)"
 	@echo "  make docker-simulate  - Run Docker container in simulation mode"
 	@echo ""
 	@echo "IMPORTANT: Only use live mode against domains you own or have explicit permission to test."
 	@echo ""
 	@echo "Default parameters:"
 	@echo "  WORDLIST=$(WORDLIST)"
-	@echo "  DOMAIN=$(DOMAIN) (EDUCATIONAL EXAMPLE ONLY)"
+	@echo "  DOMAIN=$(DOMAIN) (required for live targets; simulate uses $(SIM_DOMAIN))"
 	@echo "  CONCURRENCY=$(CONCURRENCY)"
 	@echo "  TIMEOUT=$(TIMEOUT)"
 	@echo "  DNS_SERVER=$(DNS_SERVER)"

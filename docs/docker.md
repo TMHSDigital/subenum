@@ -58,11 +58,11 @@ docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com
 The project includes a `docker-compose.yml` file for easier management:
 
 ```bash
-# Start container with the default configuration
-docker-compose up
+# Start container with the default configuration (simulation, no DNS traffic)
+docker compose up
 
 # Run with custom parameters
-docker-compose run --rm subenum -w /data/custom-wordlist.txt -v -t 200 yourdomain.com
+docker compose run --rm subenum -w /data/custom-wordlist.txt -v -t 200 yourdomain.com
 ```
 
 ## Volume Mounting

@@ -59,8 +59,8 @@ make tidy
 # Clean up build artifacts
 make clean
 
-# Run the tool with default parameters
-make run
+# Run a safe simulated scan (live scans need: make run DOMAIN=yourdomain.com)
+make simulate
 ```
 
 ### Using Docker
