@@ -150,3 +150,21 @@ func TestNormalize(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadWordlistSkipsOverlongLine covers #56: a line far past the old 64 KB
+// scanner limit is skipped and counted instead of failing the whole run, and
+// the entries around it still load. Lines without a trailing newline and CRLF
+// endings keep working.
+func TestLoadWordlistSkipsOverlongLine(t *testing.T) {
+	content := "api\r\n" + strings.Repeat("a", 200_000) + "\nwww"
+	entries, _, skipped, err := LoadWordlist(writeTemp(t, content), "example.com")
+	if err != nil {
+		t.Fatalf("LoadWordlist: %v", err)
+	}
+	if strings.Join(entries, ",") != "api,www" {
+		t.Errorf("entries = %v, want [api www]", entries)
+	}
+	if skipped != 1 {
+		t.Errorf("skipped = %d, want 1", skipped)
+	}
+}

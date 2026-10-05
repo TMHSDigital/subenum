@@ -16,6 +16,10 @@ var labelRegex = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$`)
 // maxNameLen is the longest presentation-format domain name (RFC 1035).
 const maxNameLen = 253
 
+// maxLineLen caps how much of one line is kept. Anything longer than
+// maxNameLen can never become a query, so the rest is discarded unread.
+const maxLineLen = 1024
+
 // Stdin is the path that makes ReadLines read standard input.
 const Stdin = "-"
 
@@ -65,17 +69,35 @@ func ReadLines(path string) ([]string, error) {
 		r = f
 	}
 	var lines []string
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := scanner.Text()
+	br := bufio.NewReaderSize(r, 64<<10)
+	for {
+		chunk, isPrefix, err := br.ReadLine()
+		if err == io.EOF {
+			return lines, nil
+		}
+		if err != nil {
+			return lines, err
+		}
+		// A line longer than any valid name (a merged list gone wrong, a
+		// binary file) is truncated and drained rather than failing the whole
+		// run; Build then counts it as skipped (#56).
+		line := string(chunk[:min(len(chunk), maxLineLen)])
+		for isPrefix && err == nil {
+			_, isPrefix, err = br.ReadLine()
+		}
+		if err != nil && err != io.EOF {
+			return lines, err
+		}
 		if len(lines) == 0 {
 			// Windows editors often prepend a UTF-8 byte order mark, which
 			// TrimSpace does not remove; it would invalidate the first entry.
 			line = strings.TrimPrefix(line, "\ufeff")
 		}
 		lines = append(lines, line)
+		if err == io.EOF {
+			return lines, nil
+		}
 	}
-	return lines, scanner.Err()
 }
 
 // Build normalizes raw wordlist lines for one target domain, preserving
