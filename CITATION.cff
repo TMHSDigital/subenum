@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use subenum in teaching or research, please cite it as below."
+title: subenum
+type: software
+authors:
+  - name: "TM Hospitality Strategies"
+repository-code: "https://github.com/TMHSDigital/subenum"
+url: "https://tmhsdigital.github.io/subenum/"
+abstract: >-
+  A Go subdomain enumeration tool for authorized security testing and
+  teaching, with wildcard filtering, rate limiting, a run-quality report
+  and a zero-network simulation mode.
+keywords:
+  - dns
+  - subdomain enumeration
+  - security education
+  - go
+license: GPL-3.0-only
+version: 0.8.0
+date-released: "2026-10-04"

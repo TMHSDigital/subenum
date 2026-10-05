@@ -24,6 +24,12 @@ if it drifts. Current `golang.org/x/sys` and `golang.org/x/text` declare
 `govulncheck`, which CI runs. On PowerShell, quote `-go=1.26.0`; unquoted it is
 parsed as `-go=1`. After changing dependencies run `make tidy`.
 
+### Codespaces / Dev Containers
+
+The quickest start needs no local setup. [Open the repository in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum), or use "Reopen in Container" in VS Code. The container in `.devcontainer/` comes with Go 1.26 and the CI version of golangci-lint, and builds the binary. `make test` and `./subenum -simulate example.com` then work with no network access to any target.
+
+New here? Look for issues labeled [`good first issue`](https://github.com/TMHSDigital/subenum/labels/good%20first%20issue), and ask questions in [Discussions](https://github.com/TMHSDigital/subenum/discussions).
+
 ### Getting Started
 
 1. **Fork the repository** on GitHub

@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an idea for subenum
+title: "[FEATURE] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Features should fit subenum's educational and authorized-testing purpose. Suggestions that would mainly enable misuse may be declined. For open-ended ideas, start a [discussion](https://github.com/TMHSDigital/subenum/discussions) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like subenum to do.
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: The authorized testing, defensive or teaching scenario this helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation ideas (optional)
