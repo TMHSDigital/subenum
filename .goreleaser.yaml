@@ -1,0 +1,81 @@
+# GoReleaser builds every release from a v* tag (#61): static binaries,
+# archives with the license and docs, a combined checksums.txt, SBOMs, and a
+# keyless cosign signature over the checksums. CI also runs it in snapshot
+# mode on every push to main, so this file is exercised before a tag needs it.
+version: 2
+
+project_name: subenum
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  - id: subenum
+    main: .
+    binary: subenum
+    # Static, reproducible binaries: no cgo (#46), no local paths, no debug
+    # info. The tag (v1.2.3) is stamped into -version.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.Version={{ .Tag }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows, freebsd]
+    goarch: [amd64, arm64, "386"]
+    ignore:
+      - goos: darwin
+        goarch: "386"
+      - goos: windows
+        goarch: "386"
+      - goos: freebsd
+        goarch: "386"
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# One SPDX SBOM per archive (needs syft on PATH).
+sboms:
+  - artifacts: archive
+
+# Keyless signing: the workflow's OIDC identity signs checksums.txt, which in
+# turn covers every archive. Verify with cosign verify-blob (see README).
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+
+# Release notes come from the tag's CHANGELOG.md section (--release-notes).
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: TMHSDigital
+    name: subenum
+  prerelease: auto
+  # Published by the workflow after provenance is attested.
+  draft: true
+  footer: |
+    **Verify a download:** `sha256sum --ignore-missing -c checksums.txt`, and check the signature with
+    `cosign verify-blob --bundle checksums.txt.sigstore.json --certificate-identity-regexp 'https://github.com/TMHSDigital/subenum/' --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt`.

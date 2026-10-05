@@ -39,3 +39,6 @@ CLAUDE.md
 # GitHub Pages build / visual QA
 _site/
 docs/_preview/
+
+# GoReleaser output
+dist/

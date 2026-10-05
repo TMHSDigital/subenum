@@ -104,70 +104,60 @@ jobs:
         push: false
         build-args: VERSION=ci
 
-  # Single job that owns release creation. It runs once (not a matrix), so
-  # exactly one job ever creates the release for the tag. The upload-assets
-  # matrix below then only adds files to this already-existing release and can
-  # never race to create it (the race that made action-gh-release v3 fail with
-  # "already_exists (tag_name)").
-  #
-  # The release is created as a draft so it is not publicly visible while the
-  # upload matrix is still attaching assets. The publish-release job flips it to
-  # published only after all assets are present, so the public never sees a
-  # partial or empty release.
-  create-release:
+  # Runs the full GoReleaser pipeline in snapshot mode on every push to main
+  # (no signing, no publishing), so .goreleaser.yaml is exercised long before
+  # a tag depends on it (#61).
+  release-snapshot:
+    needs: build
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: stable
+        check-latest: true
+        cache: false
+
+    - name: Install syft (SBOMs)
+      uses: anchore/sbom-action/download-syft@v0.24.3
+
+    - name: GoReleaser snapshot
+      uses: goreleaser/goreleaser-action@v7.2.3
+      with:
+        version: "~> v2"
+        args: release --snapshot --clean --skip=sign
+
+    - name: Assert static Linux binaries
+      shell: bash
+      run: |
+        for f in dist/subenum_linux_*/subenum; do
+          file "$f"
+          file "$f" | grep -q 'statically linked'
+        done
+
+  # Builds and publishes a release from a v* tag with GoReleaser (#61):
+  # static binaries (#46), archives with LICENSE/README/CHANGELOG,
+  # checksums.txt, SBOMs, a keyless cosign signature over the checksums, and
+  # release notes from the tag's CHANGELOG.md section. GoReleaser creates the
+  # release as a draft; it is published only after provenance is attested, so
+  # the public never sees a partial release (cleanup-failed-release removes a
+  # failed draft).
+  release:
     needs: [ build, docker ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
-    steps:
-    - name: Create draft release for tag
-      uses: softprops/action-gh-release@v3
-      with:
-        draft: true
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-assets:
-    needs: create-release
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
       id-token: write
       attestations: write
-
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            artifact_name: subenum
-            asset_name: subenum-linux-amd64
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            artifact_name: subenum.exe
-            asset_name: subenum-windows-amd64.exe
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-            artifact_name: subenum
-            asset_name: subenum-macos-arm64
-          - os: ubuntu-latest
-            goos: darwin
-            goarch: amd64
-            artifact_name: subenum
-            asset_name: subenum-macos-amd64
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            artifact_name: subenum
-            asset_name: subenum-linux-arm64
-
-    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v7
@@ -175,7 +165,7 @@ jobs:
         fetch-depth: 0
 
     # Release binaries use the latest stable Go so they ship a patched
-    # standard library; go.mod's 1.24.2 is only the minimum (#38). No build
+    # standard library; go.mod's version is only the minimum (#38). No build
     # cache here, so release artifacts are always built from scratch.
     - name: Set up Go
       uses: actions/setup-go@v7
@@ -184,79 +174,52 @@ jobs:
         check-latest: true
         cache: false
 
-    # CGO_ENABLED=0 on every leg: a native linux/amd64 build otherwise links
-    # the cgo resolver against glibc and the "single static binary" stops
-    # being true (#46). -trimpath and -s -w keep the binary reproducible and
-    # small; VCS stamping stays on so `go version -m` shows provenance.
-    - name: Build
+    - name: Install syft (SBOMs)
+      uses: anchore/sbom-action/download-syft@v0.24.3
+
+    - name: Install cosign (keyless signing)
+      uses: sigstore/cosign-installer@v4.1.2
+
+    - name: Release notes from CHANGELOG.md
+      shell: bash
+      run: .github/scripts/release-notes.sh "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/notes.md"
+
+    - name: GoReleaser
+      uses: goreleaser/goreleaser-action@v7.2.3
+      with:
+        version: "~> v2"
+        args: release --clean --release-notes=${{ runner.temp }}/notes.md
       env:
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-        CGO_ENABLED: "0"
-      shell: bash
-      run: go build -v -trimpath -ldflags "-s -w -X main.Version=$(git describe --tags --dirty)" -o ${{ matrix.artifact_name }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Assert static linking
-      if: matrix.goos == 'linux'
+    - name: Assert static Linux binaries
       shell: bash
       run: |
-        file ${{ matrix.artifact_name }}
-        file ${{ matrix.artifact_name }} | grep -q 'statically linked'
-
-    - name: Rename for release
-      shell: bash
-      run: |
-        if [ "${{ matrix.artifact_name }}" != "${{ matrix.asset_name }}" ]; then
-          cp ${{ matrix.artifact_name }} ${{ matrix.asset_name }}
-        fi
-
-    - name: Generate checksum
-      shell: bash
-      run: sha256sum ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
+        for f in dist/subenum_linux_*/subenum; do
+          file "$f"
+          file "$f" | grep -q 'statically linked'
+        done
 
     - name: Attest build provenance
       uses: actions/attest-build-provenance@v4
       with:
-        subject-path: ${{ matrix.asset_name }}
+        subject-path: |
+          dist/*.tar.gz
+          dist/*.zip
+          dist/checksums.txt
 
-    # The release already exists (created by create-release), so each matrix leg
-    # only adds its binary and checksum. No matrix job creates the release, which
-    # avoids the concurrent-create race entirely. draft: true is set explicitly
-    # so these update calls keep the release in draft (the action's draft input
-    # defaults to false and would otherwise publish it early).
-    - name: Upload assets to draft release
-      uses: softprops/action-gh-release@v3
-      with:
-        draft: true
-        files: |
-          ${{ matrix.asset_name }}
-          ${{ matrix.asset_name }}.sha256
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Single job that publishes the release once, only after the full asset set is
-  # attached. Flipping draft to false here is the moment the release becomes
-  # public, so there is no window where a partial or empty release is visible.
-  publish-release:
-    needs: upload-assets
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
+    # Flipping draft to false is the moment the release becomes public.
     - name: Publish release
-      uses: softprops/action-gh-release@v3
-      with:
-        draft: false
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      shell: bash
+      run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
 
   # Publishes a multi-arch image to GHCR once the release itself is public
   # (#40). The Dockerfile cross-compiles in a build-platform builder stage, so
   # arm64 needs no QEMU. `latest` only moves for non-prerelease tags.
   publish-image:
-    needs: publish-release
+    needs: release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -314,15 +277,15 @@ jobs:
         subject-digest: ${{ steps.push.outputs.digest }}
         push-to-registry: true
 
-  # Failure-path cleanup. If the upload matrix fails partway, publish-release is
-  # skipped and the draft release created above would otherwise linger
+  # Failure-path cleanup. If the release job fails partway, the draft release
+  # GoReleaser created would otherwise linger
   # invisibly until someone removes it by hand. This job runs only when a
   # tag-triggered release run failed. It deletes the draft release for this tag
   # and the tag ref so a partial release leaves nothing behind. It only ever
   # deletes a draft (never a published release) and is a no-op when there is
   # nothing to clean, so it is safe and idempotent.
   cleanup-failed-release:
-    needs: [create-release, upload-assets, publish-release]
+    needs: [release]
     if: ${{ failure() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:

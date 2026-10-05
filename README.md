@@ -179,11 +179,27 @@ go build -buildvcs=false -o subenum
 <details>
 <summary><strong>Pre-built binaries</strong></summary>
 
-Download the appropriate binary for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page.
+Download the archive for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page: `subenum_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). Each archive holds the static binary, `LICENSE`, `README.md` and `CHANGELOG.md`.
 
-Platforms: Linux (amd64, arm64) &middot; macOS (amd64, arm64) &middot; Windows (amd64)
+Platforms: Linux (amd64, arm64, 386) &middot; macOS (amd64, arm64) &middot; Windows (amd64, arm64) &middot; FreeBSD (amd64, arm64)
 
-SHA-256 checksums are provided alongside each binary.
+Every release also has a `checksums.txt`, a keyless [cosign](https://github.com/sigstore/cosign) signature over it, an SPDX SBOM per archive, and GitHub build-provenance attestations. To verify a download:
+
+```bash
+# 1. The archive matches the published checksum.
+sha256sum --ignore-missing -c checksums.txt
+
+# 2. checksums.txt was signed by this repository's release workflow.
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/TMHSDigital/subenum/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+
+# 3. Or check the build provenance with the GitHub CLI.
+gh attestation verify subenum_<version>_linux_amd64.tar.gz --owner TMHSDigital
+```
+
+Releases up to v0.8.0 shipped bare binaries with one `.sha256` file each.
 
 </details>
 

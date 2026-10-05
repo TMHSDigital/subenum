@@ -25,8 +25,6 @@ Planned features that make results more trustworthy and the tool easier to get.
 
 - **A packaged GitHub Action** for scheduled monitoring, building on `-diff`
   and the example workflow in [Monitoring](monitoring.html).
-- **Release pipeline** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):
-  GoReleaser archives, checksums, SBOM and signatures.
 - **Package managers** ([#62](https://github.com/TMHSDigital/subenum/issues/62)):
   Homebrew, Scoop, AUR, Nix, Kali/BlackArch.
 
@@ -56,8 +54,8 @@ surprises:
 - **Documented exit codes**, already in place (0, 1, 2, 3, 4, 130, 143).
 - **A run-quality report**, already in place (`-stats`, schema 1), so a result
   set says how far it can be trusted.
-- **Verifiable releases** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):
-  checksums, SBOM and signatures.
+- **Verifiable releases**, in place from the next release: checksums, SBOMs,
+  cosign signatures and provenance attestations.
 
 ## Known limitations
 
