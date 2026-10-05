@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -112,14 +113,107 @@ func ParseTypes(s string) ([]string, error) {
 
 // NewResolver returns a PreferGo resolver that always dials dnsServer. The Dial
 // hook honors the network argument so a truncated UDP response can fall back to TCP.
+//
+// Go's resolver dials a fresh connection for every query it sends, including
+// its own internal retries (attempts x system nameservers on SERVFAIL, REFUSED
+// or socket errors), so each dial is one wire query. Under a lookup started by
+// ResolveTypes, a dial beyond the slots reserved up front takes another rate
+// slot, which keeps -rate exact however many queries Go decides to send (#50).
 func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
+			b, _ := dialCtx.Value(budgetKey{}).(*wireBudget)
+			if b != nil {
+				b.server.Store(dnsServer)
+				if b.dials.Add(1) > b.prepaid {
+					if err := limiterFrom(dialCtx).Wait(dialCtx); err != nil {
+						return nil, err
+					}
+				}
+			}
 			d := net.Dialer{Timeout: timeout}
-			return d.DialContext(dialCtx, network, dnsServer)
+			c, err := d.DialContext(dialCtx, network, dnsServer)
+			if err != nil || b == nil {
+				return c, err
+			}
+			// Go frames UDP and TCP differently depending on whether the conn
+			// is a net.PacketConn, so a UDP wrapper must stay one.
+			if u, ok := c.(*net.UDPConn); ok {
+				return &rcodeUDPConn{UDPConn: u, b: b}, nil
+			}
+			return &rcodeTCPConn{Conn: c, b: b}, nil
 		},
 	}
+}
+
+// wireBudget follows one per-type lookup through Go's resolver: the rate
+// slots ResolveTypes reserved for it, the queries actually dialed, and whether
+// any response carried RCODE REFUSED.
+type wireBudget struct {
+	prepaid int32
+	dials   atomic.Int32
+	refused atomic.Bool
+	server  atomic.Value // string: the -dns-server actually dialed
+}
+
+type budgetKey struct{}
+
+// fixErr rewrites what Go's resolver cannot report: it names the system
+// nameserver instead of the one dialed, and reports REFUSED as a generic
+// "server misbehaving", hiding the most common rate-limit signal (#50).
+func (b *wireBudget) fixErr(err error) error {
+	var de *net.DNSError
+	if !errors.As(err, &de) {
+		return err
+	}
+	cp := *de
+	if s, ok := b.server.Load().(string); ok {
+		cp.Server = s
+	}
+	if b.refused.Load() && Classify(err) == OutcomeOther {
+		cp.Err = "server refused the query (REFUSED)"
+	}
+	return &cp
+}
+
+// noteRCode inspects a DNS message header: QR set and RCODE 5 is REFUSED.
+func (b *wireBudget) noteRCode(msg []byte) {
+	if len(msg) >= 4 && msg[2]&0x80 != 0 && msg[3]&0x0F == 5 {
+		b.refused.Store(true)
+	}
+}
+
+// rcodeUDPConn records a REFUSED response as Go's resolver reads it. Each
+// Read returns one whole datagram.
+type rcodeUDPConn struct {
+	*net.UDPConn
+	b *wireBudget
+}
+
+func (c *rcodeUDPConn) Read(p []byte) (int, error) {
+	n, err := c.UDPConn.Read(p)
+	c.b.noteRCode(p[:n])
+	return n, err
+}
+
+// rcodeTCPConn is rcodeUDPConn for TCP, where the message follows a two-byte
+// length prefix and may arrive split across reads.
+type rcodeTCPConn struct {
+	net.Conn
+	b   *wireBudget
+	hdr []byte // the first bytes of the stream, until the RCODE is known
+}
+
+func (c *rcodeTCPConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if len(c.hdr) < 6 {
+		c.hdr = append(c.hdr, p[:min(n, 6-len(c.hdr))]...)
+		if len(c.hdr) == 6 {
+			c.b.noteRCode(c.hdr[2:])
+		}
+	}
+	return n, err
 }
 
 // fqdn makes domain absolute. Without the trailing dot Go's resolver may also
@@ -134,9 +228,11 @@ func fqdn(domain string) string {
 }
 
 // queriesPerType is how many DNS queries one lookup of each type puts on the
-// wire. Go's LookupCNAME resolves the name with both A and AAAA queries and
-// reads the canonical name from the answer chain.
-var queriesPerType = map[string]int{"A": 1, "AAAA": 1, "CNAME": 2}
+// wire when the first answer is definitive. Go's LookupCNAME sends A, AAAA
+// and CNAME queries. These slots are reserved before the lookup's timeout
+// starts; anything Go sends beyond them (its own retries) is charged as it is
+// dialed (see NewResolver).
+var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 3}
 
 // ResolveTypes performs per-type DNS lookups for the requested record types and
 // returns the matching records, the time spent in lookups, and the most severe lookup
@@ -156,18 +252,19 @@ func ResolveTypes(ctx context.Context, resolver *net.Resolver, domain string, ti
 	var records []Record
 	var worstErr error
 	for _, t := range types {
-		for i := 0; i < queriesPerType[t]; i++ {
+		for i := int32(0); i < queriesPerType[t]; i++ {
 			if err := lim.Wait(ctx); err != nil {
 				return records, elapsed, err
 			}
 		}
-		lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+		b := &wireBudget{prepaid: queriesPerType[t]}
+		lookupCtx, cancel := context.WithTimeout(context.WithValue(ctx, budgetKey{}, b), timeout)
 		start := time.Now()
 		recs, err := lookupType(lookupCtx, resolver, name, domain, t)
 		elapsed += time.Since(start)
 		cancel()
 		if err != nil {
-			worstErr = worse(worstErr, err)
+			worstErr = worse(worstErr, b.fixErr(err))
 			continue
 		}
 		records = append(records, recs...)

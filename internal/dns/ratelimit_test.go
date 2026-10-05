@@ -2,6 +2,8 @@ package dns
 
 import (
 	"context"
+	"errors"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -95,5 +97,53 @@ func TestResolverPacesWireQueries(t *testing.T) {
 	minExpected := time.Duration(q-1) * time.Second / rate * 8 / 10
 	if elapsed < minExpected {
 		t.Errorf("%d wire queries in %s: faster than -rate %d allows (min %s)", q, elapsed, rate, minExpected)
+	}
+}
+
+// TestRateChargesEveryWireQuery covers #50: the slots charged for a lookup
+// equal the DNS queries the server receives, for every record type and when
+// Go's resolver retries a SERVFAIL internally.
+func TestRateChargesEveryWireQuery(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{
+		"ok.example.com":    {A: "192.0.2.1", AAAA: "2001:db8::1"},
+		"alias.example.com": {CNAME: "ok.example.com"},
+		"bad.example.com":   {ServFailA: true},
+	})
+	for _, tc := range []struct{ name, typ string }{
+		{"ok.example.com", "A"},
+		{"ok.example.com", "AAAA"},
+		{"alias.example.com", "CNAME"},
+		{"ok.example.com", "CNAME"},
+		{"bad.example.com", "A"},
+	} {
+		t.Run(tc.typ+" "+tc.name, func(t *testing.T) {
+			lim := NewRateLimiter(1_000_000)
+			ctx := WithLimiter(context.Background(), lim)
+			before := srv.Queries()
+			_, _, _ = ResolveTypes(ctx, srv.Resolver(time.Second), tc.name, time.Second, []string{tc.typ})
+			wire := srv.Queries() - before
+			lim.mu.Lock()
+			charged := lim.reserved
+			lim.mu.Unlock()
+			t.Logf("wire queries %d, charged %d", wire, charged)
+			if wire != charged {
+				t.Fatalf("wire queries = %d, charged slots = %d; want equal", wire, charged)
+			}
+		})
+	}
+}
+
+// TestRefusedIsClassifiedRefused covers the second half of #50: RCODE REFUSED
+// counts as refused (Go reports it as "server misbehaving"), and the error
+// names the configured server.
+func TestRefusedIsClassifiedRefused(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"*": {Refused: true}})
+	_, _, err := ResolveTypes(context.Background(), srv.Resolver(time.Second), "x.example.com", time.Second, []string{"A"})
+	if got := Classify(err); got != OutcomeRefused {
+		t.Fatalf("Classify(%v) = %v, want refused", err, got)
+	}
+	var de *net.DNSError
+	if !errors.As(err, &de) || de.Server != srv.addr {
+		t.Fatalf("error server = %q, want %q", de.Server, srv.addr)
 	}
 }

@@ -14,6 +14,7 @@ type RateLimiter struct {
 	mu       sync.Mutex
 	next     time.Time
 	interval time.Duration
+	reserved int64 // slots handed out; read by tests
 }
 
 // NewRateLimiter returns a limiter for perSecond events, or nil (unlimited)
@@ -41,6 +42,7 @@ func (l *RateLimiter) Wait(ctx context.Context) error {
 		slot = now
 	}
 	l.next = slot.Add(l.interval)
+	l.reserved++
 	l.mu.Unlock()
 
 	d := time.Until(slot)
