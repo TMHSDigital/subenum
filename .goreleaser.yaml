@@ -9,6 +9,8 @@ project_name: subenum
 before:
   hooks:
     - go mod verify
+    # Shell completions and the man page, generated from the flags (#88).
+    - go run . generate-assets build/assets
 
 builds:
   - id: subenum
@@ -44,6 +46,10 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
+      - src: build/assets/completions/*
+        dst: completions
+      - src: build/assets/man/*
+        dst: man
 
 checksum:
   name_template: checksums.txt

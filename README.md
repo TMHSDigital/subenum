@@ -359,6 +359,26 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
 
+### Defaults, completions and the man page
+
+Settings you repeat on every run can live in a config file or the environment. Precedence, highest first: **command-line flag > `SUBENUM_*` environment variable > config file > built-in default.**
+
+```json
+{ "dns-server": "1.1.1.1:53", "rate": 200, "t": 50, "r": "/home/me/resolvers.txt" }
+```
+
+- The config file is `config.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows), or the path in `SUBENUM_CONFIG`. Keys are flag names.
+- Each flag also reads `SUBENUM_<FLAG>`, upper-cased with dashes as underscores: `SUBENUM_DNS_SERVER`, `SUBENUM_RATE`, `SUBENUM_T`.
+- `subenum -print-config` shows every effective setting and where it came from (`flag`, `env`, `config` or `default`).
+
+Shell completions and a man page are generated from the same flags, and release archives include them under `completions/` and `man/`:
+
+```bash
+subenum completion bash > /etc/bash_completion.d/subenum      # or zsh, fish, powershell
+subenum completion zsh > "${fpath[1]}/_subenum"
+subenum man > /usr/local/share/man/man1/subenum.1
+```
+
 ### Choosing a wordlist
 
 Results can only be as good as the wordlist. Without `-w`, subenum uses its bundled top-5000 list (`data/subdomains-5k.txt`, from SecLists' `subdomains-top1million-5000.txt`), a good first pass that takes seconds. For deeper coverage:

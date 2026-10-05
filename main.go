@@ -112,6 +112,7 @@ func main() {
 // cliFlags holds all parsed command-line flag values.
 type cliFlags struct {
 	tui          bool
+	printConfig  bool
 	wordlistFile string
 	domainList   string
 	concurrency  int
@@ -147,9 +148,17 @@ type cliFlags struct {
 // parseFlags parses args (without the program name). Flags may appear before or
 // after the domain; the returned positionals are every non-flag argument.
 func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
+	return parseFlagsWith(args, nil)
+}
+
+// parseFlagsWith is parseFlags with applyDefaults run after the flags are
+// defined and before the command line is parsed, so config-file and
+// environment defaults sit between built-in defaults and explicit flags (#88).
+func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cliFlags, []string, *flag.FlagSet, error) {
 	var f cliFlags
 	fs := flag.NewFlagSet(ProgramName, flag.ContinueOnError)
 	fs.BoolVar(&f.tui, "tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
+	fs.BoolVar(&f.printConfig, "print-config", false, "Print every setting's effective value and its source (flag, env, config or default), then exit")
 	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file (- for stdin); omitted: the bundled top-5000 list")
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
@@ -184,6 +193,11 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 		_, _ = fmt.Fprintln(w, "       subenum [-w <wordlist_file>] [options] -dL <domains_file>")
 		fs.PrintDefaults()
 		_, _ = fmt.Fprint(w, "\n"+exitCodesHelp)
+	}
+	if applyDefaults != nil {
+		if err := applyDefaults(fs); err != nil {
+			return f, nil, fs, err
+		}
 	}
 	positionals, err := parseInterspersed(fs, args)
 	return f, positionals, fs, err
@@ -467,7 +481,17 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 }
 
 func run() (code int) {
-	f, positionals, fs, parseErr := parseFlags(os.Args[1:])
+	// completion, man (#88): handled before flag parsing.
+	if code, ok := runSubcommand(os.Args[1:], os.Stdout, os.Stderr); ok {
+		return code
+	}
+
+	defaults := newDefaultsLoader()
+	f, positionals, fs, parseErr := parseFlagsWith(os.Args[1:], defaults.apply)
+	if errors.Is(parseErr, errConfig) {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
+		return exitUsage
+	}
 	if parseErr != nil {
 		// The FlagSet has already printed the error and usage.
 		if errors.Is(parseErr, flag.ErrHelp) {
@@ -483,6 +507,11 @@ func run() (code int) {
 			fmt.Fprintln(os.Stderr, "Warning: -tui ignores every other flag and argument; set them in the form instead")
 		}
 		return tui.Start()
+	}
+
+	if f.printConfig {
+		defaults.printConfig(os.Stdout, fs)
+		return exitOK
 	}
 
 	// -version answers before anything else prints, banners included (#58).

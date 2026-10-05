@@ -143,6 +143,19 @@ jobs:
           file "$f" | grep -q 'statically linked'
         done
 
+    # The archives ship generated completions and a man page (#88); make sure
+    # each one parses in its own shell, and the man page renders cleanly.
+    - name: Check completions and man page
+      shell: bash
+      run: |
+        sudo apt-get install -y -qq zsh fish groff >/dev/null
+        tar -xzf dist/subenum_*_linux_amd64.tar.gz -C "$RUNNER_TEMP"
+        bash -n "$RUNNER_TEMP/completions/subenum.bash"
+        zsh -n "$RUNNER_TEMP/completions/_subenum"
+        fish -n "$RUNNER_TEMP/completions/subenum.fish"
+        pwsh -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$RUNNER_TEMP/completions/subenum.ps1', [ref]\$null, [ref]\$e); if (\$e) { \$e; exit 1 }"
+        test -z "$(groff -man -ww -z "$RUNNER_TEMP/man/subenum.1" 2>&1)"
+
   # Builds and publishes a release from a v* tag with GoReleaser (#61):
   # static binaries (#46), archives with LICENSE/README/CHANGELOG,
   # checksums.txt, SBOMs, a keyless cosign signature over the checksums, and

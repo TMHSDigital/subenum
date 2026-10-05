@@ -15,6 +15,7 @@
 | `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt |
 | `-no-abort` | - | Do not abort when the resolver failure rate exceeds 20% (warning is still emitted) |
 | `-o <string>` | - | Write results to file (in addition to stdout) |
+| `-print-config` | - | Print every setting's effective value and its source (flag, env, config or default), then exit |
 | `-progress` | true | Show progress during scanning |
 | `-r <string>` | - | File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server |
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |

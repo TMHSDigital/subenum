@@ -42,3 +42,4 @@ docs/_preview/
 
 # GoReleaser output
 dist/
+build/
