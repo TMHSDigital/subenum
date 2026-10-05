@@ -9,8 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"golang.org/x/net/idna"
 )
 
 // exampleDNSServer is shown in the DNS server format error message.
@@ -71,7 +69,7 @@ func NormalizeDomain(input string) (domain string, notes []string, err error) {
 	}
 	s = strings.ToLower(strings.TrimSuffix(s, "."))
 	if !isASCII(s) {
-		ascii, ierr := idna.Lookup.ToASCII(s)
+		ascii, ierr := toASCII(s)
 		if ierr != nil {
 			return "", nil, fmt.Errorf("invalid internationalized domain %q: %v", input, ierr)
 		}
@@ -82,15 +80,6 @@ func NormalizeDomain(input string) (domain string, notes []string, err error) {
 		return "", nil, err
 	}
 	return s, notes, nil
-}
-
-func isASCII(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 0x80 {
-			return false
-		}
-	}
-	return true
 }
 
 // Domain checks that domain is non-empty, within the 253-character limit, and
