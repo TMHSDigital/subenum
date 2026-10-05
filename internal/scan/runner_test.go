@@ -1019,3 +1019,72 @@ func TestRunWildcardProbeFailureInRecursion(t *testing.T) {
 		t.Fatalf("notices = %v, want a skip notice for dev.example.com", notices)
 	}
 }
+
+// TestRunMaxQueriesRecursiveCountsSkipped covers #51: once the cap is reached,
+// children of found parents are counted as skipped without being built or
+// recorded, and the totals stay exact.
+func TestRunMaxQueriesRecursiveCountsSkipped(t *testing.T) {
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     makeEntries(1000),
+		Concurrency: 8,
+		Timeout:     time.Second,
+		Simulate:    true,
+		HitRate:     100,
+		Attempts:    1,
+		Recursive:   true,
+		Depth:       3,
+		MaxQueries:  50,
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+
+	var done *Event
+	var capMsg string
+	for ev := range events {
+		switch ev.Kind {
+		case EventWildcard:
+			if strings.Contains(ev.Message, "query cap reached") {
+				capMsg = ev.Message
+			}
+		case EventDone:
+			e := ev
+			done = &e
+		case EventError:
+			t.Fatalf("unexpected error: %s", ev.Message)
+		}
+	}
+	if done == nil {
+		t.Fatal("no EventDone")
+	}
+	if done.Processed != 50 || done.Total != 50 {
+		t.Errorf("Processed/Total = %d/%d, want 50/50", done.Processed, done.Total)
+	}
+	// 950 unadmitted depth-1 names plus 1000 children for each of the 50
+	// found parents.
+	if want := "skipped 50950"; !strings.Contains(capMsg, want) {
+		t.Errorf("cap event %q: want %q", capMsg, want)
+	}
+}
+
+// BenchmarkRun1M guards against dispatcher overhead growing faster than
+// linearly with wordlist size (#49).
+func BenchmarkRun1M(b *testing.B) {
+	entries := makeEntries(1_000_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cfg := Config{
+			Domain:      "example.com",
+			Entries:     entries,
+			Concurrency: 50,
+			Timeout:     time.Second,
+			Simulate:    true,
+			HitRate:     0,
+			Attempts:    1,
+		}
+		events := make(chan Event, 64)
+		go Run(context.Background(), cfg, events)
+		for range events {
+		}
+	}
+}

@@ -14,7 +14,6 @@ import (
 const (
 	reliabilityMinJobs     = 200
 	reliabilityFailPercent = 20
-	queueCompactEvery      = 1024
 	recursionRefuseCeiling = 1e7
 )
 
@@ -177,6 +176,14 @@ type job struct {
 	depth  int
 }
 
+// expansion is a pending run of candidates: every cfg.Entries[next:] prepended
+// to parent, at the given depth. The root expansion has parent cfg.Domain.
+type expansion struct {
+	parent string
+	depth  int
+	next   int
+}
+
 // EventKind categorises a scan event.
 type EventKind int
 
@@ -304,10 +311,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	var wg sync.WaitGroup
 
 	// Work queue channels. The dispatcher owns the lifecycle: it tracks
-	// outstanding work and closes jobs only once every enqueued job has
-	// completed. This lets workers safely enqueue depth-capped children after
-	// the initial feed, which the old "close right after feeding" shape could
-	// not do without risking a send on a closed channel.
+	// outstanding work and closes jobs only once every dispatched job has
+	// completed. Workers send found parents on enqueue (before signalling
+	// completed) and the dispatcher expands them into depth-capped children.
 	jobs := make(chan job)
 	enqueue := make(chan job)
 	completed := make(chan struct{})
@@ -341,33 +347,75 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		}
 	}()
 
-	// Dispatcher: owns the queue, the visited set (loop/dup protection), and the
-	// pending-work counter. It closes jobs when pending reaches zero (all work
-	// done) or when the context is cancelled.
+	// Dispatcher: owns the expansion queue, the visited set (loop/dup
+	// protection), and the pending-work counter. It closes jobs when no
+	// candidates remain and every dispatched job has completed, or when the
+	// context is cancelled.
+	//
+	// Candidates are generated lazily. The queue holds expansions (a parent
+	// plus a cursor into cfg.Entries) rather than one job per name, so depth-1
+	// names are built only as they are dispatched and a found parent costs one
+	// enqueue instead of len(Entries) (#49). Once -max-queries is reached the
+	// remaining candidates are counted, never built or recorded (#51).
 	go func() {
-		visited := make(map[string]bool, len(cfg.Entries))
-		queue := make([]job, 0, len(cfg.Entries))
+		n := len(cfg.Entries)
+		visited := make(map[string]struct{}, n)
+		frontier := []expansion{{parent: cfg.Domain, depth: 1}}
 		head := 0
+		remaining := n // candidates not yet generated
 		admitted := 0
 		skipped := 0
-		admit := func(j job) bool {
-			if visited[j.domain] {
-				return false
+		capped := false
+		pending := 0 // dispatched jobs not yet completed
+
+		publishTotal := func() {
+			t := admitted + remaining
+			if cfg.MaxQueries > 0 && t > cfg.MaxQueries {
+				t = cfg.MaxQueries
 			}
-			visited[j.domain] = true
-			if cfg.MaxQueries > 0 && admitted >= cfg.MaxQueries {
-				skipped++
-				return false
+			atomic.StoreInt64(&total, int64(t))
+		}
+		// next generates the next admissible job, if any.
+		next := func() (job, bool) {
+			for head < len(frontier) {
+				e := &frontier[head]
+				if e.next == n {
+					head++
+					// Compact only once the consumed prefix is at least half
+					// the slice, so each element is copied O(1) times.
+					if head == len(frontier) {
+						frontier, head = frontier[:0], 0
+					} else if head*2 >= len(frontier) {
+						frontier, head = append(frontier[:0], frontier[head:]...), 0
+					}
+					continue
+				}
+				if cfg.MaxQueries > 0 && admitted >= cfg.MaxQueries {
+					skipped += remaining
+					remaining = 0
+					capped = true
+					frontier, head = nil, 0
+					return job{}, false
+				}
+				entry := cfg.Entries[e.next]
+				e.next++
+				remaining--
+				name := entry + "." + e.parent
+				// Key by the name relative to the root domain. For depth 1 that
+				// is the entry itself, so no extra string is retained.
+				key := entry
+				if e.depth > 1 {
+					key = name[:len(name)-len(cfg.Domain)-1]
+				}
+				if _, dup := visited[key]; dup {
+					continue
+				}
+				visited[key] = struct{}{}
+				admitted++
+				return job{domain: name, depth: e.depth}, true
 			}
-			queue = append(queue, j)
-			admitted++
-			return true
+			return job{}, false
 		}
-		for _, entry := range cfg.Entries {
-			_ = admit(job{domain: entry + "." + cfg.Domain, depth: 1})
-		}
-		pending := admitted
-		atomic.StoreInt64(&total, int64(pending))
 		closeJobs := func() {
 			if skipped > 0 {
 				select {
@@ -378,42 +426,39 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			}
 			close(jobs)
 		}
-		if pending == 0 {
-			closeJobs()
-			return
-		}
+
+		var ready job
+		haveReady := false
 		for {
+			if !haveReady {
+				ready, haveReady = next()
+				publishTotal()
+			}
+			if !haveReady && pending == 0 {
+				closeJobs()
+				return
+			}
 			var out chan job
-			var next job
-			if head < len(queue) {
+			if haveReady {
 				out = jobs
-				next = queue[head]
 			}
 			select {
 			case <-ctx.Done():
 				closeJobs()
 				return
-			case j := <-enqueue:
-				if admit(j) {
-					pending++
-					atomic.AddInt64(&total, 1)
+			case parent := <-enqueue:
+				if capped {
+					skipped += n
+					continue
 				}
-			case out <- next:
-				head++
-				switch {
-				case head == len(queue):
-					queue = queue[:0]
-					head = 0
-				case head >= queueCompactEvery:
-					queue = append([]job(nil), queue[head:]...)
-					head = 0
-				}
+				frontier = append(frontier, expansion{parent: parent.domain, depth: parent.depth + 1})
+				remaining += n
+				publishTotal()
+			case out <- ready:
+				haveReady = false
+				pending++
 			case <-completed:
 				pending--
-				if pending == 0 {
-					closeJobs()
-					return
-				}
 			}
 		}
 	}()
@@ -523,13 +568,10 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 				return
 			}
 		}
-		for _, entry := range cfg.Entries {
-			child := job{domain: entry + "." + j.domain, depth: j.depth + 1}
-			select {
-			case enqueue <- child:
-			case <-ctx.Done():
-				return
-			}
+		// Hand the parent to the dispatcher, which generates its children.
+		select {
+		case enqueue <- j:
+		case <-ctx.Done():
 		}
 	}
 }

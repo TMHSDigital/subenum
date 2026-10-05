@@ -1,4 +1,4 @@
-.PHONY: build test clean lint tidy run tui docker-build docker-run wordlist wordlist-gen simulate simulate-verbose
+.PHONY: build test bench clean lint tidy run tui docker-build docker-run wordlist wordlist-gen simulate simulate-verbose
 
 # Default Go parameters
 GOCMD=go
@@ -36,6 +36,11 @@ test:
 
 test-short:
 	$(GOTEST) -v ./... -short
+
+# Dispatcher throughput on a 1M-entry simulated scan; overhead must stay
+# linear in wordlist size (#49).
+bench:
+	$(GOTEST) ./internal/scan -run '^$$' -bench BenchmarkRun1M -benchtime 1x
 
 clean:
 	$(GOCLEAN)
