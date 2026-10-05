@@ -1,5 +1,14 @@
 # Security Policy
 
+## Supported Versions
+
+Security fixes land on `main` and ship in the next release. Only the latest minor release is supported.
+
+| Version | Supported |
+|---------|-----------|
+| Latest minor release | Yes |
+| Older releases | No |
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in `subenum`, **do not open a public issue.**
@@ -9,19 +18,15 @@ Report it privately using GitHub's Security Advisory feature:
 2. Click **"Report a vulnerability"**.
 3. Fill in the description, reproduction steps, and impact.
 
-You will receive acknowledgment within 48 hours. We will investigate, provide a fix timeline, keep you informed throughout, and credit you upon resolution (unless you prefer anonymity).
+This is a small project, so responses are best effort: expect an acknowledgment typically within a week. We will investigate, share a fix timeline, keep you informed, and credit you upon resolution (unless you prefer anonymity).
 
-## Scope
+## Responsible Usage
 
-This security policy applies to the latest version of `subenum` in the main branch.
-
-## Responsible Usage Requirements
-
-Remember that `subenum` is designed for:
+`subenum` is designed for:
 - Educational purposes
 - Authorized security testing
 
-Using this tool against systems without explicit permission is potentially illegal and explicitly prohibited by our license terms.
+Scanning systems without explicit permission may be illegal where you are, and it is outside the project's intended use. The GPL-3.0 license itself does not restrict how the software is used; that responsibility is yours.
 
 ## Thank You
 

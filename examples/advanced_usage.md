@@ -278,7 +278,7 @@ For CI/CD environments, you can use the version flag to ensure the correct versi
 
 ```bash
 ./subenum -version
-# Output: subenum v0.7.0
+# Output: subenum vX.Y.Z (the installed release)
 ```
 
 Use simulation mode in CI pipelines to test the tool's behaviour without network access:
