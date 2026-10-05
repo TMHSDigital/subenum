@@ -51,7 +51,10 @@ type scanViewModel struct {
 	found     int64
 	stats     scan.Stats
 	done      bool
-	aborted   bool
+	aborted   bool   // the user pressed ctrl+c
+	closed    bool   // the scan ended without EventDone (preflight, wildcard abort)
+	errText   string // first scan error; the reason shown for a failed scan
+	noAbort   bool   // -no-abort: an error with a finished scan is only a warning
 	width     int
 	height    int
 	simMode   bool
@@ -159,6 +162,9 @@ func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
 
 	case errorMsg:
 		m.addMessage(errorStyle.Render("✗ " + msg.text))
+		if m.errText == "" {
+			m.errText = msg.text
+		}
 
 	case doneMsg:
 		m.done = true
@@ -169,7 +175,7 @@ func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
 		m.refresh()
 
 	case abortedMsg:
-		m.aborted = true
+		m.closed = true
 		m.done = true
 		m.refresh()
 	}
@@ -207,7 +213,14 @@ func (m scanViewModel) View() string {
 
 	// Status line
 	switch {
-	case m.done && m.aborted:
+	case m.failed():
+		b.WriteString(errorStyle.Render("Failed: "+m.errText) + "\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf(
+			"processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
+			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
+		)) + "\n")
+		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
+	case m.done && (m.aborted || m.closed):
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
 			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
@@ -230,6 +243,14 @@ func (m scanViewModel) View() string {
 	return b.String()
 }
 
+// failed reports whether the finished scan failed, mirroring the CLI exit
+// code: an error fails the scan unless it finished under -no-abort. A scan
+// that ended without EventDone after an error (preflight failure, wildcard
+// abort) is a failure, not a user abort (#55).
+func (m scanViewModel) failed() bool {
+	return m.done && m.errText != "" && (m.closed || !m.noAbort)
+}
+
 // Event message types for Bubble Tea.
 type resultMsg struct {
 	domain  string
@@ -243,4 +264,8 @@ type doneMsg struct {
 	stats                   scan.Stats
 }
 type abortedMsg struct{}
-type startScanMsg struct{ cfg formValues }
+type wordlistLoadedMsg struct {
+	cfg     formValues
+	entries []string
+	err     error
+}

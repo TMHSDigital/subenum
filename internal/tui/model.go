@@ -46,10 +46,20 @@ func New() Model {
 	}
 }
 
-// Start runs the TUI and returns an exit code (0 = ok, 1 = error).
+// Start runs the TUI and returns an exit code: 1 if the TUI itself failed or
+// the last scan failed (#55), else 0.
 func Start() int {
 	p := tea.NewProgram(New(), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	final, err := p.Run()
+	if err != nil {
+		return 1
+	}
+	return exitCode(final)
+}
+
+// exitCode maps the final model to the process exit code.
+func exitCode(final tea.Model) int {
+	if m, ok := final.(Model); ok && m.scanView.failed() {
 		return 1
 	}
 	return 0
@@ -80,18 +90,32 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "ctrl+r":
+			if m.form.loading {
+				return m, nil
+			}
 			vals, errStr := m.form.validate()
 			if errStr != "" {
 				m.form.err = errStr
 				return m, nil
 			}
 			m.form.err = ""
-			// Kick off the scan.
-			return m, func() tea.Msg { return startScanMsg{cfg: vals} }
+			m.form.loading = true
+			// Load the wordlist off the event loop so a large list cannot
+			// freeze the UI (#55); beginScan runs when it arrives.
+			return m, loadWordlistCmd(vals)
 		}
 
-	case startScanMsg:
-		return m.beginScan(msg.cfg)
+	case wordlistLoadedMsg:
+		m.form.loading = false
+		if msg.err != nil {
+			m.form.err = "cannot read wordlist: " + msg.err.Error()
+			return m, nil
+		}
+		if len(msg.entries) == 0 {
+			m.form.err = "wordlist has no valid entries"
+			return m, nil
+		}
+		return m.beginScan(msg.cfg, msg.entries)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -103,24 +127,20 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
+// loadWordlistCmd reads and normalizes the wordlist in a tea.Cmd goroutine.
+func loadWordlistCmd(vals formValues) tea.Cmd {
+	return func() tea.Msg {
+		entries, _, _, err := wordlist.LoadWordlist(vals.wordlist, vals.domain)
+		return wordlistLoadedMsg{cfg: vals, entries: entries, err: err}
+	}
+}
+
+func (m Model) beginScan(vals formValues, entries []string) (tea.Model, tea.Cmd) {
 	// Create the context up front so cancel is always assigned to the model
 	// before any early return. This satisfies static analysis tools that
 	// require the cancellation function to be demonstrably reachable.
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-
-	entries, _, _, err := wordlist.LoadWordlist(vals.wordlist, vals.domain)
-	if err != nil {
-		cancel() // explicitly cancel before returning on error
-		m.form.err = "cannot read wordlist: " + err.Error()
-		return m, nil
-	}
-	if len(entries) == 0 {
-		cancel()
-		m.form.err = "wordlist has no valid entries"
-		return m, nil
-	}
 
 	seed := rand.Uint64()
 
@@ -140,6 +160,7 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 
 	m.state = stateScan
 	m.scanView = newScanViewModel(m.width, m.height, vals.simulate)
+	m.scanView.noAbort = vals.noAbort
 
 	cfg := scan.Config{
 		Domain:      vals.domain,

@@ -120,3 +120,92 @@ func TestFinalizeOutputReportsCloseError(t *testing.T) {
 		t.Fatal("finalizeOutput returned nil although the results file could not be written")
 	}
 }
+
+// TestValidateRejectsStdinWordlist covers #55: "-" would read the stdin that
+// Bubble Tea owns and freeze the UI.
+func TestValidateRejectsStdinWordlist(t *testing.T) {
+	m := newFormModel(savedConfig{})
+	m.inputs[0].SetValue("example.com")
+	m.inputs[1].SetValue("-")
+	if _, errStr := m.validate(); !strings.Contains(errStr, "standard input") {
+		t.Fatalf("validate() error = %q, want a standard-input rejection", errStr)
+	}
+}
+
+// TestRunLoadsWordlistAsync covers #55: ctrl+r returns immediately with the
+// wordlist load deferred to a tea.Cmd, and the loaded message starts the scan.
+func TestRunLoadsWordlistAsync(t *testing.T) {
+	redirectConfig(t) // beginScan saves the form values
+	wl := filepath.Join(t.TempDir(), "wl.txt")
+	if err := os.WriteFile(wl, []byte("www\nmail\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := Model{state: stateForm, form: newFormModel(savedConfig{})}
+	m.form.inputs[0].SetValue("example.com")
+	m.form.inputs[1].SetValue(wl)
+	m.form.inputs[10].SetValue("") // no output file
+	m.form.toggles[0] = true       // simulate: the started scan sends no DNS traffic
+
+	next, cmd := m.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR})
+	nm := next.(Model)
+	if nm.form.err != "" {
+		t.Fatalf("form error: %s", nm.form.err)
+	}
+	if !nm.form.loading || nm.state != stateForm || cmd == nil {
+		t.Fatalf("loading=%v state=%v cmd=%v, want a pending load on the form", nm.form.loading, nm.state, cmd != nil)
+	}
+	if !strings.Contains(nm.form.View(), "Loading wordlist") {
+		t.Error("form does not show the loading state")
+	}
+	// A second ctrl+r while loading is ignored.
+	if _, again := nm.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR}); again != nil {
+		t.Error("ctrl+r during load started a second load")
+	}
+
+	loaded, ok := cmd().(wordlistLoadedMsg)
+	if !ok || loaded.err != nil || len(loaded.entries) != 2 {
+		t.Fatalf("load result = %+v", loaded)
+	}
+	started, _ := nm.updateForm(loaded)
+	sm := started.(Model)
+	defer sm.cancel()
+	if sm.state != stateScan || sm.form.loading {
+		t.Fatalf("state=%v loading=%v after load, want the scan screen", sm.state, sm.form.loading)
+	}
+}
+
+// TestScanFailureStatusAndExitCode covers #55: a scan that ends with an error
+// shows "Failed", not "Aborted", and the TUI exits non-zero.
+func TestScanFailureStatusAndExitCode(t *testing.T) {
+	update := func(sv scanViewModel, msgs ...tea.Msg) scanViewModel {
+		for _, msg := range msgs {
+			sv, _ = sv.Update(msg)
+		}
+		return sv
+	}
+
+	// Preflight failure: error, then the channel closes without EventDone.
+	sv := update(newScanViewModel(120, 40, false), errorMsg{text: "resolver failed preflight"}, abortedMsg{})
+	if !sv.failed() || !strings.Contains(sv.View(), "Failed: resolver failed preflight") || strings.Contains(sv.View(), "Aborted") {
+		t.Errorf("preflight failure not shown as Failed:\n%s", sv.View())
+	}
+	if code := exitCode(Model{scanView: sv}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+
+	// Reliability warning under -no-abort with a finished scan is not a failure.
+	nv := newScanViewModel(120, 40, false)
+	nv.noAbort = true
+	nv = update(nv, errorMsg{text: "warning: 30% failed"}, doneMsg{processed: 5, total: 5})
+	if nv.failed() || exitCode(Model{scanView: nv}) != 0 {
+		t.Error("-no-abort warning counted as a failure")
+	}
+
+	// A user abort stays "Aborted" and exits 0.
+	av := newScanViewModel(120, 40, false)
+	av.aborted = true
+	av = update(av, doneMsg{processed: 1, total: 5})
+	if av.failed() || !strings.Contains(av.View(), "Aborted") || exitCode(Model{scanView: av}) != 0 {
+		t.Errorf("user abort mis-rendered:\n%s", av.View())
+	}
+}

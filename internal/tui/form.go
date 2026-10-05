@@ -14,6 +14,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/validate"
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // Field order - Simulate is now field 2 so it's reachable in 2 tabs.
@@ -80,6 +81,7 @@ type formModel struct {
 	toggles [4]bool // [simulate, force, recursive, noAbort]
 	focus   int
 	err     string
+	loading bool // wordlist is loading in the background; ctrl+r is ignored
 	width   int
 }
 
@@ -323,6 +325,9 @@ func (m formModel) View() string {
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("  ✗ "+m.err) + "\n")
 	}
+	if m.loading {
+		b.WriteString("\n" + dimStyle.Render("  Loading wordlist...") + "\n")
+	}
 
 	b.WriteString(hintStyle.Render("\n  tab/↑↓ navigate  •  space toggle  •  ctrl+r run  •  ctrl+c quit"))
 
@@ -364,6 +369,10 @@ func (m *formModel) validate() (formValues, string) {
 	wl := expandHome(strings.TrimSpace(m.inputs[1].Value()))
 	if wl == "" {
 		return formValues{}, "Wordlist path is required"
+	}
+	// The TUI owns stdin, so reading a wordlist from it would block forever (#55).
+	if wl == wordlist.Stdin {
+		return formValues{}, "Wordlist from standard input (-) is not supported in the TUI; enter a file path"
 	}
 	dnsServer := strings.TrimSpace(m.inputs[3].Value())
 	if dnsServer == "" {
