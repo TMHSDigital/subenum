@@ -255,6 +255,7 @@ make help           # list all targets
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
+| `-stats <file>` | n/a | Write a JSON run-quality report (outcomes, queries sent, verdict); see [Run-quality report](#run-quality-report) |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-version` | n/a | Print version and exit |
 | `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
@@ -331,6 +332,56 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 | `143` | Terminated (SIGTERM); partial results are kept |
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
+
+### Run-quality report
+
+Every lookup is accounted for, and subenum says how far the results can be trusted. `-stats run.json` writes a report in any format, and `-format jsonl` ends with the same object as its last line (`"type": "summary"`):
+
+```json
+{
+  "type": "summary",
+  "schema": 1,
+  "tool": "subenum",
+  "version": "vX.Y.Z",
+  "started": "2026-10-04T21:00:00Z",
+  "duration_ms": 41230,
+  "simulated": false,
+  "resolver": "1.1.1.1:53",
+  "rate_limit": 200,
+  "queries_sent": 8214,
+  "achieved_qps": 199.2,
+  "verdict": "degraded",
+  "reason": "61 of 4096 lookups failed (timeout 58, refused 3, other 0)",
+  "targets": [
+    {
+      "domain": "example.com",
+      "status": "ok",
+      "processed": 4096, "total": 4096, "found": 37,
+      "outcomes": { "resolved": 37, "nxdomain": 3998, "timeout": 58, "refused": 3, "other": 0, "wildcard_filtered": 0 },
+      "queries_sent": 8214,
+      "skipped_by_cap": 0,
+      "wildcard": false,
+      "verdict": "degraded",
+      "reason": "61 of 4096 lookups failed (timeout 58, refused 3, other 0)"
+    }
+  ]
+}
+```
+
+| Verdict | Meaning |
+|---------|---------|
+| `complete` | Under 1% of lookups failed and nothing was skipped |
+| `degraded` | Usable, but some names are unknown: 1-20% of lookups failed, `-max-queries` skipped candidates, or the run was interrupted |
+| `unreliable` | Over 20% of lookups failed (the reliability guard's threshold), the guard aborted the scan, or the target could not be scanned |
+
+The overall `verdict` is the worst target verdict. `queries_sent` counts DNS messages actually dialed, including retries; it is 0 in simulation mode. SERVFAIL and other errors Go's resolver does not distinguish are counted under `other`. `status` is one of `ok`, `failed`, `interrupted`, `skipped` or `not_run`. The `schema` number changes only when a field is renamed, removed or changes meaning; new fields can appear at any time.
+
+Gate a CI job on the verdict with `jq`:
+
+```bash
+subenum -w wordlist.txt -stats run.json example.com > found.txt
+jq -e '.verdict == "complete"' run.json > /dev/null || { jq -r .reason run.json; exit 1; }
+```
 
 <br>
 

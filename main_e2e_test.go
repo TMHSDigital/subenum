@@ -315,3 +315,60 @@ func TestE2EHelpListsExitCodes(t *testing.T) {
 		t.Errorf("-h: exit %d, output missing the exit-code table:\n%s", code, out)
 	}
 }
+
+// TestE2ESummary covers #70: jsonl output ends with a schema-versioned
+// summary, and -stats records a verdict even when the scan fails.
+func TestE2ESummary(t *testing.T) {
+	wl := writeFile(t, "wl.txt", e2eWords)
+	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-format", "jsonl", "-w", wl, "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var sum struct {
+		Type    string `json:"type"`
+		Schema  int    `json:"schema"`
+		Verdict string `json:"verdict"`
+		Targets []struct {
+			Domain   string `json:"domain"`
+			Status   string `json:"status"`
+			Outcomes struct {
+				Resolved int `json:"resolved"`
+			} `json:"outcomes"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &sum); err != nil {
+		t.Fatalf("last jsonl line is not JSON: %v", err)
+	}
+	if sum.Type != "summary" || sum.Schema != 1 || sum.Verdict != "complete" ||
+		len(sum.Targets) != 1 || sum.Targets[0].Status != "ok" || sum.Targets[0].Outcomes.Resolved != 6 {
+		t.Fatalf("summary = %+v\nfrom %s", sum, lines[len(lines)-1])
+	}
+	if len(lines) != 7 {
+		t.Errorf("got %d lines, want 6 results + 1 summary", len(lines))
+	}
+
+	// A preflight failure still writes -stats, with an unreliable verdict.
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pc.Close() }()
+	stats := filepath.Join(t.TempDir(), "run.json")
+	code, _ = runCLI(t, "", "-dns-server", pc.LocalAddr().String(), "-timeout", "100", "-progress=false",
+		"-stats", stats, "-w", wl, "example.invalid")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	data, err := os.ReadFile(stats)
+	if err != nil {
+		t.Fatalf("-stats file not written: %v", err)
+	}
+	sum.Targets = nil
+	if err := json.Unmarshal(data, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if sum.Verdict != "unreliable" || len(sum.Targets) != 1 || sum.Targets[0].Status != "failed" {
+		t.Fatalf("failed-run summary = %s", data)
+	}
+}

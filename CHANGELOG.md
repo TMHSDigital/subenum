@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Run-quality report: `-stats <file>` writes a schema-versioned JSON summary of a run (outcomes per target, DNS queries actually sent, achieved query rate, wildcard fingerprint, candidates skipped by `-max-queries`) with a `complete` / `degraded` / `unreliable` verdict and its reason. `-format jsonl` ends with the same object as its last line. The README documents the schema and how to gate CI on the verdict (#70).
+
 ### Changed
 - The minimum Go version is now 1.26 (`go 1.26.0` in go.mod), required by current `golang.org/x/sys` and `golang.org/x/text`; both were bumped and `govulncheck -show verbose` now reports no vulnerable modules. Dependabot also updates indirect modules, and CI lints with errorlint, nilerr, contextcheck, noctx, copyloopvar, usestdlibvars and revive, with errcheck exemptions narrowed to stdout prints (#83).
 

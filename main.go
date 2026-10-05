@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -131,6 +132,7 @@ type cliFlags struct {
 	depth        int
 	noAbort      bool
 	maxQueries   int
+	statsFile    string
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
@@ -162,6 +164,7 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
+	fs.StringVar(&f.statsFile, "stats", "", "Write a JSON run-quality report (outcomes, queries sent, verdict) to this file")
 	fs.Usage = func() {
 		w := fs.Output()
 		_, _ = fmt.Fprintln(w, "Usage: subenum -w <wordlist_file> [options] <domain>")
@@ -542,7 +545,9 @@ func run() (code int) {
 	// header. A reliability abort means the resolver is overloaded, so the
 	// remaining targets are skipped rather than sent to it too (#82).
 	status := make([]string, len(targets))
+	results := make([]targetResult, len(targets))
 	failedTargets := 0
+	started := time.Now()
 	for i, target := range targets {
 		if ctx.Err() != nil {
 			break
@@ -564,18 +569,23 @@ func run() (code int) {
 			out.Error("no valid wordlist entries for %s", target)
 			anyFailed = true
 			status[i] = "failed"
+			results[i] = targetResult{failed: true, err: "no valid wordlist entries"}
 			failedTargets++
 			continue
 		}
-		done, failed, resolverAbort := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter)
-		anyDone = anyDone || done
-		anyFailed = anyFailed || failed
+		res := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter)
+		results[i] = res
+		anyDone = anyDone || res.done
+		anyFailed = anyFailed || res.failed
 		status[i] = "ok"
-		if failed {
+		switch {
+		case res.failed:
 			status[i] = "failed"
 			failedTargets++
+		case signalCode.Load() != 0:
+			status[i] = "interrupted"
 		}
-		if resolverAbort && i < len(targets)-1 {
+		if res.resolverAbort && i < len(targets)-1 {
 			out.Error("resolver %s looks overloaded; skipping the %d remaining targets (use -no-abort to continue)", f.dnsServer, len(targets)-1-i)
 			for j := i + 1; j < len(targets); j++ {
 				status[j] = "skipped"
@@ -600,6 +610,15 @@ func run() (code int) {
 	// empty JSON array or a bare CSV header. The deferred file flush/close
 	// registered above runs after this. Reliability abort still emits
 	// EventDone with partial results, so Finish runs there.
+	// The run-quality report (#70): the last jsonl line, and the -stats file.
+	summary := buildSummary(f, targets, status, results, started, time.Since(started))
+	out.Summary(summary)
+	if f.statsFile != "" {
+		if err := output.WriteSummaryFile(f.statsFile, summary); err != nil {
+			out.Error("writing -stats file: %v", err)
+			fileErrReported = true
+		}
+	}
 	if anyDone {
 		if err := out.Finish(); err != nil {
 			out.Error("writing output file: %v", err)
@@ -651,10 +670,17 @@ func scanOptions(f cliFlags, domain string, entries []string, maxAttempts int, r
 	}
 }
 
-// scanTarget runs one domain's scan and streams its events to out. It reports
-// whether the scan finished (EventDone arrived), whether it should count as a
-// failure for the exit code, and whether the reliability guard aborted it.
-func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (sawDone, failed, resolverAbort bool) {
+// targetResult is how one domain's scan ended.
+type targetResult struct {
+	done          bool       // EventDone arrived
+	failed        bool       // counts as a failure for the exit code
+	resolverAbort bool       // the reliability guard aborted it
+	err           string     // first error message, if any
+	final         scan.Event // the EventDone, when done
+}
+
+// scanTarget runs one domain's scan and streams its events to out.
+func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (res targetResult) {
 	// Logf is serialized with the progress line (#36).
 	cfg := scanOptions(f, domain, entries, maxAttempts, recordTypes, out.Info).Config()
 
@@ -683,6 +709,9 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 			out.Info("%s", ev.Message)
 		case scan.EventError:
 			out.Error("%s", ev.Message)
+			if !sawError {
+				res.err = ev.Message
+			}
 			sawError = true
 			finishProgress()
 			// Keep draining so EventDone (and Stats) can still arrive after a
@@ -690,7 +719,8 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 			// the channel without EventDone.
 		case scan.EventDone:
 			finishProgress()
-			sawDone = true
+			res.done = true
+			res.final = ev
 			logScanBreakdown(domain, ev, out)
 			if f.verbose {
 				logVerboseDone(ev, f, outWriter, out)
@@ -700,8 +730,9 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 	// An error fails the run unless the scan finished under -no-abort.
 	// The reliability guard is the only error that still lets EventDone
 	// arrive; without -no-abort it cancelled the scan.
-	resolverAbort = sawDone && sawError && !f.noAbort
-	return sawDone, sawError && (!sawDone || !f.noAbort), resolverAbort
+	res.resolverAbort = res.done && sawError && !f.noAbort
+	res.failed = sawError && (!res.done || !f.noAbort)
+	return res
 }
 
 // resolveAttempts merges the -attempts and deprecated -retries flags.

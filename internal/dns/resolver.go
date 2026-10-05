@@ -127,6 +127,9 @@ func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
+			if c, ok := dialCtx.Value(queryCounterKey{}).(*atomic.Int64); ok {
+				c.Add(1)
+			}
 			b, _ := dialCtx.Value(budgetKey{}).(*wireBudget)
 			if b != nil {
 				b.server.Store(dnsServer)
@@ -162,6 +165,15 @@ type wireBudget struct {
 }
 
 type budgetKey struct{}
+
+type queryCounterKey struct{}
+
+// WithQueryCounter attaches c to ctx; every DNS query a resolver from
+// NewResolver dials under that ctx (retries included) increments it, so a
+// scan can report the queries it actually sent (#70).
+func WithQueryCounter(ctx context.Context, c *atomic.Int64) context.Context {
+	return context.WithValue(ctx, queryCounterKey{}, c)
+}
 
 // fixErr rewrites what Go's resolver cannot report: it names the system
 // nameserver instead of the one dialed, and reports REFUSED as a generic

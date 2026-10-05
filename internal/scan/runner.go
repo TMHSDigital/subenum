@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,6 +68,13 @@ type Stats struct {
 	Refused          int64
 	Other            int64
 	WildcardFiltered int64
+
+	// Run facts for the quality report (#70); not part of Sum.
+	QueriesSent int64        // DNS queries dialed, retries included (0 when simulated)
+	Skipped     int64        // candidates not tested because -max-queries was reached
+	Aborted     bool         // the reliability guard cancelled the scan
+	Wildcard    bool         // the root domain is a wildcard (scanned under -force)
+	Fingerprint []dns.Record // final wildcard fingerprint, empty when none
 }
 
 // Sum returns the number of classified queries (found + negatives + failures +
@@ -86,6 +94,8 @@ type counters struct {
 	refused          atomic.Int64
 	other            atomic.Int64
 	wildcardFiltered atomic.Int64
+	skipped          atomic.Int64
+	aborted          atomic.Bool
 }
 
 func (c *counters) add(o dns.Outcome) {
@@ -113,6 +123,8 @@ func (c *counters) snapshot() Stats {
 		Refused:          c.refused.Load(),
 		Other:            c.other.Load(),
 		WildcardFiltered: c.wildcardFiltered.Load(),
+		Skipped:          c.skipped.Load(),
+		Aborted:          c.aborted.Load(),
 	}
 }
 
@@ -164,6 +176,23 @@ func (f *fingerprint) add(recs []dns.Record) {
 	for _, r := range recs {
 		f.set[recordKey(r)] = struct{}{}
 	}
+}
+
+// records returns the fingerprint's records in a stable order.
+func (f *fingerprint) records() []dns.Record {
+	f.mu.RLock()
+	keys := make([]string, 0, len(f.set))
+	for k := range f.set {
+		keys = append(keys, k)
+	}
+	f.mu.RUnlock()
+	sort.Strings(keys)
+	out := make([]dns.Record, 0, len(keys))
+	for _, k := range keys {
+		typ, val, _ := strings.Cut(k, "\x00")
+		out = append(out, dns.Record{Type: typ, Value: val})
+	}
+	return out
 }
 
 // match reports whether every record of got is a known wildcard answer
@@ -347,6 +376,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	} else {
 		ctx = dns.WithLimiter(ctx, limiter)
 	}
+	var queriesSent atomic.Int64
+	ctx = dns.WithQueryCounter(ctx, &queriesSent)
+	wildcardRoot := false
 
 	if cfg.Recursive {
 		ceiling := RecursionCeiling(len(cfg.Entries), maxDepth)
@@ -401,6 +433,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		}
 		fingerprint.add(fp)
 		if isWildcard {
+			wildcardRoot = true
 			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
 			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: msg}
 			if !cfg.Force {
@@ -519,6 +552,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			return job{}, false
 		}
 		closeJobs := func() {
+			stats.skipped.Store(int64(skipped))
 			if skipped > 0 {
 				select {
 				case events <- Event{Kind: EventNotice, Notice: NoticeCap, Message: fmt.Sprintf(
@@ -589,6 +623,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	<-tickerStopped
 
 	snap := stats.snapshot()
+	snap.QueriesSent = queriesSent.Load()
+	snap.Wildcard = wildcardRoot
+	snap.Fingerprint = fingerprint.records()
 	// EventDone is the abort/finish signal. CLI Finish and TUI aborted=true both
 	// wait for it after cancel, so this send must not be select-guarded on
 	// ctx.Done(): once ctx is cancelled that select is a coin-flip drop.
@@ -698,6 +735,7 @@ func checkReliability(cfg Config, processed int64, st *counters, events chan<- E
 			verb, rate, processed, cfg.Concurrency, cfg.Rate)
 		events <- Event{Kind: EventError, Message: msg}
 		if !cfg.NoAbort {
+			st.aborted.Store(true)
 			cancel()
 		}
 	})

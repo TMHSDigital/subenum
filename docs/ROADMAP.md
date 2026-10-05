@@ -26,8 +26,6 @@ Work in progress or next up.
 Planned features that make results more trustworthy and the tool easier to get.
 
 - **Resolver pool with trusted re-validation** ([#69](https://github.com/TMHSDigital/subenum/issues/69)), `-r resolvers.txt`.
-- **Machine-readable run-quality report** ([#70](https://github.com/TMHSDigital/subenum/issues/70)):
-  per-query stats, wildcard drops and a confidence verdict.
 - **Scope control for bug-bounty programs** ([#87](https://github.com/TMHSDigital/subenum/issues/87)):
   `-exclude` patterns and an out-of-scope file.
 - **Monitoring mode** ([#84](https://github.com/TMHSDigital/subenum/issues/84)):
@@ -64,8 +62,8 @@ surprises:
 - **Stable output schemas.** The JSON, JSONL and CSV fields are documented and
   only ever gain fields, never lose or rename them.
 - **Documented exit codes**, already in place (0, 1, 2, 3, 130, 143).
-- **A run-quality report** ([#70](https://github.com/TMHSDigital/subenum/issues/70)),
-  so a result set says how far it can be trusted.
+- **A run-quality report**, already in place (`-stats`, schema 1), so a result
+  set says how far it can be trusted.
 - **Verifiable releases** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):
   checksums, SBOM and signatures.
 
