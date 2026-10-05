@@ -72,7 +72,7 @@ func NormalizeDomain(input string) (domain string, notes []string, err error) {
 	if !isASCII(s) {
 		ascii, ierr := toASCII(s)
 		if ierr != nil {
-			return "", nil, fmt.Errorf("invalid internationalized domain %q: %v", input, ierr)
+			return "", nil, fmt.Errorf("invalid internationalized domain %q: %w", input, ierr)
 		}
 		notes = append(notes, fmt.Sprintf("using the punycode form %s for %s", ascii, s))
 		s = ascii

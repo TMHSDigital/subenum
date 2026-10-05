@@ -17,6 +17,9 @@
 // For authorized use only. Only scan domains you own or have explicit
 // written permission to test.
 
+// Command subenum enumerates subdomains by DNS brute-forcing a wordlist
+// against one or more domains, with wildcard filtering, rate limiting, a
+// simulation mode and an interactive terminal UI (-tui).
 package main
 
 import (
@@ -161,8 +164,8 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
 	fs.Usage = func() {
 		w := fs.Output()
-		fmt.Fprintln(w, "Usage: subenum -w <wordlist_file> [options] <domain>")
-		fmt.Fprintln(w, "       subenum -w <wordlist_file> [options] -dL <domains_file>")
+		_, _ = fmt.Fprintln(w, "Usage: subenum -w <wordlist_file> [options] <domain>")
+		_, _ = fmt.Fprintln(w, "       subenum -w <wordlist_file> [options] -dL <domains_file>")
 		fs.PrintDefaults()
 		_, _ = fmt.Fprint(w, "\n"+exitCodesHelp)
 	}

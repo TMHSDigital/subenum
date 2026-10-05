@@ -1,3 +1,6 @@
+// Package scan runs a subdomain scan: it validates options, dispatches
+// candidate names to a worker pool, filters wildcard answers and reports
+// results and statistics as events.
 package scan
 
 import (
@@ -259,23 +262,28 @@ type expansion struct {
 // EventKind categorises a scan event.
 type EventKind int
 
+// Event kinds.
 const (
-	EventResult   EventKind = iota // a subdomain resolved
-	EventProgress                  // progress update
-	EventNotice                    // informational notice; see Event.Notice
-	EventError                     // non-fatal error message
-	EventDone                      // scan finished
+	// EventResult reports a resolved subdomain.
+	EventResult   EventKind = iota
+	EventProgress           // progress update
+	EventNotice             // informational notice; see Event.Notice
+	EventError              // non-fatal error message
+	EventDone               // scan finished
 )
 
 // NoticeKind says what an EventNotice is about, so consumers can style or
 // filter notices without parsing the message (#68).
 type NoticeKind int
 
+// Notice kinds.
 const (
-	NoticeWildcard NoticeKind = iota + 1 // wildcard DNS detected, or its check failed under -force
-	NoticeCap                            // -max-queries reached; candidates skipped
-	NoticeCeiling                        // recursive scan may generate very many queries
-	NoticeSkip                           // a recursive branch was not expanded
+	// NoticeWildcard means wildcard DNS was detected, or its check failed
+	// under -force.
+	NoticeWildcard NoticeKind = iota + 1
+	NoticeCap                 // -max-queries reached; candidates skipped
+	NoticeCeiling             // recursive scan may generate very many queries
+	NoticeSkip                // a recursive branch was not expanded
 )
 
 // String names a notice kind for structured output.

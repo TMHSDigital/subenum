@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -164,7 +165,7 @@ func TestE2EExitCodes(t *testing.T) {
 // leaves an existing -o file byte-for-byte unchanged, while a run that
 // finishes replaces it.
 func TestE2EFailedRunKeepsOutputFile(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

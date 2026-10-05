@@ -1,3 +1,5 @@
+// Package wordlist reads wordlist files and normalizes their entries into
+// the DNS labels a scan queries.
 package wordlist
 
 import (

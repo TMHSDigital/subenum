@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The minimum Go version is now 1.26 (`go 1.26.0` in go.mod), required by current `golang.org/x/sys` and `golang.org/x/text`; both were bumped and `govulncheck -show verbose` now reports no vulnerable modules. Dependabot also updates indirect modules, and CI lints with errorlint, nilerr, contextcheck, noctx, copyloopvar, usestdlibvars and revive, with errcheck exemptions narrowed to stdout prints (#83).
+
 ### Fixed
 - A wildcard check whose probes time out or SERVFAIL is no longer read as "no wildcard". Probes are retried up to `-attempts`; if still inconclusive, the scan aborts (scans without filtering under `-force`, with a warning), and in recursive mode the branch is skipped and not cached. Previously a wildcard zone with flaky probes reported every wordlist entry as a hit (#47).
 - The dispatcher no longer does quadratic queue copying, so large wordlists scale linearly (simulated 2M entries: 19.4s down to 4.6s). Candidate names are generated lazily from the wordlist instead of being built up front, and a found parent is expanded in the dispatcher instead of pushing every child through a channel. `make bench` runs a 1M-entry benchmark (#49).

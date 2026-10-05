@@ -87,6 +87,6 @@ Constraints to keep in mind when changing the code.
 - **The reliability guard is tested with injected timeouts, not simulate
   misses,** because simulate misses classify as NXDOMAIN, which is excluded from
   the failure rate by design.
-- **The `go` directive is `1.24.2`.** charmbracelet/bubbles requires it, and new
+- **The `go` directive is pinned at `1.26.0`** and CI checks it. New
   dependencies must keep it and pass `govulncheck` in CI. On PowerShell, quote
-  `-go=1.24.2`; unquoted it is parsed as `-go=1`.
+  `-go=1.26.0`; unquoted it is parsed as `-go=1`.

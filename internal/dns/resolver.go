@@ -1,3 +1,5 @@
+// Package dns resolves candidate names, classifies lookup outcomes, detects
+// wildcard zones, paces queries and simulates resolution for -simulate.
 package dns
 
 import (
@@ -29,7 +31,9 @@ var supportedTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true}
 // tell a definitive negative (NXDOMAIN) apart from an infrastructure failure.
 type Outcome int
 
+// Lookup outcomes, from a definitive answer to an interrupted lookup.
 const (
+	// OutcomeFound means the lookup returned records of a requested type.
 	OutcomeFound Outcome = iota
 	// OutcomeNXDomain is a definitive negative: the name does not exist, or it
 	// exists but has no records of the requested types (NODATA). Go's resolver

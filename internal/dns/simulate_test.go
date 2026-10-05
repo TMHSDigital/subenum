@@ -87,7 +87,7 @@ func TestSimulateResolveTypes(t *testing.T) {
 // TestSimulateResolveConcurrent calls SimulateResolve from many goroutines at
 // once. Results are a pure function of (seed, name), so this is race-free; the test
 // exists to be caught by `go test -race`.
-func TestSimulateResolveConcurrent(t *testing.T) {
+func TestSimulateResolveConcurrent(_ *testing.T) {
 	const goroutines = 64
 	const perGoroutine = 200
 

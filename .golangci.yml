@@ -12,6 +12,13 @@ linters:
     - gocritic
     - misspell
     - unconvert
+    - errorlint
+    - nilerr
+    - contextcheck
+    - noctx
+    - copyloopvar
+    - usestdlibvars
+    - revive
   settings:
     gosec:
       excludes:
@@ -20,11 +27,10 @@ linters:
         # G404: Weak RNG is fine; math/rand/v2 only drives simulation output, which is not security-sensitive
         - G404
     errcheck:
-      # These write to stdout/files in hot paths; errors are intentionally ignored
+      # Only stdout prints are exempt: a closed pipe there is not actionable.
+      # Writes to files and other io.Writers must handle their errors (#83).
       exclude-functions:
         - fmt.Printf
-        - fmt.Fprintln
-        - fmt.Fprintf
         - fmt.Println
   exclusions:
     rules:

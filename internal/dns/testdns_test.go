@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -54,12 +55,12 @@ func (s *testDNS) lookup(name string) testReply {
 
 func startTestDNS(t *testing.T, table map[string]testReply) *testDNS {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen tcp: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	pc, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", port))
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		_ = ln.Close()
 		t.Fatalf("ListenPacket udp: %v", err)
@@ -119,7 +120,7 @@ func startTestDNS(t *testing.T, table map[string]testReply) *testDNS {
 
 func startBlackHole(t *testing.T) string {
 	t.Helper()
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("ListenPacket: %v", err)
 	}

@@ -3,6 +3,8 @@
 // Tool for generating custom wordlists for subdomain enumeration.
 // For authorized use only.
 
+// Command wordlist-gen generates a custom subdomain wordlist from common
+// prefixes, terms taken from a domain name, and prefix combinations.
 package main
 
 import (
@@ -159,17 +161,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *outputFile == "" {
-		fmt.Fprintln(stderr, "Error: output file cannot be empty")
+		_, _ = fmt.Fprintln(stderr, "Error: output file cannot be empty")
 		return 1
 	}
 	if err := validateCombine(*combineWith); err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
 	}
 
 	words := generate(options{common: *addCommon, domain: *domainInfo, combine: *combineWith})
 	if len(words) == 0 {
-		fmt.Fprintln(stderr, "Error: no entries generated; enable -common or pass -domain or -combine")
+		_, _ = fmt.Fprintln(stderr, "Error: no entries generated; enable -common or pass -domain or -combine")
 		return 1
 	}
 
@@ -179,27 +181,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	file, err := os.OpenFile(*outputFile, flags, 0o644) //nolint:gosec // a generated wordlist is not sensitive; same mode os.Create gives
 	if errors.Is(err, os.ErrExist) {
-		fmt.Fprintf(stderr, "Error: %s already exists; pass -f to overwrite it or -o to choose another path\n", *outputFile)
+		_, _ = fmt.Fprintf(stderr, "Error: %s already exists; pass -f to overwrite it or -o to choose another path\n", *outputFile)
 		return 1
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "Error creating output file: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "Error creating output file: %v\n", err)
 		return 1
 	}
 	writeErr := writeWordlist(file, words)
 	closeErr := file.Close()
 	if writeErr != nil || closeErr != nil {
-		fmt.Fprintf(stderr, "Error writing %s: %v\n", *outputFile, firstErr(writeErr, closeErr))
+		_, _ = fmt.Fprintf(stderr, "Error writing %s: %v\n", *outputFile, firstErr(writeErr, closeErr))
 		return 1
 	}
 
 	if *verbose {
 		for _, w := range words {
-			fmt.Fprintln(stdout, w)
+			_, _ = fmt.Fprintln(stdout, w)
 		}
 	}
-	fmt.Fprintf(stderr, "Wordlist generated at %s with %d unique entries\n", *outputFile, len(words))
-	fmt.Fprintln(stderr, "NOTE: Only use this tool to generate wordlists for domains you have explicit permission to test.")
+	_, _ = fmt.Fprintf(stderr, "Wordlist generated at %s with %d unique entries\n", *outputFile, len(words))
+	_, _ = fmt.Fprintln(stderr, "NOTE: Only use this tool to generate wordlists for domains you have explicit permission to test.")
 	return 0
 }
 

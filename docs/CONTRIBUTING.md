@@ -13,16 +13,16 @@ See the [Code of Conduct](CODE_OF_CONDUCT.html).
 
 ### Prerequisites
 
-- Go 1.24 or later
+- Go 1.26 or later
 - Git
 - Make (optional but recommended)
 - Docker (optional, for containerized development)
 
-The `go` directive in `go.mod` must stay exactly `go 1.24.2`. CI fails the build
-if it drifts. `github.com/charmbracelet/bubbles` declares `go 1.24.2`, so a
-patchless `go 1.24` line makes `go build` refuse to run until tidy bumps it.
-On PowerShell, unquoted `-go=1.24` is also parsed as `-go=1`. After changing
-dependencies run `make tidy`.
+The `go` directive in `go.mod` must stay exactly `go 1.26.0`. CI fails the build
+if it drifts. Current `golang.org/x/sys` and `golang.org/x/text` declare
+`go 1.26.0`, so it is also the floor. New dependencies must keep it and pass
+`govulncheck`, which CI runs. On PowerShell, quote `-go=1.26.0`; unquoted it is
+parsed as `-go=1`. After changing dependencies run `make tidy`.
 
 ### Getting Started
 
@@ -53,7 +53,7 @@ make test
 # Run linter
 make lint
 
-# Tidy modules (keeps the go 1.24.2 pin)
+# Tidy modules (keeps the go 1.26.0 pin)
 make tidy
 
 # Clean up build artifacts

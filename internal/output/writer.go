@@ -1,3 +1,5 @@
+// Package output renders scan results (text, JSON, JSONL, CSV) to stdout and
+// the -o file, and serializes progress and diagnostics on stderr.
 package output
 
 import (
@@ -56,6 +58,11 @@ type Result struct {
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
 // everything else (progress, verbose, errors) goes to stderr.
+//
+// Individual writes ignore their errors on purpose: outWriter is a
+// bufio.Writer, whose errors are sticky and are returned by Finish and by the
+// output file's Close, and a failed diagnostic write to stderr has nowhere
+// better to be reported.
 type Writer struct {
 	mu        sync.Mutex
 	outWriter *bufio.Writer
@@ -151,7 +158,7 @@ func (w *Writer) writeText(domain string, records []dns.Record) {
 	}
 	if w.outWriter != nil {
 		w.writeTextHeaderLocked()
-		fmt.Fprintln(w.outWriter, line)
+		_, _ = fmt.Fprintln(w.outWriter, line)
 	}
 }
 
@@ -163,7 +170,7 @@ func (w *Writer) writeTextHeaderLocked() {
 		return
 	}
 	w.headerDone = true
-	fmt.Fprintf(w.outWriter, "# SIMULATED - not real DNS results (subenum -simulate -seed %d)\n", w.seed)
+	_, _ = fmt.Fprintf(w.outWriter, "# SIMULATED - not real DNS results (subenum -simulate -seed %d)\n", w.seed)
 }
 
 // formatRecords renders records as " A=192.0.2.1 AAAA=2001:db8::1".
@@ -181,14 +188,14 @@ func (w *Writer) writeJSONL(domain string, records []dns.Record) {
 	}
 	data, err := json.Marshal(Result{Subdomain: domain, Records: records, Simulated: w.simulate})
 	if err != nil {
-		fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
+		_, _ = fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
 		return
 	}
 	if w.stdout {
 		fmt.Printf("%s\n", data)
 	}
 	if w.outWriter != nil {
-		fmt.Fprintf(w.outWriter, "%s\n", data)
+		_, _ = fmt.Fprintf(w.outWriter, "%s\n", data)
 	}
 }
 
@@ -306,7 +313,7 @@ func (w *Writer) ProgressDone() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.progressLen > 0 {
-		fmt.Fprintln(w.errOut())
+		_, _ = fmt.Fprintln(w.errOut())
 		w.progressLen = 0
 	}
 }
@@ -327,7 +334,7 @@ func (w *Writer) Info(format string, a ...any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.clearProgressLocked()
-	fmt.Fprintf(w.errOut(), format+"\n", a...)
+	_, _ = fmt.Fprintf(w.errOut(), format+"\n", a...)
 }
 
 // Error writes an error line to stderr, serialized like Info.
@@ -335,5 +342,5 @@ func (w *Writer) Error(format string, a ...any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.clearProgressLocked()
-	fmt.Fprintf(w.errOut(), "Error: "+format+"\n", a...)
+	_, _ = fmt.Fprintf(w.errOut(), "Error: "+format+"\n", a...)
 }

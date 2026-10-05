@@ -552,7 +552,7 @@ func TestRunRecursionCeilingForceAllows(t *testing.T) {
 // TestRunInterruptDuringPreflightIsSilent: Ctrl+C while the preflight lookup is
 // in flight must not be reported as a resolver failure.
 func TestRunInterruptDuringPreflightIsSilent(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestRunInterruptDuringPreflightIsSilent(t *testing.T) {
 }
 
 func TestRunPreflightFailsOnBlackHole(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,18 +632,18 @@ func TestFingerprintMatch(t *testing.T) {
 // of wildcard names), and real names with their own addresses are all kept.
 func TestRunRotatingPoolWildcardFiltered(t *testing.T) {
 	var next atomic.Uint32
-	real := map[string][4]byte{}
+	realIPs := map[string][4]byte{}
 	var entries []string
 	for i := 0; i < 5; i++ {
 		name := fmt.Sprintf("real%d", i)
 		entries = append(entries, name)
-		real[name+".example.com"] = [4]byte{198, 51, 100, byte(i + 1)}
+		realIPs[name+".example.com"] = [4]byte{198, 51, 100, byte(i + 1)}
 	}
 	for i := 0; i < 50; i++ {
 		entries = append(entries, fmt.Sprintf("w%d", i))
 	}
 	addr, stop := startUDPDNSAction(t, func(name string) dnsAction {
-		if ip, ok := real[name]; ok {
+		if ip, ok := realIPs[name]; ok {
 			return dnsAction{ip: ip, hit: true}
 		}
 		if strings.HasSuffix(name, ".example.com") {
@@ -683,12 +683,12 @@ func TestRunRotatingPoolWildcardFiltered(t *testing.T) {
 	if done == nil {
 		t.Fatal("no EventDone")
 	}
-	for name := range real {
+	for name := range realIPs {
 		if !found[name] {
 			t.Errorf("real name %s was filtered", name)
 		}
 	}
-	leaked := len(found) - len(real)
+	leaked := len(found) - len(realIPs)
 	if filtered := 50 - leaked; filtered*100 < 50*95 {
 		t.Errorf("filtered %d/50 rotating-pool wildcard answers, want >= 95%%; stats=%+v", filtered, done.Stats)
 	}
@@ -789,7 +789,7 @@ func startUDPDNS(t *testing.T, handle func(name string, qtype uint16) ([4]byte, 
 
 func startUDPDNSAction(t *testing.T, handle func(name string) dnsAction) (addr string, stop func()) {
 	t.Helper()
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("ListenPacket: %v", err)
 	}

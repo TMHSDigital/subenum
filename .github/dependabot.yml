@@ -4,6 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Include indirect modules (x/sys, x/text), which otherwise go stale (#83).
+    allow:
+      - dependency-type: "all"
     labels:
       - "dependencies"
       - "go"

@@ -55,7 +55,7 @@ clean:
 lint:
 	golangci-lint run
 
-# go mod tidy. The go directive must stay go 1.24.2 (bubbles requires it).
+# go mod tidy. The go directive must stay go 1.26.0 (CI checks it; x/sys and x/text need it).
 tidy:
 	go mod tidy
 
