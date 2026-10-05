@@ -16,9 +16,6 @@ Work in progress or next up.
 
 - **Patch release for static Linux binaries** ([#46](https://github.com/TMHSDigital/subenum/issues/46)).
   The build fix is on `main`; a v0.8.1 release replaces the dynamically linked asset.
-- **Developer docs match the code** ([#79](https://github.com/TMHSDigital/subenum/issues/79)).
-- **Dependency and lint hygiene** ([#83](https://github.com/TMHSDigital/subenum/issues/83)):
-  current `x/sys` and `x/text`, a supported `go` directive, stricter linters.
 - **Test infrastructure** ([#67](https://github.com/TMHSDigital/subenum/issues/67)):
   replace the hand-rolled test DNS server and close coverage gaps.
 - **Repository hardening** ([#60](https://github.com/TMHSDigital/subenum/issues/60)):
