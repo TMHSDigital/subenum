@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
@@ -27,6 +28,7 @@ func buildSummary(f cliFlags, targets, status []string, results []targetResult, 
 		s.Seed = f.seed
 	} else {
 		s.Resolver = f.dnsServer
+		s.Transport = dns.Transport(f.dnsServer)
 	}
 
 	worst := -1

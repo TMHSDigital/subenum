@@ -132,3 +132,17 @@ func TestNormalizeDomain(t *testing.T) {
 		})
 	}
 }
+
+// TestDNSServerTransports covers #86: DoT and DoH servers are accepted.
+func TestDNSServerTransports(t *testing.T) {
+	for _, ok := range []string{"tls://1.1.1.1", "tls://1.1.1.1:853", "tls://dns.google", "https://cloudflare-dns.com/dns-query", "https://1.1.1.1/dns-query"} {
+		if err := DNSServer(ok); err != nil {
+			t.Errorf("DNSServer(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"tls://", "tls://1.1.1.1:99999", "https://", "quic://1.1.1.1", "tls://bad host"} {
+		if err := DNSServer(bad); err == nil {
+			t.Errorf("DNSServer(%q) accepted", bad)
+		}
+	}
+}

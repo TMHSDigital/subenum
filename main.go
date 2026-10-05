@@ -172,7 +172,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
 	fs.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
-	fs.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server to use (format: ip:port)")
+	fs.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server: ip:port (UDP, TCP fallback), tls://host[:853] (DNS over TLS) or https://host/path (DNS over HTTPS)")
 	fs.BoolVar(&f.verbose, "v", false, "Enable verbose output")
 	fs.BoolVar(&f.showVersion, "version", false, "Show version information")
 	fs.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")

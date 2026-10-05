@@ -7,9 +7,17 @@ package dnstest
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/binary"
 	"io"
+	"math/big"
 	"net"
+	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
@@ -65,6 +73,12 @@ type Options struct {
 type Server struct {
 	Addr string // host:port, for -dns-server or dns.NewResolver
 
+	TLSAddr string         // DoT listener after StartTLS, for tls://<TLSAddr>
+	RootCAs *x509.CertPool // trusts the StartTLS certificate
+
+	connections   atomic.Int64
+	streamQueries atomic.Int64
+
 	total  atomic.Int64
 	mu     sync.Mutex
 	counts map[countKey]int64
@@ -96,19 +110,21 @@ func StartWith(t testing.TB, opts Options, h Handler) *Server {
 	var ln net.Listener
 	var pc net.PacketConn
 	var err error
+	// UDP is bound first: Windows reserves blocks of UDP ports, and binding
+	// UDP on a port the OS picked for TCP kept landing inside one.
 	for attempt := 0; attempt < 20; attempt++ {
-		ln, err = lc.Listen(context.Background(), "tcp", net.JoinHostPort(host, "0"))
+		pc, err = lc.ListenPacket(context.Background(), "udp", net.JoinHostPort(host, "0"))
 		if err != nil {
 			if opts.IPv6 {
 				t.Skipf("no IPv6 loopback: %v", err)
 			}
-			t.Fatalf("listen tcp: %v", err)
+			t.Fatalf("listen udp: %v", err)
 		}
-		pc, err = lc.ListenPacket(context.Background(), "udp", ln.Addr().String())
+		ln, err = lc.Listen(context.Background(), "tcp", pc.LocalAddr().String())
 		if err == nil {
 			break
 		}
-		_ = ln.Close()
+		_ = pc.Close()
 	}
 	if err != nil {
 		t.Fatalf("no free UDP+TCP port pair: %v", err)
@@ -169,6 +185,8 @@ func (s *Server) serveUDP(pc net.PacketConn, serial bool, h Handler) {
 	}
 }
 
+// serveTCP answers length-prefixed queries on each connection until the
+// client closes it, so DoT clients can reuse a connection.
 func (s *Server) serveTCP(ln net.Listener, h Handler) {
 	for {
 		conn, err := ln.Accept()
@@ -177,23 +195,114 @@ func (s *Server) serveTCP(ln net.Listener, h Handler) {
 		}
 		go func(c net.Conn) {
 			defer func() { _ = c.Close() }()
-			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-			var size [2]byte
-			if _, err := io.ReadFull(c, size[:]); err != nil {
-				return
+			for {
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				var size [2]byte
+				if _, err := io.ReadFull(c, size[:]); err != nil {
+					return
+				}
+				q := make([]byte, binary.BigEndian.Uint16(size[:]))
+				if _, err := io.ReadFull(c, q); err != nil {
+					return
+				}
+				resp := s.handle(q, true, h)
+				if resp == nil {
+					// A dropped query: keep the connection open without
+					// answering, as an unresponsive server would, until the
+					// client gives up. Closing it would read as an error.
+					_, _ = io.Copy(io.Discard, c)
+					return
+				}
+				out := binary.BigEndian.AppendUint16(nil, uint16(len(resp))) //nolint:gosec // DNS messages are under 64 KiB
+				if _, err := c.Write(append(out, resp...)); err != nil {
+					return
+				}
+				s.streamQueries.Add(1)
 			}
-			q := make([]byte, binary.BigEndian.Uint16(size[:]))
-			if _, err := io.ReadFull(c, q); err != nil {
-				return
-			}
-			resp := s.handle(q, true, h)
-			if resp == nil {
-				return
-			}
-			out := binary.BigEndian.AppendUint16(nil, uint16(len(resp))) //nolint:gosec // DNS messages are under 64 KiB
-			_, _ = c.Write(append(out, resp...))
 		}(conn)
+		s.connections.Add(1)
 	}
+}
+
+// StartTLS adds a DNS-over-TLS listener (RFC 7858) answering with h, using a
+// certificate for 127.0.0.1 generated for the test. Use TLSAddr as
+// tls://<TLSAddr> and RootCAs to trust it.
+func (s *Server) StartTLS(t testing.TB, h Handler) {
+	t.Helper()
+	cert, pool := selfSignedCert(t)
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		t.Fatalf("listen tls: %v", err)
+	}
+	s.TLSAddr, s.RootCAs = ln.Addr().String(), pool
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.serveTCP(ln, h)
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-done
+	})
+}
+
+// DoHHandler serves DNS over HTTPS (RFC 8484, POST) answering with h. Run it
+// with httptest.NewUnstartedServer(...).StartTLS().
+func (s *Server) DoHHandler(h Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/dns-message" {
+			http.Error(w, "want POST application/dns-message", http.StatusBadRequest)
+			return
+		}
+		q, err := io.ReadAll(io.LimitReader(r.Body, 65535))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := s.handle(q, true, h)
+		if resp == nil {
+			// A dropped query: hold the request until the client gives up.
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/dns-message")
+		_, _ = w.Write(resp)
+	})
+}
+
+// Connections returns how many TCP or TLS connections clients opened.
+func (s *Server) Connections() int64 { return s.connections.Load() }
+
+// selfSignedCert makes a short-lived certificate for 127.0.0.1 and ::1.
+func selfSignedCert(t testing.TB) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "dnstest"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(time.Hour),
+		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		DNSNames:              []string{"localhost"},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, pool
 }
 
 // handle parses a query, asks h, and builds the response (nil means drop).

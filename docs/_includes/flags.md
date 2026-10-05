@@ -6,7 +6,7 @@
 | `-dL <string>` | - | File of apex domains to scan, one per line (- for stdin); replaces the &lt;domain&gt; argument |
 | `-depth <int>` | 1 | Max recursion depth when -recursive is set (1 = no recursion) |
 | `-diff <string>` | - | Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes |
-| `-dns-server <string>` | 8.8.8.8:53 | DNS server to use (format: ip:port) |
+| `-dns-server <string>` | 8.8.8.8:53 | DNS server: ip:port (UDP, TCP fallback), tls://host[:853] (DNS over TLS) or https://host/path (DNS over HTTPS) |
 | `-exclude <string>` | - | Comma-separated out-of-scope names and \*.parent patterns; never queried or expanded |
 | `-exclude-file <string>` | - | File of out-of-scope names and \*.parent patterns, one per line (# comments allowed) |
 | `-force` | - | Continue scanning even if wildcard DNS is detected |

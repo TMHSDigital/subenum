@@ -367,6 +367,17 @@ The resumed run refuses to start if an input file changed, re-emits the earlier 
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
 
+### Encrypted DNS: DoT and DoH
+
+Where outbound UDP/53 is blocked or intercepted, point `-dns-server` at an encrypted resolver:
+
+```bash
+subenum -dns-server tls://1.1.1.1 example.com                          # DNS over TLS (port 853)
+subenum -dns-server https://cloudflare-dns.com/dns-query example.com   # DNS over HTTPS
+```
+
+DoT connections are pooled and reused, and DoH uses one keep-alive HTTP client (HTTP/2 where the server offers it), so most queries skip the TLS handshake. Outcome classification and `-rate` accounting are identical to UDP, and the run-quality report names the `transport`. `-r` resolver pools are plain UDP; with `-r`, an encrypted `-dns-server` is the trusted resolver that re-validates every hit.
+
 ### Defaults, completions and the man page
 
 Settings you repeat on every run can live in a config file or the environment. Precedence, highest first: **command-line flag > `SUBENUM_*` environment variable > config file > built-in default.**

@@ -22,14 +22,45 @@ var (
 
 // DNSServer checks that server is a valid ip:port address with an IP host and a
 // port in the range 1-65535.
+//
+// Encrypted transports are written as URLs (#86): tls://host[:port] for DNS
+// over TLS (port 853 by default) and https://host/path for DNS over HTTPS.
+// Their host may be a name, which is resolved with the system resolver.
 func DNSServer(server string) error {
+	switch {
+	case strings.HasPrefix(server, "tls://"):
+		hostport := strings.TrimPrefix(server, "tls://")
+		if _, _, err := net.SplitHostPort(hostport); err != nil {
+			hostport = net.JoinHostPort(hostport, "853")
+		}
+		host, portStr, err := net.SplitHostPort(hostport)
+		if err != nil || host == "" {
+			return fmt.Errorf("invalid DNS-over-TLS server %q, expected tls://host[:port]", server)
+		}
+		if net.ParseIP(host) == nil && Domain(host) != nil {
+			return fmt.Errorf("invalid DNS-over-TLS host: %s", host)
+		}
+		return checkPort(portStr)
+	case strings.HasPrefix(server, "https://"):
+		u, err := url.Parse(server)
+		if err != nil || u.Host == "" {
+			return fmt.Errorf("invalid DNS-over-HTTPS URL %q, expected https://host/path", server)
+		}
+		return nil
+	case strings.Contains(server, "://"):
+		return fmt.Errorf("unsupported DNS server scheme in %q (want ip:port, tls://host or https://host/path)", server)
+	}
 	host, portStr, err := net.SplitHostPort(server)
 	if err != nil {
-		return fmt.Errorf("invalid format, expected ip:port (e.g., %s): %w", DefaultDNSServer, err)
+		return fmt.Errorf("invalid format, expected ip:port (e.g., %s), tls://host or https://host/path: %w", DefaultDNSServer, err)
 	}
 	if net.ParseIP(host) == nil {
 		return fmt.Errorf("invalid IP address: %s", host)
 	}
+	return checkPort(portStr)
+}
+
+func checkPort(portStr string) error {
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
 		return fmt.Errorf("invalid port: %s (must be 1-65535)", portStr)

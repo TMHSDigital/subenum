@@ -34,7 +34,6 @@ Ideas we want, with no date attached.
 
 - A stable Go library API, `pkg/subenum` ([#77](https://github.com/TMHSDigital/subenum/issues/77)).
 - Try AXFR and detect NSEC-walkable zones before brute-forcing ([#85](https://github.com/TMHSDigital/subenum/issues/85)).
-- DNS-over-TLS and DNS-over-HTTPS transports ([#86](https://github.com/TMHSDigital/subenum/issues/86)).
 - A teaching / lab mode built on `-simulate` and the TUI ([#76](https://github.com/TMHSDigital/subenum/issues/76)).
 - Community and discoverability: Discussions, devcontainer, demo GIF, launch posts
   ([#75](https://github.com/TMHSDigital/subenum/issues/75), [#74](https://github.com/TMHSDigital/subenum/issues/74)).

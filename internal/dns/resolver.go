@@ -124,6 +124,7 @@ func ParseTypes(s string) ([]string, error) {
 // ResolveTypes, a dial beyond the slots reserved up front takes another rate
 // slot, which keeps -rate exact however many queries Go decides to send (#50).
 func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
+	dl := newDialer(timeout, dnsServer) // UDP/TCP, DoT or DoH (#86)
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
@@ -139,8 +140,7 @@ func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 					}
 				}
 			}
-			d := net.Dialer{Timeout: timeout}
-			c, err := d.DialContext(dialCtx, network, dnsServer)
+			c, err := dl.dial(dialCtx, network)
 			if err != nil || b == nil {
 				return c, err
 			}
