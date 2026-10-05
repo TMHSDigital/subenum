@@ -345,6 +345,14 @@ subenum -w <wordlist> [flags] -dL <domains_file>
 
 Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results are flushed, and the process exits with code 130 (143 for SIGTERM, as sent by `docker stop` or systemd). Interrupted lookups are not counted as resolver failures.
 
+**Resuming an interrupted scan.** On `Ctrl+C` or SIGTERM, subenum saves where it stopped to `subenum-resume.json` (or the path given with `-state`): the original command line, a checksum of each input file, the position in the wordlist per target, and the results found so far. Continue with:
+
+```bash
+subenum -resume subenum-resume.json
+```
+
+The resumed run refuses to start if an input file changed, re-emits the earlier results (so `-o` and JSON output end up complete), skips targets that had finished, and continues the interrupted one from the first wordlist entry not yet fully looked up. At most about one worker pool's worth (`-t`) of lookups is repeated. In recursive mode, names found before the interrupt have their children re-scanned. Runs that read the wordlist or domain list from stdin cannot be resumed.
+
 **Exit codes**
 
 | Code | Meaning |

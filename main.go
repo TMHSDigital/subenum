@@ -78,6 +78,10 @@ const exitCodesHelp = `Exit codes:
 // installed.
 var signalReady chan struct{}
 
+// testSignals, when set by a test, receives signals in place of a fresh
+// channel, so a test can interrupt a run in-process on Windows too.
+var testSignals chan os.Signal
+
 // Version is the release identifier. Makefile, CI and the Dockerfile set it
 // with -ldflags "-X main.Version=$(git describe --tags --dirty)". When it is
 // empty (go install, plain go build), the module version from the build info
@@ -141,6 +145,9 @@ type cliFlags struct {
 	excludeFile  string
 	resolvers    string    // -r: file of resolver addresses for a pool
 	diff         string    // -diff: previous results file to compare against
+	stateFile    string    // where an interrupted run saves its resume state
+	resumeFrom   int       // per target, set while resuming (#73)
+	resumeNames  []string  // per target, names found before the interrupt
 	permute      bool      // -permute: second pass over permutations of found names
 	seedsFile    string    // -seeds: extra permutation seeds (any results format)
 	pool         *dns.Pool // built from -r; nil means the single -dns-server
@@ -189,6 +196,8 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
 	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
 	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
+	fs.StringVar(&f.stateFile, "state", defaultStateFile, "Where an interrupted run saves its state for -resume")
+	fs.String("resume", "", "Resume an interrupted run from its state file (no other arguments)")
 	fs.StringVar(&f.diff, "diff", "", "Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes")
 	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")
 	fs.Usage = func() {
@@ -490,8 +499,13 @@ func run() (code int) {
 		return code
 	}
 
+	args, resume, resumeErr := resumeArgs(os.Args[1:])
+	if resumeErr != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", resumeErr)
+		return exitUsage
+	}
 	defaults := newDefaultsLoader()
-	f, positionals, fs, parseErr := parseFlagsWith(os.Args[1:], defaults.apply)
+	f, positionals, fs, parseErr := parseFlagsWith(args, defaults.apply)
 	if errors.Is(parseErr, errConfig) {
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
 		return exitUsage
@@ -591,6 +605,13 @@ func run() (code int) {
 	if f.wordlistFile == "" {
 		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", bundledWordlistName)
 	}
+	if resume != nil {
+		if err := resume.checkInputs(f); err != nil {
+			out.Error("cannot resume: %v", err)
+			return exitFailure
+		}
+		out.Info("Resuming the interrupted run of: subenum %s", strings.Join(args, " "))
+	}
 	wordLines, err := readWordlist(f)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
@@ -638,10 +659,16 @@ func run() (code int) {
 		w.SetSeed(f.seed)
 		w.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
 	}
-	var targetFound []string // the current target's hits, seeds for -permute
+	var targetFound []string          // the current target's hits, seeds for -permute
+	var targetResults []output.Result // the current target's results, saved on interrupt
+	restored := map[string]bool{}     // names re-emitted from a -resume state
 	emitResult := func(ev scan.Event, permutation bool) {
+		if restored[ev.Domain] {
+			return
+		}
 		targetFound = append(targetFound, ev.Domain)
 		res := output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Permutation: permutation}
+		targetResults = append(targetResults, res)
 		if diff == nil {
 			out.Emit(res)
 			return
@@ -699,6 +726,9 @@ func run() (code int) {
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
+	if testSignals != nil {
+		sigCh = testSignals // tests deliver an interrupt on any OS
+	}
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 	if signalReady != nil {
@@ -730,6 +760,7 @@ func run() (code int) {
 	// remaining targets are skipped rather than sent to it too (#82).
 	status := make([]string, len(targets))
 	results := make([]targetResult, len(targets))
+	targetRuns := make([][]output.Result, len(targets)) // results per target, for -resume state
 	failedTargets := 0
 	started := time.Now()
 	for i, target := range targets {
@@ -758,7 +789,35 @@ func run() (code int) {
 			continue
 		}
 		targetFound = targetFound[:0]
+		targetResults = nil
+		saved := resume.target(target)
+		f.resumeFrom, f.resumeNames = 0, nil
+		if saved != nil {
+			// Re-emit what was found before the interrupt, so -o and the
+			// structured output hold the whole result set.
+			for _, r := range saved.Results {
+				emitResult(scan.Event{Domain: r.Subdomain, Records: r.Records, Takeover: r.Takeover}, r.Permutation)
+				restored[r.Subdomain] = true
+			}
+			savedFinal := scan.Event{Kind: scan.EventDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results))}
+			if saved.Done {
+				out.Info("%s was finished before the interrupt; %d results restored", target, len(saved.Results))
+				results[i] = targetResult{done: true, final: savedFinal}
+				targetRuns[i] = targetResults
+				anyDone = true
+				status[i] = "ok"
+				continue
+			}
+			f.resumeFrom, f.resumeNames = saved.RootDone, append([]string(nil), targetFound...)
+			out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
+		}
 		res := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter, emit)
+		if saved != nil && res.done {
+			res.final.Stats = mergeStats(saved.Stats, res.final.Stats)
+			res.final.Processed += saved.Processed
+			res.final.Found += int64(len(saved.Results))
+			res.final.Total = max(res.final.Total+saved.Processed, saved.Total)
+		}
 		// -permute: a second pass over permutations of what was found (#72),
 		// skipped after an interrupt or a resolver abort.
 		if f.permute && res.done && !res.resolverAbort && signalCode.Load() == 0 {
@@ -769,6 +828,7 @@ func run() (code int) {
 			}
 		}
 		results[i] = res
+		targetRuns[i] = targetResults
 		anyDone = anyDone || res.done
 		anyFailed = anyFailed || res.failed
 		status[i] = "ok"
@@ -805,6 +865,10 @@ func run() (code int) {
 	// registered above runs after this. Reliability abort still emits
 	// EventDone with partial results, so Finish runs there.
 	logPoolHealth(f.pool, out)
+
+	if signalCode.Load() != 0 {
+		saveResumeState(f, args, targets, status, results, targetRuns, out)
+	}
 
 	// The run-quality report (#70): the last jsonl line, and the -stats file.
 	summary := buildSummary(f, targets, status, results, started, time.Since(started))
@@ -877,10 +941,13 @@ func scanOptions(f cliFlags, domain string, entries []string, maxAttempts int, r
 		Rate:        f.rate,
 		MaxQueries:  f.maxQueries,
 		Exclude:     f.excludes,
-		Pool:        f.pool,
-		NoAbort:     f.noAbort,
-		Verbose:     f.verbose,
-		Logf:        logf,
+		ResumeFrom:  f.resumeFrom,
+		// Names found before an interrupt still need their children expanded.
+		ResumeParents: f.resumeNames,
+		Pool:          f.pool,
+		NoAbort:       f.noAbort,
+		Verbose:       f.verbose,
+		Logf:          logf,
 	}
 }
 

@@ -18,6 +18,8 @@ func TestMain(m *testing.M) {
 		}
 	}
 	_ = os.Setenv(configEnv, filepath.Join(os.TempDir(), "subenum-test-no-such-config.json"))
+	// An interrupted run saves resume state; keep it out of the package dir.
+	_ = os.Setenv("SUBENUM_STATE", filepath.Join(os.TempDir(), "subenum-test-resume.json"))
 	os.Exit(m.Run())
 }
 

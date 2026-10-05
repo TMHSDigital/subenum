@@ -34,16 +34,23 @@ type Config struct {
 	Seed        uint64 // simulation seed: the same seed reproduces the same simulated results
 	Attempts    int
 	Force       bool
-	Verbose     bool          // log every lookup; through Logf when set, else unsynchronized to stderr
-	Logf        dns.Logf      // receives verbose lines when Verbose is set
-	Rate        int           // max DNS messages per second on the wire, all workers combined (0 = unlimited)
-	Types       []string      // record types to look up (A, AAAA, CNAME); empty = A,AAAA
-	Recursive   bool          // enumerate subdomains of discovered subdomains
-	Depth       int           // max recursion depth (1 = no recursion)
-	NoAbort     bool          // keep scanning after the reliability guard fires
-	MaxQueries  int           // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
-	Exclude     []string      // out-of-scope names and *.parent patterns; never queried (#87)
-	Resolver    *net.Resolver // reused across lookups; nil means scan.Run constructs one
+	Verbose     bool     // log every lookup; through Logf when set, else unsynchronized to stderr
+	Logf        dns.Logf // receives verbose lines when Verbose is set
+	Rate        int      // max DNS messages per second on the wire, all workers combined (0 = unlimited)
+	Types       []string // record types to look up (A, AAAA, CNAME); empty = A,AAAA
+	Recursive   bool     // enumerate subdomains of discovered subdomains
+	Depth       int      // max recursion depth (1 = no recursion)
+	NoAbort     bool     // keep scanning after the reliability guard fires
+	MaxQueries  int      // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
+	Exclude     []string // out-of-scope names and *.parent patterns; never queried (#87)
+
+	// Resuming an interrupted scan (#73): ResumeFrom skips the wordlist
+	// entries before it (Stats.RootDone of the interrupted run), and
+	// ResumeParents are names found before the interrupt whose children a
+	// recursive scan still has to expand.
+	ResumeFrom    int
+	ResumeParents []string
+	Resolver      *net.Resolver // reused across lookups; nil means scan.Run constructs one
 	// Pool, when set, spreads candidate lookups over several resolvers (#69).
 	// Every pool hit is re-validated against Resolver (the trusted
 	// -dns-server), whose answer is the one reported; preflight and wildcard
@@ -78,13 +85,17 @@ type Stats struct {
 	WildcardFiltered int64
 
 	// Run facts for the quality report (#70); not part of Sum.
-	QueriesSent int64        // DNS queries dialed, retries included (0 when simulated)
-	Skipped     int64        // candidates not tested because -max-queries was reached
-	Excluded    int64        // candidates not tested because -exclude put them out of scope
-	PoolHits    int64        // names a pool resolver said exist (-r)
-	Confirmed   int64        // pool hits the trusted resolver confirmed
-	Unconfirmed int64        // pool hits the trusted resolver said do not exist
-	Takeover    int64        // results flagged as subdomain-takeover candidates
+	QueriesSent int64 // DNS queries dialed, retries included (0 when simulated)
+	Skipped     int64 // candidates not tested because -max-queries was reached
+	Excluded    int64 // candidates not tested because -exclude put them out of scope
+	PoolHits    int64 // names a pool resolver said exist (-r)
+	Confirmed   int64 // pool hits the trusted resolver confirmed
+	Unconfirmed int64 // pool hits the trusted resolver said do not exist
+	Takeover    int64 // results flagged as subdomain-takeover candidates
+	// RootDone is the resume point: every wordlist entry before this index
+	// has been fully looked up (#73). Entries at or after it may also be
+	// done; resuming repeats at most a worker pool's worth of lookups.
+	RootDone    int64
 	Aborted     bool         // the reliability guard cancelled the scan
 	Wildcard    bool         // the root domain is a wildcard (scanned under -force)
 	Fingerprint []dns.Record // final wildcard fingerprint, empty when none
@@ -113,6 +124,7 @@ type counters struct {
 	confirmed        atomic.Int64
 	unconfirmed      atomic.Int64
 	takeover         atomic.Int64
+	rootDone         atomic.Int64
 	aborted          atomic.Bool
 }
 
@@ -147,6 +159,7 @@ func (c *counters) snapshot() Stats {
 		Confirmed:        c.confirmed.Load(),
 		Unconfirmed:      c.unconfirmed.Load(),
 		Takeover:         c.takeover.Load(),
+		RootDone:         c.rootDone.Load(),
 		Aborted:          c.aborted.Load(),
 	}
 }
@@ -301,6 +314,15 @@ func workerCount(cfg Config, maxDepth int) int {
 type job struct {
 	domain string
 	depth  int
+	root   int // index into cfg.Entries for a depth-1 job, else -1
+}
+
+// completion reports a job back to the dispatcher. finished is false when
+// the lookup was cut short by cancellation, so it does not count toward the
+// resume point.
+type completion struct {
+	root     int
+	finished bool
 }
 
 // expansion is a pending run of candidates: every cfg.Entries[next:] prepended
@@ -484,7 +506,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// completed) and the dispatcher expands them into depth-capped children.
 	jobs := make(chan job)
 	enqueue := make(chan job)
-	completed := make(chan struct{})
+	completed := make(chan completion)
 
 	// Progress ticker - fires every second.
 	// tickerDone signals the goroutine to stop; tickerStopped confirms it has
@@ -528,9 +550,39 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	go func() {
 		n := len(cfg.Entries)
 		visited := make(map[string]struct{}, n)
-		frontier := []expansion{{parent: cfg.Domain, depth: 1}}
+		start := min(max(cfg.ResumeFrom, 0), n)
+		frontier := []expansion{{parent: cfg.Domain, depth: 1, next: start}}
 		head := 0
-		remaining := n // candidates not yet generated
+		remaining := n - start // candidates not yet generated
+		// Resumed recursive scans re-expand the names found before the
+		// interrupt, whose children may not all have been tested (#73).
+		if cfg.Recursive {
+			rootLabels := strings.Count(cfg.Domain, ".") + 1
+			for _, p := range cfg.ResumeParents {
+				p = strings.ToLower(strings.TrimSuffix(p, "."))
+				if !strings.HasSuffix(p, "."+cfg.Domain) {
+					continue
+				}
+				if d := strings.Count(p, ".") + 1 - rootLabels; d >= 1 && d < maxDepth {
+					frontier = append(frontier, expansion{parent: p, depth: d + 1})
+					remaining += n
+				}
+			}
+		}
+		// Resume point: rootDone[i-start] is set once entry i is settled
+		// (looked up, or skipped as a duplicate or out of scope); watermark is
+		// the first index not yet settled.
+		rootDone := make([]bool, n-start)
+		watermark := start
+		settle := func(i int) {
+			if i < start {
+				return
+			}
+			rootDone[i-start] = true
+			for watermark < n && rootDone[watermark-start] {
+				watermark++
+			}
+		}
 		admitted := 0
 		skipped := 0
 		excluded := 0
@@ -576,21 +628,28 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 				if e.depth > 1 {
 					key = name[:len(name)-len(cfg.Domain)-1]
 				}
+				root := -1
+				if e.depth == 1 {
+					root = e.next - 1
+				}
 				if _, dup := visited[key]; dup {
+					settle(root)
 					continue
 				}
 				visited[key] = struct{}{}
 				if sc.excluded(name) {
 					excluded++
+					settle(root)
 					continue
 				}
 				admitted++
-				return job{domain: name, depth: e.depth}, true
+				return job{domain: name, depth: e.depth, root: root}, true
 			}
 			return job{}, false
 		}
 		closeJobs := func() {
 			stats.skipped.Store(int64(skipped))
+			stats.rootDone.Store(int64(watermark))
 			stats.excluded.Store(int64(excluded))
 			if skipped > 0 {
 				select {
@@ -637,8 +696,11 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			case out <- ready:
 				haveReady = false
 				pending++
-			case <-completed:
+			case c := <-completed:
 				pending--
+				if c.finished {
+					settle(c.root)
+				}
 			}
 		}
 	}()
@@ -650,9 +712,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				processJob(ctx, cfg, j, maxDepth, jobLimiter, events, enqueue, &processed, &found, &stats, cancel, &guardOnce, fingerprint, wc)
+				finished := processJob(ctx, cfg, j, maxDepth, jobLimiter, events, enqueue, &processed, &found, &stats, cancel, &guardOnce, fingerprint, wc)
 				select {
-				case completed <- struct{}{}:
+				case completed <- completion{root: j.root, finished: finished}:
 				case <-ctx.Done():
 				}
 			}
@@ -685,12 +747,12 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 // processJob resolves a single job and, on success, optionally enqueues
 // depth-capped children for recursive enumeration.
-func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *dns.RateLimiter, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once, fp *fingerprint, wc *wildcardCache) {
+func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *dns.RateLimiter, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once, fp *fingerprint, wc *wildcardCache) (finished bool) {
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	if err := limiter.Wait(ctx); err != nil {
-		return
+		return false
 	}
 
 	var outcome dns.Outcome
@@ -716,14 +778,14 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 	// cancel) says nothing about the resolver. Leave it out of every counter so
 	// an interrupt cannot inflate the failure rate or trip the guard (#42).
 	if outcome == dns.OutcomeCanceled || (outcome != dns.OutcomeFound && ctx.Err() != nil) {
-		return
+		return false
 	}
 
 	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, fp, j.domain, records) {
 		st.wildcardFiltered.Add(1)
 		n := atomic.AddInt64(processed, 1)
 		checkReliability(cfg, n, st, events, cancel, guardOnce)
-		return
+		return true
 	}
 
 	st.add(outcome)
@@ -731,7 +793,7 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 	checkReliability(cfg, n, st, events, cancel, guardOnce)
 
 	if outcome != dns.OutcomeFound {
-		return
+		return true
 	}
 
 	atomic.AddInt64(found, 1)
@@ -754,15 +816,15 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 		if !cfg.Simulate && cfg.resolveHook == nil && !cfg.scope.subtreeExcluded(j.domain) {
 			isWild, err := wc.isWildcard(ctx, cfg, j.domain)
 			if ctx.Err() != nil {
-				return
+				return true
 			}
 			if err != nil {
 				events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "skipping recursive expansion of " + j.domain + ": wildcard check failed: " + err.Error()}
-				return
+				return true
 			}
 			if isWild {
 				events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "wildcard DNS at " + j.domain + "; skipping recursive expansion"}
-				return
+				return true
 			}
 		}
 		// Hand the parent to the dispatcher, which generates its children.
@@ -771,6 +833,7 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 		case <-ctx.Done():
 		}
 	}
+	return true
 }
 
 // resolveViaPool looks name up through the resolver pool and re-validates a

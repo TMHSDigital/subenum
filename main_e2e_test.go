@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -606,5 +608,77 @@ func TestE2EPermute(t *testing.T) {
 	}
 	if err := json.Unmarshal(data, &sum); err != nil || sum.Targets[0].Permutation.Found != 1 || sum.Targets[0].Permutation.Seeds != 1 {
 		t.Fatalf("summary permutation = %+v (err %v)", sum.Targets, err)
+	}
+}
+
+// TestE2EResume is #73's done-when: interrupting a simulated scan partway
+// and running `subenum -resume <state>` gives the same final result set as
+// an uninterrupted run with the same seed.
+func TestE2EResume(t *testing.T) {
+	var words strings.Builder
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&words, "host%d\n", i)
+	}
+	wl := writeFile(t, "wl.txt", words.String())
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	outPath := filepath.Join(dir, "results.jsonl")
+	names := func(jsonl string) map[string]bool {
+		set := map[string]bool{}
+		for _, line := range strings.Split(strings.TrimSpace(jsonl), "\n") {
+			var r struct {
+				Type      string `json:"type"`
+				Subdomain string `json:"subdomain"`
+			}
+			if line != "" && json.Unmarshal([]byte(line), &r) == nil && r.Type != "summary" {
+				set[r.Subdomain] = true
+			}
+		}
+		return set
+	}
+
+	base := []string{"-simulate", "-seed", "7", "-hit-rate", "50", "-progress=false", "-format", "jsonl", "-w", wl}
+	_, ref := runCLI(t, "", append(append([]string{}, base...), "example.com")...)
+	want := names(ref)
+	if len(want) < 10 {
+		t.Fatalf("reference run found only %d names", len(want))
+	}
+
+	// Interrupted run: -rate 20 makes 40 names take ~2s; interrupt at ~1s.
+	ready := make(chan struct{})
+	signalReady, testSignals = ready, make(chan os.Signal, 1)
+	t.Cleanup(func() { signalReady, testSignals = nil, nil })
+	go func() {
+		<-ready
+		time.Sleep(time.Second)
+		testSignals <- os.Interrupt
+	}()
+	code, first := runCLI(t, "", append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")...)
+	signalReady, testSignals = nil, nil
+	if code != 130 {
+		t.Fatalf("interrupted run: exit %d, want 130", code)
+	}
+	if got := len(names(first)); got == 0 || got >= len(want) {
+		t.Fatalf("interrupt did not land mid-scan: %d of %d names", got, len(want))
+	}
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("no resume state written: %v", err)
+	}
+
+	// Resume: the state file alone replays the original command line.
+	code, resumed := runCLI(t, "", "-resume", statePath)
+	if code != 0 {
+		t.Fatalf("resumed run: exit %d", code)
+	}
+	if got := names(resumed); !maps.Equal(got, want) {
+		t.Fatalf("resumed result set has %d names, uninterrupted %d", len(got), len(want))
+	}
+	if data, err := os.ReadFile(outPath); err != nil || !maps.Equal(names(string(data)), want) {
+		t.Fatalf("-o after resume does not hold the full result set (err %v)", err)
+	}
+
+	// Resuming takes no other arguments.
+	if code, _ := runCLI(t, "", "-resume", statePath, "-t", "5"); code != 2 {
+		t.Errorf("-resume with extra arguments: exit %d, want 2", code)
 	}
 }

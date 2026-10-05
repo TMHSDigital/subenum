@@ -29,9 +29,12 @@ type Options struct {
 	MaxQueries  int
 	Exclude     []string
 	Pool        *dns.Pool // -r resolver pool; DNSServer is then the trusted resolver
-	NoAbort     bool
-	Verbose     bool
-	Logf        dns.Logf
+	// Resume point of an interrupted scan (#73); see Config.
+	ResumeFrom    int
+	ResumeParents []string
+	NoAbort       bool
+	Verbose       bool
+	Logf          dns.Logf
 }
 
 // Validate checks the numeric ranges and the resolver address. Messages name
@@ -85,5 +88,8 @@ func (o Options) Config() Config {
 		MaxQueries:  o.MaxQueries,
 		Exclude:     o.Exclude,
 		Pool:        o.Pool,
+
+		ResumeFrom:    o.ResumeFrom,
+		ResumeParents: o.ResumeParents,
 	}
 }

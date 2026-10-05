@@ -21,11 +21,13 @@
 | `-r <string>` | - | File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server |
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
+| `-resume <string>` | - | Resume an interrupted run from its state file (no other arguments) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
 | `-seed <uint>` | - | In simulation mode, seed for reproducible results (0 = random; the seed used is printed) |
 | `-seeds <string>` | - | Results file (any -format) whose names also seed -permute; implies -permute |
 | `-show-records` | - | In text format, append each result's records (TYPE=value) |
 | `-simulate` | - | Run in simulation mode without actual DNS queries (for testing) |
+| `-state <string>` | subenum-resume.json | Where an interrupted run saves its state for -resume |
 | `-stats <string>` | - | Write a JSON run-quality report (outcomes, queries sent, verdict) to this file |
 | `-t <int>` | 100 | Number of concurrent workers |
 | `-timeout <int>` | 1000 | DNS lookup timeout in milliseconds |
