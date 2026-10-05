@@ -50,6 +50,28 @@ const (
 	highConcurrency = 10000
 )
 
+// Exit codes, documented in the README and in -h (#82). A signal exits with
+// the shell convention 128+signum: 130 for SIGINT, 143 for SIGTERM.
+const (
+	exitOK      = 0
+	exitFailure = 1 // a scan, the wordlist, the domain list or the output file failed
+	exitUsage   = 2 // invalid flags or arguments
+	exitPartial = 3 // -dL: some targets failed while others completed
+)
+
+const exitCodesHelp = `Exit codes:
+  0    success
+  1    a scan, the wordlist, the domain list or the output file failed
+  2    invalid flags or arguments
+  3    -dL: some targets failed while others completed
+  130  interrupted (SIGINT, Ctrl+C); partial results are kept
+  143  terminated (SIGTERM); partial results are kept
+`
+
+// signalReady, when set by a test, is closed once run's signal handler is
+// installed.
+var signalReady chan struct{}
+
 // Version is the release identifier. Makefile, CI and the Dockerfile set it
 // with -ldflags "-X main.Version=$(git describe --tags --dirty)". When it is
 // empty (go install, plain go build), the module version from the build info
@@ -138,6 +160,13 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
+	fs.Usage = func() {
+		w := fs.Output()
+		fmt.Fprintln(w, "Usage: subenum -w <wordlist_file> [options] <domain>")
+		fmt.Fprintln(w, "       subenum -w <wordlist_file> [options] -dL <domains_file>")
+		fs.PrintDefaults()
+		_, _ = fmt.Fprint(w, "\n"+exitCodesHelp)
+	}
 	positionals, err := parseInterspersed(fs, args)
 	return f, positionals, fs, err
 }
@@ -199,10 +228,8 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 		if len(positionals) == 0 && f.domainList == "" {
 			out.Error("missing <domain> (or -dL <domains_file>)")
 		}
-		fmt.Fprintln(os.Stderr, "Usage: subenum -w <wordlist_file> [options] <domain>")
-		fmt.Fprintln(os.Stderr, "       subenum -w <wordlist_file> [options] -dL <domains_file>")
 		fs.SetOutput(os.Stderr)
-		fs.PrintDefaults()
+		fs.Usage()
 		return "", false
 	}
 	if f.domainList != "" && len(positionals) > 0 {
@@ -411,15 +438,15 @@ func run() (code int) {
 	out := output.New(nil, f.testMode, format)
 	if formatErr != nil {
 		out.Error("%v", formatErr)
-		return 1
+		return exitUsage
 	}
 	if typesErr != nil {
 		out.Error("%v", typesErr)
-		return 1
+		return exitUsage
 	}
 	if err != nil {
 		out.Error("%v", err)
-		return 1
+		return exitUsage
 	}
 
 	if f.testMode {
@@ -437,7 +464,7 @@ func run() (code int) {
 
 	domain, ok := validateFlags(f, positionals, fs, out, maxAttempts)
 	if !ok {
-		return 1
+		return exitUsage
 	}
 
 	targets, ok := loadTargets(f, domain, out)
@@ -514,23 +541,35 @@ func run() (code int) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
-	var interrupted atomic.Bool
+	if signalReady != nil {
+		close(signalReady)
+	}
+	var signalCode atomic.Int32 // 128+signum once a signal arrives
 	go func() {
 		select {
-		case <-sigCh:
+		case sig := <-sigCh:
 			// Restore default handling so a second Ctrl+C force-quits a run
 			// that is stuck draining (for example on a blocked stdout pipe).
 			signal.Stop(sigCh)
-			out.Info("Interrupt received, shutting down gracefully (Ctrl+C again to force quit)...")
-			interrupted.Store(true)
+			if sig == syscall.SIGTERM {
+				out.Info("SIGTERM received, shutting down gracefully...")
+				signalCode.Store(143)
+			} else {
+				out.Info("Interrupt received, shutting down gracefully (Ctrl+C again to force quit)...")
+				signalCode.Store(130)
+			}
 			cancel()
 		case <-ctx.Done():
 		}
 	}()
 
 	// Each target is an independent scan: its own preflight, wildcard check,
-	// -max-queries budget and reliability guard. Results share one writer, so
-	// -format json is a single array and CSV has a single header.
+	// -max-queries budget, -rate limiter and reliability guard. Results share
+	// one writer, so -format json is a single array and CSV has a single
+	// header. A reliability abort means the resolver is overloaded, so the
+	// remaining targets are skipped rather than sent to it too (#82).
+	status := make([]string, len(targets))
+	failedTargets := 0
 	for i, target := range targets {
 		if ctx.Err() != nil {
 			break
@@ -551,11 +590,36 @@ func run() (code int) {
 		if len(entries) == 0 {
 			out.Error("no valid wordlist entries for %s", target)
 			anyFailed = true
+			status[i] = "failed"
+			failedTargets++
 			continue
 		}
-		done, failed := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter)
+		done, failed, resolverAbort := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter)
 		anyDone = anyDone || done
 		anyFailed = anyFailed || failed
+		status[i] = "ok"
+		if failed {
+			status[i] = "failed"
+			failedTargets++
+		}
+		if resolverAbort && i < len(targets)-1 {
+			out.Error("resolver %s looks overloaded; skipping the %d remaining targets (use -no-abort to continue)", f.dnsServer, len(targets)-1-i)
+			for j := i + 1; j < len(targets); j++ {
+				status[j] = "skipped"
+				failedTargets++
+			}
+			break
+		}
+	}
+	if len(targets) > 1 {
+		out.Info("Targets:")
+		for i, target := range targets {
+			st := status[i]
+			if st == "" {
+				st = "not run"
+			}
+			out.Info("  %-8s %s", st, target)
+		}
 	}
 
 	// Finalize structured output only if at least one scan finished, so an
@@ -572,21 +636,27 @@ func run() (code int) {
 			out.Info("NOTE: these results are SIMULATED; no DNS queries were sent (seed %d).", f.seed)
 		}
 	}
-	if interrupted.Load() {
-		// Shell convention for SIGINT (128+2): partial results were flushed above,
+	if c := signalCode.Load(); c != 0 {
+		// Shell convention 128+signum: partial results were flushed above,
 		// but callers can tell an interrupted scan apart from success or failure.
-		return 130
+		return int(c)
 	}
-	if anyFailed || fileErrReported {
-		return 1
+	if fileErrReported {
+		return exitFailure
 	}
-	return 0
+	if len(targets) > 1 && failedTargets > 0 && failedTargets < len(targets) {
+		return exitPartial
+	}
+	if anyFailed {
+		return exitFailure
+	}
+	return exitOK
 }
 
 // scanTarget runs one domain's scan and streams its events to out. It reports
-// whether the scan finished (EventDone arrived) and whether it should count as
-// a failure for the exit code.
-func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (sawDone, failed bool) {
+// whether the scan finished (EventDone arrived), whether it should count as a
+// failure for the exit code, and whether the reliability guard aborted it.
+func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (sawDone, failed, resolverAbort bool) {
 	cfg := scan.Config{
 		Domain:      domain,
 		Entries:     entries,
@@ -648,7 +718,10 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 		}
 	}
 	// An error fails the run unless the scan finished under -no-abort.
-	return sawDone, sawError && (!sawDone || !f.noAbort)
+	// The reliability guard is the only error that still lets EventDone
+	// arrive; without -no-abort it cancelled the scan.
+	resolverAbort = sawDone && sawError && !f.noAbort
+	return sawDone, sawError && (!sawDone || !f.noAbort), resolverAbort
 }
 
 // resolveAttempts merges the -attempts and deprecated -retries flags.

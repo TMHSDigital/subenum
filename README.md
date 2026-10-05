@@ -317,7 +317,20 @@ subenum -w <wordlist> [flags] -dL <domains_file>
 
 </details>
 
-Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results are flushed, and the process exits with code 130. Interrupted lookups are not counted as resolver failures.
+Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results are flushed, and the process exits with code 130 (143 for SIGTERM, as sent by `docker stop` or systemd). Interrupted lookups are not counted as resolver failures.
+
+**Exit codes**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | A scan, the wordlist, the domain list or the output file failed |
+| `2` | Invalid flags or arguments |
+| `3` | `-dL`: some targets failed while others completed |
+| `130` | Interrupted (SIGINT, `Ctrl+C`); partial results are kept |
+| `143` | Terminated (SIGTERM); partial results are kept |
+
+With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
 
 <br>
 

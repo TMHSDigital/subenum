@@ -130,6 +130,10 @@ func TestE2ESeedReproducible(t *testing.T) {
 func TestE2EExitCodes(t *testing.T) {
 	wl := writeFile(t, "wl.txt", e2eWords)
 	empty := writeFile(t, "empty.txt", "# only comments\n")
+	// The second domain is so long that no wordlist entry fits under it, so
+	// that target fails while the first completes.
+	long := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 54) + ".com"
+	partial := writeFile(t, "partial.txt", "example.com\n"+long+"\n")
 	cases := []struct {
 		name string
 		args []string
@@ -137,9 +141,11 @@ func TestE2EExitCodes(t *testing.T) {
 	}{
 		{"help", []string{"-h"}, 0},
 		{"unknown flag", []string{"-nope"}, 2},
-		{"missing domain", []string{"-w", wl}, 1},
-		{"two domains", []string{"-simulate", "-w", wl, "a.example", "b.example"}, 1},
-		{"invalid flag value after domain", []string{"-simulate", "-w", wl, "example.com", "-t", "0"}, 1},
+		{"missing domain", []string{"-w", wl}, 2},
+		{"two domains", []string{"-simulate", "-w", wl, "a.example", "b.example"}, 2},
+		{"invalid flag value after domain", []string{"-simulate", "-w", wl, "example.com", "-t", "0"}, 2},
+		{"invalid format", []string{"-simulate", "-format", "xml", "-w", wl, "example.com"}, 2},
+		{"-dL partial failure", []string{"-simulate", "-progress=false", "-w", wl, "-dL", partial}, 3},
 		{"wordlist without valid entries", []string{"-simulate", "-w", empty, "example.com"}, 1},
 		{"domain list without valid domains", []string{"-simulate", "-w", wl, "-dL", empty}, 1},
 		{"unwritable output file", []string{"-simulate", "-progress=false", "-w", wl, "-o", t.TempDir(), "example.com"}, 1},
@@ -298,5 +304,13 @@ func TestE2ECLIPolish(t *testing.T) {
 	code, out := runCLIMerged(t, "-simulate", "-version")
 	if code != 0 || !strings.HasPrefix(out, ProgramName) || strings.Contains(out, "SIMULATION MODE ACTIVE") {
 		t.Errorf("-simulate -version: exit %d, output:\n%s", code, out)
+	}
+}
+
+// TestE2EHelpListsExitCodes covers #82: -h documents the exit codes.
+func TestE2EHelpListsExitCodes(t *testing.T) {
+	code, out := runCLIMerged(t, "-h")
+	if code != 0 || !strings.Contains(out, "Exit codes:") || !strings.Contains(out, "143") {
+		t.Errorf("-h: exit %d, output missing the exit-code table:\n%s", code, out)
 	}
 }
