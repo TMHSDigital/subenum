@@ -5,16 +5,19 @@ package validate
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"golang.org/x/net/idna"
 )
 
 // exampleDNSServer is shown in the DNS server format error message.
 const exampleDNSServer = "8.8.8.8:53"
 
 var (
-	labelRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+	labelRegex = regexp.MustCompile(`^[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?$`)
 	tldRegex   = regexp.MustCompile(`^([a-zA-Z]{2,}|xn--[a-zA-Z0-9-]{1,59})$`)
 )
 
@@ -35,9 +38,65 @@ func DNSServer(server string) error {
 	return nil
 }
 
+// NormalizeDomain turns a target as users type or paste it into the canonical
+// form every entry point scans: trimmed, lowercase, no trailing dot, IDNs in
+// punycode. It also strips a URL scheme and path, a :port and a leading "*.",
+// returning a one-line note for each so the caller can say what it did (#54).
+// The result is checked with Domain.
+func NormalizeDomain(input string) (domain string, notes []string, err error) {
+	s := strings.TrimSpace(input)
+	if strings.Contains(s, "@") {
+		return "", nil, fmt.Errorf("%q looks like an email address; pass just the domain", input)
+	}
+	if i := strings.Index(s, "://"); i >= 0 {
+		u, perr := url.Parse(s)
+		if perr != nil || u.Hostname() == "" {
+			return "", nil, fmt.Errorf("%q looks like a URL but has no host; pass just the domain", input)
+		}
+		s = u.Hostname()
+		notes = append(notes, fmt.Sprintf("%q looks like a URL; scanning host %s", input, s))
+	} else if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+		notes = append(notes, fmt.Sprintf("ignoring the path in %q; scanning host %s", input, s))
+	}
+	if host, port, serr := net.SplitHostPort(s); serr == nil {
+		if _, perr := strconv.Atoi(port); perr == nil {
+			s = host
+			notes = append(notes, fmt.Sprintf("ignoring port %s; DNS enumeration has no ports", port))
+		}
+	}
+	if strings.HasPrefix(s, "*.") {
+		s = s[2:]
+		notes = append(notes, fmt.Sprintf("ignoring the leading *. wildcard; scanning %s", s))
+	}
+	s = strings.ToLower(strings.TrimSuffix(s, "."))
+	if !isASCII(s) {
+		ascii, ierr := idna.Lookup.ToASCII(s)
+		if ierr != nil {
+			return "", nil, fmt.Errorf("invalid internationalized domain %q: %v", input, ierr)
+		}
+		notes = append(notes, fmt.Sprintf("using the punycode form %s for %s", ascii, s))
+		s = ascii
+	}
+	if err := Domain(s); err != nil {
+		return "", nil, err
+	}
+	return s, notes, nil
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
 // Domain checks that domain is non-empty, within the 253-character limit, and
 // conforms to DNS naming rules: 1-63 characters per label, and a TLD that is
-// either alphabetic (2+) or a punycode xn-- prefix.
+// either alphabetic (2+) or a punycode xn-- prefix. Labels other than the TLD
+// may contain underscores (_dmarc, _domainkey), as wordlist entries can.
 func Domain(domain string) error {
 	if len(domain) == 0 {
 		return fmt.Errorf("domain cannot be empty")

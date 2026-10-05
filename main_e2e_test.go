@@ -256,3 +256,29 @@ func TestE2EMergedStreamsHaveNoCarriageReturns(t *testing.T) {
 		})
 	}
 }
+
+// TestE2EDomainFormsGiveIdenticalOutput covers #54: the same target written
+// as Example.COM., example.com, a URL, or via -dL scans identically.
+func TestE2EDomainFormsGiveIdenticalOutput(t *testing.T) {
+	wl := writeFile(t, "wl.txt", e2eWords)
+	common := []string{"-simulate", "-seed", "7", "-hit-rate", "100", "-progress=false", "-w", wl}
+	scan := func(args ...string) string {
+		code, out := runCLI(t, "", append(append([]string{}, common...), args...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d", args, code)
+		}
+		lines := strings.Fields(out)
+		sort.Strings(lines)
+		return strings.Join(lines, "\n")
+	}
+	want := scan("example.com")
+	if !strings.Contains(want, "www.example.com") {
+		t.Fatalf("baseline output missing www.example.com:\n%s", want)
+	}
+	dl := writeFile(t, "domains.txt", "Example.COM.\n")
+	for _, args := range [][]string{{"Example.COM."}, {"https://example.com/"}, {"-dL", dl}} {
+		if got := scan(args...); got != want {
+			t.Errorf("%v output differs:\n%s\nwant:\n%s", args, got, want)
+		}
+	}
+}

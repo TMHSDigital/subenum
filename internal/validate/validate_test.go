@@ -88,3 +88,47 @@ func TestDomain(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeDomain covers #54: every common way of writing a target
+// normalizes to the same canonical domain.
+func TestNormalizeDomain(t *testing.T) {
+	tests := []struct {
+		in, want string
+		notes    int
+		wantErr  string
+	}{
+		{in: "example.com", want: "example.com"},
+		{in: "  Example.COM.  ", want: "example.com"},
+		{in: "https://example.com/", want: "example.com", notes: 1},
+		{in: "HTTPS://Example.com:8443/login?x=1", want: "example.com", notes: 1},
+		{in: "example.com/path", want: "example.com", notes: 1},
+		{in: "example.com:443", want: "example.com", notes: 1},
+		{in: "*.example.com", want: "example.com", notes: 1},
+		{in: "bücher.de", want: "xn--bcher-kva.de", notes: 1},
+		{in: "_dmarc.example.com", want: "_dmarc.example.com"},
+		{in: "user@example.com", wantErr: "email address"},
+		{in: "https:///nohost", wantErr: "no host"},
+		{in: "localhost", wantErr: "invalid domain format"},
+		{in: "", wantErr: "empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, notes, err := NormalizeDomain(tt.in)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+			if len(notes) != tt.notes {
+				t.Errorf("notes = %q, want %d", notes, tt.notes)
+			}
+		})
+	}
+}

@@ -250,10 +250,13 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 	if f.domainList != "" {
 		return "", true // targets come from loadTargets
 	}
-	domain := positionals[0]
-	if err := validate.Domain(domain); err != nil {
+	domain, notes, err := validate.NormalizeDomain(positionals[0])
+	if err != nil {
 		out.Error("%v", err)
 		return "", false
+	}
+	for _, n := range notes {
+		out.Info("Note: %s", n)
 	}
 	return domain, true
 }
@@ -276,10 +279,13 @@ func loadTargets(f cliFlags, domain string, out *output.Writer) ([]string, bool)
 		if wordlist.IsComment(line) {
 			continue
 		}
-		d := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(line), "."))
-		if err := validate.Domain(d); err != nil {
+		d, notes, err := validate.NormalizeDomain(line)
+		if err != nil {
 			out.Info("Skipping invalid domain %q in %s: %v", strings.TrimSpace(line), f.domainList, err)
 			continue
+		}
+		for _, n := range notes {
+			out.Info("Note: %s", n)
 		}
 		if !seen[d] {
 			seen[d] = true

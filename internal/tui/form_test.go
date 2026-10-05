@@ -162,3 +162,19 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 		t.Errorf("focus after Force = %d, want No Abort toggle", m.focus)
 	}
 }
+
+// TestValidateNormalizesDomain covers #54 for the TUI: a pasted URL or mixed
+// case domain scans the same canonical name as the CLI.
+func TestValidateNormalizesDomain(t *testing.T) {
+	for _, in := range []string{"https://Example.COM/", "Example.COM.", "example.com"} {
+		m := newFormModel(savedConfig{})
+		m.inputs[0].SetValue(in)
+		vals, errStr := m.validate()
+		if errStr != "" {
+			t.Fatalf("%q: unexpected error %q", in, errStr)
+		}
+		if vals.domain != "example.com" {
+			t.Errorf("%q: domain = %q, want example.com", in, vals.domain)
+		}
+	}
+}

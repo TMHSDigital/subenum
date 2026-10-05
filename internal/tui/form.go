@@ -351,11 +351,14 @@ func expandHome(path string) string {
 
 // validate checks all inputs and returns a scan config or an error string.
 func (m *formModel) validate() (formValues, string) {
-	domain := strings.TrimSpace(m.inputs[0].Value())
-	if domain == "" {
+	rawDomain := strings.TrimSpace(m.inputs[0].Value())
+	if rawDomain == "" {
 		return formValues{}, "Domain is required"
 	}
-	if err := validate.Domain(domain); err != nil {
+	// Same normalization as the CLI, so a pasted URL or Example.COM. scans
+	// (and saves) the same canonical domain (#54).
+	domain, _, err := validate.NormalizeDomain(rawDomain)
+	if err != nil {
 		return formValues{}, err.Error()
 	}
 	wl := expandHome(strings.TrimSpace(m.inputs[1].Value()))
