@@ -5,101 +5,88 @@ title: Roadmap
 
 # Roadmap
 
-Status as of v0.8.0, which shipped N1-N6 below. Items below the fold were the next pass; they were
-noticed during resolver-layer hardening and left alone on purpose.
+Where subenum is going next. Everything that has shipped is in the
+[CHANGELOG](https://github.com/TMHSDigital/subenum/blob/main/CHANGELOG.md);
+this page only lists open work. Each item links to its issue, which is the place
+to discuss it or offer help.
 
-Effort: S (under ~1 hour), M (a few hours), L (a day or more).
+## Now
 
-## Shipped in 0.6.x / 0.7.0
+Work in progress or next up.
 
-### C1 (CLOSED as not planned, #23). Guard the events sends against a non-draining consumer
-- **Status:** closed. CLI and TUI both drain until close. Guarding `EventDone` with `ctx.Done()` races TUI/CLI abort (`select` is non-deterministic once ctx is already cancelled). The PR1 `EventError` drain is enough for reliability abort. Reopen if a consumer stops draining.
+- **Patch release for static Linux binaries** ([#46](https://github.com/TMHSDigital/subenum/issues/46)).
+  The build fix is on `main`; a v0.8.1 release replaces the dynamically linked asset.
+- **Developer docs match the code** ([#79](https://github.com/TMHSDigital/subenum/issues/79)).
+- **Dependency and lint hygiene** ([#83](https://github.com/TMHSDigital/subenum/issues/83)):
+  current `x/sys` and `x/text`, a supported `go` directive, stricter linters.
+- **Test infrastructure** ([#67](https://github.com/TMHSDigital/subenum/issues/67)):
+  replace the hand-rolled test DNS server and close coverage gaps.
+- **Repository hardening** ([#60](https://github.com/TMHSDigital/subenum/issues/60)):
+  protected `main`, Dependabot alerts, Actions pinned by SHA.
 
-### C2 (DONE). Remove dead `dns.Resolve` and its doc reference
-Landed with the unused `LookupHost` path deleted and ARCHITECTURE section 2.3 corrected.
+## Next
 
-### P1 (DONE). Extract validators into `internal/validate`
-CLI and TUI share `validate.Domain` and `validate.DNSServer`. As of 0.7.0 the domain
-validator also enforces the 63-character per-label limit and accepts punycode TLDs (`xn--...`).
+Planned features that make results more trustworthy and the tool easier to get.
 
-### P2 (DONE). Persist and round-trip record types (`-type`) in the TUI
+- **Resolver pool with trusted re-validation** ([#69](https://github.com/TMHSDigital/subenum/issues/69)), `-r resolvers.txt`.
+- **Machine-readable run-quality report** ([#70](https://github.com/TMHSDigital/subenum/issues/70)):
+  per-query stats, wildcard drops and a confidence verdict.
+- **Scope control for bug-bounty programs** ([#87](https://github.com/TMHSDigital/subenum/issues/87)):
+  `-exclude` patterns and an out-of-scope file.
+- **Monitoring mode** ([#84](https://github.com/TMHSDigital/subenum/issues/84)):
+  diff against a previous run, plus a GitHub Action for scheduled checks.
+- **Release pipeline** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):
+  GoReleaser archives, checksums, SBOM and signatures.
+- **Package managers** ([#62](https://github.com/TMHSDigital/subenum/issues/62)):
+  Homebrew, Scoop, AUR, Nix, Kali/BlackArch.
+- **A useful default wordlist** ([#63](https://github.com/TMHSDigital/subenum/issues/63))
+  and an up-to-date **Pages site** ([#64](https://github.com/TMHSDigital/subenum/issues/64)).
 
-### P3 (DONE). Expose recursive enumeration (`-recursive`/`-depth`) in the TUI
+## Later
 
-### P4 (DONE). Expose rate limiting (`-rate`) in the TUI
+Ideas we want, with no date attached.
 
-### P5 (DONE). Output file and format in the TUI
-`output.NewFile` is file-only so structured output never collides with the alt-screen.
+- Permutation / alteration mode for second-stage brute-forcing ([#72](https://github.com/TMHSDigital/subenum/issues/72)).
+- Subdomain takeover hints for dangling CNAMEs ([#71](https://github.com/TMHSDigital/subenum/issues/71)).
+- A stable Go library API, `pkg/subenum` ([#77](https://github.com/TMHSDigital/subenum/issues/77)).
+- Resume interrupted scans with `-resume` ([#73](https://github.com/TMHSDigital/subenum/issues/73)).
+- Try AXFR and detect NSEC-walkable zones before brute-forcing ([#85](https://github.com/TMHSDigital/subenum/issues/85)).
+- DNS-over-TLS and DNS-over-HTTPS transports ([#86](https://github.com/TMHSDigital/subenum/issues/86)).
+- Shell completions, a man page, and defaults from a config file or `SUBENUM_*` variables ([#88](https://github.com/TMHSDigital/subenum/issues/88)).
+- A teaching / lab mode built on `-simulate` and the TUI ([#76](https://github.com/TMHSDigital/subenum/issues/76)).
+- Community and discoverability: Discussions, devcontainer, demo GIF, launch posts
+  ([#75](https://github.com/TMHSDigital/subenum/issues/75), [#74](https://github.com/TMHSDigital/subenum/issues/74)).
 
-### D1 (DONE). Rewrite the ARCHITECTURE data-flow to the dispatcher model
+## What 1.0 means
 
-### D2 (DONE). Refresh DEVELOPER_GUIDE "Future Development" and file tree
+subenum reaches 1.0 when scripts and pipelines can depend on it without
+surprises:
 
-### D3 (DONE). Fix minor doc references
-
-### CL1 (DONE). Consolidate `SimulateResolution` into `SimulateResolve`
-
-### T1 (DONE). Cover TUI session-config round-trip and form navigation
-
-### T2 (DONE). Cover output simulate-prefix and CSV empty-record branches
-
-### R1 (DONE). Resolver-layer hardening (v0.7.0)
-Outcome classification and scan accounting, NXDOMAIN no-retry, TCP fallback plus
-one `*net.Resolver` per scan, wildcard fingerprints and per-branch detection,
-`-max-queries` plus recursion ceiling plus resolver preflight, hermetic DNS tests
-and release hygiene.
+- **Stable flags.** No flag is renamed or removed without a deprecation release
+  first (as `-retries` was for `-attempts`).
+- **Stable output schemas.** The JSON, JSONL and CSV fields are documented and
+  only ever gain fields, never lose or rename them.
+- **Documented exit codes**, already in place (0, 1, 2, 3, 130, 143).
+- **A run-quality report** ([#70](https://github.com/TMHSDigital/subenum/issues/70)),
+  so a result set says how far it can be trusted.
+- **Verifiable releases** ([#61](https://github.com/TMHSDigital/subenum/issues/61)):
+  checksums, SBOM and signatures.
 
 ## Known limitations
 
-These are constraints from the v0.7.0 resolver-hardening pass, not footnotes.
+Constraints to keep in mind when changing the code.
 
-- **testdns is still hand-rolled and partial.** It serves A, AAAA, one-hop CNAME
-  chains, per-name SERVFAIL on A, and delayed A answers. Other qtypes and EDNS are
-  not modelled; extend the responder before testing them.
-- **The reliability guard is exercised with injected timeouts, not simulate misses,**
-  because simulate misses classify as NXDOMAIN and NXDOMAIN is excluded from the
-  failure rate by design. Preserve that when refactoring the guard.
-- **Cap and ceiling notices reuse `EventWildcard`.** Working, but the kind name now
-  understates what it carries. Renaming it to `EventNotice` is a clean follow-up
-  that touches both consumers.
-- **The DNS wire format in `testdns_test.go` is hand-rolled** because
-  `golang.org/x/net/dns/dnsmessage` is not in the module graph and PR6 forbade new
-  dependencies. Adding `golang.org/x/net` later would let the responder shrink
-  considerably.
-- **The `go` directive is `1.24.2`, not patchless `1.24`.** charmbracelet/bubbles
-  requires 1.24.2, so `go build` refuses a `go 1.24` line until tidy bumps it.
-  On PowerShell, unquoted `-go=1.24` is parsed as `-go=1`.
-
-## Next pass
-
-Do not expand this list into drive-by fixes in the same PR that notices them.
-
-### N1 (DONE, #32). `-rate` ticker under-delivers
-Replaced by `dns.RateLimiter` reservations, which also moved pacing from jobs
-to wire queries.
-
-### N2 (DONE, #34). Text-format record display
-`text` output still prints `Found: <domain>` and discards record type/value.
-JSON and CSV already carry them.
-
-### N3 (DONE, #31/#32). Per-type shared timeout budget
-`ResolveTypes` uses one `context.WithTimeout` for the whole type loop, so AAAA
-and CNAME starve after a slow A. Give each type its own budget or a remaining
-budget that cannot go negative.
-
-### N4 (DONE, #41). `-dL` multi-domain input
-A domain-list file (one apex per line) so a single process can scan more than
-one target. This would retire the Windows-hostile `examples/multi_domain_scan.sh`.
-Needs a clear interaction with `-recursive`, `-max-queries`, and the reliability
-guard.
-
-### N5 (DONE, #36). Verbose logging bypasses the output mutex
-`-v` writes to stderr without going through the output writer mutex, so verbose
-lines mangle the carriage-return progress line.
-
-### N6 (DONE, #37). TUI viewport height goes negative below 9 rows
-The scan-view viewport height is unclamped and can go negative on short
-terminals.
-
-### N7. Event-channel send guards (C1 / #23)
-Closed as not planned. See C1.
+- **The test DNS server is hand-rolled.** It serves A, AAAA, one-hop CNAME
+  chains, SERVFAIL, REFUSED, dropped queries and delayed A answers. Other qtypes
+  and EDNS are not modelled; extend it (or finish #67) before testing them.
+- **DNS goes through Go's stdlib resolver.** Its internal retries depend on the
+  host's resolver configuration. `-rate` charges every query it dials, but the
+  number of queries per lookup is not fully under subenum's control.
+- **IDN targets use a plain RFC 3492 Punycode encoder**, not full UTS #46
+  mapping, so a domain must be typed in its usual lowercase form.
+- **The reliability guard is tested with injected timeouts, not simulate
+  misses,** because simulate misses classify as NXDOMAIN, which is excluded from
+  the failure rate by design.
+- **The `go` directive is `1.24.2`.** charmbracelet/bubbles requires it, and new
+  dependencies must keep it and pass `govulncheck` in CI. On PowerShell, quote
+  `-go=1.24.2`; unquoted it is parsed as `-go=1`.
