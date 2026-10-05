@@ -177,7 +177,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !*force {
 		flags |= os.O_EXCL // never silently replace an existing wordlist (#59)
 	}
-	file, err := os.OpenFile(*outputFile, flags, 0o644)
+	file, err := os.OpenFile(*outputFile, flags, 0o644) //nolint:gosec // a generated wordlist is not sensitive; same mode os.Create gives
 	if errors.Is(err, os.ErrExist) {
 		fmt.Fprintf(stderr, "Error: %s already exists; pass -f to overwrite it or -o to choose another path\n", *outputFile)
 		return 1
