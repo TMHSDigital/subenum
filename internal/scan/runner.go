@@ -259,20 +259,15 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	}
 
 	if !cfg.Simulate && cfg.resolveHook == nil {
-		types := cfg.Types
-		if len(types) == 0 {
-			types = dns.DefaultTypes
-		}
-		records, _, err := dns.ResolveTypes(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, types)
-		outcome := dns.Classify(err)
-		if len(records) > 0 {
-			outcome = dns.OutcomeFound
-		}
+		// Retried like any other lookup, so one dropped packet cannot abort a
+		// scan that -attempts would otherwise complete (#57).
+		attempts := max(cfg.Attempts, 1)
+		_, outcome := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, nil, attempts, cfg.Types)
 		if ctx.Err() != nil {
 			return // interrupted during preflight: not a resolver failure
 		}
 		if outcome != dns.OutcomeFound && outcome != dns.OutcomeNXDomain {
-			msg := fmt.Sprintf("resolver %s failed preflight for %s: %v", cfg.DNSServer, cfg.Domain, err)
+			msg := fmt.Sprintf("resolver %s failed preflight for %s: %s after %d attempt(s)", cfg.DNSServer, cfg.Domain, outcome, attempts)
 			events <- Event{Kind: EventError, Message: msg}
 			return
 		}

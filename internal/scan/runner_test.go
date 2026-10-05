@@ -1088,3 +1088,48 @@ func BenchmarkRun1M(b *testing.B) {
 		}
 	}
 }
+
+// TestRunPreflightRetries covers #57: a dropped first preflight query fails a
+// one-attempt scan but not one with -attempts 2.
+func TestRunPreflightRetries(t *testing.T) {
+	for _, attempts := range []int{1, 2} {
+		t.Run(fmt.Sprintf("attempts=%d", attempts), func(t *testing.T) {
+			var apexQueries atomic.Int32
+			addr, stop := startUDPDNSAction(t, func(name string) dnsAction {
+				if name == "example.com" && apexQueries.Add(1) == 1 {
+					return dnsAction{drop: true}
+				}
+				return dnsAction{}
+			})
+			defer stop()
+
+			timeout := 150 * time.Millisecond
+			cfg := Config{
+				Domain:      "example.com",
+				Entries:     []string{"www"},
+				Concurrency: 1,
+				Timeout:     timeout,
+				Attempts:    attempts,
+				Types:       []string{"A"},
+				Resolver:    dns.NewResolver(timeout, addr),
+				DNSServer:   addr,
+			}
+			events := make(chan Event, 16)
+			go Run(context.Background(), cfg, events)
+			done, errs, _ := collect(events)
+
+			if attempts == 1 {
+				if len(errs) != 1 || !strings.Contains(errs[0].Message, "failed preflight") {
+					t.Fatalf("errors = %v, want a preflight failure", errs)
+				}
+				return
+			}
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+			if done == nil || done.Processed != 1 {
+				t.Fatalf("done = %+v, want one processed job", done)
+			}
+		})
+	}
+}
