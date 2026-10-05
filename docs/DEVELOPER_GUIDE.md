@@ -165,7 +165,7 @@ go test ./internal/dns -run TestLiveResolverSmoke
 
 ### Writing Tests
 
-When adding new features or modifying existing ones, please ensure you add appropriate tests. Tests must not depend on the network: DNS tests in `internal/dns` use `startTestDNS` (in `testdns_test.go`), a table-driven wrapper over `internal/dnstest`, the shared in-process UDP/TCP DNS server; names missing from the table get NXDOMAIN and missing record types get NODATA. Use `dnstest.Start` directly when a test needs per-query scripting or exact query counts (`QueriesFor`). Its `Resolver` method returns a `*net.Resolver` pointed at it. Here's a basic structure (save it as a `_test.go` file in `internal/dns`):
+When adding new features or modifying existing ones, please ensure you add appropriate tests. Tests must not depend on the network: DNS tests in `internal/dns` use `startTestDNS` (in `testdns_test.go`), a table-driven wrapper over `internal/dnstest`, the shared in-process UDP/TCP DNS server; names missing from the table get NXDOMAIN and missing record types get NODATA. Use `dnstest.Start` directly when a test needs per-query scripting or exact query counts (`QueriesFor`). The `startTestDNS` server's `Resolver` method returns a `*net.Resolver` pointed at it. Here's a basic structure (save it as a `_test.go` file in `internal/dns`):
 
 ```go
 package dns
