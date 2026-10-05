@@ -88,8 +88,12 @@ subenum/
 │   ├── sample_wordlist.txt     # 50-entry starter wordlist
 │   ├── sample_domains.txt      # Sample domain list for -dL
 │   ├── advanced_usage.md       # Scripting and integration patterns
-│   └── demo.sh                 # Quick demo script
+│   ├── demo.sh                 # Quick demo script
+│   └── labs/                   # -simulate-zone scenarios and wordlist for docs/labs.md
 ├── internal/
+│   ├── dnsserver/              # Scriptable loopback DNS server (UDP, TCP, DoT, DoH)
+│   ├── dnstest/                # dnsserver for tests: stops on cleanup, fails the test on error
+│   ├── labzone/                # -simulate-zone scenario parser and answer logic
 │   ├── dns/
 │   │   ├── resolver.go         # NewResolver, ResolveTypes, ResolveDomainWithRetry, Classify,
 │   │   │                       # CheckWildcard, FingerprintWildcard, ParseTypes

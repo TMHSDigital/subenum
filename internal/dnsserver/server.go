@@ -1,9 +1,11 @@
-// Package dnstest is a scriptable DNS server for hermetic tests (#67). Each
-// query is answered by a Handler, which decides per name and type whether to
-// answer with records, return an error RCODE or NODATA, delay, truncate, or
-// drop it. The server counts every query it receives, in total and per name
-// and type, so tests can assert exact wire-query counts.
-package dnstest
+// Package dnsserver is a scriptable local DNS server (#67). Each query is
+// answered by a Handler, which decides per name and type whether to answer
+// with records, return an error RCODE or NODATA, delay, truncate, or drop it.
+// The server counts every query it receives, in total and per name and type.
+//
+// It backs the hermetic tests (through internal/dnstest) and -simulate-zone
+// labs (#76), which point the real resolver at a loopback server.
+package dnsserver
 
 import (
 	"context"
@@ -14,6 +16,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -22,7 +26,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -69,12 +72,12 @@ type Options struct {
 	IPv6 bool
 }
 
-// Server is a running test DNS server.
+// Server is a running DNS server.
 type Server struct {
 	Addr string // host:port, for -dns-server or dns.NewResolver
 
-	TLSAddr string         // DoT listener after StartTLS, for tls://<TLSAddr>
-	RootCAs *x509.CertPool // trusts the StartTLS certificate
+	TLSAddr string         // DoT listener after ListenTLS, for tls://<TLSAddr>
+	RootCAs *x509.CertPool // trusts the ListenTLS certificate
 
 	connections   atomic.Int64
 	streamQueries atomic.Int64
@@ -82,6 +85,9 @@ type Server struct {
 	total  atomic.Int64
 	mu     sync.Mutex
 	counts map[countKey]int64
+
+	closers []io.Closer
+	wg      sync.WaitGroup
 }
 
 type countKey struct {
@@ -89,15 +95,12 @@ type countKey struct {
 	qtype dnsmessage.Type
 }
 
-// Start runs a concurrent IPv4 server answering with h, stopped on cleanup.
-func Start(t testing.TB, h Handler) *Server {
-	return StartWith(t, Options{}, h)
-}
+// ErrNoIPv6 is returned by Listen when IPv6 is requested and the host has no
+// IPv6 loopback.
+var ErrNoIPv6 = errors.New("no IPv6 loopback")
 
-// StartWith runs a server with options, stopped on cleanup. With IPv6 set and
-// no IPv6 loopback available, the test is skipped.
-func StartWith(t testing.TB, opts Options, h Handler) *Server {
-	t.Helper()
+// Listen runs a server on a free loopback port answering with h, until Close.
+func Listen(opts Options, h Handler) (*Server, error) {
 	host := "127.0.0.1"
 	if opts.IPv6 {
 		host = "::1"
@@ -116,9 +119,9 @@ func StartWith(t testing.TB, opts Options, h Handler) *Server {
 		pc, err = lc.ListenPacket(context.Background(), "udp", net.JoinHostPort(host, "0"))
 		if err != nil {
 			if opts.IPv6 {
-				t.Skipf("no IPv6 loopback: %v", err)
+				return nil, fmt.Errorf("%w: %w", ErrNoIPv6, err)
 			}
-			t.Fatalf("listen udp: %v", err)
+			return nil, fmt.Errorf("listen udp: %w", err)
 		}
 		ln, err = lc.Listen(context.Background(), "tcp", pc.LocalAddr().String())
 		if err == nil {
@@ -127,26 +130,28 @@ func StartWith(t testing.TB, opts Options, h Handler) *Server {
 		_ = pc.Close()
 	}
 	if err != nil {
-		t.Fatalf("no free UDP+TCP port pair: %v", err)
+		return nil, fmt.Errorf("no free UDP+TCP port pair: %w", err)
 	}
-	s := &Server{Addr: ln.Addr().String(), counts: map[countKey]int64{}}
+	s := &Server{Addr: ln.Addr().String(), counts: map[countKey]int64{}, closers: []io.Closer{ln, pc}}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	s.wg.Add(2)
 	go func() {
-		defer wg.Done()
+		defer s.wg.Done()
 		s.serveUDP(pc, opts.Serial, h)
 	}()
 	go func() {
-		defer wg.Done()
+		defer s.wg.Done()
 		s.serveTCP(ln, h)
 	}()
-	t.Cleanup(func() {
-		_ = ln.Close()
-		_ = pc.Close()
-		wg.Wait()
-	})
-	return s
+	return s, nil
+}
+
+// Close stops the server's listeners and waits for them to exit.
+func (s *Server) Close() {
+	for _, c := range s.closers {
+		_ = c.Close()
+	}
+	s.wg.Wait()
 }
 
 // Queries returns how many queries the server has received.
@@ -224,26 +229,28 @@ func (s *Server) serveTCP(ln net.Listener, h Handler) {
 	}
 }
 
-// StartTLS adds a DNS-over-TLS listener (RFC 7858) answering with h, using a
-// certificate for 127.0.0.1 generated for the test. Use TLSAddr as
-// tls://<TLSAddr> and RootCAs to trust it.
-func (s *Server) StartTLS(t testing.TB, h Handler) {
-	t.Helper()
-	cert, pool := selfSignedCert(t)
-	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+// ListenTLS adds a DNS-over-TLS listener (RFC 7858) answering with h, using a
+// freshly generated certificate for 127.0.0.1. Use TLSAddr as tls://<TLSAddr>
+// and RootCAs to trust it. Close stops it too.
+func (s *Server) ListenTLS(h Handler) error {
+	cert, pool, err := selfSignedCert()
 	if err != nil {
-		t.Fatalf("listen tls: %v", err)
+		return err
 	}
+	lc := &net.ListenConfig{}
+	tcp, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("listen tls: %w", err)
+	}
+	ln := tls.NewListener(tcp, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
 	s.TLSAddr, s.RootCAs = ln.Addr().String(), pool
-	done := make(chan struct{})
+	s.closers = append(s.closers, ln)
+	s.wg.Add(1)
 	go func() {
-		defer close(done)
+		defer s.wg.Done()
 		s.serveTCP(ln, h)
 	}()
-	t.Cleanup(func() {
-		_ = ln.Close()
-		<-done
-	})
+	return nil
 }
 
 // DoHHandler serves DNS over HTTPS (RFC 8484, POST) answering with h. Run it
@@ -274,11 +281,10 @@ func (s *Server) DoHHandler(h Handler) http.Handler {
 func (s *Server) Connections() int64 { return s.connections.Load() }
 
 // selfSignedCert makes a short-lived certificate for 127.0.0.1 and ::1.
-func selfSignedCert(t testing.TB) (tls.Certificate, *x509.CertPool) {
-	t.Helper()
+func selfSignedCert() (tls.Certificate, *x509.CertPool, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		return tls.Certificate{}, nil, err
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
@@ -294,15 +300,15 @@ func selfSignedCert(t testing.TB) (tls.Certificate, *x509.CertPool) {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
-		t.Fatal(err)
+		return tls.Certificate{}, nil, err
 	}
 	leaf, err := x509.ParseCertificate(der)
 	if err != nil {
-		t.Fatal(err)
+		return tls.Certificate{}, nil, err
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(leaf)
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, pool
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, pool, nil
 }
 
 // handle parses a query, asks h, and builds the response (nil means drop).

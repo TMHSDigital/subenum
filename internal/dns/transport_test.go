@@ -28,7 +28,7 @@ func startAllTransports(t *testing.T) (*dnstest.Server, map[string]string) {
 		return dnstest.NXDomain
 	}
 	srv := dnstest.Start(t, h)
-	srv.StartTLS(t, h)
+	dnstest.StartTLS(t, srv, h)
 	doh := httptest.NewUnstartedServer(srv.DoHHandler(h))
 	doh.EnableHTTP2 = true
 	doh.StartTLS()

@@ -1,0 +1,6 @@
+# Lab 3: a resolver that refuses anything past 40 queries a second.
+$REFUSE-ABOVE 40
+www       A      192.0.2.10
+mail      A      192.0.2.20
+api       A      192.0.2.30
+test      A      192.0.2.40

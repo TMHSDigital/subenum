@@ -112,6 +112,7 @@ Exit codes: `0` success, `1` failure, `2` invalid arguments, `3` some `-dL` targ
   <a href="DEVELOPER_GUIDE.html">Developer Guide</a>
   <a href="docker.html">Docker</a>
   <a href="monitoring.html">Monitoring</a>
+  <a href="labs.html">Labs</a>
   <a href="CONTRIBUTING.html">Contributing</a>
   <a href="ROADMAP.html">Roadmap</a>
   <a href="https://github.com/TMHSDigital/subenum/blob/main/examples/advanced_usage.md">Advanced Usage</a>

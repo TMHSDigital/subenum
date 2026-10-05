@@ -26,6 +26,7 @@ type Summary struct {
 	Simulated   bool            `json:"simulated"`
 	Seed        uint64          `json:"seed,omitempty"`
 	Resolver    string          `json:"resolver,omitempty"`
+	Zone        string          `json:"zone,omitempty"`      // -simulate-zone scenario; Resolver is then its local server (#76)
 	Transport   string          `json:"transport,omitempty"` // udp, tls or https (#86)
 	RateLimit   int             `json:"rate_limit"`
 	QueriesSent int64           `json:"queries_sent"`

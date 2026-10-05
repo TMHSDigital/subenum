@@ -1,0 +1,6 @@
+# Lab 2: spot the wildcard. Every name under lab.example resolves...
+# except that a few of them are real hosts with their own addresses.
+*         A      192.0.2.250
+www       A      192.0.2.10
+portal    A      192.0.2.11
+intranet  A      192.0.2.12

@@ -29,6 +29,7 @@ func buildSummary(f cliFlags, targets, status []string, results []targetResult, 
 	} else {
 		s.Resolver = f.dnsServer
 		s.Transport = dns.Transport(f.dnsServer)
+		s.Zone = f.simZone
 	}
 
 	worst := -1

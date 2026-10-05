@@ -1,0 +1,9 @@
+# Lab 4: names hide one level down. Only some are visible from the top.
+www            A   192.0.2.10
+dev            A   192.0.2.50
+api.dev        A   192.0.2.51
+git.dev        A   192.0.2.52
+staging.dev    A   192.0.2.53
+admin.staging.dev  A  192.0.2.54
+corp           A   192.0.2.60
+vpn.corp       A   192.0.2.61

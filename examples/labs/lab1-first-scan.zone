@@ -1,0 +1,10 @@
+# Lab 1: first scan. Run:
+#   subenum -simulate-zone examples/labs/lab1-first-scan.zone -show-records lab.example
+@         A      192.0.2.1
+www       A      192.0.2.10
+www       AAAA   2001:db8::10
+mail      A      192.0.2.20
+vpn       A      192.0.2.30
+jenkins   A      192.0.2.40
+shop      CNAME  www
+blog      CNAME  ghost-lab.example.net.

@@ -1,0 +1,7 @@
+# Lab 5: a zone where some lookups fail. Read the run-quality report.
+www       A        192.0.2.10
+mail      A        192.0.2.20
+legacy    TIMEOUT
+old       TIMEOUT
+backup    SERVFAIL
+beta      REFUSED

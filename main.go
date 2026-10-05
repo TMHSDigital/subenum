@@ -128,6 +128,7 @@ type cliFlags struct {
 	testMode     bool
 	testHitRate  int
 	seed         uint64
+	simZone      string // -simulate-zone: lab scenario served by a local DNS server (#76)
 	outputFile   string
 	attempts     int
 	retries      int
@@ -179,6 +180,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
 	fs.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
+	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file via a local DNS server, so no traffic leaves the machine (see the Labs page)")
 	fs.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain, 1 = no retry (default 1)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
@@ -283,6 +285,14 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 	if f.wordlistFile == wordlist.Stdin && f.domainList == wordlist.Stdin {
 		out.Error("-w and -dL cannot both read standard input")
 		return "", false
+	}
+	if f.simZone != "" {
+		for _, other := range []string{"simulate", "dns-server", "r"} {
+			if flagSet(fs, other) {
+				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with -%s", other)
+				return "", false
+			}
+		}
 	}
 	// Range and resolver checks are shared with the TUI (#80).
 	if err := scanOptions(f, "", nil, maxAttempts, nil, nil).Validate(); err != nil {
@@ -589,6 +599,13 @@ func run() (code int) {
 	targets, ok := loadTargets(f, domain, out)
 	if !ok {
 		return 1
+	}
+	if f.simZone != "" {
+		stop, ok := startLabZone(&f, targets, out)
+		if !ok {
+			return exitFailure
+		}
+		defer stop()
 	}
 	targetDesc := targets[0]
 	if len(targets) > 1 {
