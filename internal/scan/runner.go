@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -138,20 +139,77 @@ func (c *wildcardCache) isWildcard(ctx context.Context, cfg Config, parent strin
 	return is, nil
 }
 
-func recordsSubset(got, fp []dns.Record) bool {
-	if len(fp) == 0 || len(got) == 0 {
-		return false
+// fingerprint is the root wildcard's known answers. A result whose records
+// all appear in it is a wildcard answer. Near-miss results grow it with fresh
+// probes (see revalidate), so it is shared by the workers and locked.
+type fingerprint struct {
+	mu  sync.RWMutex
+	set map[string]struct{}
+}
+
+func newFingerprint(recs []dns.Record) *fingerprint {
+	f := &fingerprint{set: make(map[string]struct{}, len(recs))}
+	f.add(recs)
+	return f
+}
+
+func recordKey(r dns.Record) string { return r.Type + "\x00" + r.Value }
+
+func (f *fingerprint) add(recs []dns.Record) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range recs {
+		f.set[recordKey(r)] = struct{}{}
 	}
-	set := make(map[string]struct{}, len(fp))
-	for _, r := range fp {
-		set[r.Type+"\x00"+r.Value] = struct{}{}
+}
+
+// match reports whether every record of got is a known wildcard answer
+// (covered) and whether at least one is (overlaps). An empty fingerprint or
+// result never matches.
+func (f *fingerprint) match(got []dns.Record) (covered, overlaps bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.set) == 0 || len(got) == 0 {
+		return false, false
 	}
+	covered = true
 	for _, r := range got {
-		if _, ok := set[r.Type+"\x00"+r.Value]; !ok {
-			return false
+		if _, ok := f.set[recordKey(r)]; ok {
+			overlaps = true
+		} else {
+			covered = false
 		}
 	}
-	return true
+	return covered, overlaps
+}
+
+// nearMissProbes is how many fresh random labels re-validate a result that
+// shares some but not all records with the wildcard fingerprint (#48).
+const nearMissProbes = 2
+
+// isWildcardAnswer reports whether records are a wildcard answer for name. A
+// result that only partly matches the fingerprint is a near miss, typical of
+// a wildcard served from a rotating pool: fresh random labels under the same
+// parent are probed, their answers join the fingerprint, and the result is
+// checked again. Results that share nothing with the fingerprint (real names)
+// cost no extra queries.
+func isWildcardAnswer(ctx context.Context, cfg Config, fp *fingerprint, name string, records []dns.Record) bool {
+	covered, overlaps := fp.match(records)
+	if covered || !overlaps || cfg.Simulate || cfg.resolveHook != nil {
+		return covered
+	}
+	parent := name
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		parent = name[i+1:]
+	}
+	for i := 0; i < nearMissProbes; i++ {
+		recs, _ := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, dns.RandomLabel()+"."+parent, cfg.Timeout, nil, cfg.Attempts, cfg.Types)
+		fp.add(recs)
+		if covered, _ = fp.match(records); covered {
+			return true
+		}
+	}
+	return false
 }
 
 // RecursionCeiling returns the theoretical job count for a recursive scan:
@@ -273,12 +331,12 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		}
 	}
 
-	var fingerprint []dns.Record
+	fingerprint := newFingerprint(nil)
 	wc := &wildcardCache{known: make(map[string]bool)}
 
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
-		isWildcard, fp, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, cfg.Types, cfg.Attempts)
+		isWildcard, fp, err := dns.FingerprintWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, cfg.Types, cfg.Attempts)
 		if ctx.Err() != nil {
 			return // interrupted during wildcard probes
 		}
@@ -292,7 +350,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		if err != nil {
 			events <- Event{Kind: EventWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of -force"}
 		}
-		fingerprint = fp
+		fingerprint.add(fp)
 		if isWildcard {
 			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
 			events <- Event{Kind: EventWildcard, Message: msg}
@@ -496,7 +554,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 // processJob resolves a single job and, on success, optionally enqueues
 // depth-capped children for recursive enumeration.
-func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *dns.RateLimiter, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once, fp []dns.Record, wc *wildcardCache) {
+func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *dns.RateLimiter, events chan<- Event, enqueue chan<- job, processed, found *int64, st *counters, cancel context.CancelFunc, guardOnce *sync.Once, fp *fingerprint, wc *wildcardCache) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -528,7 +586,7 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 		return
 	}
 
-	if outcome == dns.OutcomeFound && recordsSubset(records, fp) {
+	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, fp, j.domain, records) {
 		st.wildcardFiltered.Add(1)
 		n := atomic.AddInt64(processed, 1)
 		checkReliability(cfg, n, st, events, cancel, guardOnce)

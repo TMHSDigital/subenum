@@ -121,10 +121,11 @@ func TestCheckWildcardInconclusive(t *testing.T) {
 			if is || fp != nil {
 				t.Fatalf("is=%v fp=%v, want false/nil on an inconclusive check", is, fp)
 			}
-			// Two probes, two attempts each. Go's resolver may itself retry a
-			// SERVFAIL, so only require that the retry happened.
-			if got := srv.Queries(); got < 4 {
-				t.Fatalf("queries = %d, want >= 4 (each probe retried)", got)
+			// The check stops at the first inconclusive probe, after its two
+			// attempts. Go's resolver may itself retry a SERVFAIL, so only
+			// require that the retry happened.
+			if got := srv.Queries(); got < 2 {
+				t.Fatalf("queries = %d, want >= 2 (the probe retried)", got)
 			}
 		})
 	}

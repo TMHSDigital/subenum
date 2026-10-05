@@ -610,16 +610,87 @@ func TestRunPreflightFailsOnBlackHole(t *testing.T) {
 	}
 }
 
-func TestRecordsSubset(t *testing.T) {
-	fp := []dns.Record{{Type: "A", Value: "192.0.2.99"}, {Type: "AAAA", Value: "::1"}}
-	if !recordsSubset([]dns.Record{{Type: "A", Value: "192.0.2.99"}}, fp) {
-		t.Error("A-only should be a subset of A+AAAA fingerprint")
+func TestFingerprintMatch(t *testing.T) {
+	recs := []dns.Record{{Type: "A", Value: "192.0.2.99"}, {Type: "AAAA", Value: "::1"}}
+	fp := newFingerprint(recs)
+	if covered, _ := fp.match([]dns.Record{{Type: "A", Value: "192.0.2.99"}}); !covered {
+		t.Error("A-only should be covered by an A+AAAA fingerprint")
 	}
-	if recordsSubset([]dns.Record{{Type: "A", Value: "192.0.2.1"}}, fp) {
+	if covered, overlaps := fp.match([]dns.Record{{Type: "A", Value: "192.0.2.1"}}); covered || overlaps {
 		t.Error("different IP must not match")
 	}
-	if recordsSubset(fp, nil) {
+	if covered, overlaps := fp.match([]dns.Record{{Type: "A", Value: "192.0.2.99"}, {Type: "A", Value: "192.0.2.1"}}); covered || !overlaps {
+		t.Error("partial match must be an overlap, not covered")
+	}
+	if covered, _ := newFingerprint(nil).match(recs); covered {
 		t.Error("empty fingerprint must not filter")
+	}
+}
+
+// TestRunRotatingPoolWildcardFiltered covers #48: a wildcard that answers
+// from a rotating pool of 8 addresses is filtered under -force (at least 95%
+// of wildcard names), and real names with their own addresses are all kept.
+func TestRunRotatingPoolWildcardFiltered(t *testing.T) {
+	var next atomic.Uint32
+	real := map[string][4]byte{}
+	var entries []string
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("real%d", i)
+		entries = append(entries, name)
+		real[name+".example.com"] = [4]byte{198, 51, 100, byte(i + 1)}
+	}
+	for i := 0; i < 50; i++ {
+		entries = append(entries, fmt.Sprintf("w%d", i))
+	}
+	addr, stop := startUDPDNSAction(t, func(name string) dnsAction {
+		if ip, ok := real[name]; ok {
+			return dnsAction{ip: ip, hit: true}
+		}
+		if strings.HasSuffix(name, ".example.com") {
+			n := next.Add(1)
+			return dnsAction{ip: [4]byte{203, 0, 113, byte(n%8 + 1)}, hit: true}
+		}
+		return dnsAction{}
+	})
+	defer stop()
+
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     entries,
+		Concurrency: 4,
+		Timeout:     time.Second,
+		Attempts:    1,
+		Force:       true,
+		Types:       []string{"A"},
+		Resolver:    dns.NewResolver(time.Second, addr),
+		DNSServer:   addr,
+	}
+	events := make(chan Event, 256)
+	go Run(context.Background(), cfg, events)
+	found := map[string]bool{}
+	var done *Event
+	for ev := range events {
+		switch ev.Kind {
+		case EventResult:
+			found[ev.Domain] = true
+		case EventDone:
+			e := ev
+			done = &e
+		case EventError:
+			t.Fatalf("unexpected error: %s", ev.Message)
+		}
+	}
+	if done == nil {
+		t.Fatal("no EventDone")
+	}
+	for name := range real {
+		if !found[name] {
+			t.Errorf("real name %s was filtered", name)
+		}
+	}
+	leaked := len(found) - len(real)
+	if filtered := 50 - leaked; filtered*100 < 50*95 {
+		t.Errorf("filtered %d/50 rotating-pool wildcard answers, want >= 95%%; stats=%+v", filtered, done.Stats)
 	}
 }
 

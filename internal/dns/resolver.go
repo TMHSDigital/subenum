@@ -380,6 +380,10 @@ func ResolveDomainWithRetry(ctx context.Context, resolver *net.Resolver, domain 
 	return nil, last
 }
 
+// RandomLabel returns a 32-character random hex label, the kind wildcard
+// probes use: a name no real zone contains.
+func RandomLabel() string { return randomHex(32) }
+
 // randomHex returns n random hex characters.
 func randomHex(n int) string {
 	b := make([]byte, (n+1)/2)
@@ -403,43 +407,83 @@ var ErrWildcardInconclusive = errors.New("wildcard check inconclusive")
 // Otherwise the error wraps ErrWildcardInconclusive. Returns (isWildcard,
 // fingerprint, error).
 func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string, attempts int) (bool, []Record, error) {
+	return checkWildcard(ctx, resolver, domain, timeout, types, attempts, 2, false)
+}
+
+// Fingerprint probes sizing for FingerprintWildcard (#48).
+const (
+	fingerprintProbes    = 5   // initial probes
+	fingerprintMaxProbes = 128 // hard cap when the answers rotate
+)
+
+// FingerprintWildcard is CheckWildcard for the scan root, where the
+// fingerprint filters every result. It starts with five probes, and when
+// their answers differ (a wildcard served from a rotating CDN or
+// load-balancer pool) it keeps probing until the fingerprint has not grown
+// for max(8, 4 x its size) consecutive probes, so the whole pool is learned
+// rather than the two addresses two probes happened to see (#48).
+func FingerprintWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string, attempts int) (bool, []Record, error) {
+	return checkWildcard(ctx, resolver, domain, timeout, types, attempts, fingerprintProbes, true)
+}
+
+func checkWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string, attempts, probes int, saturate bool) (bool, []Record, error) {
 	if len(types) == 0 {
 		types = DefaultTypes
 	}
 	if attempts < 1 {
 		attempts = 1
 	}
-	probe1 := randomHex(32) + "." + domain
-	probe2 := randomHex(32) + "." + domain
-
-	r1, o1 := ResolveDomainWithRetry(ctx, resolver, probe1, timeout, nil, attempts, types)
-	r2, o2 := ResolveDomainWithRetry(ctx, resolver, probe2, timeout, nil, attempts, types)
-
-	if ctx.Err() != nil {
-		return false, nil, ctx.Err()
-	}
-	for _, o := range []Outcome{o1, o2} {
-		if o != OutcomeFound && o != OutcomeNXDomain {
-			return false, nil, fmt.Errorf("%w for %s: probe lookup failed (%s) after %d attempt(s)", ErrWildcardInconclusive, domain, o, attempts)
-		}
-	}
-
-	fp := unionRecords(r1, r2)
-	return len(r1) > 0 || len(r2) > 0, fp, nil
-}
-
-func unionRecords(a, b []Record) []Record {
-	seen := make(map[string]struct{}, len(a)+len(b))
-	out := make([]Record, 0, len(a)+len(b))
-	for _, recs := range [][]Record{a, b} {
+	var fp []Record
+	seen := map[string]struct{}{}
+	add := func(recs []Record) (grew bool) {
 		for _, r := range recs {
 			k := r.Type + "\x00" + r.Value
-			if _, ok := seen[k]; ok {
-				continue
+			if _, ok := seen[k]; !ok {
+				seen[k] = struct{}{}
+				fp = append(fp, r)
+				grew = true
 			}
-			seen[k] = struct{}{}
-			out = append(out, r)
+		}
+		return grew
+	}
+	probe := func() error {
+		recs, o := ResolveDomainWithRetry(ctx, resolver, RandomLabel()+"."+domain, timeout, nil, attempts, types)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if o != OutcomeFound && o != OutcomeNXDomain {
+			return fmt.Errorf("%w for %s: probe lookup failed (%s) after %d attempt(s)", ErrWildcardInconclusive, domain, o, attempts)
+		}
+		add(recs)
+		return nil
+	}
+
+	firstSize := -1
+	for i := 0; i < probes; i++ {
+		if err := probe(); err != nil {
+			return false, nil, err
+		}
+		if firstSize < 0 {
+			firstSize = len(fp)
 		}
 	}
-	return out
+	if len(fp) == 0 {
+		return false, nil, nil
+	}
+	// The fingerprint grew after the first probe, so the answers rotate.
+	if saturate && len(fp) > firstSize {
+		stale := 0
+		for n := probes; n < fingerprintMaxProbes && stale < max(8, 4*len(fp)); n++ {
+			before := len(fp)
+			if err := probe(); err != nil {
+				return false, nil, err
+			}
+			if len(fp) > before {
+				stale = 0
+			} else {
+				stale++
+			}
+		}
+	}
+	return true, fp, nil
 }
