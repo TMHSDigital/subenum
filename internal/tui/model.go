@@ -322,7 +322,7 @@ func listenForEvents(events <-chan scan.Event) tea.Cmd {
 			return resultMsg{domain: ev.Domain, records: ev.Records}
 		case scan.EventProgress:
 			return progressMsg{processed: ev.Processed, total: ev.Total, found: ev.Found}
-		case scan.EventWildcard:
+		case scan.EventNotice:
 			return wildcardMsg{text: ev.Message}
 		case scan.EventError:
 			return errorMsg{text: ev.Message}

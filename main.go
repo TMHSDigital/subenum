@@ -699,7 +699,7 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 				pct := float64(ev.Processed) / float64(ev.Total) * 100
 				out.Progress(pct, ev.Processed, ev.Total, ev.Found)
 			}
-		case scan.EventWildcard:
+		case scan.EventNotice:
 			out.Info("%s", ev.Message)
 		case scan.EventError:
 			out.Error("%s", ev.Message)

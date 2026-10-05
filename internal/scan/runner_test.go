@@ -475,7 +475,7 @@ func TestRunMaxQueriesStopsAdmission(t *testing.T) {
 	var capMsg string
 	for ev := range events {
 		switch ev.Kind {
-		case EventWildcard:
+		case EventNotice:
 			if strings.Contains(ev.Message, "query cap reached") {
 				capMsg = ev.Message
 			}
@@ -926,7 +926,7 @@ func TestRunWildcardBranchSkipsExpansion(t *testing.T) {
 		switch ev.Kind {
 		case EventResult:
 			results++
-		case EventWildcard:
+		case EventNotice:
 			wildMsgs = append(wildMsgs, ev.Message)
 		case EventDone:
 			e := ev
@@ -1001,7 +1001,7 @@ func TestRunWildcardProbeFailureAtRoot(t *testing.T) {
 						results++
 					case EventError:
 						errs = append(errs, ev.Message)
-					case EventWildcard:
+					case EventNotice:
 						notices = append(notices, ev.Message)
 					}
 				}
@@ -1073,7 +1073,7 @@ func TestRunWildcardProbeFailureInRecursion(t *testing.T) {
 		switch ev.Kind {
 		case EventResult:
 			results++
-		case EventWildcard:
+		case EventNotice:
 			notices = append(notices, ev.Message)
 		case EventError:
 			t.Fatalf("unexpected error: %s", ev.Message)
@@ -1114,7 +1114,7 @@ func TestRunMaxQueriesRecursiveCountsSkipped(t *testing.T) {
 	var capMsg string
 	for ev := range events {
 		switch ev.Kind {
-		case EventWildcard:
+		case EventNotice:
 			if strings.Contains(ev.Message, "query cap reached") {
 				capMsg = ev.Message
 			}
@@ -1222,6 +1222,35 @@ func TestWorkerCountCapped(t *testing.T) {
 		if got := workerCount(tc.cfg, tc.depth); got != tc.want {
 			t.Errorf("workerCount(t=%d, n=%d, rec=%v, depth=%d, max=%d) = %d, want %d",
 				tc.cfg.Concurrency, len(tc.cfg.Entries), tc.cfg.Recursive, tc.depth, tc.cfg.MaxQueries, got, tc.want)
+		}
+	}
+}
+
+// TestNoticesCarryKind covers #68: notices are machine-readable by kind.
+func TestNoticesCarryKind(t *testing.T) {
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     makeEntries(20),
+		Concurrency: 2,
+		Timeout:     time.Second,
+		Simulate:    true,
+		HitRate:     100,
+		Attempts:    1,
+		Recursive:   true,
+		Depth:       2,
+		MaxQueries:  5,
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+	kinds := map[NoticeKind]bool{}
+	for ev := range events {
+		if ev.Kind == EventNotice {
+			kinds[ev.Notice] = true
+		}
+	}
+	for _, k := range []NoticeKind{NoticeCeiling, NoticeCap} {
+		if !kinds[k] {
+			t.Errorf("no %s notice; got %v", k, kinds)
 		}
 	}
 }

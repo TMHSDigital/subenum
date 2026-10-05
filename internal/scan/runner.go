@@ -262,20 +262,47 @@ type EventKind int
 const (
 	EventResult   EventKind = iota // a subdomain resolved
 	EventProgress                  // progress update
-	EventWildcard                  // wildcard DNS detected
+	EventNotice                    // informational notice; see Event.Notice
 	EventError                     // non-fatal error message
 	EventDone                      // scan finished
 )
 
+// NoticeKind says what an EventNotice is about, so consumers can style or
+// filter notices without parsing the message (#68).
+type NoticeKind int
+
+const (
+	NoticeWildcard NoticeKind = iota + 1 // wildcard DNS detected, or its check failed under -force
+	NoticeCap                            // -max-queries reached; candidates skipped
+	NoticeCeiling                        // recursive scan may generate very many queries
+	NoticeSkip                           // a recursive branch was not expanded
+)
+
+// String names a notice kind for structured output.
+func (k NoticeKind) String() string {
+	switch k {
+	case NoticeWildcard:
+		return "wildcard"
+	case NoticeCap:
+		return "cap"
+	case NoticeCeiling:
+		return "ceiling"
+	case NoticeSkip:
+		return "skip"
+	}
+	return "notice"
+}
+
 // Event is emitted on the events channel during a scan.
 type Event struct {
 	Kind      EventKind
+	Notice    NoticeKind   // EventNotice: what the notice is about
 	Domain    string       // EventResult: the resolved subdomain
 	Records   []dns.Record // EventResult: the resolved records (A/AAAA/CNAME)
 	Processed int64        // EventProgress
 	Total     int64        // EventProgress
 	Found     int64        // EventProgress / EventDone
-	Message   string       // EventError / EventWildcard
+	Message   string       // EventError / EventNotice
 	Stats     Stats        // EventDone: per-outcome counters
 }
 
@@ -325,7 +352,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		if maxDepth > 1 {
 			consider = fmt.Sprintf("Consider -depth %d or -max-queries.", maxDepth-1)
 		}
-		events <- Event{Kind: EventWildcard, Message: fmt.Sprintf(
+		events <- Event{Kind: EventNotice, Notice: NoticeCeiling, Message: fmt.Sprintf(
 			"Warning: -recursive -depth %d with %d entries can generate up to %.1e queries.\n%s",
 			maxDepth, len(cfg.Entries), ceiling, consider)}
 	}
@@ -362,12 +389,12 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			return
 		}
 		if err != nil {
-			events <- Event{Kind: EventWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of -force"}
+			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of -force"}
 		}
 		fingerprint.add(fp)
 		if isWildcard {
 			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
-			events <- Event{Kind: EventWildcard, Message: msg}
+			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: msg}
 			if !cfg.Force {
 				events <- Event{Kind: EventError, Message: "Results would be meaningless. Use -force to scan anyway."}
 				return
@@ -486,7 +513,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		closeJobs := func() {
 			if skipped > 0 {
 				select {
-				case events <- Event{Kind: EventWildcard, Message: fmt.Sprintf(
+				case events <- Event{Kind: EventNotice, Notice: NoticeCap, Message: fmt.Sprintf(
 					"query cap reached (-max-queries %d); skipped %d additional jobs", cfg.MaxQueries, skipped)}:
 				case <-ctx.Done():
 				}
@@ -628,11 +655,11 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 				return
 			}
 			if err != nil {
-				events <- Event{Kind: EventWildcard, Message: "skipping recursive expansion of " + j.domain + ": wildcard check failed: " + err.Error()}
+				events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "skipping recursive expansion of " + j.domain + ": wildcard check failed: " + err.Error()}
 				return
 			}
 			if isWild {
-				events <- Event{Kind: EventWildcard, Message: "wildcard DNS at " + j.domain + "; skipping recursive expansion"}
+				events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "wildcard DNS at " + j.domain + "; skipping recursive expansion"}
 				return
 			}
 		}
