@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"golang.org/x/net/dns/dnsmessage"
+
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/dnstest"
 )
 
 // makeEntries builds a synthetic wordlist of n prefixes.
@@ -694,87 +698,10 @@ func TestRunRotatingPoolWildcardFiltered(t *testing.T) {
 	}
 }
 
-func skipDNSName(msg []byte, off int) (int, bool) {
-	for off < len(msg) {
-		l := int(msg[off])
-		if l == 0 {
-			return off + 1, true
-		}
-		if l&0xC0 == 0xC0 {
-			if off+1 >= len(msg) {
-				return 0, false
-			}
-			return off + 2, true
-		}
-		off += 1 + l
-	}
-	return 0, false
-}
-
-func dnsQNameType(query []byte) (string, uint16, bool) {
-	if len(query) < 12 {
-		return "", 0, false
-	}
-	var labels []string
-	off := 12
-	for off < len(query) {
-		l := int(query[off])
-		if l == 0 {
-			off++
-			break
-		}
-		if l&0xC0 == 0xC0 {
-			return "", 0, false
-		}
-		if off+1+l > len(query) {
-			return "", 0, false
-		}
-		labels = append(labels, string(query[off+1:off+1+l]))
-		off += 1 + l
-	}
-	if off+2 > len(query) {
-		return "", 0, false
-	}
-	qtype := uint16(query[off])<<8 | uint16(query[off+1])
-	return strings.ToLower(strings.Join(labels, ".")), qtype, true
-}
-
-func dnsAResponse(query []byte, ip [4]byte) []byte {
-	if len(query) < 12 {
-		return nil
-	}
-	qend, ok := skipDNSName(query, 12)
-	if !ok || qend+4 > len(query) {
-		return nil
-	}
-	qend += 4
-	flags := uint16(0x8400)
-	if query[2]&0x01 != 0 {
-		flags |= 0x0100
-	}
-	resp := make([]byte, 0, 64)
-	resp = append(resp, query[0], query[1])
-	resp = append(resp, byte(flags>>8), byte(flags))
-	resp = append(resp, 0, 1, 0, 1, 0, 0, 0, 0)
-	resp = append(resp, query[12:qend]...)
-	resp = append(resp, 0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, ip[0], ip[1], ip[2], ip[3])
-	return resp
-}
-
-func dnsNXDomain(query []byte) []byte {
-	if len(query) < 12 {
-		return nil
-	}
-	resp := append([]byte(nil), query...)
-	resp[2] |= 0x80
-	resp[3] = (resp[3] & 0xF0) | 0x03
-	return resp
-}
-
 // dnsAction tells startUDPDNSAction how to answer one query.
 type dnsAction struct {
 	ip       [4]byte
-	hit      bool // answer A with ip
+	hit      bool // the name exists, with an A record of ip
 	drop     bool // never answer (the client times out)
 	servFail bool // answer SERVFAIL
 }
@@ -787,47 +714,27 @@ func startUDPDNS(t *testing.T, handle func(name string, qtype uint16) ([4]byte, 
 	})
 }
 
+// startUDPDNSAction runs a dnstest server (#67) that answers one query at a
+// time, so a handler that sleeps throttles it like a rate-limited resolver.
+// Names without a hit are NXDOMAIN; a hit name answers A with ip and NODATA
+// for other types. The server stops on test cleanup; stop is kept for callers.
 func startUDPDNSAction(t *testing.T, handle func(name string) dnsAction) (addr string, stop func()) {
 	t.Helper()
-	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("ListenPacket: %v", err)
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		buf := make([]byte, 512)
-		for {
-			n, src, err := pc.ReadFrom(buf)
-			if err != nil {
-				return
-			}
-			q := buf[:n]
-			name, qtype, ok := dnsQNameType(q)
-			if !ok {
-				continue
-			}
-			act := handle(name)
-			var resp []byte
-			switch {
-			case act.drop:
-			case act.servFail:
-				resp = dnsNXDomain(q)
-				resp[3] = (resp[3] & 0xF0) | 0x02
-			case qtype == 1 && act.hit:
-				resp = dnsAResponse(q, act.ip)
-			default:
-				resp = dnsNXDomain(q)
-			}
-			if resp != nil {
-				_, _ = pc.WriteTo(resp, src)
-			}
+	srv := dnstest.StartWith(t, dnstest.Options{Serial: true}, func(q dnstest.Query) dnstest.Reply {
+		act := handle(q.Name)
+		switch {
+		case act.drop:
+			return dnstest.Dropped
+		case act.servFail:
+			return dnstest.ServFail
+		case !act.hit:
+			return dnstest.NXDomain
+		case q.Type == dnsmessage.TypeA:
+			return dnstest.Reply{A: []string{netip.AddrFrom4(act.ip).String()}}
 		}
-	}()
-	return pc.LocalAddr().String(), func() {
-		_ = pc.Close()
-		<-done
-	}
+		return dnstest.Reply{}
+	})
+	return srv.Addr, func() {}
 }
 
 func isProbeLabel(name, parent string) bool {

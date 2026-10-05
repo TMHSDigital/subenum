@@ -151,6 +151,9 @@ go test -v -race ./...
 ```
 
 New features should include tests. New flags must be covered by at least one test case.
-Do not hit public resolvers. Use `-simulate` or the in-process responder in
+Do not hit public resolvers. Use `-simulate` or the in-process DNS server in
+`internal/dnstest`, which answers from a per-query handler (records, RCODE,
+NODATA, delay, drop, truncation) and counts every query per name and type.
+`internal/dns` tests can also use the table-driven `startTestDNS` wrapper in
 `internal/dns/testdns_test.go`. The optional live smoke test is gated on
 `SUBENUM_NETWORK_TESTS=1`.

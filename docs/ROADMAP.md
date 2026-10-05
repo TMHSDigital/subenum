@@ -16,8 +16,6 @@ Work in progress or next up.
 
 - **Patch release for static Linux binaries** ([#46](https://github.com/TMHSDigital/subenum/issues/46)).
   The build fix is on `main`; a v0.8.1 release replaces the dynamically linked asset.
-- **Test infrastructure** ([#67](https://github.com/TMHSDigital/subenum/issues/67)):
-  replace the hand-rolled test DNS server and close coverage gaps.
 - **Repository hardening** ([#60](https://github.com/TMHSDigital/subenum/issues/60)):
   protected `main`, Dependabot alerts, Actions pinned by SHA.
 
@@ -66,9 +64,10 @@ surprises:
 
 Constraints to keep in mind when changing the code.
 
-- **The test DNS server is hand-rolled.** It serves A, AAAA, one-hop CNAME
-  chains, SERVFAIL, REFUSED, dropped queries and delayed A answers. Other qtypes
-  and EDNS are not modelled; extend it (or finish #67) before testing them.
+- **The test DNS server (`internal/dnstest`) models A, AAAA and CNAME
+  answers,** any RCODE, NODATA with SOA, delays, drops and truncation. Other
+  record types and EDNS are not modelled; extend its `Reply` before testing
+  them.
 - **DNS goes through Go's stdlib resolver.** Its internal retries depend on the
   host's resolver configuration. `-rate` charges every query it dials, but the
   number of queries per lookup is not fully under subenum's control.

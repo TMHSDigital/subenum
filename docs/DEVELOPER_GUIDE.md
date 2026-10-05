@@ -96,7 +96,7 @@ subenum/
 │   │   ├── resolver_test.go    # DNS resolution, classification and wildcard detection tests
 │   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
 │   │   ├── ratelimit_test.go   # Rate limiter tests
-│   │   ├── testdns_test.go     # In-process UDP/TCP DNS responder for hermetic tests
+│   │   ├── testdns_test.go     # Table-driven wrapper over internal/dnstest
 │   │   ├── simulate.go         # SimulateResolve (seeded synthetic DNS)
 │   │   └── simulate_test.go    # Simulation logic tests
 │   ├── output/
@@ -165,7 +165,7 @@ go test ./internal/dns -run TestLiveResolverSmoke
 
 ### Writing Tests
 
-When adding new features or modifying existing ones, please ensure you add appropriate tests. Tests must not depend on the network: DNS tests in `internal/dns` use `startTestDNS` (in `testdns_test.go`), an in-process UDP/TCP server that answers from a table of `testReply` entries; names missing from the table get NXDOMAIN. Its `Resolver` method returns a `*net.Resolver` pointed at it. Here's a basic structure (save it as a `_test.go` file in `internal/dns`):
+When adding new features or modifying existing ones, please ensure you add appropriate tests. Tests must not depend on the network: DNS tests in `internal/dns` use `startTestDNS` (in `testdns_test.go`), a table-driven wrapper over `internal/dnstest`, the shared in-process UDP/TCP DNS server; names missing from the table get NXDOMAIN and missing record types get NODATA. Use `dnstest.Start` directly when a test needs per-query scripting or exact query counts (`QueriesFor`). Its `Resolver` method returns a `*net.Resolver` pointed at it. Here's a basic structure (save it as a `_test.go` file in `internal/dns`):
 
 ```go
 package dns
