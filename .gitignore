@@ -43,3 +43,6 @@ docs/_preview/
 # GoReleaser output
 dist/
 build/
+
+# Resume state written by an interrupted scan
+subenum-resume.json
