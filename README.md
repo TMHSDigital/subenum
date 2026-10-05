@@ -107,6 +107,7 @@ Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://
 | Record Types | Look up and filter by `A`, `AAAA`, or `CNAME` records with `-type` |
 | Recursive Enumeration | Enumerate subdomains of discovered subdomains with `-recursive` and a `-depth` cap, with loop and duplicate protection |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
+| Go library | `pkg/subenum` embeds the same engine in other programs: `Scan` for a finished run, `Run` to stream events |
 
 <br>
 
@@ -508,6 +509,26 @@ jq -e '.verdict == "complete"' run.json > /dev/null || { jq -r .reason run.json;
 ```
 
 No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `~/.config/subenum/last.json` and restored on next launch. The interface is shown at the top of this README.
+
+### Go library
+
+The engine is importable, so a recon pipeline or custom tool can use it without shelling out:
+
+```bash
+go get github.com/TMHSDigital/subenum/pkg/subenum
+```
+
+```go
+results, stats, err := subenum.Scan(ctx, subenum.Config{
+    Domain: "example.com",            // URLs, ports and IDNs are normalized
+    Rate:   100,                      // queries per second on the wire
+    Types:  []string{"A", "AAAA", "CNAME"},
+})
+```
+
+Every zero value in `Config` takes the same default as the CLI, so `Config{Domain: "example.com"}` is a complete configuration and uses the bundled wordlist. `Scan` returns a finished scan; `Run` returns a channel that streams results, notices and progress and always ends with the final `Stats`. Set `Simulate` for a run that sends no DNS queries. Wildcard filtering, rate limiting, retries, takeover hints, the reliability guard and the per-outcome accounting are all the same code the CLI runs, and the DNS internals stay unexported.
+
+API reference and runnable examples: [pkg.go.dev/github.com/TMHSDigital/subenum/pkg/subenum](https://pkg.go.dev/github.com/TMHSDigital/subenum/pkg/subenum). The package follows semantic versioning from v1.0.0; until then it may change between minor releases, while the CLI stays stable.
 
 <br>
 

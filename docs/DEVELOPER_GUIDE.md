@@ -126,6 +126,8 @@ subenum/
 │   └── wordlist/
 │       ├── reader.go           # ReadLines, Normalize, Build, LoadWordlist
 │       └── reader_test.go      # Wordlist reading, normalization and dedup tests
+├── pkg/
+│   └── subenum/                # Public Go library API: Config, Scan, Run, Event, Stats
 ├── tools/
 │   ├── wordlist-gen.go         # Custom wordlist generator utility
 │   ├── wordlist-gen_test.go    # Generator tests

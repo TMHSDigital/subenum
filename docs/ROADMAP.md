@@ -32,7 +32,6 @@ Planned features that make results more trustworthy and the tool easier to get.
 
 Ideas we want, with no date attached.
 
-- A stable Go library API, `pkg/subenum` ([#77](https://github.com/TMHSDigital/subenum/issues/77)).
 - Try AXFR and detect NSEC-walkable zones before brute-forcing ([#85](https://github.com/TMHSDigital/subenum/issues/85)).
 - Discoverability: demo GIF and launch posts ([#74](https://github.com/TMHSDigital/subenum/issues/74)).
 
@@ -50,6 +49,8 @@ surprises:
   set says how far it can be trusted.
 - **Verifiable releases**, in place from the next release: checksums, SBOMs,
   cosign signatures and provenance attestations.
+- **A stable library API.** `pkg/subenum` follows semantic versioning from 1.0;
+  until then it may change between minor releases.
 
 ## Known limitations
 

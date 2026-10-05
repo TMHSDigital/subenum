@@ -23,7 +23,7 @@ RUN go mod download
 COPY *.go ./
 COPY internal/ ./internal/
 # The default wordlist is embedded in the binary (#63).
-COPY data/subdomains-5k.txt ./data/
+COPY data/subdomains-5k.txt data/data.go ./data/
 
 # Build the binary with optimizations
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o subenum -ldflags="-w -s -X main.Version=${VERSION}" .

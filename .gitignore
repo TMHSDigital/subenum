@@ -4,7 +4,9 @@
 *.dll
 *.so
 *.dylib
-subenum
+# The built binary, anchored to the repository root: unanchored, this also
+# ignored the pkg/subenum library directory.
+/subenum
 
 # Test binary, built with `go test -c`
 *.test
