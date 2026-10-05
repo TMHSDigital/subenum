@@ -336,6 +336,21 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
 
+### Subdomain takeover hints
+
+When a result has a CNAME record, subenum resolves the CNAME target with the trusted resolver and marks the result as a takeover candidate:
+
+| Marker | Meaning |
+|--------|---------|
+| `dangling` | The CNAME target does not exist (NXDOMAIN) |
+| `provider:<name>` | The target is at a service where dangling records have allowed takeovers (S3, GitHub Pages, Heroku, Azure, Fastly, Shopify, ...) |
+| `dangling:<name>` | Both: a takeover-prone service and a target that does not exist |
+
+The marker is a `takeover_candidate` field in JSON and JSONL, a `takeover_candidate` column in CSV, `TAKEOVER?=<marker>` in text with `-show-records`, and a count in the breakdown and the run-quality report. A dangling CNAME makes A/AAAA lookups fail, so scan with CNAME records included to find them: `-type A,AAAA,CNAME`.
+
+> [!IMPORTANT]
+> Takeover markers are DNS-only hints. subenum makes no HTTP requests; a `provider:` match is often a perfectly healthy service. Verify every candidate by hand, and only against targets you are authorized to test.
+
 ### Run-quality report
 
 Every lookup is accounted for, and subenum says how far the results can be trusted. `-stats run.json` writes a report in any format, and `-format jsonl` ends with the same object as its last line (`"type": "summary"`):

@@ -140,7 +140,11 @@ func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
 		if m.simMode {
 			prefix = "Found (sim): "
 		}
-		m.results = append(m.results, resultStyle.Render(prefix+msg.domain))
+		line := resultStyle.Render(prefix + msg.domain)
+		if msg.takeover != "" {
+			line += wildcardStyle.Render("  ⚠ takeover? " + msg.takeover)
+		}
+		m.results = append(m.results, line)
 		if len(m.results) > maxResultLines {
 			// Evict in chunks so the copy cost is amortized across results.
 			n := len(m.results) - maxResultLines + maxResultLines/10
@@ -254,8 +258,9 @@ func (m scanViewModel) failed() bool {
 
 // Event message types for Bubble Tea.
 type resultMsg struct {
-	domain  string
-	records []dns.Record
+	domain   string
+	records  []dns.Record
+	takeover string // DNS-only takeover hint (#71)
 }
 type progressMsg struct{ processed, total, found int64 }
 type wildcardMsg struct{ text string }

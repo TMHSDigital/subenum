@@ -32,6 +32,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -457,6 +458,9 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	if s.PoolHits > 0 {
 		out.Info("  pool hits: %d (confirmed by the trusted resolver: %d, not confirmed: %d)", s.PoolHits, s.Confirmed, s.Unconfirmed)
 	}
+	if s.Takeover > 0 {
+		out.Info("  takeover candidates: %d (DNS-only hints; verify each by hand)", s.Takeover)
+	}
 }
 
 func run() (code int) {
@@ -570,6 +574,7 @@ func run() (code int) {
 	out.SetPlain(!stdoutIsTerminal())
 	out.SetShowRecords(f.showRecords)
 	out.SetSeed(f.seed)
+	out.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
 	// A carriage-return progress line only makes sense on a terminal. When
 	// stderr is a pipe or file (2>&1, tee, CI logs) progress is off unless
 	// -progress was given explicitly, and then printed as whole lines (#78).
@@ -791,7 +796,7 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 	for ev := range events {
 		switch ev.Kind {
 		case scan.EventResult:
-			out.Result(ev.Domain, ev.Records)
+			out.ResultWithHint(ev.Domain, ev.Records, ev.Takeover)
 		case scan.EventProgress:
 			if f.showProgress && ev.Total > 0 {
 				progressStarted = true

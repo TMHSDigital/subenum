@@ -88,6 +88,7 @@ func targetSummary(domain, status string, res targetResult) output.TargetSummary
 	}
 	t.QueriesSent = st.QueriesSent
 	t.SkippedCap = st.Skipped
+	t.Takeover = st.Takeover
 	t.PoolHits, t.Confirmed, t.Unconfirmed = st.PoolHits, st.Confirmed, st.Unconfirmed
 	t.Wildcard = st.Wildcard
 	if st.Wildcard {

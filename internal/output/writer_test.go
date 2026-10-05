@@ -543,3 +543,30 @@ func TestFinishReportsFileWriteErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestTakeoverHintOutput covers #71: the hint appears in JSONL, in a CSV
+// column, and in text with -show-records.
+func TestTakeoverHintOutput(t *testing.T) {
+	recs := []dns.Record{{Type: "CNAME", Value: "gone.example.net"}}
+	run := func(format Format, setup func(*Writer)) string {
+		w := New(nil, false, format)
+		w.SetPlain(true)
+		setup(w)
+		return captureStdout(t, func() {
+			w.ResultWithHint("old.example.com", recs, "dangling")
+			_ = w.Finish()
+		})
+	}
+	if out := run(FormatJSONL, func(*Writer) {}); !strings.Contains(out, `"takeover_candidate":"dangling"`) {
+		t.Errorf("jsonl: %q", out)
+	}
+	if out := run(FormatCSV, func(w *Writer) { w.SetTakeoverColumn(true) }); !strings.Contains(out, "takeover_candidate\n") || !strings.Contains(out, ",dangling\n") {
+		t.Errorf("csv: %q", out)
+	}
+	if out := run(FormatText, func(w *Writer) { w.SetShowRecords(true) }); !strings.Contains(out, "TAKEOVER?=dangling") {
+		t.Errorf("text: %q", out)
+	}
+	if out := run(FormatText, func(*Writer) {}); out != "old.example.com\n" {
+		t.Errorf("text without -show-records = %q, want the bare name", out)
+	}
+}

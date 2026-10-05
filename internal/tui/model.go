@@ -232,7 +232,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case resultMsg:
 		if m.out != nil {
-			m.out.Result(msg.domain, msg.records)
+			m.out.ResultWithHint(msg.domain, msg.records, msg.takeover)
 		}
 		return m, tea.Batch(svCmd, listenForEvents(m.events))
 	case progressMsg, wildcardMsg, errorMsg:
@@ -310,7 +310,7 @@ func listenForEvents(events <-chan scan.Event) tea.Cmd {
 		}
 		switch ev.Kind {
 		case scan.EventResult:
-			return resultMsg{domain: ev.Domain, records: ev.Records}
+			return resultMsg{domain: ev.Domain, records: ev.Records, takeover: ev.Takeover}
 		case scan.EventProgress:
 			return progressMsg{processed: ev.Processed, total: ev.Total, found: ev.Found}
 		case scan.EventNotice:

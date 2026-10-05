@@ -84,6 +84,7 @@ type Stats struct {
 	PoolHits    int64        // names a pool resolver said exist (-r)
 	Confirmed   int64        // pool hits the trusted resolver confirmed
 	Unconfirmed int64        // pool hits the trusted resolver said do not exist
+	Takeover    int64        // results flagged as subdomain-takeover candidates
 	Aborted     bool         // the reliability guard cancelled the scan
 	Wildcard    bool         // the root domain is a wildcard (scanned under -force)
 	Fingerprint []dns.Record // final wildcard fingerprint, empty when none
@@ -111,6 +112,7 @@ type counters struct {
 	poolHits         atomic.Int64
 	confirmed        atomic.Int64
 	unconfirmed      atomic.Int64
+	takeover         atomic.Int64
 	aborted          atomic.Bool
 }
 
@@ -144,6 +146,7 @@ func (c *counters) snapshot() Stats {
 		PoolHits:         c.poolHits.Load(),
 		Confirmed:        c.confirmed.Load(),
 		Unconfirmed:      c.unconfirmed.Load(),
+		Takeover:         c.takeover.Load(),
 		Aborted:          c.aborted.Load(),
 	}
 }
@@ -356,6 +359,7 @@ type Event struct {
 	Notice    NoticeKind   // EventNotice: what the notice is about
 	Domain    string       // EventResult: the resolved subdomain
 	Records   []dns.Record // EventResult: the resolved records (A/AAAA/CNAME)
+	Takeover  string       // EventResult: subdomain-takeover hint, see dns.TakeoverHint (#71)
 	Processed int64        // EventProgress
 	Total     int64        // EventProgress
 	Found     int64        // EventProgress / EventDone
@@ -733,7 +737,16 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 	atomic.AddInt64(found, 1)
 	// Unguarded: CLI and TUI drain until close. A ctx.Done() guard here would
 	// only matter for a consumer that stops reading with a full buffer.
-	events <- Event{Kind: EventResult, Domain: j.domain, Records: records}
+	// A CNAME result gets a DNS-only takeover hint; its target is resolved
+	// with the trusted resolver. Simulated records are never checked.
+	takeover := ""
+	if !cfg.Simulate && cfg.resolveHook == nil {
+		takeover = dns.TakeoverHint(ctx, cfg.Resolver, records, cfg.Timeout, cfg.Attempts)
+	}
+	if takeover != "" {
+		st.takeover.Add(1)
+	}
+	events <- Event{Kind: EventResult, Domain: j.domain, Records: records, Takeover: takeover}
 
 	if cfg.Recursive && j.depth < maxDepth {
 		// The wildcard probe would query inside the branch, so an out-of-scope

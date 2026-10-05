@@ -39,7 +39,6 @@ Planned features that make results more trustworthy and the tool easier to get.
 Ideas we want, with no date attached.
 
 - Permutation / alteration mode for second-stage brute-forcing ([#72](https://github.com/TMHSDigital/subenum/issues/72)).
-- Subdomain takeover hints for dangling CNAMEs ([#71](https://github.com/TMHSDigital/subenum/issues/71)).
 - A stable Go library API, `pkg/subenum` ([#77](https://github.com/TMHSDigital/subenum/issues/77)).
 - Resume interrupted scans with `-resume` ([#73](https://github.com/TMHSDigital/subenum/issues/73)).
 - Try AXFR and detect NSEC-walkable zones before brute-forcing ([#85](https://github.com/TMHSDigital/subenum/issues/85)).

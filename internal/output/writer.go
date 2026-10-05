@@ -54,6 +54,9 @@ type Result struct {
 	Subdomain string       `json:"subdomain"`
 	Records   []dns.Record `json:"records"`
 	Simulated bool         `json:"simulated,omitempty"`
+	// Takeover is a DNS-only subdomain-takeover hint ("dangling",
+	// "provider:<name>" or "dangling:<name>"); verify it by hand (#71).
+	Takeover string `json:"takeover_candidate,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
@@ -76,8 +79,9 @@ type Writer struct {
 	progressLen int       // width of the progress line currently on screen
 	lineMode    bool      // progress as whole lines, never carriage-return overwrites (#78)
 
-	seed       uint64 // simulation seed, named in the text file header
-	headerDone bool   // text file header written
+	seed           uint64 // simulation seed, named in the text file header
+	takeoverColumn bool   // CSV carries a takeover_candidate column
+	headerDone     bool   // text file header written
 
 	buffered  []Result // FormatJSON: accumulated until Finish
 	csvStdout *csv.Writer
@@ -110,6 +114,10 @@ func (w *Writer) SetPlain(plain bool) { w.plain = plain }
 // result glued onto a progress line (#78).
 func (w *Writer) SetProgressLines(lines bool) { w.lineMode = lines }
 
+// SetTakeoverColumn adds a takeover_candidate column to CSV output. The CLI
+// sets it when CNAME records are requested, the only case that yields hints.
+func (w *Writer) SetTakeoverColumn(on bool) { w.takeoverColumn = on }
+
 // SetSeed records the simulation seed for the simulated-results file header.
 func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
 
@@ -120,8 +128,14 @@ func (w *Writer) SetShowRecords(show bool) { w.records = show }
 // Result records a resolved domain. In text mode it prints immediately; in JSON
 // mode it is buffered for Finish; in CSV and JSONL mode it is streamed.
 func (w *Writer) Result(domain string, records []dns.Record) {
+	w.ResultWithHint(domain, records, "")
+}
+
+// ResultWithHint is Result with a subdomain-takeover hint attached.
+func (w *Writer) ResultWithHint(domain string, records []dns.Record, takeover string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	res := Result{Subdomain: domain, Records: records, Simulated: w.simulate, Takeover: takeover}
 
 	// stdout and the stderr progress line may share a screen or a merged
 	// stream; blank the progress line so the result starts on a clean line.
@@ -131,20 +145,23 @@ func (w *Writer) Result(domain string, records []dns.Record) {
 
 	switch w.format {
 	case FormatJSON:
-		w.buffered = append(w.buffered, Result{Subdomain: domain, Records: records, Simulated: w.simulate})
+		w.buffered = append(w.buffered, res)
 	case FormatCSV:
-		w.writeCSVRows(domain, records)
+		w.writeCSVRows(res)
 	case FormatJSONL:
-		w.writeJSONL(domain, records)
+		w.writeJSONL(res)
 	default:
-		w.writeText(domain, records)
+		w.writeText(res)
 	}
 }
 
-func (w *Writer) writeText(domain string, records []dns.Record) {
-	line := domain
+func (w *Writer) writeText(res Result) {
+	line := res.Subdomain
 	if w.records {
-		line += formatRecords(records)
+		line += formatRecords(res.Records)
+		if res.Takeover != "" {
+			line += " TAKEOVER?=" + res.Takeover
+		}
 	}
 	if w.stdout {
 		switch {
@@ -182,11 +199,11 @@ func formatRecords(records []dns.Record) string {
 	return b.String()
 }
 
-func (w *Writer) writeJSONL(domain string, records []dns.Record) {
-	if records == nil {
-		records = []dns.Record{}
+func (w *Writer) writeJSONL(res Result) {
+	if res.Records == nil {
+		res.Records = []dns.Record{}
 	}
-	data, err := json.Marshal(Result{Subdomain: domain, Records: records, Simulated: w.simulate})
+	data, err := json.Marshal(res)
 	if err != nil {
 		_, _ = fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
 		return
@@ -208,6 +225,9 @@ func (w *Writer) ensureCSV() {
 	if w.simulate {
 		header = append(header, "simulated")
 	}
+	if w.takeoverColumn {
+		header = append(header, "takeover_candidate")
+	}
 	if w.stdout {
 		w.csvStdout = csv.NewWriter(os.Stdout)
 		_ = w.csvStdout.Write(header)
@@ -218,16 +238,19 @@ func (w *Writer) ensureCSV() {
 	}
 }
 
-func (w *Writer) writeCSVRows(domain string, records []dns.Record) {
+func (w *Writer) writeCSVRows(res Result) {
 	w.ensureCSV()
-	rows := records
+	rows := res.Records
 	if len(rows) == 0 {
 		rows = []dns.Record{{}}
 	}
 	for _, r := range rows {
-		row := []string{domain, r.Type, r.Value}
+		row := []string{res.Subdomain, r.Type, r.Value}
 		if w.simulate {
 			row = append(row, "true")
+		}
+		if w.takeoverColumn {
+			row = append(row, res.Takeover)
 		}
 		if w.csvStdout != nil {
 			_ = w.csvStdout.Write(row)

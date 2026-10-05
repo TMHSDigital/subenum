@@ -48,9 +48,10 @@ type TargetSummary struct {
 	Outcomes    Outcomes     `json:"outcomes"`
 	QueriesSent int64        `json:"queries_sent"`
 	SkippedCap  int64        `json:"skipped_by_cap"`
-	PoolHits    int64        `json:"pool_hits,omitempty"`   // -r: names a pool resolver said exist
-	Confirmed   int64        `json:"confirmed,omitempty"`   // pool hits the trusted resolver confirmed
-	Unconfirmed int64        `json:"unconfirmed,omitempty"` // pool hits the trusted resolver denied
+	Takeover    int64        `json:"takeover_candidates,omitempty"` // results with a takeover hint
+	PoolHits    int64        `json:"pool_hits,omitempty"`           // -r: names a pool resolver said exist
+	Confirmed   int64        `json:"confirmed,omitempty"`           // pool hits the trusted resolver confirmed
+	Unconfirmed int64        `json:"unconfirmed,omitempty"`         // pool hits the trusted resolver denied
 	Wildcard    bool         `json:"wildcard"`
 	Fingerprint []dns.Record `json:"wildcard_fingerprint,omitempty"`
 	Verdict     string       `json:"verdict"`
