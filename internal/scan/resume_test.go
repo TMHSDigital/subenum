@@ -42,6 +42,11 @@ func TestResumeMatchesUninterruptedRun(t *testing.T) {
 				Simulate: true, HitRate: 10, Seed: 42, Attempts: 1,
 				Recursive: recursive, Depth: 2,
 			}
+			if !recursive {
+				// Unpaced, a flat simulated scan can finish before the
+				// interrupt lands; 2000 names/s gives it ~0.2s to run.
+				cfg.Rate = 2000
+			}
 			want, _ := runCollect(t, cfg, 0)
 
 			partial, stats := runCollect(t, cfg, len(want)/2)
