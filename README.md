@@ -250,7 +250,7 @@ make help           # list all targets
 | `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
-| `-progress` | `true` | Live progress line on stderr |
+| `-progress` | `true` | Live progress line on stderr. Off by default when stderr is not a terminal; passing `-progress` there prints whole progress lines instead of redrawing one |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
@@ -261,10 +261,10 @@ make help           # list all targets
 <br>
 
 > [!NOTE]
-> Wildcard DNS is detected automatically before scanning begins. If the target resolves wildcard records, the tool exits with a warning, since all subdomains would match, making results meaningless. Pass `-force` to override. With `-force`, results whose records are a subset of the wildcard fingerprint are still dropped and counted as `wildcard-filtered`. Recursive scans probe each new parent and skip expanding wildcard branches.
+> Wildcard DNS is detected automatically before scanning begins. If the target resolves wildcard records, or the wildcard probes fail so the check is inconclusive, the tool exits with a warning, since all subdomains would match, making results meaningless. Pass `-force` to override. With `-force`, results whose records are a subset of the wildcard fingerprint are still dropped and counted as `wildcard-filtered`. Recursive scans probe each new parent and skip expanding wildcard branches.
 
 > [!CAUTION]
-> Simulation mode (`-simulate`) generates synthetic results and performs zero network I/O. Do not confuse simulated output with real DNS data.
+> Simulation mode (`-simulate`) generates synthetic results and performs zero network I/O. Do not confuse simulated output with real DNS data. Simulated output marks itself: JSON and JSONL results carry `"simulated": true`, CSV gets a `simulated` column, and `-o` text files start with a `# SIMULATED` comment line. Bare names piped to stdout stay unmarked so they still pipe cleanly.
 
 <br>
 

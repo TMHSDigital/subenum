@@ -46,9 +46,12 @@ func ParseFormat(s string) (Format, error) {
 }
 
 // Result is one resolved subdomain and its records, used for structured output.
+// Simulated is set on every result of a -simulate run, so invented names can
+// never pass for real recon output once saved or piped (#53).
 type Result struct {
 	Subdomain string       `json:"subdomain"`
 	Records   []dns.Record `json:"records"`
+	Simulated bool         `json:"simulated,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
@@ -64,6 +67,10 @@ type Writer struct {
 
 	stderr      io.Writer // diagnostics destination; nil means os.Stderr
 	progressLen int       // width of the progress line currently on screen
+	lineMode    bool      // progress as whole lines, never carriage-return overwrites (#78)
+
+	seed       uint64 // simulation seed, named in the text file header
+	headerDone bool   // text file header written
 
 	buffered  []Result // FormatJSON: accumulated until Finish
 	csvStdout *csv.Writer
@@ -90,6 +97,15 @@ func NewFile(outWriter *bufio.Writer, simulate bool, format Format) *Writer {
 // CLI enables it when stdout is not a terminal.
 func (w *Writer) SetPlain(plain bool) { w.plain = plain }
 
+// SetProgressLines makes Progress print complete newline-terminated lines
+// instead of redrawing one line with carriage returns. The CLI enables it when
+// stderr is not a terminal, so logs that merge stdout and stderr never get a
+// result glued onto a progress line (#78).
+func (w *Writer) SetProgressLines(lines bool) { w.lineMode = lines }
+
+// SetSeed records the simulation seed for the simulated-results file header.
+func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
+
 // SetShowRecords makes text-mode output (stdout and file) append each
 // result's records as TYPE=value pairs.
 func (w *Writer) SetShowRecords(show bool) { w.records = show }
@@ -100,15 +116,15 @@ func (w *Writer) Result(domain string, records []dns.Record) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// On a terminal, stdout and the stderr progress line share the screen;
-	// blank the progress line so the result starts on a clean line.
-	if w.stdout && !w.plain {
+	// stdout and the stderr progress line may share a screen or a merged
+	// stream; blank the progress line so the result starts on a clean line.
+	if w.stdout {
 		w.clearProgressLocked()
 	}
 
 	switch w.format {
 	case FormatJSON:
-		w.buffered = append(w.buffered, Result{Subdomain: domain, Records: records})
+		w.buffered = append(w.buffered, Result{Subdomain: domain, Records: records, Simulated: w.simulate})
 	case FormatCSV:
 		w.writeCSVRows(domain, records)
 	case FormatJSONL:
@@ -134,8 +150,20 @@ func (w *Writer) writeText(domain string, records []dns.Record) {
 		}
 	}
 	if w.outWriter != nil {
+		w.writeTextHeaderLocked()
 		fmt.Fprintln(w.outWriter, line)
 	}
+}
+
+// writeTextHeaderLocked starts a simulated text results file with a comment
+// line, so the file identifies itself wherever it ends up (#53). subenum's own
+// wordlist reader skips # lines, so the file still loads as a wordlist.
+func (w *Writer) writeTextHeaderLocked() {
+	if w.headerDone || !w.simulate || w.format != FormatText || w.outWriter == nil {
+		return
+	}
+	w.headerDone = true
+	fmt.Fprintf(w.outWriter, "# SIMULATED - not real DNS results (subenum -simulate -seed %d)\n", w.seed)
 }
 
 // formatRecords renders records as " A=192.0.2.1 AAAA=2001:db8::1".
@@ -151,7 +179,7 @@ func (w *Writer) writeJSONL(domain string, records []dns.Record) {
 	if records == nil {
 		records = []dns.Record{}
 	}
-	data, err := json.Marshal(Result{Subdomain: domain, Records: records})
+	data, err := json.Marshal(Result{Subdomain: domain, Records: records, Simulated: w.simulate})
 	if err != nil {
 		fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
 		return
@@ -170,6 +198,9 @@ func (w *Writer) ensureCSV() {
 	}
 	w.csvInit = true
 	header := []string{"subdomain", "type", "value"}
+	if w.simulate {
+		header = append(header, "simulated")
+	}
 	if w.stdout {
 		w.csvStdout = csv.NewWriter(os.Stdout)
 		_ = w.csvStdout.Write(header)
@@ -188,6 +219,9 @@ func (w *Writer) writeCSVRows(domain string, records []dns.Record) {
 	}
 	for _, r := range rows {
 		row := []string{domain, r.Type, r.Value}
+		if w.simulate {
+			row = append(row, "true")
+		}
 		if w.csvStdout != nil {
 			_ = w.csvStdout.Write(row)
 		}
@@ -224,6 +258,8 @@ func (w *Writer) Finish() error {
 				return err
 			}
 		}
+	case FormatText:
+		w.writeTextHeaderLocked() // a simulated run with no hits still says so
 	case FormatCSV:
 		if w.csvStdout != nil {
 			w.csvStdout.Flush()
@@ -249,11 +285,16 @@ func (w *Writer) errOut() io.Writer {
 	return os.Stderr
 }
 
-// Progress writes a progress line to stderr using carriage-return overwrite.
+// Progress writes a progress line to stderr using carriage-return overwrite,
+// or as a complete line when SetProgressLines is on.
 func (w *Writer) Progress(pct float64, processed, total, found int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	line := fmt.Sprintf("Progress: %.1f%% (%d/%d) | Found: %d ", pct, processed, total, found)
+	if w.lineMode {
+		_, _ = fmt.Fprintln(w.errOut(), strings.TrimSpace(line))
+		return
+	}
 	// Pad over a longer previous line so no stale characters remain.
 	pad := max(0, w.progressLen-len(line))
 	_, _ = fmt.Fprint(w.errOut(), "\r"+line+strings.Repeat(" ", pad))

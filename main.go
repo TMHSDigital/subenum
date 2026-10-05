@@ -307,9 +307,20 @@ func openOutputFile(path string, testMode bool, format output.Format, out *outpu
 
 // stdoutIsTerminal reports whether stdout is an interactive terminal rather than
 // a pipe or file.
-func stdoutIsTerminal() bool {
-	fi, err := os.Stdout.Stat()
+func stdoutIsTerminal() bool { return isTerminal(os.Stdout) }
+
+// isTerminal reports whether f is a character device (a terminal) rather than
+// a pipe or file.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// flagSet reports whether the named flag was given on the command line.
+func flagSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(fl *flag.Flag) { set = set || fl.Name == name })
+	return set
 }
 
 func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Writer) {
@@ -446,6 +457,17 @@ func run() (code int) {
 	// Bare names when piped (no "Found:" banner), human-friendly on a terminal.
 	out.SetPlain(!stdoutIsTerminal())
 	out.SetShowRecords(f.showRecords)
+	out.SetSeed(f.seed)
+	// A carriage-return progress line only makes sense on a terminal. When
+	// stderr is a pipe or file (2>&1, tee, CI logs) progress is off unless
+	// -progress was given explicitly, and then printed as whole lines (#78).
+	if !isTerminal(os.Stderr) {
+		if flagSet(fs, "progress") {
+			out.SetProgressLines(true)
+		} else {
+			f.showProgress = false
+		}
+	}
 	fileErrReported := false
 	anyDone, anyFailed := false, false
 	if outFile != nil {
@@ -525,6 +547,9 @@ func run() (code int) {
 		if err := out.Finish(); err != nil {
 			out.Error("writing output file: %v", err)
 			fileErrReported = true
+		}
+		if f.testMode && !f.verbose {
+			out.Info("NOTE: these results are SIMULATED; no DNS queries were sent (seed %d).", f.seed)
 		}
 	}
 	if interrupted.Load() {

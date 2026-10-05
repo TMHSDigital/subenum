@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -185,5 +186,73 @@ func TestE2EFailedRunKeepsOutputFile(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(outPath); !strings.Contains(string(got), "www.example.com") {
 		t.Fatalf("finished run did not replace the output file: %q", got)
+	}
+}
+
+// runCLIMerged is runCLI with stdout and stderr sharing one pipe, like
+// `subenum ... 2>&1 | tee log`.
+func runCLIMerged(t *testing.T, args ...string) (int, string) {
+	t.Helper()
+	oldArgs, oldStdout, oldStderr := os.Args, os.Stdout, os.Stderr
+	t.Cleanup(func() { os.Args, os.Stdout, os.Stderr = oldArgs, oldStdout, oldStderr })
+	os.Args = append([]string{ProgramName}, args...)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout, os.Stderr = w, w
+	outCh := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		outCh <- string(b)
+	}()
+	code := run()
+	_ = w.Close()
+	return code, <-outCh
+}
+
+// TestE2EMergedStreamsHaveNoCarriageReturns covers #78: with stdout and
+// stderr merged into a non-terminal, results are never glued onto a progress
+// line. Progress is off by default there and whole lines when requested.
+func TestE2EMergedStreamsHaveNoCarriageReturns(t *testing.T) {
+	var words strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&words, "w%d\n", i)
+	}
+	wl := writeFile(t, "wl.txt", words.String())
+	base := []string{"-simulate", "-seed", "1", "-hit-rate", "50", "-rate", "15", "-w", wl, "example.com"}
+
+	for _, tc := range []struct {
+		name         string
+		extra        []string
+		wantProgress bool
+	}{
+		{"default", nil, false},
+		{"explicit -progress", []string{"-progress"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out := runCLIMerged(t, append(tc.extra, base...)...)
+			if code != 0 {
+				t.Fatalf("exit %d\n%s", code, out)
+			}
+			if strings.Contains(out, "\r") {
+				t.Fatalf("carriage return in merged output:\n%q", out)
+			}
+			results := 0
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasSuffix(line, ".example.com") {
+					results++
+					if strings.ContainsAny(line, " :") {
+						t.Fatalf("result line is not a bare hostname: %q", line)
+					}
+				}
+			}
+			if results == 0 {
+				t.Fatalf("no results in merged output:\n%s", out)
+			}
+			if got := strings.Contains(out, "Progress:"); got != tc.wantProgress {
+				t.Fatalf("progress lines present = %v, want %v\n%s", got, tc.wantProgress, out)
+			}
+		})
 	}
 }

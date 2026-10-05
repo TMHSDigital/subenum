@@ -122,6 +122,8 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	seed := rand.Uint64()
+
 	// Open the optional output file before switching screens so a create error
 	// is reported on the form rather than mid-scan.
 	if vals.outputFile != "" {
@@ -133,6 +135,7 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 		}
 		m.outFile = f
 		m.out = output.NewFile(f.Writer, vals.simulate, vals.format)
+		m.out.SetSeed(seed)
 	}
 
 	m.state = stateScan
@@ -146,7 +149,7 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 		DNSServer:   vals.dnsServer,
 		Simulate:    vals.simulate,
 		HitRate:     vals.hitRate,
-		Seed:        rand.Uint64(),
+		Seed:        seed,
 		Attempts:    vals.attempts,
 		Force:       vals.force,
 		Types:       vals.recordTypes,

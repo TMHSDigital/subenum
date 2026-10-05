@@ -431,15 +431,86 @@ func TestResultClearsProgressOnTerminal(t *testing.T) {
 		t.Errorf("progress line not cleared before result: %q", buf.b.String())
 	}
 
-	// Piped stdout never shares the screen, so nothing is cleared.
+	// Piped stdout can still share a merged stream with stderr (2>&1), so the
+	// progress line is terminated in plain mode too (#78).
 	var buf2 lockedBuf
 	p := New(nil, false, FormatText)
 	p.stderr = &buf2
 	p.SetPlain(true)
 	p.Progress(10, 1, 10, 0)
 	_ = captureStdout(t, func() { p.Result("www.example.com", nil) })
-	if p.progressLen == 0 {
-		t.Error("plain mode should leave the progress line alone")
+	if p.progressLen != 0 {
+		t.Error("plain mode must clear the progress line before a result")
+	}
+}
+
+// TestProgressLinesMode: with SetProgressLines, progress is whole lines and no
+// carriage return ever reaches the stream (#78).
+func TestProgressLinesMode(t *testing.T) {
+	var buf lockedBuf
+	w := New(nil, false, FormatText)
+	w.stderr = &buf
+	w.SetProgressLines(true)
+	w.Progress(10, 1, 10, 0)
+	w.Progress(20, 2, 10, 1)
+	w.Info("note")
+	w.ProgressDone()
+	got := buf.b.String()
+	if strings.Contains(got, "\r") {
+		t.Fatalf("carriage return in line-mode output: %q", got)
+	}
+	want := "Progress: 10.0% (1/10) | Found: 0\nProgress: 20.0% (2/10) | Found: 1\nnote\n"
+	if got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+// TestSimulatedOutputIsMarked covers #53: every saved or structured format
+// from a -simulate run identifies itself; live output is unchanged.
+func TestSimulatedOutputIsMarked(t *testing.T) {
+	recs := []dns.Record{{Type: "A", Value: "10.0.0.1"}}
+	run := func(simulate bool, format Format) (stdout, file string) {
+		var fb strings.Builder
+		bw := bufio.NewWriter(&fb)
+		w := New(bw, simulate, format)
+		w.SetPlain(true)
+		w.SetSeed(42)
+		stdout = captureStdout(t, func() {
+			w.Result("www.example.com", recs)
+			if err := w.Finish(); err != nil {
+				t.Fatalf("Finish: %v", err)
+			}
+		})
+		return stdout, fb.String()
+	}
+
+	for _, tc := range []struct {
+		format Format
+		marker string
+	}{
+		{FormatJSON, `"simulated": true`},
+		{FormatJSONL, `"simulated":true`},
+		{FormatCSV, "subdomain,type,value,simulated\nwww.example.com,A,10.0.0.1,true\n"},
+	} {
+		stdout, file := run(true, tc.format)
+		if !strings.Contains(stdout, tc.marker) || !strings.Contains(file, tc.marker) {
+			t.Errorf("format %d: marker %q missing\nstdout: %q\nfile: %q", tc.format, tc.marker, stdout, file)
+		}
+		liveOut, liveFile := run(false, tc.format)
+		if strings.Contains(liveOut+liveFile, "simulated") {
+			t.Errorf("format %d: live output marked simulated: %q", tc.format, liveOut+liveFile)
+		}
+	}
+
+	stdout, file := run(true, FormatText)
+	if stdout != "www.example.com\n" {
+		t.Errorf("plain simulated stdout = %q, want the bare name", stdout)
+	}
+	if want := "# SIMULATED - not real DNS results (subenum -simulate -seed 42)\nwww.example.com\n"; file != want {
+		t.Errorf("simulated text file = %q, want %q", file, want)
+	}
+	if _, liveFile := run(false, FormatText); liveFile != "www.example.com\n" {
+		t.Errorf("live text file = %q", liveFile)
 	}
 }
 
