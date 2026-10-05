@@ -32,7 +32,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -44,7 +43,7 @@ import (
 
 const (
 	ProgramName      = "subenum"
-	DefaultDNSServer = "8.8.8.8:53"
+	DefaultDNSServer = validate.DefaultDNSServer
 
 	// highConcurrency is the -t above which the CLI warns (#58).
 	highConcurrency = 10000
@@ -244,42 +243,13 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 		out.Error("-w and -dL cannot both read standard input")
 		return "", false
 	}
-	if f.concurrency <= 0 {
-		out.Error("Concurrency level (-t) must be greater than 0")
+	// Range and resolver checks are shared with the TUI (#80).
+	if err := scanOptions(f, "", nil, maxAttempts, nil, nil).Validate(); err != nil {
+		out.Error("%v", err)
 		return "", false
 	}
 	if f.concurrency > highConcurrency {
 		out.Info("Warning: -t %d is very high; every worker can hold a socket open, and most resolvers rate-limit long before this", f.concurrency)
-	}
-	if f.timeoutMs <= 0 {
-		out.Error("Timeout (-timeout) must be greater than 0")
-		return "", false
-	}
-	if f.testHitRate < 1 || f.testHitRate > 100 {
-		out.Error("Hit rate (-hit-rate) must be between 1 and 100")
-		return "", false
-	}
-	if maxAttempts < 1 {
-		out.Error("Attempts (-attempts) must be at least 1")
-		return "", false
-	}
-	if f.rate < 0 {
-		out.Error("Rate (-rate) must be 0 (unlimited) or a positive integer")
-		return "", false
-	}
-	if f.depth < 1 {
-		out.Error("Depth (-depth) must be at least 1")
-		return "", false
-	}
-	if f.maxQueries < 0 {
-		out.Error("Max queries (-max-queries) must be 0 (unlimited) or a positive integer")
-		return "", false
-	}
-	if !f.testMode {
-		if err := validate.DNSServer(f.dnsServer); err != nil {
-			out.Error("DNS server %s: %v", f.dnsServer, err)
-			return "", false
-		}
 	}
 	if f.domainList != "" {
 		return "", true // targets come from loadTargets
@@ -653,30 +623,37 @@ func run() (code int) {
 	return exitOK
 }
 
-// scanTarget runs one domain's scan and streams its events to out. It reports
-// whether the scan finished (EventDone arrived), whether it should count as a
-// failure for the exit code, and whether the reliability guard aborted it.
-func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (sawDone, failed, resolverAbort bool) {
-	cfg := scan.Config{
+// scanOptions maps the CLI flags onto the scan options the TUI also builds,
+// so both front ends share one validator and one Config builder (#80).
+func scanOptions(f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, logf dns.Logf) scan.Options {
+	return scan.Options{
 		Domain:      domain,
 		Entries:     entries,
 		Concurrency: f.concurrency,
-		Timeout:     time.Duration(f.timeoutMs) * time.Millisecond,
+		TimeoutMs:   f.timeoutMs,
 		DNSServer:   f.dnsServer,
 		Simulate:    f.testMode,
 		HitRate:     f.testHitRate,
 		Seed:        f.seed,
 		Attempts:    maxAttempts,
 		Force:       f.force,
-		Verbose:     f.verbose,
-		Logf:        out.Info, // serialized with the progress line (#36)
-		Rate:        f.rate,
 		Types:       recordTypes,
 		Recursive:   f.recursive,
 		Depth:       f.depth,
-		NoAbort:     f.noAbort,
+		Rate:        f.rate,
 		MaxQueries:  f.maxQueries,
+		NoAbort:     f.noAbort,
+		Verbose:     f.verbose,
+		Logf:        logf,
 	}
+}
+
+// scanTarget runs one domain's scan and streams its events to out. It reports
+// whether the scan finished (EventDone arrived), whether it should count as a
+// failure for the exit code, and whether the reliability guard aborted it.
+func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer) (sawDone, failed, resolverAbort bool) {
+	// Logf is serialized with the progress line (#36).
+	cfg := scanOptions(f, domain, entries, maxAttempts, recordTypes, out.Info).Config()
 
 	events := make(chan scan.Event, 64)
 	go scan.Run(ctx, cfg, events)

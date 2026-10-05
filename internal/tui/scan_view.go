@@ -58,6 +58,7 @@ type scanViewModel struct {
 	width     int
 	height    int
 	simMode   bool
+	seed      uint64 // simulation seed, shown so a TUI run can be reproduced
 }
 
 func newScanViewModel(width, height int, simMode bool) scanViewModel {
@@ -191,7 +192,7 @@ func (m scanViewModel) View() string {
 	// Header
 	mode := "LIVE"
 	if m.simMode {
-		mode = "SIMULATION"
+		mode = fmt.Sprintf("SIMULATION, seed %d", m.seed)
 	}
 	b.WriteString(logo() + "\n")
 	b.WriteString(headerStyle.Render(fmt.Sprintf("Scanning [%s mode]", mode)) + "\n\n")
@@ -267,5 +268,6 @@ type abortedMsg struct{}
 type wordlistLoadedMsg struct {
 	cfg     formValues
 	entries []string
+	skipped int
 	err     error
 }

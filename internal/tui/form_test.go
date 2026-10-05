@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 func TestNewFormModelDefaults(t *testing.T) {
@@ -34,7 +38,7 @@ func TestValidateNonPositiveConcurrency(t *testing.T) {
 	m.inputs[0].SetValue("example.com")
 	m.inputs[4].SetValue("0")
 	_, errStr := m.validate()
-	if !strings.Contains(errStr, "Concurrency") {
+	if !strings.Contains(errStr, "concurrency") {
 		t.Errorf("expected concurrency error, got %q", errStr)
 	}
 }
@@ -151,7 +155,7 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 	}
 
 	m.inputs[12].SetValue("-1")
-	if _, errStr := m.validate(); !strings.Contains(errStr, "Max names") {
+	if _, errStr := m.validate(); !strings.Contains(errStr, "max queries") {
 		t.Errorf("negative max queries: got %q", errStr)
 	}
 
@@ -176,5 +180,30 @@ func TestValidateNormalizesDomain(t *testing.T) {
 		if vals.domain != "example.com" {
 			t.Errorf("%q: domain = %q, want example.com", in, vals.domain)
 		}
+	}
+}
+
+// TestFormBuildsSharedConfig covers #80: the TUI builds its scan.Config with
+// the shared scan.Options builder. main_test.go asserts the CLI produces this
+// same Config from the equivalent flags.
+func TestFormBuildsSharedConfig(t *testing.T) {
+	m := newFormModel(savedConfig{})
+	for i, v := range map[int]string{0: "example.com", 1: "wl.txt", 2: "30", 3: "1.1.1.1:53", 4: "50", 5: "800", 6: "2", 7: "A,CNAME", 8: "2", 9: "100", 10: "", 12: "500"} {
+		m.inputs[i].SetValue(v)
+	}
+	m.toggles = [4]bool{true, true, true, true}
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	got := vals.options([]string{"www", "mail"}, 7).Config()
+	want := scan.Config{
+		Domain: "example.com", Entries: []string{"www", "mail"}, Concurrency: 50,
+		Timeout: 800 * time.Millisecond, DNSServer: "1.1.1.1:53", Simulate: true, HitRate: 30,
+		Seed: 7, Attempts: 2, Force: true, Types: []string{"A", "CNAME"}, Recursive: true,
+		Depth: 2, Rate: 100, MaxQueries: 500, NoAbort: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("TUI config:\n got %+v\nwant %+v", got, want)
 	}
 }

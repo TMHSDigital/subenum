@@ -13,6 +13,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/validate"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
@@ -117,7 +118,7 @@ func newFormModel(saved savedConfig) formModel {
 		newInput("e.g. example.com", str(saved.Domain, "")),                                                // 0 Domain
 		newInput("e.g. examples/sample_wordlist.txt", str(saved.Wordlist, "examples/sample_wordlist.txt")), // 1 Wordlist
 		newInput("1–100", intStr(saved.HitRate, "15")),                                                     // 2 HitRate
-		newInput("e.g. 8.8.8.8:53", str(saved.DNSServer, "8.8.8.8:53")),                                    // 3 DNSServer
+		newInput("e.g. 8.8.8.8:53", str(saved.DNSServer, validate.DefaultDNSServer)),                       // 3 DNSServer
 		newInput("e.g. 100", intStr(saved.Concurrency, "100")),                                             // 4 Concurrency
 		newInput("e.g. 1000", intStr(saved.TimeoutMs, "1000")),                                             // 5 Timeout
 		newInput("e.g. 1", intStr(saved.Attempts, "1")),                                                    // 6 Attempts
@@ -376,64 +377,44 @@ func (m *formModel) validate() (formValues, string) {
 	}
 	dnsServer := strings.TrimSpace(m.inputs[3].Value())
 	if dnsServer == "" {
-		dnsServer = "8.8.8.8:53"
-	}
-	if err := validate.DNSServer(dnsServer); err != nil {
-		return formValues{}, err.Error()
+		dnsServer = validate.DefaultDNSServer
 	}
 
-	concurrency, err := strconv.Atoi(strings.TrimSpace(m.inputs[4].Value()))
-	if err != nil || concurrency < 1 {
-		return formValues{}, fmt.Sprintf("Concurrency must be a positive integer, got %q", m.inputs[4].Value())
+	// The form only parses its text fields here; ranges and the resolver are
+	// checked by scan.Options.Validate, the same validator the CLI uses (#80).
+	num := func(field int, name string, blank int) int {
+		s := strings.TrimSpace(m.inputs[field].Value())
+		if err != nil || s == "" {
+			return blank
+		}
+		n, perr := strconv.Atoi(s)
+		if perr != nil {
+			err = fmt.Errorf("%s must be a whole number, got %q", name, m.inputs[field].Value())
+		}
+		return n
 	}
-	timeout, err := strconv.Atoi(strings.TrimSpace(m.inputs[5].Value()))
-	if err != nil || timeout < 1 {
-		return formValues{}, fmt.Sprintf("Timeout must be a positive integer (ms), got %q", m.inputs[5].Value())
-	}
-	attempts, err := strconv.Atoi(strings.TrimSpace(m.inputs[6].Value()))
-	if err != nil || attempts < 1 {
-		return formValues{}, fmt.Sprintf("Attempts must be >= 1, got %q", m.inputs[6].Value())
-	}
-	// Hit rate only matters in simulation mode; in live mode it is never used,
-	// so a blank or out-of-range field must not block the scan.
+	concurrency := num(4, "Concurrency", 0)
+	timeout := num(5, "Timeout", 0)
+	attempts := num(6, "Attempts", 0)
+	// Hit rate only matters in simulation mode, and depth only when
+	// recursive is on; otherwise their fields must not block the scan.
 	hitRate := 15
 	if m.toggles[0] {
-		hitRate, err = strconv.Atoi(strings.TrimSpace(m.inputs[2].Value()))
-		if err != nil || hitRate < 1 || hitRate > 100 {
-			return formValues{}, fmt.Sprintf("Hit rate must be 1-100, got %q", m.inputs[2].Value())
-		}
+		hitRate = num(2, "Hit rate", 0)
+	}
+	depth := 1
+	if m.toggles[2] {
+		depth = num(8, "Depth", 1)
+	}
+	rate := num(9, "Rate", 0)               // blank means unlimited
+	maxQueries := num(12, "Max queries", 0) // blank means unlimited
+	if err != nil {
+		return formValues{}, err.Error()
 	}
 
 	recordTypes, err := dns.ParseTypes(m.inputs[7].Value())
 	if err != nil {
 		return formValues{}, err.Error()
-	}
-
-	// Depth only matters when recursive is on; a blank field defaults to 1.
-	depth := 1
-	if m.toggles[2] {
-		depth, err = strconv.Atoi(strings.TrimSpace(m.inputs[8].Value()))
-		if err != nil || depth < 1 {
-			return formValues{}, fmt.Sprintf("Depth must be >= 1, got %q", m.inputs[8].Value())
-		}
-	}
-
-	// Rate is optional; a blank field means unlimited (0).
-	rate := 0
-	if rateStr := strings.TrimSpace(m.inputs[9].Value()); rateStr != "" {
-		rate, err = strconv.Atoi(rateStr)
-		if err != nil || rate < 0 {
-			return formValues{}, fmt.Sprintf("Rate must be 0 (unlimited) or a positive integer, got %q", m.inputs[9].Value())
-		}
-	}
-
-	// Max queries is optional; a blank field means unlimited (0).
-	maxQueries := 0
-	if mqStr := strings.TrimSpace(m.inputs[12].Value()); mqStr != "" {
-		maxQueries, err = strconv.Atoi(mqStr)
-		if err != nil || maxQueries < 0 {
-			return formValues{}, fmt.Sprintf("Max names must be 0 (unlimited) or a positive integer, got %q", m.inputs[12].Value())
-		}
 	}
 
 	// Output file is optional; the format applies only to that file and is
@@ -448,7 +429,7 @@ func (m *formModel) validate() (formValues, string) {
 		return formValues{}, err.Error()
 	}
 
-	return formValues{
+	v := formValues{
 		domain:      domain,
 		wordlist:    wl,
 		dnsServer:   dnsServer,
@@ -467,7 +448,34 @@ func (m *formModel) validate() (formValues, string) {
 		formatName:  formatStr,
 		simulate:    m.toggles[0],
 		force:       m.toggles[1],
-	}, ""
+	}
+	if err := v.options(nil, 0).Validate(); err != nil {
+		return formValues{}, err.Error()
+	}
+	return v, ""
+}
+
+// options maps the form onto the scan options the CLI also builds, so both
+// front ends share one validator and one Config builder (#80).
+func (v formValues) options(entries []string, seed uint64) scan.Options {
+	return scan.Options{
+		Domain:      v.domain,
+		Entries:     entries,
+		Concurrency: v.concurrency,
+		TimeoutMs:   v.timeoutMs,
+		DNSServer:   v.dnsServer,
+		Simulate:    v.simulate,
+		HitRate:     v.hitRate,
+		Seed:        seed,
+		Attempts:    v.attempts,
+		Force:       v.force,
+		Types:       v.recordTypes,
+		Recursive:   v.recursive,
+		Depth:       v.depth,
+		Rate:        v.rate,
+		MaxQueries:  v.maxQueries,
+		NoAbort:     v.noAbort,
+	}
 }
 
 type formValues struct {

@@ -7,8 +7,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 func TestParseFlagsInterspersed(t *testing.T) {
@@ -188,5 +191,30 @@ func TestAttemptsUsageShowsDefault(t *testing.T) {
 	_, _, fs, _ := parseFlags(nil)
 	if u := fs.Lookup("attempts").Usage; !strings.Contains(u, "default 1") {
 		t.Errorf("-attempts usage %q does not show the default", u)
+	}
+}
+
+// TestCLIBuildsSharedConfig covers #80: the CLI builds the same scan.Config
+// as the TUI (see TestFormBuildsSharedConfig) from equivalent inputs.
+func TestCLIBuildsSharedConfig(t *testing.T) {
+	f, pos, _, err := parseFlags([]string{"-w", "wl.txt", "-t", "50", "-timeout", "800", "-dns-server", "1.1.1.1:53",
+		"-simulate", "-hit-rate", "30", "-seed", "7", "-attempts", "2", "-force", "-type", "A,CNAME",
+		"-recursive", "-depth", "2", "-rate", "100", "-max-queries", "500", "-no-abort", "example.com"})
+	if err != nil || len(pos) != 1 {
+		t.Fatalf("parseFlags: %v %v", pos, err)
+	}
+	types, err := dns.ParseTypes(f.recordTypes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := scanOptions(f, pos[0], []string{"www", "mail"}, f.attempts, types, nil).Config()
+	want := scan.Config{
+		Domain: "example.com", Entries: []string{"www", "mail"}, Concurrency: 50,
+		Timeout: 800 * time.Millisecond, DNSServer: "1.1.1.1:53", Simulate: true, HitRate: 30,
+		Seed: 7, Attempts: 2, Force: true, Types: []string{"A", "CNAME"}, Recursive: true,
+		Depth: 2, Rate: 100, MaxQueries: 500, NoAbort: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CLI config:\n got %+v\nwant %+v", got, want)
 	}
 }

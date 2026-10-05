@@ -82,5 +82,22 @@ func saveConfig(fv formValues) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0o600)
+	// Write a temp file and rename it into place, so a second instance
+	// reading at the same moment never sees half-written JSON (#80).
+	tmp, err := os.CreateTemp(filepath.Dir(p), ".last-*.json")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(data)
+	cerr := tmp.Close()
+	if werr == nil && cerr == nil {
+		if werr = os.Rename(tmp.Name(), p); werr == nil {
+			return nil
+		}
+	}
+	_ = os.Remove(tmp.Name())
+	if werr != nil {
+		return werr
+	}
+	return cerr
 }

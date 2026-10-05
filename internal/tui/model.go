@@ -3,8 +3,8 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -115,7 +115,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.err = "wordlist has no valid entries"
 			return m, nil
 		}
-		return m.beginScan(msg.cfg, msg.entries)
+		return m.beginScan(msg.cfg, msg.entries, msg.skipped)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -130,12 +130,12 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 // loadWordlistCmd reads and normalizes the wordlist in a tea.Cmd goroutine.
 func loadWordlistCmd(vals formValues) tea.Cmd {
 	return func() tea.Msg {
-		entries, _, _, err := wordlist.LoadWordlist(vals.wordlist, vals.domain)
-		return wordlistLoadedMsg{cfg: vals, entries: entries, err: err}
+		entries, _, skipped, err := wordlist.LoadWordlist(vals.wordlist, vals.domain)
+		return wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err}
 	}
 }
 
-func (m Model) beginScan(vals formValues, entries []string) (tea.Model, tea.Cmd) {
+func (m Model) beginScan(vals formValues, entries []string, skipped int) (tea.Model, tea.Cmd) {
 	// Create the context up front so cancel is always assigned to the model
 	// before any early return. This satisfies static analysis tools that
 	// require the cancellation function to be demonstrably reachable.
@@ -161,25 +161,16 @@ func (m Model) beginScan(vals formValues, entries []string) (tea.Model, tea.Cmd)
 	m.state = stateScan
 	m.scanView = newScanViewModel(m.width, m.height, vals.simulate)
 	m.scanView.noAbort = vals.noAbort
-
-	cfg := scan.Config{
-		Domain:      vals.domain,
-		Entries:     entries,
-		Concurrency: vals.concurrency,
-		Timeout:     time.Duration(vals.timeoutMs) * time.Millisecond,
-		DNSServer:   vals.dnsServer,
-		Simulate:    vals.simulate,
-		HitRate:     vals.hitRate,
-		Seed:        seed,
-		Attempts:    vals.attempts,
-		Force:       vals.force,
-		Types:       vals.recordTypes,
-		Recursive:   vals.recursive,
-		Depth:       vals.depth,
-		Rate:        vals.rate,
-		MaxQueries:  vals.maxQueries,
-		NoAbort:     vals.noAbort,
+	// Same facts the CLI prints: the seed that reproduces a simulation, and
+	// how many wordlist entries were dropped (#80).
+	if vals.simulate {
+		m.scanView.seed = seed
 	}
+	if skipped > 0 {
+		m.scanView.addMessage(wildcardStyle.Render(fmt.Sprintf("⚠ Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)))
+	}
+
+	cfg := vals.options(entries, seed).Config()
 
 	// Persist form values for next session (best-effort).
 	_ = saveConfig(vals)

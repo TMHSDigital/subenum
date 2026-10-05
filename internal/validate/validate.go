@@ -11,8 +11,9 @@ import (
 	"strings"
 )
 
-// exampleDNSServer is shown in the DNS server format error message.
-const exampleDNSServer = "8.8.8.8:53"
+// DefaultDNSServer is the resolver used when none is given; the CLI, the TUI
+// and the DNS server error message all use this one constant (#80).
+const DefaultDNSServer = "8.8.8.8:53"
 
 var (
 	labelRegex = regexp.MustCompile(`^[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?$`)
@@ -24,7 +25,7 @@ var (
 func DNSServer(server string) error {
 	host, portStr, err := net.SplitHostPort(server)
 	if err != nil {
-		return fmt.Errorf("invalid format, expected ip:port (e.g., %s): %w", exampleDNSServer, err)
+		return fmt.Errorf("invalid format, expected ip:port (e.g., %s): %w", DefaultDNSServer, err)
 	}
 	if net.ParseIP(host) == nil {
 		return fmt.Errorf("invalid IP address: %s", host)
