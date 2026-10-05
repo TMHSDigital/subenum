@@ -135,7 +135,9 @@ type cliFlags struct {
 	statsFile    string
 	exclude      string
 	excludeFile  string
-	excludes     []string // -exclude and -exclude-file patterns, merged
+	resolvers    string    // -r: file of resolver addresses for a pool
+	pool         *dns.Pool // built from -r; nil means the single -dns-server
+	excludes     []string  // -exclude and -exclude-file patterns, merged
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
@@ -170,6 +172,7 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.StringVar(&f.statsFile, "stats", "", "Write a JSON run-quality report (outcomes, queries sent, verdict) to this file")
 	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
+	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")
 	fs.Usage = func() {
 		w := fs.Output()
 		_, _ = fmt.Fprintln(w, "Usage: subenum -w <wordlist_file> [options] <domain>")
@@ -274,6 +277,44 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 		out.Info("Note: %s", n)
 	}
 	return domain, true
+}
+
+// loadPool builds the -r resolver pool (#69). It reports its own errors.
+func loadPool(f cliFlags, out *output.Writer) (*dns.Pool, error) {
+	if f.resolvers == "" {
+		return nil, nil
+	}
+	if f.testMode {
+		out.Info("Note: -r is ignored in simulation mode, which sends no DNS queries")
+		return nil, nil
+	}
+	lines, err := wordlist.ReadLines(f.resolvers)
+	if err != nil {
+		out.Error("reading -r resolver list: %v", err)
+		return nil, err
+	}
+	addrs, err := dns.ParseResolverList(lines)
+	if err == nil && len(addrs) == 0 {
+		err = fmt.Errorf("%s lists no resolvers", f.resolvers)
+	}
+	if err != nil {
+		out.Error("-r: %v", err)
+		return nil, err
+	}
+	out.Info("Resolver pool: %d resolvers; every hit is re-validated against %s", len(addrs), f.dnsServer)
+	return dns.NewPool(addrs, time.Duration(f.timeoutMs)*time.Millisecond), nil
+}
+
+// logPoolHealth prints each pool resolver's accounting at the end of a run.
+func logPoolHealth(pool *dns.Pool, out *output.Writer) {
+	if pool == nil {
+		return
+	}
+	out.Info("Resolvers:")
+	out.Info("  %-24s %8s %8s %8s %8s %7s", "address", "lookups", "found", "nxdomain", "failed", "benched")
+	for _, r := range pool.Stats() {
+		out.Info("  %-24s %8d %8d %8d %8d %7d", r.Addr, r.Lookups, r.Found, r.NXDomain, r.Failed, r.Benched)
+	}
 }
 
 // loadExcludes merges the -exclude list and the -exclude-file lines (#87).
@@ -413,6 +454,9 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	if s.Excluded > 0 {
 		out.Info("  excluded (out of scope): %d", s.Excluded)
 	}
+	if s.PoolHits > 0 {
+		out.Info("  pool hits: %d (confirmed by the trusted resolver: %d, not confirmed: %d)", s.PoolHits, s.Confirmed, s.Unconfirmed)
+	}
 }
 
 func run() (code int) {
@@ -469,6 +513,12 @@ func run() (code int) {
 		out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
 		out.Info("")
 	}
+
+	pool, poolErr := loadPool(f, out)
+	if poolErr != nil {
+		return exitUsage
+	}
+	f.pool = pool
 
 	excludes, err := loadExcludes(f)
 	if err != nil {
@@ -649,6 +699,8 @@ func run() (code int) {
 	// empty JSON array or a bare CSV header. The deferred file flush/close
 	// registered above runs after this. Reliability abort still emits
 	// EventDone with partial results, so Finish runs there.
+	logPoolHealth(f.pool, out)
+
 	// The run-quality report (#70): the last jsonl line, and the -stats file.
 	summary := buildSummary(f, targets, status, results, started, time.Since(started))
 	out.Summary(summary)
@@ -704,6 +756,7 @@ func scanOptions(f cliFlags, domain string, entries []string, maxAttempts int, r
 		Rate:        f.rate,
 		MaxQueries:  f.maxQueries,
 		Exclude:     f.excludes,
+		Pool:        f.pool,
 		NoAbort:     f.noAbort,
 		Verbose:     f.verbose,
 		Logf:        logf,

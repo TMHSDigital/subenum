@@ -28,6 +28,7 @@ type Options struct {
 	Rate        int
 	MaxQueries  int
 	Exclude     []string
+	Pool        *dns.Pool // -r resolver pool; DNSServer is then the trusted resolver
 	NoAbort     bool
 	Verbose     bool
 	Logf        dns.Logf
@@ -83,5 +84,6 @@ func (o Options) Config() Config {
 		NoAbort:     o.NoAbort,
 		MaxQueries:  o.MaxQueries,
 		Exclude:     o.Exclude,
+		Pool:        o.Pool,
 	}
 }

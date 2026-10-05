@@ -410,3 +410,77 @@ func TestE2EExclude(t *testing.T) {
 		t.Errorf("invalid -exclude pattern: exit %d, want 2", code)
 	}
 }
+
+// startNXServer is a minimal UDP DNS server that answers NXDOMAIN to every
+// query, enough to drive live-mode CLI runs hermetically.
+func startNXServer(t *testing.T) string {
+	t.Helper()
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, src, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			if n < 12 {
+				continue
+			}
+			resp := append([]byte(nil), buf[:n]...)
+			resp[2] |= 0x80                   // QR: response
+			resp[3] = (resp[3] & 0xF0) | 0x03 // RCODE: NXDOMAIN
+			_, _ = pc.WriteTo(resp, src)
+		}
+	}()
+	return pc.LocalAddr().String()
+}
+
+// TestE2EResolverPool covers #69: -r spreads lookups over the listed
+// resolvers and the summary reports each one's accounting.
+func TestE2EResolverPool(t *testing.T) {
+	trusted, r1, r2 := startNXServer(t), startNXServer(t), startNXServer(t)
+	wl := writeFile(t, "wl.txt", e2eWords)
+	list := writeFile(t, "resolvers.txt", "# pool\n"+r1+"\n"+r2+"\n")
+	stats := filepath.Join(t.TempDir(), "run.json")
+	code, _ := runCLI(t, "", "-dns-server", trusted, "-r", list, "-type", "A", "-progress=false",
+		"-stats", stats, "-w", wl, "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, err := os.ReadFile(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum struct {
+		Resolver  string `json:"resolver"`
+		Resolvers []struct {
+			Address string `json:"address"`
+			Lookups int    `json:"lookups"`
+		} `json:"resolvers"`
+	}
+	if err := json.Unmarshal(data, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if sum.Resolver != trusted || len(sum.Resolvers) != 2 {
+		t.Fatalf("summary resolvers wrong: %s", data)
+	}
+	total := 0
+	for _, r := range sum.Resolvers {
+		if r.Lookups == 0 {
+			t.Errorf("resolver %s got no lookups: %s", r.Address, data)
+		}
+		total += r.Lookups
+	}
+	if total != 6 {
+		t.Errorf("pool lookups = %d, want 6 (one per wordlist entry)", total)
+	}
+
+	bad := writeFile(t, "bad.txt", "dns.example.com\n")
+	if code, _ := runCLI(t, "", "-r", bad, "-w", wl, "example.com"); code != 2 {
+		t.Errorf("invalid resolver list: exit %d, want 2", code)
+	}
+}

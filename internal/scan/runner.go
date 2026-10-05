@@ -44,6 +44,11 @@ type Config struct {
 	MaxQueries  int           // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
 	Exclude     []string      // out-of-scope names and *.parent patterns; never queried (#87)
 	Resolver    *net.Resolver // reused across lookups; nil means scan.Run constructs one
+	// Pool, when set, spreads candidate lookups over several resolvers (#69).
+	// Every pool hit is re-validated against Resolver (the trusted
+	// -dns-server), whose answer is the one reported; preflight and wildcard
+	// checks also use Resolver.
+	Pool *dns.Pool
 
 	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
 	// Tests inject classified outcomes through this field without network I/O.
@@ -76,6 +81,9 @@ type Stats struct {
 	QueriesSent int64        // DNS queries dialed, retries included (0 when simulated)
 	Skipped     int64        // candidates not tested because -max-queries was reached
 	Excluded    int64        // candidates not tested because -exclude put them out of scope
+	PoolHits    int64        // names a pool resolver said exist (-r)
+	Confirmed   int64        // pool hits the trusted resolver confirmed
+	Unconfirmed int64        // pool hits the trusted resolver said do not exist
 	Aborted     bool         // the reliability guard cancelled the scan
 	Wildcard    bool         // the root domain is a wildcard (scanned under -force)
 	Fingerprint []dns.Record // final wildcard fingerprint, empty when none
@@ -100,6 +108,9 @@ type counters struct {
 	wildcardFiltered atomic.Int64
 	skipped          atomic.Int64
 	excluded         atomic.Int64
+	poolHits         atomic.Int64
+	confirmed        atomic.Int64
+	unconfirmed      atomic.Int64
 	aborted          atomic.Bool
 }
 
@@ -130,6 +141,9 @@ func (c *counters) snapshot() Stats {
 		WildcardFiltered: c.wildcardFiltered.Load(),
 		Skipped:          c.skipped.Load(),
 		Excluded:         c.excluded.Load(),
+		PoolHits:         c.poolHits.Load(),
+		Confirmed:        c.confirmed.Load(),
+		Unconfirmed:      c.unconfirmed.Load(),
 		Aborted:          c.aborted.Load(),
 	}
 }
@@ -688,6 +702,8 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 		} else {
 			outcome = dns.OutcomeNXDomain
 		}
+	case cfg.Pool != nil:
+		records, outcome = resolveViaPool(ctx, cfg, j.domain, st)
 	default:
 		records, outcome = dns.ResolveDomainWithRetry(ctx, cfg.Resolver, j.domain, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
 	}
@@ -742,6 +758,27 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 		case <-ctx.Done():
 		}
 	}
+}
+
+// resolveViaPool looks name up through the resolver pool and re-validates a
+// hit against the trusted resolver, so a pool member that lies (a poisoned or
+// hijacking resolver) cannot inject results (#69). The trusted answer is the
+// one reported. A pool hit the trusted resolver cannot confirm because its
+// own lookup failed counts as that failure, not as a silent drop.
+func resolveViaPool(ctx context.Context, cfg Config, name string, st *counters) ([]dns.Record, dns.Outcome) {
+	_, outcome, _ := cfg.Pool.Resolve(ctx, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+	if outcome != dns.OutcomeFound {
+		return nil, outcome
+	}
+	st.poolHits.Add(1)
+	records, trusted := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+	switch trusted {
+	case dns.OutcomeFound:
+		st.confirmed.Add(1)
+	case dns.OutcomeNXDomain:
+		st.unconfirmed.Add(1)
+	}
+	return records, trusted
 }
 
 func checkReliability(cfg Config, processed int64, st *counters, events chan<- Event, cancel context.CancelFunc, once *sync.Once) {

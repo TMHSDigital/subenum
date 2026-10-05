@@ -32,6 +32,9 @@ type Summary struct {
 	Verdict     string          `json:"verdict"`
 	Reason      string          `json:"reason"`
 	Targets     []TargetSummary `json:"targets"`
+	// Resolvers is the -r pool's per-resolver accounting; Resolver is then
+	// the trusted resolver every pool hit was re-validated against.
+	Resolvers []dns.ResolverStats `json:"resolvers,omitempty"`
 }
 
 // TargetSummary is one scanned domain's part of a Summary.
@@ -45,6 +48,9 @@ type TargetSummary struct {
 	Outcomes    Outcomes     `json:"outcomes"`
 	QueriesSent int64        `json:"queries_sent"`
 	SkippedCap  int64        `json:"skipped_by_cap"`
+	PoolHits    int64        `json:"pool_hits,omitempty"`   // -r: names a pool resolver said exist
+	Confirmed   int64        `json:"confirmed,omitempty"`   // pool hits the trusted resolver confirmed
+	Unconfirmed int64        `json:"unconfirmed,omitempty"` // pool hits the trusted resolver denied
 	Wildcard    bool         `json:"wildcard"`
 	Fingerprint []dns.Record `json:"wildcard_fingerprint,omitempty"`
 	Verdict     string       `json:"verdict"`

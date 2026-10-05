@@ -45,6 +45,9 @@ func buildSummary(f cliFlags, targets, status []string, results []targetResult, 
 			s.Reason = w.Domain + ": " + w.Reason
 		}
 	}
+	if f.pool != nil {
+		s.Resolvers = f.pool.Stats()
+	}
 	if secs := elapsed.Seconds(); secs > 0 {
 		s.AchievedQPS = float64(int(float64(s.QueriesSent)/secs*10)) / 10
 	}
@@ -85,6 +88,7 @@ func targetSummary(domain, status string, res targetResult) output.TargetSummary
 	}
 	t.QueriesSent = st.QueriesSent
 	t.SkippedCap = st.Skipped
+	t.PoolHits, t.Confirmed, t.Unconfirmed = st.PoolHits, st.Confirmed, st.Unconfirmed
 	t.Wildcard = st.Wildcard
 	if st.Wildcard {
 		t.Fingerprint = st.Fingerprint
