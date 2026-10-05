@@ -293,17 +293,16 @@ func loadTargets(f cliFlags, domain string, out *output.Writer) ([]string, bool)
 	return targets, true
 }
 
-func openOutputFile(path string, testMode bool, format output.Format, out *output.Writer) (*output.Writer, *bufio.Writer, *os.File, bool) {
+func openOutputFile(path string, testMode bool, format output.Format, out *output.Writer) (*output.Writer, *output.File, bool) {
 	if path == "" {
-		return out, nil, nil, true
+		return out, nil, true
 	}
-	f, err := os.Create(path)
+	f, err := output.CreateFile(path)
 	if err != nil {
 		out.Error("creating output file: %v", err)
-		return out, nil, nil, false
+		return out, nil, false
 	}
-	w := bufio.NewWriter(f)
-	return output.New(w, testMode, format), w, f, true
+	return output.New(f.Writer, testMode, format), f, true
 }
 
 // stdoutIsTerminal reports whether stdout is an interactive terminal rather than
@@ -436,30 +435,30 @@ func run() (code int) {
 		return 1
 	}
 
-	out, outWriter, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
+	out, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
 	if !ok {
 		return 1
+	}
+	var outWriter *bufio.Writer
+	if outFile != nil {
+		outWriter = outFile.Writer
 	}
 	// Bare names when piped (no "Found:" banner), human-friendly on a terminal.
 	out.SetPlain(!stdoutIsTerminal())
 	out.SetShowRecords(f.showRecords)
 	fileErrReported := false
+	anyDone, anyFailed := false, false
 	if outFile != nil {
-		// Runs after the final return value is chosen; a failed flush or close
-		// means the results file is incomplete, so it must turn a successful
-		// exit into a failure (#30). bufio errors are sticky, so a failure
-		// already reported by Finish is not printed twice.
+		// Runs after the final return value is chosen. The results file
+		// replaces an existing one only if a scan finished (#52); a failed
+		// flush, close or rename means it is incomplete, so it must turn a
+		// successful exit into a failure (#30). bufio errors are sticky, so a
+		// failure already reported by Finish is not printed twice.
 		defer func() {
-			if flushErr := outWriter.Flush(); flushErr != nil {
+			if err := outFile.Close(anyDone); err != nil {
 				if !fileErrReported {
-					out.Error("writing output file: %v", flushErr)
+					out.Error("writing output file: %v", err)
 				}
-				if code == 0 {
-					code = 1
-				}
-			}
-			if closeErr := outFile.Close(); closeErr != nil {
-				out.Error("closing output file: %v", closeErr)
 				if code == 0 {
 					code = 1
 				}
@@ -490,7 +489,6 @@ func run() (code int) {
 	// Each target is an independent scan: its own preflight, wildcard check,
 	// -max-queries budget and reliability guard. Results share one writer, so
 	// -format json is a single array and CSV has a single header.
-	anyDone, anyFailed := false, false
 	for i, target := range targets {
 		if ctx.Err() != nil {
 			break

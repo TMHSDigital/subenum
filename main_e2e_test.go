@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -149,5 +150,40 @@ func TestE2EExitCodes(t *testing.T) {
 				t.Errorf("exit %d, want %d", code, tc.want)
 			}
 		})
+	}
+}
+
+// TestE2EFailedRunKeepsOutputFile covers #52: a run that fails preflight
+// leaves an existing -o file byte-for-byte unchanged, while a run that
+// finishes replaces it.
+func TestE2EFailedRunKeepsOutputFile(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pc.Close() }()
+
+	wl := writeFile(t, "wl.txt", e2eWords)
+	const prev = "PREVIOUS RESULTS\n"
+	outPath := writeFile(t, "prev.txt", prev)
+
+	code, _ := runCLI(t, "", "-dns-server", pc.LocalAddr().String(), "-timeout", "100", "-progress=false",
+		"-format", "json", "-w", wl, "-o", outPath, "example.invalid")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (preflight failure)", code)
+	}
+	if got, _ := os.ReadFile(outPath); string(got) != prev {
+		t.Fatalf("output file changed by a failed run: %q", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(outPath), ".*.tmp")); len(left) != 0 {
+		t.Fatalf("temporary files left behind: %v", left)
+	}
+
+	code, _ = runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-w", wl, "-o", outPath, "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if got, _ := os.ReadFile(outPath); !strings.Contains(string(got), "www.example.com") {
+		t.Fatalf("finished run did not replace the output file: %q", got)
 	}
 }

@@ -2,10 +2,8 @@
 package tui
 
 import (
-	"bufio"
 	"context"
 	"math/rand/v2"
-	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,8 +34,7 @@ type Model struct {
 	// mirror resolved records to disk in the chosen format when an output file
 	// is configured on the form.
 	out     *output.Writer
-	outBuf  *bufio.Writer
-	outFile *os.File
+	outFile *output.File
 }
 
 // New creates the root model starting on the form screen.
@@ -128,15 +125,14 @@ func (m Model) beginScan(vals formValues) (tea.Model, tea.Cmd) {
 	// Open the optional output file before switching screens so a create error
 	// is reported on the form rather than mid-scan.
 	if vals.outputFile != "" {
-		f, ferr := os.Create(vals.outputFile)
+		f, ferr := output.CreateFile(vals.outputFile)
 		if ferr != nil {
 			cancel()
 			m.form.err = "cannot create output file: " + ferr.Error()
 			return m, nil
 		}
 		m.outFile = f
-		m.outBuf = bufio.NewWriter(f)
-		m.out = output.NewFile(m.outBuf, vals.simulate, vals.format)
+		m.out = output.NewFile(f.Writer, vals.simulate, vals.format)
 	}
 
 	m.state = stateScan
@@ -245,7 +241,8 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // finalizeOutput closes the optional output file. When finish is true the
 // structured writer is finalized first (buffered JSON array emitted, CSV
-// flushed); when false the file is closed without emitting structured output.
+// flushed) and the file replaces any existing one; when false it is discarded
+// and an existing results file is left untouched (#52).
 // Safe to call when no output file is configured.
 // It returns the first write, flush, or close error so the scan view can tell
 // the user the results file is incomplete.
@@ -262,14 +259,10 @@ func (m *Model) finalizeOutput(finish bool) error {
 	if finish {
 		keep(m.out.Finish())
 	}
-	if m.outBuf != nil {
-		keep(m.outBuf.Flush())
-	}
 	if m.outFile != nil {
-		keep(m.outFile.Close())
+		keep(m.outFile.Close(finish))
 	}
 	m.out = nil
-	m.outBuf = nil
 	m.outFile = nil
 	return firstErr
 }
