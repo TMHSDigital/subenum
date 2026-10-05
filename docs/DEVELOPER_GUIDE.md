@@ -79,8 +79,10 @@ subenum/
 │   ├── CONTRIBUTING.md         # PR workflow, testing, ethical guidelines
 │   ├── DEVELOPER_GUIDE.md      # This file
 │   ├── DOCUMENTATION_STRUCTURE.md
+│   ├── ROADMAP.md              # Planned work
 │   ├── docker.md               # Container setup and volume mounting
 │   ├── _config.yml             # Jekyll config for GitHub Pages
+│   ├── _includes/, _layouts/, assets/  # Jekyll site templates, CSS, images
 │   └── index.md                # GitHub Pages landing page
 ├── examples/
 │   ├── sample_wordlist.txt     # 50-entry starter wordlist
@@ -89,33 +91,49 @@ subenum/
 │   └── demo.sh                 # Quick demo script
 ├── internal/
 │   ├── dns/
-│   │   ├── resolver.go         # ResolveTypes, ResolveDomainWithRetry, CheckWildcard, ParseTypes
-│   │   ├── resolver_test.go    # DNS resolution and wildcard detection tests
+│   │   ├── resolver.go         # NewResolver, ResolveTypes, ResolveDomainWithRetry, Classify,
+│   │   │                       # CheckWildcard, FingerprintWildcard, ParseTypes
+│   │   ├── resolver_test.go    # DNS resolution, classification and wildcard detection tests
+│   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
+│   │   ├── ratelimit_test.go   # Rate limiter tests
 │   │   ├── testdns_test.go     # In-process UDP/TCP DNS responder for hermetic tests
-│   │   ├── simulate.go         # SimulateResolve (synthetic DNS)
+│   │   ├── simulate.go         # SimulateResolve (seeded synthetic DNS)
 │   │   └── simulate_test.go    # Simulation logic tests
 │   ├── output/
 │   │   ├── writer.go           # Thread-safe output (results→stdout, rest→stderr)
+│   │   ├── file.go             # File: atomically replaced -o results file
 │   │   └── writer_test.go      # Output writer tests
 │   ├── scan/
-│   │   ├── runner.go           # Scan engine: Config, Event types, Run(ctx, cfg, events)
-│   │   └── runner_test.go      # Dispatcher lifecycle, recursion, rate, cancellation tests
+│   │   ├── options.go          # Options: settings shared by CLI and TUI (Validate, Config)
+│   │   ├── options_test.go     # Options validation tests
+│   │   ├── runner.go           # Scan engine: Config, Event/NoticeKind, Stats, Run
+│   │   └── runner_test.go      # Dispatcher lifecycle, recursion, rate, wildcard, cancellation tests
 │   ├── tui/
 │   │   ├── model.go            # Root Bubble Tea model (form → scan state machine)
 │   │   ├── form.go             # Config form screen (textinput fields + toggles)
 │   │   ├── scan_view.go        # Live results screen (viewport + progress bar)
-│   │   └── config.go           # Session persistence: load/save ~/.config/subenum/last.json
+│   │   ├── logo.go             # Styled wordmark
+│   │   ├── config.go           # Session persistence: load/save <user config dir>/subenum/last.json
+│   │   └── *_test.go           # Model, form, scan view and config tests
+│   ├── validate/
+│   │   ├── validate.go         # DNSServer, Domain, NormalizeDomain, DefaultDNSServer
+│   │   ├── punycode.go         # IDN → punycode (A-label) conversion
+│   │   └── *_test.go           # Validator and punycode tests
 │   └── wordlist/
-│       ├── reader.go           # LoadWordlist (dedup + sanitize)
-│       └── reader_test.go      # Wordlist loading and dedup tests
+│       ├── reader.go           # ReadLines, Normalize, Build, LoadWordlist
+│       └── reader_test.go      # Wordlist reading, normalization and dedup tests
 ├── tools/
 │   ├── wordlist-gen.go         # Custom wordlist generator utility
+│   ├── wordlist-gen_test.go    # Generator tests
 │   └── README.md               # Wordlist generator docs
 ├── .gitattributes              # Line-ending normalization rules
+├── .gitignore
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
-├── main.go                     # CLI entry point: flag parsing, wiring
+├── main.go                     # CLI entry point: flag parsing, -dL loop, exit codes
 ├── main_test.go                # CLI-level tests: validation, flag logic
-├── go.mod                      # Go module (Bubble Tea TUI is linked into every binary)
+├── main_e2e_test.go            # End-to-end run() tests: -dL, stdin, formats, exit codes
+├── main_signal_unix_test.go    # SIGTERM exit code test (Unix only)
+├── go.mod / go.sum             # Go module (Bubble Tea TUI is linked into every binary)
 ├── Dockerfile                  # Multi-stage distroless static nonroot build
 ├── docker-compose.yml          # Compose orchestration
 ├── Makefile                    # Build, test, lint, simulate, Docker targets
@@ -147,50 +165,49 @@ go test ./internal/dns -run TestLiveResolverSmoke
 
 ### Writing Tests
 
-When adding new features or modifying existing ones, please ensure you add appropriate tests. Here's a basic structure for tests:
+When adding new features or modifying existing ones, please ensure you add appropriate tests. Tests must not depend on the network: DNS tests in `internal/dns` use `startTestDNS` (in `testdns_test.go`), an in-process UDP/TCP server that answers from a table of `testReply` entries; names missing from the table get NXDOMAIN. Its `Resolver` method returns a `*net.Resolver` pointed at it. Here's a basic structure (save it as a `_test.go` file in `internal/dns`):
 
 ```go
-package dns_test
+package dns
 
 import (
-    "context"
-    "testing"
-    "time"
-
-    "github.com/TMHSDigital/subenum/internal/dns"
+	"context"
+	"testing"
+	"time"
 )
 
-func TestResolveDomain(t *testing.T) {
-    testCases := []struct {
-        name     string
-        domain   string
-        timeout  time.Duration
-        expected bool
-    }{
-        {
-            name:     "Valid domain",
-            domain:   "google.com",
-            timeout:  time.Second,
-            expected: true,
-        },
-        {
-            name:     "Invalid domain",
-            domain:   "thisdoesnotexisthopefully.com",
-            timeout:  time.Second,
-            expected: false,
-        },
-    }
+func TestGuideResolveOutcomes(t *testing.T) {
+	// In-process DNS server: no outbound network. Names missing from the
+	// table get NXDOMAIN.
+	srv := startTestDNS(t, map[string]testReply{
+		"www.example.com":  {A: "192.0.2.1"},
+		"busy.example.com": {Refused: true},
+	})
+	timeout := time.Second
+	r := srv.Resolver(timeout)
 
-    for _, tc := range testCases {
-        t.Run(tc.name, func(t *testing.T) {
-            result := dns.ResolveDomain(context.Background(), tc.domain, tc.timeout, "8.8.8.8:53", false)
-            if result != tc.expected {
-                t.Errorf("Expected %v for domain %s, got %v", tc.expected, tc.domain, result)
-            }
-        })
-    }
+	testCases := []struct {
+		name   string
+		domain string
+		want   Outcome
+	}{
+		{"resolves", "www.example.com", OutcomeFound},
+		{"does not exist", "missing.example.com", OutcomeNXDomain},
+		{"server refuses", "busy.example.com", OutcomeRefused},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, got := ResolveDomainWithRetry(context.Background(), r, tc.domain, timeout, nil, 1, []string{"A"})
+			if got != tc.want {
+				t.Errorf("%s: outcome = %v, want %v", tc.domain, got, tc.want)
+			}
+		})
+	}
 }
 ```
+
+Scan-engine tests in `internal/scan` can avoid DNS entirely by setting the unexported `resolveHook` field of `scan.Config`, or by running with `Simulate` set; see `runner_test.go`.
 
 ## Debugging Tips
 
@@ -268,16 +285,16 @@ If you need to add a further dependency:
 The following capabilities are implemented and available today:
 
 *   **Terminal UI** (`-tui`): a Bubble Tea form-based config screen and live-scrolling results view, no arguments required to launch. Last-used values persist to `~/.config/subenum/last.json` across sessions.
-*   **Output Formats** (`-format text|json|csv`): in addition to the plain text output file (`-o`).
+*   **Output Formats** (`-format text|json|jsonl|csv`): on stdout and in the atomically replaced output file (`-o`); `jsonl` streams one object per line.
 *   **Record Types** (`-type A,AAAA,CNAME`): per-type lookups filtered to the requested types.
-*   **Recursive Enumeration** (`-recursive` with `-depth`): enumerate subdomains of discovered subdomains, with loop and duplicate protection.
-*   **Rate Limiting** (`-rate`): cap total DNS queries per second across the worker pool.
+*   **Recursive Enumeration** (`-recursive` with `-depth`): enumerate subdomains of discovered subdomains, with loop and duplicate protection and per-branch wildcard checks.
+*   **Rate Limiting** (`-rate`): cap DNS queries per second on the wire across the worker pool, counting every record type, retry and wildcard probe.
+*   **Multiple Targets** (`-dL`): scan a list of apex domains, each as an independent scan, with exit code 3 when only some targets fail.
 
 ## Future Development
 
 See `docs/ROADMAP.md` for the next-pass list. Areas still open:
 
 *   **Additional record types**: extend `dns.ResolveTypes` beyond A/AAAA/CNAME (for example MX, TXT, NS).
-*   **Streaming JSON output**: a JSONL mode for live structured output that, unlike the buffered JSON array, can be piped incrementally.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 
