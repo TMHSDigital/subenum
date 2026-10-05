@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -157,5 +158,35 @@ func TestFormatVersion(t *testing.T) {
 	Version = ""
 	if got := formatVersion(); got != "subenum dev" {
 		t.Errorf("no ldflags: got %q, want %q", got, "subenum dev")
+	}
+}
+
+// TestParseFlagsTUIOnlyAsFlag covers #58: -tui is honoured only as a flag,
+// not as another flag's value or an argument after "--".
+func TestParseFlagsTUIOnlyAsFlag(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"-tui"}, true},
+		{[]string{"-v", "--tui"}, true},
+		{[]string{"-o", "-tui", "example.com"}, false},
+		{[]string{"-w", "wl.txt", "--", "-tui"}, false},
+	} {
+		f, _, _, err := parseFlags(tc.args)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if f.tui != tc.want {
+			t.Errorf("%v: tui = %v, want %v", tc.args, f.tui, tc.want)
+		}
+	}
+}
+
+// TestAttemptsUsageShowsDefault covers #58: -h shows the effective default.
+func TestAttemptsUsageShowsDefault(t *testing.T) {
+	_, _, fs, _ := parseFlags(nil)
+	if u := fs.Lookup("attempts").Usage; !strings.Contains(u, "default 1") {
+		t.Errorf("-attempts usage %q does not show the default", u)
 	}
 }

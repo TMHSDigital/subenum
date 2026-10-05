@@ -1204,3 +1204,24 @@ func TestRunPreflightRetries(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkerCountCapped covers #58: a huge -t never spawns more workers than
+// the scan has jobs.
+func TestWorkerCountCapped(t *testing.T) {
+	for _, tc := range []struct {
+		cfg   Config
+		depth int
+		want  int
+	}{
+		{Config{Concurrency: 5_000_000, Entries: makeEntries(8)}, 1, 8},
+		{Config{Concurrency: 100, Entries: makeEntries(8), Recursive: true}, 2, 72},
+		{Config{Concurrency: 100, Entries: makeEntries(1000), MaxQueries: 10}, 1, 10},
+		{Config{Concurrency: 4, Entries: makeEntries(1000)}, 1, 4},
+		{Config{Concurrency: 4}, 1, 1},
+	} {
+		if got := workerCount(tc.cfg, tc.depth); got != tc.want {
+			t.Errorf("workerCount(t=%d, n=%d, rec=%v, depth=%d, max=%d) = %d, want %d",
+				tc.cfg.Concurrency, len(tc.cfg.Entries), tc.cfg.Recursive, tc.depth, tc.cfg.MaxQueries, got, tc.want)
+		}
+	}
+}

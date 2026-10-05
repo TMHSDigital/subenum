@@ -45,6 +45,9 @@ import (
 const (
 	ProgramName      = "subenum"
 	DefaultDNSServer = "8.8.8.8:53"
+
+	// highConcurrency is the -t above which the CLI warns (#58).
+	highConcurrency = 10000
 )
 
 // Version is the release identifier. Makefile, CI and the Dockerfile set it
@@ -75,18 +78,12 @@ func formatVersion() string {
 }
 
 func main() {
-	// Fast-path: if -tui is the first argument, launch the TUI immediately
-	// before flag.Parse() consumes everything else.
-	for _, arg := range os.Args[1:] {
-		if arg == "-tui" || arg == "--tui" {
-			os.Exit(tui.Start())
-		}
-	}
 	os.Exit(run())
 }
 
 // cliFlags holds all parsed command-line flag values.
 type cliFlags struct {
+	tui          bool
 	wordlistFile string
 	domainList   string
 	concurrency  int
@@ -117,7 +114,7 @@ type cliFlags struct {
 func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	var f cliFlags
 	fs := flag.NewFlagSet(ProgramName, flag.ContinueOnError)
-	fs.Bool("tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
+	fs.BoolVar(&f.tui, "tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
 	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file (- for stdin)")
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
@@ -130,7 +127,7 @@ func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
 	fs.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
 	fs.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
-	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain (1 = no retry)")
+	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain, 1 = no retry (default 1)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
 	fs.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
 	fs.StringVar(&f.format, "format", "text", "Output format: text, json, jsonl, or csv")
@@ -195,6 +192,13 @@ func endsWithTerminator(fs *flag.FlagSet, consumed []string) bool {
 
 func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
 	if f.wordlistFile == "" || (len(positionals) == 0 && f.domainList == "") {
+		// Say what is missing before the full flag list (#58).
+		if f.wordlistFile == "" {
+			out.Error("-w <wordlist> is required")
+		}
+		if len(positionals) == 0 && f.domainList == "" {
+			out.Error("missing <domain> (or -dL <domains_file>)")
+		}
 		fmt.Fprintln(os.Stderr, "Usage: subenum -w <wordlist_file> [options] <domain>")
 		fmt.Fprintln(os.Stderr, "       subenum -w <wordlist_file> [options] -dL <domains_file>")
 		fs.SetOutput(os.Stderr)
@@ -216,6 +220,9 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 	if f.concurrency <= 0 {
 		out.Error("Concurrency level (-t) must be greater than 0")
 		return "", false
+	}
+	if f.concurrency > highConcurrency {
+		out.Info("Warning: -t %d is very high; every worker can hold a socket open, and most resolvers rate-limit long before this", f.concurrency)
 	}
 	if f.timeoutMs <= 0 {
 		out.Error("Timeout (-timeout) must be greater than 0")
@@ -383,6 +390,21 @@ func run() (code int) {
 		return 2
 	}
 
+	// -tui counts only as a real flag, not as the value of another flag
+	// (-o -tui) or an argument after "--" (#58).
+	if f.tui {
+		if fs.NFlag() > 1 || len(positionals) > 0 {
+			fmt.Fprintln(os.Stderr, "Warning: -tui ignores every other flag and argument; set them in the form instead")
+		}
+		return tui.Start()
+	}
+
+	// -version answers before anything else prints, banners included (#58).
+	if f.showVersion {
+		fmt.Println(formatVersion())
+		return 0
+	}
+
 	format, formatErr := output.ParseFormat(f.format)
 	recordTypes, typesErr := dns.ParseTypes(f.recordTypes)
 	maxAttempts, err := resolveAttempts(f.attempts, f.retries)
@@ -411,14 +433,6 @@ func run() (code int) {
 		out.Info("╚════════════════════════════════════════════════════════════════════╝")
 		out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
 		out.Info("")
-	}
-
-	if f.showVersion {
-		fmt.Println(formatVersion())
-		if f.testMode {
-			fmt.Println("Running in SIMULATION mode")
-		}
-		return 0
 	}
 
 	domain, ok := validateFlags(f, positionals, fs, out, maxAttempts)

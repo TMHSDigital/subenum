@@ -282,3 +282,21 @@ func TestE2EDomainFormsGiveIdenticalOutput(t *testing.T) {
 		}
 	}
 }
+
+// TestE2ECLIPolish covers #58: missing arguments are named before the usage
+// text, and -version prints before any simulation banner.
+func TestE2ECLIPolish(t *testing.T) {
+	_, out := runCLIMerged(t, "example.com")
+	if !strings.Contains(out, "Error: -w <wordlist> is required") {
+		t.Errorf("missing -w not named:\n%s", out)
+	}
+	wl := writeFile(t, "wl.txt", e2eWords)
+	_, out = runCLIMerged(t, "-w", wl)
+	if !strings.Contains(out, "Error: missing <domain>") {
+		t.Errorf("missing domain not named:\n%s", out)
+	}
+	code, out := runCLIMerged(t, "-simulate", "-version")
+	if code != 0 || !strings.HasPrefix(out, ProgramName) || strings.Contains(out, "SIMULATION MODE ACTIVE") {
+		t.Errorf("-simulate -version: exit %d, output:\n%s", code, out)
+	}
+}

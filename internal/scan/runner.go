@@ -227,6 +227,20 @@ func RecursionCeiling(n, depth int) float64 {
 	return total
 }
 
+// workerCount caps the pool at the most jobs the scan can produce, so a huge
+// -t on a short wordlist does not spawn millions of idle goroutines (#58).
+func workerCount(cfg Config, maxDepth int) int {
+	depth := 1
+	if cfg.Recursive {
+		depth = maxDepth
+	}
+	work := RecursionCeiling(len(cfg.Entries), depth)
+	if cfg.MaxQueries > 0 {
+		work = min(work, float64(cfg.MaxQueries))
+	}
+	return max(1, int(min(float64(cfg.Concurrency), work)))
+}
+
 // job is a single unit of work: a fully qualified domain to test and its depth
 // in the recursion tree (initial entries are depth 1).
 type job struct {
@@ -517,7 +531,8 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	}()
 
 	// Worker pool.
-	for i := 0; i < cfg.Concurrency; i++ {
+	workers := workerCount(cfg, maxDepth)
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
