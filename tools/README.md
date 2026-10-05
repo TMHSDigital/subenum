@@ -14,6 +14,7 @@ A simple utility for generating custom wordlists for subdomain enumeration.
 - Ensures no duplicate entries (case-insensitive)
 - Deterministic: the same flags always produce a byte-identical file
 - Strips the public suffix, including second-level ones such as `.co.uk`
+- Writes only valid DNS labels, and exits non-zero when nothing would be written
 
 ### Usage
 
@@ -35,10 +36,11 @@ go build -buildvcs=false -o wordlist-gen wordlist-gen.go
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-o` | Output file path | `wordlist.txt` |
+| `-o` | Output file path; an existing file is never overwritten without `-f` | `wordlist.txt` |
+| `-f` | Overwrite the output file if it exists | `false` |
 | `-common` | Include common subdomain prefixes | `true` |
 | `-domain` | Domain to extract terms from | `""` (empty) |
-| `-combine` | Comma-separated prefixes to combine with other terms | `""` (empty) |
+| `-combine` | Comma-separated prefixes to combine with other terms; each must be a valid DNS label | `""` (empty) |
 | `-v` | Print every generated entry to stdout | `false` |
 
 ### Example

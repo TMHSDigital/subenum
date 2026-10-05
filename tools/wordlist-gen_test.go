@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -67,5 +70,44 @@ func TestWriteWordlistReportsErrors(t *testing.T) {
 	var sb strings.Builder
 	if err := writeWordlist(&sb, []string{"a", "b"}); err != nil || sb.String() != "a\nb\n" {
 		t.Fatalf("got %q, %v", sb.String(), err)
+	}
+}
+
+// TestRunGuards covers #59: an existing file is not overwritten without -f,
+// an empty result exits non-zero, and invalid -combine prefixes are rejected.
+func TestRunGuards(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "wl.txt")
+	if err := os.WriteFile(out, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr strings.Builder
+
+	if code := run([]string{"-o", out}, io.Discard, &stderr); code != 1 || !strings.Contains(stderr.String(), "already exists") {
+		t.Errorf("existing file: exit %d, stderr %q; want 1 and an already-exists error", code, stderr.String())
+	}
+	if got, _ := os.ReadFile(out); string(got) != "keep\n" {
+		t.Errorf("existing file overwritten without -f: %q", got)
+	}
+	if code := run([]string{"-f", "-o", out}, io.Discard, io.Discard); code != 0 {
+		t.Errorf("-f: exit %d, want 0", code)
+	}
+	if got, _ := os.ReadFile(out); !strings.Contains(string(got), "www\n") {
+		t.Errorf("-f did not rewrite the file: %q", got)
+	}
+
+	empty := filepath.Join(dir, "empty.txt")
+	if code := run([]string{"-common=false", "-o", empty}, io.Discard, io.Discard); code != 1 {
+		t.Errorf("empty result: exit %d, want 1", code)
+	}
+	if _, err := os.Stat(empty); !os.IsNotExist(err) {
+		t.Errorf("empty result still created %s", empty)
+	}
+
+	for _, bad := range []string{"shop!", "a b", "x.y"} {
+		stderr.Reset()
+		if code := run([]string{"-combine", "dev," + bad, "-o", filepath.Join(dir, "c.txt")}, io.Discard, &stderr); code != 1 || !strings.Contains(stderr.String(), "invalid -combine prefix") {
+			t.Errorf("-combine %q: exit %d, stderr %q", bad, code, stderr.String())
+		}
 	}
 }

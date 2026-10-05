@@ -81,7 +81,7 @@ echo ""
 
 # Generate a custom wordlist
 echo -e "${YELLOW}[3/7] Generating domain-specific wordlist...${NC}"
-tools/wordlist-gen -domain "$TARGET_DOMAIN" -combine "dev,api,staging,test,v1,v2" -o demo-wordlist.txt
+tools/wordlist-gen -f -domain "$TARGET_DOMAIN" -combine "dev,api,staging,test,v1,v2" -o demo-wordlist.txt
 echo -e "${GREEN}✓ Custom wordlist generated${NC}"
 echo ""
 

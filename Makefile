@@ -65,7 +65,7 @@ wordlist-gen:
 
 # Generate a custom wordlist
 wordlist: wordlist-gen
-	tools/$(WORDLIST_GEN) -domain $(WL_DOMAIN) -combine $(WL_COMBINE) -o $(WL_OUTPUT)
+	tools/$(WORDLIST_GEN) -f -domain $(WL_DOMAIN) -combine $(WL_COMBINE) -o $(WL_OUTPUT)
 	@echo "Generated wordlist: $(WL_OUTPUT)"
 	@echo "Use it with: make WORDLIST=$(WL_OUTPUT) DOMAIN=$(WL_DOMAIN) run-verbose"
 

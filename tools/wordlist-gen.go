@@ -7,11 +7,14 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // commonPrefixes are frequently seen subdomain labels, emitted first when
@@ -72,6 +75,11 @@ func generate(o options) []string {
 		if w == "" || seen[w] {
 			return
 		}
+		// Only valid labels: a too-long combination or an odd domain term
+		// would be skipped by subenum anyway.
+		if _, ok := wordlist.Normalize(w); !ok {
+			return
+		}
 		seen[w] = true
 		out = append(out, w)
 	}
@@ -115,40 +123,84 @@ func writeWordlist(w io.Writer, words []string) error {
 	return bw.Flush()
 }
 
+// validateCombine rejects -combine prefixes that are not valid DNS labels,
+// which subenum would otherwise skip silently when it loads the list (#59).
+func validateCombine(combine string) error {
+	for _, prefix := range strings.Split(combine, ",") {
+		p := strings.TrimSpace(prefix)
+		if p == "" {
+			continue
+		}
+		if _, ok := wordlist.Normalize(p); !ok || strings.Contains(p, ".") {
+			return fmt.Errorf("invalid -combine prefix %q: use letters, digits, hyphens or underscores", p)
+		}
+	}
+	return nil
+}
+
 func main() {
-	outputFile := flag.String("o", "wordlist.txt", "Path to output wordlist file")
-	combineWith := flag.String("combine", "", "Combine each word with these prefixes (comma-separated)")
-	addCommon := flag.Bool("common", true, "Add common subdomain prefixes")
-	domainInfo := flag.String("domain", "", "Domain to extract potential subdomains from (e.g., company-name.com -> company, name)")
-	verbose := flag.Bool("v", false, "Print every generated entry")
-	flag.Parse()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("wordlist-gen", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	outputFile := fs.String("o", "wordlist.txt", "Path to output wordlist file")
+	force := fs.Bool("f", false, "Overwrite the output file if it already exists")
+	combineWith := fs.String("combine", "", "Combine each word with these prefixes (comma-separated)")
+	addCommon := fs.Bool("common", true, "Add common subdomain prefixes")
+	domainInfo := fs.String("domain", "", "Domain to extract potential subdomains from (e.g., company-name.com -> company, name)")
+	verbose := fs.Bool("v", false, "Print every generated entry")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
 
 	if *outputFile == "" {
-		fmt.Fprintln(os.Stderr, "Error: output file cannot be empty")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "Error: output file cannot be empty")
+		return 1
+	}
+	if err := validateCombine(*combineWith); err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
 	}
 
 	words := generate(options{common: *addCommon, domain: *domainInfo, combine: *combineWith})
+	if len(words) == 0 {
+		fmt.Fprintln(stderr, "Error: no entries generated; enable -common or pass -domain or -combine")
+		return 1
+	}
 
-	file, err := os.Create(*outputFile)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if !*force {
+		flags |= os.O_EXCL // never silently replace an existing wordlist (#59)
+	}
+	file, err := os.OpenFile(*outputFile, flags, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		fmt.Fprintf(stderr, "Error: %s already exists; pass -f to overwrite it or -o to choose another path\n", *outputFile)
+		return 1
+	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating output file: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "Error creating output file: %v\n", err)
+		return 1
 	}
 	writeErr := writeWordlist(file, words)
 	closeErr := file.Close()
 	if writeErr != nil || closeErr != nil {
-		fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", *outputFile, firstErr(writeErr, closeErr))
-		os.Exit(1)
+		fmt.Fprintf(stderr, "Error writing %s: %v\n", *outputFile, firstErr(writeErr, closeErr))
+		return 1
 	}
 
 	if *verbose {
 		for _, w := range words {
-			fmt.Println(w)
+			fmt.Fprintln(stdout, w)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "Wordlist generated at %s with %d unique entries\n", *outputFile, len(words))
-	fmt.Fprintln(os.Stderr, "NOTE: Only use this tool to generate wordlists for domains you have explicit permission to test.")
+	fmt.Fprintf(stderr, "Wordlist generated at %s with %d unique entries\n", *outputFile, len(words))
+	fmt.Fprintln(stderr, "NOTE: Only use this tool to generate wordlists for domains you have explicit permission to test.")
+	return 0
 }
 
 func firstErr(errs ...error) error {
