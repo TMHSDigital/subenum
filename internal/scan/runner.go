@@ -126,9 +126,9 @@ func (c *wildcardCache) isWildcard(ctx context.Context, cfg Config, parent strin
 	}
 	c.mu.Unlock()
 
-	is, _, err := dns.CheckWildcard(ctx, cfg.Resolver, parent, cfg.Timeout, cfg.Types)
+	is, _, err := dns.CheckWildcard(ctx, cfg.Resolver, parent, cfg.Timeout, cfg.Types, cfg.Attempts)
 	if err != nil {
-		return false, err
+		return false, err // never cache an inconclusive check
 	}
 	c.mu.Lock()
 	if c.known == nil {
@@ -276,13 +276,19 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
-		isWildcard, fp, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, cfg.Types)
+		isWildcard, fp, err := dns.CheckWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, cfg.Types, cfg.Attempts)
 		if ctx.Err() != nil {
 			return // interrupted during wildcard probes
 		}
-		if err != nil {
-			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error()}
+		// An inconclusive check is never "no wildcard": under a real wildcard
+		// every candidate would resolve and flood the results (#47). -force
+		// scans anyway, but without a fingerprint to filter with.
+		if err != nil && !cfg.Force {
+			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error() + "; results could not be filtered. Use -force to scan anyway."}
 			return
+		}
+		if err != nil {
+			events <- Event{Kind: EventWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of -force"}
 		}
 		fingerprint = fp
 		if isWildcard {

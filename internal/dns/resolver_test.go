@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -91,7 +92,7 @@ func TestCheckWildcard(t *testing.T) {
 		"www.example.com": {A: "192.0.2.1"},
 	})
 	timeout := time.Second
-	isWildcard, _, err := CheckWildcard(context.Background(), srv.Resolver(timeout), "example.com", timeout, nil)
+	isWildcard, _, err := CheckWildcard(context.Background(), srv.Resolver(timeout), "example.com", timeout, nil, 1)
 	if err != nil {
 		t.Fatalf("CheckWildcard returned error: %v", err)
 	}
@@ -100,12 +101,41 @@ func TestCheckWildcard(t *testing.T) {
 	}
 }
 
+// TestCheckWildcardInconclusive covers #47: a probe that times out or gets
+// SERVFAIL must not be read as "no wildcard", and is retried up to attempts.
+func TestCheckWildcardInconclusive(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply testReply
+	}{
+		{"timeout", testReply{Drop: true}},
+		{"servfail", testReply{ServFail: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := startTestDNS(t, map[string]testReply{"*": tc.reply})
+			timeout := 100 * time.Millisecond
+			is, fp, err := CheckWildcard(context.Background(), srv.Resolver(timeout), "example.com", timeout, []string{"A"}, 2)
+			if !errors.Is(err, ErrWildcardInconclusive) {
+				t.Fatalf("err = %v, want ErrWildcardInconclusive", err)
+			}
+			if is || fp != nil {
+				t.Fatalf("is=%v fp=%v, want false/nil on an inconclusive check", is, fp)
+			}
+			// Two probes, two attempts each. Go's resolver may itself retry a
+			// SERVFAIL, so only require that the retry happened.
+			if got := srv.Queries(); got < 4 {
+				t.Fatalf("queries = %d, want >= 4 (each probe retried)", got)
+			}
+		})
+	}
+}
+
 func TestCheckWildcardCancelled(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := CheckWildcard(ctx, srv.Resolver(time.Second), "example.com", time.Second, nil)
+	_, _, err := CheckWildcard(ctx, srv.Resolver(time.Second), "example.com", time.Second, nil, 1)
 	if err == nil {
 		t.Errorf("expected error from cancelled context")
 	}
@@ -199,7 +229,7 @@ func TestCheckWildcardCNAMEFingerprint(t *testing.T) {
 		"*":                {CNAME: "edge.example.net"},
 		"edge.example.net": {A: "192.0.2.50"},
 	})
-	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, []string{"CNAME"})
+	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, []string{"CNAME"}, 1)
 	if err != nil {
 		t.Fatalf("CheckWildcard: %v", err)
 	}
@@ -243,7 +273,7 @@ func TestCheckWildcardFingerprint(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{
 		"*": {A: "192.0.2.99"},
 	})
-	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, nil)
+	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, nil, 1)
 	if err != nil {
 		t.Fatalf("CheckWildcard: %v", err)
 	}

@@ -42,6 +42,23 @@ const (
 	OutcomeCanceled
 )
 
+// String names an outcome for messages.
+func (o Outcome) String() string {
+	switch o {
+	case OutcomeFound:
+		return "found"
+	case OutcomeNXDomain:
+		return "NXDOMAIN"
+	case OutcomeTimeout:
+		return "timeout"
+	case OutcomeRefused:
+		return "refused"
+	case OutcomeCanceled:
+		return "canceled"
+	}
+	return "error"
+}
+
 // Classify maps a resolver error onto a coarse outcome so callers can tell a
 // definitive negative (NXDOMAIN) apart from an infrastructure failure.
 func Classify(err error) Outcome {
@@ -273,24 +290,41 @@ func randomHex(n int) string {
 	return fmt.Sprintf("%x", b)[:n]
 }
 
+// ErrWildcardInconclusive is returned (wrapped) by CheckWildcard when a probe
+// neither resolved nor got a definitive negative, so the zone may or may not
+// be a wildcard. Callers must not treat it as "no wildcard" (#47).
+var ErrWildcardInconclusive = errors.New("wildcard check inconclusive")
+
 // CheckWildcard probes the domain with two random subdomains, looking up the
 // same record types the scan will request (empty means DefaultTypes), so a
-// CNAME wildcard is fingerprinted when -type includes CNAME. If either probe
-// resolves the domain is treated as wildcard (conservative). The returned
-// record slice is the union of both probe answers and is the fingerprint used
-// to filter later results. Returns (isWildcard, fingerprint, error).
-func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string) (bool, []Record, error) {
+// CNAME wildcard is fingerprinted when -type includes CNAME. Each probe is
+// tried up to attempts times. If either probe resolves the domain is treated
+// as wildcard (conservative). The returned record slice is the union of both
+// probe answers and is the fingerprint used to filter later results.
+//
+// The check is conclusive only when every probe ended found or NXDOMAIN/NODATA.
+// Otherwise the error wraps ErrWildcardInconclusive. Returns (isWildcard,
+// fingerprint, error).
+func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string, attempts int) (bool, []Record, error) {
 	if len(types) == 0 {
 		types = DefaultTypes
+	}
+	if attempts < 1 {
+		attempts = 1
 	}
 	probe1 := randomHex(32) + "." + domain
 	probe2 := randomHex(32) + "." + domain
 
-	r1, _, _ := ResolveTypes(ctx, resolver, probe1, timeout, types)
-	r2, _, _ := ResolveTypes(ctx, resolver, probe2, timeout, types)
+	r1, o1 := ResolveDomainWithRetry(ctx, resolver, probe1, timeout, nil, attempts, types)
+	r2, o2 := ResolveDomainWithRetry(ctx, resolver, probe2, timeout, nil, attempts, types)
 
 	if ctx.Err() != nil {
 		return false, nil, ctx.Err()
+	}
+	for _, o := range []Outcome{o1, o2} {
+		if o != OutcomeFound && o != OutcomeNXDomain {
+			return false, nil, fmt.Errorf("%w for %s: probe lookup failed (%s) after %d attempt(s)", ErrWildcardInconclusive, domain, o, attempts)
+		}
 	}
 
 	fp := unionRecords(r1, r2)

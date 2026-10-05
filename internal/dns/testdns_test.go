@@ -19,6 +19,8 @@ type testReply struct {
 	NXDomain  bool          // name does not exist
 	Truncated bool          // UDP responds TC=1; TCP still returns the full A
 	ServFailA bool          // A queries get SERVFAIL (other types answer normally)
+	ServFail  bool          // every query gets SERVFAIL
+	Drop      bool          // queries are never answered (the client times out)
 	DelayA    time.Duration // A answers are sent after this delay
 }
 
@@ -130,6 +132,12 @@ func (s *testDNS) reply(query []byte, udp bool) []byte {
 		return nil
 	}
 	r := s.lookup(name)
+	if r.Drop {
+		return nil
+	}
+	if r.ServFail {
+		return dnsRcode(query, 2)
+	}
 	if r.CNAME != "" && !r.NXDomain {
 		// Answer every qtype with the alias; for A also chase one hop so Go's
 		// resolver sees a complete CNAME -> A chain.

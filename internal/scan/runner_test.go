@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -699,7 +700,23 @@ func dnsNXDomain(query []byte) []byte {
 	return resp
 }
 
+// dnsAction tells startUDPDNSAction how to answer one query.
+type dnsAction struct {
+	ip       [4]byte
+	hit      bool // answer A with ip
+	drop     bool // never answer (the client times out)
+	servFail bool // answer SERVFAIL
+}
+
 func startUDPDNS(t *testing.T, handle func(name string, qtype uint16) ([4]byte, bool)) (addr string, stop func()) {
+	t.Helper()
+	return startUDPDNSAction(t, func(name string) dnsAction {
+		ip, hit := handle(name, 1)
+		return dnsAction{ip: ip, hit: hit}
+	})
+}
+
+func startUDPDNSAction(t *testing.T, handle func(name string) dnsAction) (addr string, stop func()) {
 	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
@@ -719,14 +736,16 @@ func startUDPDNS(t *testing.T, handle func(name string, qtype uint16) ([4]byte, 
 			if !ok {
 				continue
 			}
+			act := handle(name)
 			var resp []byte
-			if qtype == 1 {
-				if ip, hit := handle(name, qtype); hit {
-					resp = dnsAResponse(q, ip)
-				} else {
-					resp = dnsNXDomain(q)
-				}
-			} else {
+			switch {
+			case act.drop:
+			case act.servFail:
+				resp = dnsNXDomain(q)
+				resp[3] = (resp[3] & 0xF0) | 0x02
+			case qtype == 1 && act.hit:
+				resp = dnsAResponse(q, act.ip)
+			default:
 				resp = dnsNXDomain(q)
 			}
 			if resp != nil {
@@ -862,5 +881,141 @@ func TestRunWildcardBranchSkipsExpansion(t *testing.T) {
 	}
 	if !skip {
 		t.Errorf("expected skip-expansion event, got %v", wildMsgs)
+	}
+}
+
+// TestRunWildcardProbeFailureAtRoot covers #47 at the root: probes that time
+// out or SERVFAIL abort the scan instead of reading as "no wildcard", and
+// -force scans anyway with a warning.
+func TestRunWildcardProbeFailureAtRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		act  dnsAction
+	}{
+		{"timeout", dnsAction{drop: true}},
+		{"servfail", dnsAction{servFail: true}},
+	} {
+		for _, force := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/force=%v", tc.name, force), func(t *testing.T) {
+				addr, stop := startUDPDNSAction(t, func(name string) dnsAction {
+					switch {
+					case name == "www.example.com":
+						return dnsAction{ip: [4]byte{192, 0, 2, 1}, hit: true}
+					case isProbeLabel(name, "example.com"):
+						return tc.act
+					}
+					return dnsAction{}
+				})
+				defer stop()
+
+				timeout := 100 * time.Millisecond
+				cfg := Config{
+					Domain:      "example.com",
+					Entries:     []string{"www", "mail"},
+					Concurrency: 2,
+					Timeout:     timeout,
+					Attempts:    2,
+					Force:       force,
+					Types:       []string{"A"},
+					Resolver:    dns.NewResolver(timeout, addr),
+					DNSServer:   addr,
+				}
+				events := make(chan Event, 64)
+				go Run(context.Background(), cfg, events)
+				var errs, notices []string
+				results := 0
+				for ev := range events {
+					switch ev.Kind {
+					case EventResult:
+						results++
+					case EventError:
+						errs = append(errs, ev.Message)
+					case EventWildcard:
+						notices = append(notices, ev.Message)
+					}
+				}
+
+				if !force {
+					if len(errs) != 1 || !strings.Contains(errs[0], "wildcard detection failed") {
+						t.Fatalf("errors = %v, want one wildcard-detection failure", errs)
+					}
+					if results != 0 {
+						t.Fatalf("results = %d, want 0 (scan must not start)", results)
+					}
+					return
+				}
+				if len(errs) != 0 {
+					t.Fatalf("unexpected errors under -force: %v", errs)
+				}
+				if results != 1 {
+					t.Fatalf("results = %d, want 1", results)
+				}
+				warned := false
+				for _, m := range notices {
+					warned = warned || strings.Contains(m, "without wildcard filtering")
+				}
+				if !warned {
+					t.Fatalf("notices = %v, want a without-filtering warning", notices)
+				}
+			})
+		}
+	}
+}
+
+// TestRunWildcardProbeFailureInRecursion is the #47 repro: *.dev.example.com
+// is a wildcard whose probe queries are dropped. The branch must be skipped,
+// not expanded into one bogus result per wordlist entry.
+func TestRunWildcardProbeFailureInRecursion(t *testing.T) {
+	entries := []string{"dev"}
+	for i := 0; i < 30; i++ {
+		entries = append(entries, fmt.Sprintf("w%d", i))
+	}
+	addr, stop := startUDPDNSAction(t, func(name string) dnsAction {
+		switch {
+		case isProbeLabel(name, "dev.example.com"):
+			return dnsAction{drop: true}
+		case name == "dev.example.com", strings.HasSuffix(name, ".dev.example.com"):
+			return dnsAction{ip: [4]byte{192, 0, 2, 7}, hit: true}
+		}
+		return dnsAction{}
+	})
+	defer stop()
+
+	timeout := 100 * time.Millisecond
+	cfg := Config{
+		Domain:      "example.com",
+		Entries:     entries,
+		Concurrency: 4,
+		Timeout:     timeout,
+		Attempts:    1,
+		Types:       []string{"A"},
+		Recursive:   true,
+		Depth:       2,
+		Resolver:    dns.NewResolver(timeout, addr),
+		DNSServer:   addr,
+	}
+	events := make(chan Event, 256)
+	go Run(context.Background(), cfg, events)
+	var notices []string
+	results := 0
+	for ev := range events {
+		switch ev.Kind {
+		case EventResult:
+			results++
+		case EventWildcard:
+			notices = append(notices, ev.Message)
+		case EventError:
+			t.Fatalf("unexpected error: %s", ev.Message)
+		}
+	}
+	if results != 1 {
+		t.Fatalf("results = %d, want 1 (dev only; the unverified branch must not expand)", results)
+	}
+	skipped := false
+	for _, m := range notices {
+		skipped = skipped || (strings.Contains(m, "dev.example.com") && strings.Contains(m, "wildcard check failed"))
+	}
+	if !skipped {
+		t.Fatalf("notices = %v, want a skip notice for dev.example.com", notices)
 	}
 }

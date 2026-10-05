@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A wildcard check whose probes time out or SERVFAIL is no longer read as "no wildcard". Probes are retried up to `-attempts`; if still inconclusive, the scan aborts (scans without filtering under `-force`, with a warning), and in recursive mode the branch is skipped and not cached. Previously a wildcard zone with flaky probes reported every wordlist entry as a hit (#47).
+- Release binaries are built with `CGO_ENABLED=0 -trimpath -s -w`, so `subenum-linux-amd64` is statically linked again and CI fails if a Linux asset is not (#46).
+
 ## [0.8.0] - 2026-10-04
 
 ### Fixed
