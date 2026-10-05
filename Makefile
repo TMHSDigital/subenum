@@ -1,4 +1,4 @@
-.PHONY: all build test test-short bench clean lint tidy tui run run-verbose run-custom require-domain \
+.PHONY: all build test test-short bench docs-flags clean lint tidy tui run run-verbose run-custom require-domain \
 	simulate simulate-verbose simulate-custom wordlist wordlist-gen docker-build docker-run docker-simulate help
 
 # Default Go parameters
@@ -40,6 +40,11 @@ test:
 
 test-short:
 	$(GOTEST) -v ./... -short
+
+# Regenerate the site's flag table (docs/_includes/flags.md) from the CLI's
+# flags; a test fails CI when it drifts (#64).
+docs-flags:
+	UPDATE_DOCS=1 $(GOTEST) -run '^TestSiteFlagTableUpToDate$$' -count=1 .
 
 # Dispatcher throughput on a 1M-entry simulated scan; overhead must stay
 # linear in wordlist size (#49).

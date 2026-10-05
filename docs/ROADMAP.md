@@ -29,7 +29,6 @@ Planned features that make results more trustworthy and the tool easier to get.
   GoReleaser archives, checksums, SBOM and signatures.
 - **Package managers** ([#62](https://github.com/TMHSDigital/subenum/issues/62)):
   Homebrew, Scoop, AUR, Nix, Kali/BlackArch.
-- An up-to-date **Pages site** ([#64](https://github.com/TMHSDigital/subenum/issues/64)).
 
 ## Later
 

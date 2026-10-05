@@ -7,58 +7,66 @@ title: Home
 
 ## What it does
 
-subenum brute-forces subdomains by resolving a wordlist against a target domain using a concurrent worker pool. Results stream to stdout — pipe-clean, no noise. Progress, diagnostics, and errors go to stderr.
+subenum brute-forces subdomains by resolving a wordlist against a target domain with a concurrent worker pool. Resolved names stream to stdout, pipe-clean; progress, diagnostics and the per-query breakdown go to stderr. It ships with a 5,000-entry wordlist, so `subenum yourdomain.com` works out of the box.
 
 <div class="screenshot-wrap">
   <figure>
     <img src="assets/tui-form.png" alt="subenum TUI - Configure Scan">
-    <figcaption>Interactive TUI — <code>./subenum -tui</code> or <code>make tui</code></figcaption>
+    <figcaption>Interactive TUI: <code>subenum -tui</code></figcaption>
   </figure>
 </div>
+
+## Why subenum
+
+Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://github.com/projectdiscovery/shuffledns) and [dnsx](https://github.com/projectdiscovery/dnsx) are built for raw mass resolution, and [subfinder](https://github.com/projectdiscovery/subfinder) covers passive sources. subenum is a single static binary focused on telling you how much to trust the result:
+
+- **It accounts for every query.** Each lookup is classified as resolved, nxdomain, timeout, refused or other. `-stats` writes a versioned JSON report with a `complete` / `degraded` / `unreliable` verdict that CI can gate on, and the scan stops when more than 20% of queries fail instead of returning a quietly incomplete list.
+- **It handles wildcards,** including CDN and load-balancer pools that rotate their answers. Inconclusive wildcard checks are reported, never read as "no wildcard".
+- **Its resolver pool cannot lie to you.** `-r resolvers.txt` spreads queries over many resolvers and benches failing ones, and every hit is re-validated against your trusted resolver before it is reported.
+- **Its rate limit is real.** `-rate` caps DNS packets on the wire, including retries and every record type, so it can be quoted in rules of engagement.
+- **It respects scope.** `-exclude` keeps out-of-scope names from ever being queried.
+- **It can be taught and demoed.** `-simulate` produces marked, reproducible output with zero network traffic, and `-tui` gives a form-driven interface.
 
 ## Features
 
 <dl class="feature-list">
   <div>
-    <dt>Worker pool</dt>
-    <dd>N goroutines for parallel DNS resolution. Ceiling via <code>-t</code>.</dd>
+    <dt>Run-quality report</dt>
+    <dd><code>-stats run.json</code> (or the last line of <code>-format jsonl</code>): outcomes per target, queries sent, achieved rate, and a verdict with its reason.</dd>
   </div>
   <div>
-    <dt>Wildcard detection</dt>
-    <dd>Double-probe before scanning; exits unless <code>-force</code>. Matching answers are dropped. Recursive scans skip wildcard branches.</dd>
+    <dt>Resolver pool</dt>
+    <dd><code>-r</code> rotates over healthy resolvers, benches failing ones, and re-validates every hit against <code>-dns-server</code>.</dd>
   </div>
   <div>
-    <dt>Interactive TUI</dt>
-    <dd>Form-based config and live-scrolling results via <code>-tui</code>. Last session saved to <code>~/.config/subenum/last.json</code>.</dd>
+    <dt>Wildcard filtering</dt>
+    <dd>Fingerprints the wildcard before scanning, learns rotating pools, and re-checks near misses. Recursive scans skip wildcard branches.</dd>
   </div>
   <div>
-    <dt>Simulation</dt>
-    <dd>Synthetic DNS results at a configurable hit rate — zero network I/O. For demos and tests, not recon.</dd>
+    <dt>Takeover hints</dt>
+    <dd>CNAMEs that dangle or point at takeover-prone services (S3, GitHub Pages, Heroku, Azure, ...) are flagged. DNS-only hints to verify by hand.</dd>
+  </div>
+  <div>
+    <dt>Monitoring</dt>
+    <dd><code>-diff previous.jsonl</code> prints only names added or removed since the last run and exits 4 on changes. See <a href="monitoring.html">Monitoring</a>.</dd>
+  </div>
+  <div>
+    <dt>Scope control</dt>
+    <dd><code>-exclude</code> and <code>-exclude-file</code> take exact names and <code>*.parent</code> patterns; excluded names are never queried.</dd>
   </div>
   <div>
     <dt>Output formats</dt>
-    <dd><code>text</code>, <code>json</code> (subdomain plus typed records), or <code>csv</code> via <code>-format</code>.</dd>
+    <dd><code>text</code>, <code>json</code>, <code>jsonl</code> or <code>csv</code> via <code>-format</code>, to stdout and <code>-o</code>. Results files are replaced atomically.</dd>
   </div>
   <div>
-    <dt>Pipe-clean stdout</dt>
-    <dd>Resolved names on stdout only. Compose with other tools; Ctrl+C drains in-flight workers and flushes partial results.</dd>
+    <dt>Many targets</dt>
+    <dd><code>-dL domains.txt</code> scans each domain as its own scan, with a per-target status and exit code 3 for partial failure.</dd>
+  </div>
+  <div>
+    <dt>Simulation and TUI</dt>
+    <dd><code>-simulate</code> for demos and tests with zero network I/O; <code>-tui</code> for a form-driven interface.</dd>
   </div>
 </dl>
-
-## Flags
-
-| Flag | Default | Description |
-| :--- | :--- | :--- |
-| `-w <file>` | required | Wordlist, one prefix per line |
-| `-t <n>` | `100` | Concurrent workers |
-| `-dns-server <ip:port>` | `8.8.8.8:53` | Resolver address |
-| `-force` | `false` | Continue on wildcard DNS |
-| `-format <fmt>` | `text` | `text`, `json`, `jsonl`, or `csv` |
-| `-rate <qps>` | `0` | Max queries per second (`0` = unlimited) |
-| `-type <list>` | `A,AAAA` | Record types: `A`, `AAAA`, `CNAME` |
-| `-recursive` | `false` | Enumerate children of hits |
-| `-simulate` | `false` | Synthetic results, no DNS |
-| `-tui` | `false` | Interactive terminal UI |
 
 ## Quick Start
 
@@ -66,30 +74,36 @@ subenum brute-forces subdomains by resolving a wordlist against a target domain 
 
 ```bash
 go install github.com/TMHSDigital/subenum@latest
+subenum yourdomain.com
 ```
 
-**Or build from source:**
+Or download a [release binary](https://github.com/TMHSDigital/subenum/releases/latest), or run the container image:
 
 ```bash
-git clone https://github.com/TMHSDigital/subenum.git
-cd subenum
-go build -buildvcs=false -o subenum
+docker run --rm ghcr.io/tmhsdigital/subenum:latest -simulate -w /home/nonroot/examples/sample_wordlist.txt example.com
+docker run --rm ghcr.io/tmhsdigital/subenum:latest -w /home/nonroot/examples/sample_wordlist.txt yourdomain.com
 ```
 
-**Scan / TUI / simulate:**
+**Try it with no network at all:**
 
 ```bash
-./subenum -w wordlist.txt example.com
-./subenum -tui
-./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt example.com
+subenum -simulate -hit-rate 20 example.com
+subenum -tui
 ```
 
-**Docker:**
+**A thorough, CI-friendly scan:**
 
 ```bash
-docker build -t subenum .
-docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com
+subenum -w big-wordlist.txt -r resolvers.txt -rate 500 -type A,AAAA,CNAME \
+  -format jsonl -o results.jsonl -stats run.json yourdomain.com
+jq -e '.verdict == "complete"' run.json
 ```
+
+## Flags
+
+{% include flags.md %}
+
+Exit codes: `0` success, `1` failure, `2` invalid arguments, `3` some `-dL` targets failed, `4` `-diff` found changes, `130` interrupted, `143` terminated.
 
 ## Documentation
 
@@ -97,6 +111,7 @@ docker run --rm -v $(pwd)/data:/data subenum -w /data/wordlist.txt example.com
   <a href="ARCHITECTURE.html">Architecture</a>
   <a href="DEVELOPER_GUIDE.html">Developer Guide</a>
   <a href="docker.html">Docker</a>
+  <a href="monitoring.html">Monitoring</a>
   <a href="CONTRIBUTING.html">Contributing</a>
   <a href="ROADMAP.html">Roadmap</a>
   <a href="https://github.com/TMHSDigital/subenum/blob/main/examples/advanced_usage.md">Advanced Usage</a>

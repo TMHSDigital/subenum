@@ -1,7 +1,13 @@
-theme: jekyll-theme-cayman
 title: subenum
-description: Fast, concurrent subdomain enumeration via DNS brute-forcing - written in pure Go.
+description: Subdomain enumeration you can trust - every DNS query accounted for. A single static Go binary.
 show_downloads: false
 url: "https://tmhsdigital.github.io"
 baseurl: "/subenum"
 repository: TMHSDigital/subenum
+# Shown when a page link is shared (og:image / twitter:card).
+social_image: /assets/social-preview.png
+# Internal templates and local build output are not part of the site.
+exclude:
+  - DOCUMENTATION_STRUCTURE.md
+  - _preview
+  - .jekyll-cache

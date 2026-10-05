@@ -5,6 +5,22 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% if page.title == "Home" %}{{ site.title }} - {{ site.description }}{% else %}{{ page.title }} - {{ site.title }}{% endif %}</title>
+    {% assign page_title = site.title | append: " - " | append: site.description %}{% if page.title != "Home" %}{% assign page_title = page.title | append: " - " | append: site.title %}{% endif %}
+    <meta name="description" content="{{ site.description }}">
+    <link rel="canonical" href="{{ page.url | absolute_url }}">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{ site.title }}">
+    <meta property="og:title" content="{{ page_title }}">
+    <meta property="og:description" content="{{ site.description }}">
+    <meta property="og:url" content="{{ page.url | absolute_url }}">
+    <meta property="og:image" content="{{ site.social_image | absolute_url }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="subenum: subdomain enumeration you can trust">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ page_title }}">
+    <meta name="twitter:description" content="{{ site.description }}">
+    <meta name="twitter:image" content="{{ site.social_image | absolute_url }}">
     <link rel="icon" href="{{ '/assets/favicon.svg' | relative_url }}" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,6 +37,7 @@
         <a href="{{ '/ARCHITECTURE.html' | relative_url }}"{% if page.title == 'Architecture' %} class="active"{% endif %}>Architecture</a>
         <a href="{{ '/DEVELOPER_GUIDE.html' | relative_url }}"{% if page.title == 'Developer Guide' %} class="active"{% endif %}>Dev Guide</a>
         <a href="{{ '/docker.html' | relative_url }}"{% if page.title == 'Docker Usage' %} class="active"{% endif %}>Docker</a>
+        <a href="{{ '/monitoring.html' | relative_url }}"{% if page.title == 'Monitoring' %} class="active"{% endif %}>Monitoring</a>
       </div>
       <a class="nav-github" href="https://github.com/TMHSDigital/subenum">GitHub</a>
     </nav>
@@ -33,15 +50,13 @@
         </div>
         <p class="hero-tagline">fast concurrent subdomain enumeration // written in Go</p>
 
-        <pre class="hero-commands">$ ./subenum -w wordlist.txt example.com
-$ ./subenum -tui
-$ ./subenum -simulate -hit-rate 20 -w examples/sample_wordlist.txt example.com</pre>
+        <pre class="hero-commands">$ subenum -show-records -type A,AAAA,CNAME example.com</pre>
 
-        <div class="query-ledger" aria-label="Sample scan output">
-          <div class="ledger-row nx"><span class="name">www.example.com</span><span class="rr">NXDOMAIN</span><span class="data"></span></div>
+        <div class="query-ledger" aria-label="Sample scan output: only resolved names are printed">
           <div class="ledger-row hit"><span class="name">mail.example.com</span><span class="rr">A</span><span class="data">203.0.113.10</span></div>
           <div class="ledger-row hit"><span class="name">api.example.com</span><span class="rr">AAAA</span><span class="data">2001:db8::53</span></div>
           <div class="ledger-row hit"><span class="name">staging.example.com</span><span class="rr">CNAME</span><span class="data">api.example.com</span></div>
+          <div class="ledger-row nx"><span class="name">old.example.com</span><span class="rr">CNAME</span><span class="data">gone.herokuapp.com TAKEOVER?=dangling:heroku</span></div>
         </div>
 
         <div class="hero-actions">

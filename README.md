@@ -72,12 +72,14 @@ Or launch the interactive terminal UI with no flags:
 
 ## Why subenum
 
-Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://github.com/projectdiscovery/shuffledns) and [dnsx](https://github.com/projectdiscovery/dnsx) are faster at mass resolution across large resolver pools, and [subfinder](https://github.com/projectdiscovery/subfinder) covers passive sources. subenum is a single static binary that brute-forces against one resolver you choose and focuses on telling you how much to trust the result:
+Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://github.com/projectdiscovery/shuffledns) and [dnsx](https://github.com/projectdiscovery/dnsx) are built for raw mass resolution, and [subfinder](https://github.com/projectdiscovery/subfinder) covers passive sources. subenum is a single static binary focused on telling you how much to trust the result:
 
-- **It accounts for every query.** Each lookup is classified as resolved, nxdomain, timeout, refused or other, and the breakdown is printed after every scan. When more than 20% of queries fail, the scan stops and blames the resolver instead of returning a quietly incomplete list.
-- **It handles wildcards.** Wildcard DNS is detected before the scan starts. With `-force`, answers matching the wildcard fingerprint are dropped, and recursive scans skip wildcard branches.
+- **It accounts for every query.** Each lookup is classified as resolved, nxdomain, timeout, refused or other. `-stats` writes a versioned JSON report with a `complete` / `degraded` / `unreliable` verdict that CI can gate on, and when more than 20% of queries fail the scan stops and blames the resolver instead of returning a quietly incomplete list.
+- **It handles wildcards,** including CDN and load-balancer pools that rotate their answers. With `-force`, answers matching the wildcard fingerprint are dropped, inconclusive wildcard checks are reported rather than read as "no wildcard", and recursive scans skip wildcard branches.
+- **Its resolver pool cannot lie to you.** `-r resolvers.txt` spreads queries over many resolvers and benches failing ones, and every hit is re-validated against your trusted `-dns-server` before it is reported.
 - **Its rate limit is real.** `-rate` caps DNS packets on the wire, including retries, every record type and wildcard probes, so it can be quoted in rules of engagement.
-- **It can be taught and demoed.** `-simulate` produces realistic output with zero network traffic, and `-tui` gives a form-driven interface for people who don't live in a shell.
+- **It respects scope.** `-exclude` keeps out-of-scope names from ever being queried.
+- **It can be taught and demoed.** `-simulate` produces marked, reproducible output with zero network traffic, and `-tui` gives a form-driven interface for people who don't live in a shell.
 
 <br>
 
