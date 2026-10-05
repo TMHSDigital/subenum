@@ -1,4 +1,4 @@
-# Builder uses a current, supported Go toolchain (go.mod 1.24.2 is only the
+# Builder uses a current, supported Go toolchain (go.mod 1.26.0 is only the
 # minimum); Dependabot keeps both digests fresh. It runs on the build host's
 # platform and cross-compiles for the target, so multi-arch images (#40) need
 # no QEMU emulation.
@@ -18,7 +18,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY main.go ./
+# Every top-level .go file: main is split across several (main.go,
+# main_summary.go, ...); _test.go files are ignored by go build.
+COPY *.go ./
 COPY internal/ ./internal/
 
 # Build the binary with optimizations
