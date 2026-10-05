@@ -89,6 +89,12 @@ func targetSummary(domain, status string, res targetResult) output.TargetSummary
 	t.QueriesSent = st.QueriesSent
 	t.SkippedCap = st.Skipped
 	t.Takeover = st.Takeover
+	if p := res.permutation; p != nil {
+		t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}
+		if p.pass.done {
+			t.Permutation.Verdict, _ = p.pass.final.Stats.Verdict(status == "interrupted")
+		}
+	}
 	t.PoolHits, t.Confirmed, t.Unconfirmed = st.PoolHits, st.Confirmed, st.Unconfirmed
 	t.Wildcard = st.Wildcard
 	if st.Wildcard {

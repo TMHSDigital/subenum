@@ -11,6 +11,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"golang.org/x/net/dns/dnsmessage"
+
+	"github.com/TMHSDigital/subenum/internal/dnstest"
 )
 
 // runCLI invokes run() as the binary would, with args after the program name,
@@ -548,5 +552,59 @@ func TestE2EDiff(t *testing.T) {
 	// A capped (degraded) run must not claim names were removed.
 	if _, out := run("www\nmail\ndev\n", "-diff", cur, "-max-queries", "1"); strings.Contains(out, "- ") {
 		t.Fatalf("degraded run reported removals: %q", out)
+	}
+}
+
+// TestE2EPermute is #72's done-when: a found api.example.com seeds a second
+// pass that finds a planted api-dev.example.com absent from the wordlist.
+func TestE2EPermute(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch q.Name {
+		case "example.com", "api.example.com", "api-dev.example.com":
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.10"}}
+			}
+			return dnstest.Reply{}
+		}
+		return dnstest.NXDomain
+	})
+	wl := writeFile(t, "wl.txt", "api\nwww\n")
+	stats := filepath.Join(t.TempDir(), "run.json")
+	code, out := runCLI(t, "", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-permute",
+		"-format", "jsonl", "-stats", stats, "-w", wl, "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	results := map[string]bool{} // name -> permutation
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var r struct {
+			Type        string `json:"type"`
+			Subdomain   string `json:"subdomain"`
+			Permutation bool   `json:"permutation"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("bad line %q: %v", line, err)
+		}
+		if r.Type != "summary" {
+			results[r.Subdomain] = r.Permutation
+		}
+	}
+	perm, ok := results["api-dev.example.com"]
+	if !ok || !perm {
+		t.Fatalf("results = %v, want api-dev.example.com found by the permutation pass", results)
+	}
+	if results["api.example.com"] {
+		t.Error("api.example.com came from the wordlist, not the permutation pass")
+	}
+	data, _ := os.ReadFile(stats)
+	var sum struct {
+		Targets []struct {
+			Permutation struct {
+				Seeds, Candidates, Found int
+			} `json:"permutation"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(data, &sum); err != nil || sum.Targets[0].Permutation.Found != 1 || sum.Targets[0].Permutation.Seeds != 1 {
+		t.Fatalf("summary permutation = %+v (err %v)", sum.Targets, err)
 	}
 }

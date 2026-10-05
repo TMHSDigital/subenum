@@ -59,6 +59,8 @@ type Result struct {
 	Takeover string `json:"takeover_candidate,omitempty"`
 	// Change is "added" or "removed" in -diff mode (#84).
 	Change string `json:"change,omitempty"`
+	// Permutation marks a name found by the -permute pass (#72).
+	Permutation bool `json:"permutation,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);

@@ -392,6 +392,16 @@ Results can only be as good as the wordlist. Without `-w`, subenum uses its bund
 
 List size sets the query volume: each entry costs one query per record type (two with the default `A,AAAA`), per attempt, per recursion level. A 1M-entry list at `-rate 500` is about 70 minutes of wire time per target, so pair big lists with `-rate` (and `-r` for a resolver pool), and use `-max-queries` as a budget. `tools/wordlist-gen` builds a small target-specific list from a domain's own terms.
 
+### Permutations: a second pass
+
+Once `api.example.com` and `dev.example.com` exist, the next names most likely to exist are `api-dev`, `dev-api`, `dev.api` and `api2`. `-permute` runs a second scan per target over permutations of the names the first pass found: built-in environment and role words (`dev`, `staging`, `prod`, `qa`, `internal`, `v1`, ...) joined with `-` on either side or as a new level, plus number increments (`api2` -> `api1`, `api3`, `api4`). `-seeds results.jsonl` adds names from an earlier run (any format) and implies `-permute`.
+
+The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist are skipped. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates and hits per target.
+
+```bash
+subenum -permute -format jsonl -o results.jsonl example.com
+```
+
 ### Monitoring for new subdomains
 
 `-diff previous.jsonl` reports only what changed since an earlier run: `+ name` for new subdomains and `- name` for ones that disappeared (only when the run's verdict is `complete`, so failed lookups are never mistaken for removals). The `-o` file keeps the full current results for the next comparison, and the exit code is `4` when anything changed. [docs/monitoring.md](docs/monitoring.md) has a ready-to-use scheduled GitHub Actions workflow that opens an issue when new names appear.

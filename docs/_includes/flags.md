@@ -15,6 +15,7 @@
 | `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt |
 | `-no-abort` | - | Do not abort when the resolver failure rate exceeds 20% (warning is still emitted) |
 | `-o <string>` | - | Write results to file (in addition to stdout) |
+| `-permute` | - | After each scan, scan permutations of the names found (api -&gt; api-dev, dev-api, dev.api, api2, ...) |
 | `-print-config` | - | Print every setting's effective value and its source (flag, env, config or default), then exit |
 | `-progress` | true | Show progress during scanning |
 | `-r <string>` | - | File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server |
@@ -22,6 +23,7 @@
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
 | `-seed <uint>` | - | In simulation mode, seed for reproducible results (0 = random; the seed used is printed) |
+| `-seeds <string>` | - | Results file (any -format) whose names also seed -permute; implies -permute |
 | `-show-records` | - | In text format, append each result's records (TYPE=value) |
 | `-simulate` | - | Run in simulation mode without actual DNS queries (for testing) |
 | `-stats <string>` | - | Write a JSON run-quality report (outcomes, queries sent, verdict) to this file |

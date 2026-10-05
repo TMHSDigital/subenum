@@ -141,6 +141,8 @@ type cliFlags struct {
 	excludeFile  string
 	resolvers    string    // -r: file of resolver addresses for a pool
 	diff         string    // -diff: previous results file to compare against
+	permute      bool      // -permute: second pass over permutations of found names
+	seedsFile    string    // -seeds: extra permutation seeds (any results format)
 	pool         *dns.Pool // built from -r; nil means the single -dns-server
 	excludes     []string  // -exclude and -exclude-file patterns, merged
 }
@@ -185,6 +187,8 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 	fs.StringVar(&f.statsFile, "stats", "", "Write a JSON run-quality report (outcomes, queries sent, verdict) to this file")
 	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
+	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
+	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
 	fs.StringVar(&f.diff, "diff", "", "Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes")
 	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")
 	fs.Usage = func() {
@@ -634,16 +638,31 @@ func run() (code int) {
 		w.SetSeed(f.seed)
 		w.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
 	}
-	emit := func(ev scan.Event) {
+	var targetFound []string // the current target's hits, seeds for -permute
+	emitResult := func(ev scan.Event, permutation bool) {
+		targetFound = append(targetFound, ev.Domain)
+		res := output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Permutation: permutation}
 		if diff == nil {
-			out.ResultWithHint(ev.Domain, ev.Records, ev.Takeover)
+			out.Emit(res)
 			return
 		}
 		if fileOut != nil {
-			fileOut.ResultWithHint(ev.Domain, ev.Records, ev.Takeover)
+			fileOut.Emit(res)
 		}
 		if diff.observe(ev.Domain) {
-			out.Emit(output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Change: "added"})
+			res.Change = "added"
+			out.Emit(res)
+		}
+	}
+	emit := func(ev scan.Event) { emitResult(ev, false) }
+	emitPermutation := func(ev scan.Event) { emitResult(ev, true) }
+
+	var seeds map[string]struct{}
+	if f.seedsFile != "" {
+		f.permute = true
+		if seeds, err = loadPrevious(f.seedsFile); err != nil {
+			out.Error("reading -seeds file: %v", err)
+			return exitFailure
 		}
 	}
 	// A carriage-return progress line only makes sense on a terminal. When
@@ -738,7 +757,17 @@ func run() (code int) {
 			failedTargets++
 			continue
 		}
+		targetFound = targetFound[:0]
 		res := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter, emit)
+		// -permute: a second pass over permutations of what was found (#72),
+		// skipped after an interrupt or a resolver abort.
+		if f.permute && res.done && !res.resolverAbort && signalCode.Load() == 0 {
+			found := append([]string(nil), targetFound...)
+			res.permutation = runPermutationPass(ctx, f, target, entries, found, seeds, maxAttempts, recordTypes, out, outWriter, emitPermutation)
+			if p := res.permutation; p != nil && p.pass.failed {
+				res.failed = true
+			}
+		}
 		results[i] = res
 		anyDone = anyDone || res.done
 		anyFailed = anyFailed || res.failed
@@ -862,6 +891,7 @@ type targetResult struct {
 	resolverAbort bool       // the reliability guard aborted it
 	err           string     // first error message, if any
 	final         scan.Event // the EventDone, when done
+	permutation   *permutationResult
 }
 
 // scanTarget runs one domain's scan and streams its events to out.
