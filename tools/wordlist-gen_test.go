@@ -106,8 +106,65 @@ func TestRunGuards(t *testing.T) {
 
 	for _, bad := range []string{"shop!", "a b", "x.y"} {
 		stderr.Reset()
-		if code := run([]string{"-combine", "dev," + bad, "-o", filepath.Join(dir, "c.txt")}, io.Discard, &stderr); code != 1 || !strings.Contains(stderr.String(), "invalid -combine prefix") {
-			t.Errorf("-combine %q: exit %d, stderr %q", bad, code, stderr.String())
+		if code := run([]string{"-combine", "dev," + bad, "-o", filepath.Join(dir, "c.txt")}, io.Discard, &stderr); code != 2 || !strings.Contains(stderr.String(), "invalid -combine prefix") {
+			t.Errorf("-combine %q: exit %d, stderr %q; want 2", bad, code, stderr.String())
 		}
+	}
+}
+
+// TestRunRejectsPositionalAndAcceptsDomain tests issue #120: a leftover
+// positional is a usage error that points at -domain, while -domain itself
+// works and accepts flags written after it.
+func TestRunRejectsPositionalAndAcceptsDomain(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "wl.txt")
+	var stderr strings.Builder
+
+	// Without -domain, a positional should cause an error mentioning -domain
+	if code := run([]string{"acme.com"}, io.Discard, &stderr); code != 2 || !strings.Contains(stderr.String(), "-domain") {
+		t.Errorf("positional without -domain: exit %d, stderr %q; want 2 with -domain mentioned", code, stderr.String())
+	}
+
+	// -domain takes acme.com as its value; -o (written after it) is still parsed.
+	if code := run([]string{"-domain", "acme.com", "-o", out}, io.Discard, &stderr); code != 0 {
+		t.Errorf("valid -domain with trailing flags: exit %d, stderr %q; want 0", code, stderr.String())
+	}
+
+	// Check that the file was written
+	content, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("could not read output file: %v", err)
+	}
+	if !strings.Contains(string(content), "www\n") {
+		t.Errorf("expected 'www' in output; got %q", string(content))
+	}
+}
+
+// TestRunEmptyOutputFile tests issue #120: empty -o should exit 2.
+func TestRunEmptyOutputFile(t *testing.T) {
+	var stderr strings.Builder
+	if code := run([]string{"-o", ""}, io.Discard, &stderr); code != 2 || !strings.Contains(stderr.String(), "output file cannot be empty") {
+		t.Errorf("empty -o: exit %d, stderr %q; want 2 with error message", code, stderr.String())
+	}
+}
+
+// TestRunInvalidCombinePrefix tests issue #120: invalid -combine should exit 2.
+func TestRunInvalidCombinePrefix(t *testing.T) {
+	dir := t.TempDir()
+	var stderr strings.Builder
+	if code := run([]string{"-combine", "bad!.x", "-o", filepath.Join(dir, "c.txt")}, io.Discard, &stderr); code != 2 || !strings.Contains(stderr.String(), "invalid -combine prefix") {
+		t.Errorf("invalid -combine prefix: exit %d, stderr %q; want 2 with error message", code, stderr.String())
+	}
+}
+
+// TestRunTerminator tests that -- terminator works correctly.
+func TestRunTerminator(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "wl.txt")
+	var stderr strings.Builder
+
+	// With --, all subsequent args are positionals and cause an error
+	if code := run([]string{"-domain", "acme.com", "--", "-o", out}, io.Discard, &stderr); code != 2 || !strings.Contains(stderr.String(), "unexpected argument") {
+		t.Errorf("-- terminator: exit %d, stderr %q; want 2", code, stderr.String())
 	}
 }
