@@ -158,8 +158,9 @@ runs:
         if [ -n "$DOMAINS_FILE" ]; then target=(-dL "$DOMAINS_FILE"); else target=("$DOMAIN"); fi
         if [ -z "$DOMAIN" ] && [ -z "$DOMAINS_FILE" ]; then echo "::error::set domain or domains-file"; exit 2; fi
 
-        subenum "${flags[@]}" "${extra[@]}" "${target[@]}" > "$out/changes.jsonl"
-        code=$?
+        # The runner's bash has -e: capture the exit code instead of dying on 4.
+        code=0
+        subenum "${flags[@]}" "${extra[@]}" "${target[@]}" > "$out/changes.jsonl" || code=$?
         if [ ! -s "$out/run.json" ]; then echo "::error::subenum exited $code without a report"; exit "$code"; fi
 
         verdict=$(jq -r .verdict "$out/run.json")
