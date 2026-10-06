@@ -2,8 +2,13 @@ package output
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
+	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // File is an -o results file that is replaced atomically. Output goes to a
@@ -21,9 +26,14 @@ type File struct {
 }
 
 // CreateFile opens path for writing results. An existing regular file keeps
-// its permissions; a new one is created 0644.
+// its permissions; a new one gets 0666 less the process umask, as os.Create
+// would, so a umask of 077 keeps results private (#119). A path that is a
+// symlink is followed: the file it points at is replaced and the link kept.
 func CreateFile(path string) (*File, error) {
-	mode := os.FileMode(0o644)
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	keep := os.FileMode(0)
 	if fi, err := os.Stat(path); err == nil {
 		if !fi.Mode().IsRegular() {
 			f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
@@ -32,14 +42,29 @@ func CreateFile(path string) (*File, error) {
 			}
 			return &File{Writer: bufio.NewWriter(f), path: path, f: f}, nil
 		}
-		mode = fi.Mode().Perm()
+		keep = fi.Mode().Perm()
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	f, err := createTemp(filepath.Dir(path), "."+filepath.Base(path)+".")
 	if err != nil {
 		return nil, err
 	}
-	_ = f.Chmod(mode) // best effort; Windows only honors the read-only bit
+	if keep != 0 {
+		_ = f.Chmod(keep) // best effort; Windows only honors the read-only bit
+	}
 	return &File{Writer: bufio.NewWriter(f), path: path, f: f, tmp: true}, nil
+}
+
+// createTemp is os.CreateTemp with mode 0666, so the umask applies the way
+// it does to os.Create; os.CreateTemp always creates 0600.
+func createTemp(dir, prefix string) (*os.File, error) {
+	for range 100 {
+		name := filepath.Join(dir, prefix+strconv.FormatUint(rand.Uint64(), 36)+".tmp")
+		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666) //nolint:gosec // the user names the output path
+		if !errors.Is(err, fs.ErrExist) {
+			return f, err
+		}
+	}
+	return nil, fmt.Errorf("creating a temporary file in %s: too many collisions", dir)
 }
 
 // Close flushes and closes the file. With commit set, the temporary file
