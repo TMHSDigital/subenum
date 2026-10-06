@@ -215,3 +215,15 @@ func (d *defaultsLoader) printConfig(w io.Writer, fset *flag.FlagSet) {
 		_, _ = fmt.Fprintf(w, "%-14s = %-24q (%s)\n", fl.Name, fl.Value.String(), source)
 	})
 }
+
+// settings returns the effective value of every setting that came from the
+// environment or the config file, keyed by flag name, for the TUI's form.
+func (d *defaultsLoader) settings(fs *flag.FlagSet) map[string]string {
+	out := map[string]string{}
+	for name, src := range d.sources {
+		if src == sourceEnv || src == sourceConfig {
+			out[name] = fs.Lookup(name).Value.String()
+		}
+	}
+	return out
+}

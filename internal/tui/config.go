@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -102,4 +103,50 @@ func saveConfig(fv formValues) error {
 		return werr
 	}
 	return cerr
+}
+
+// withSettings overlays flag values from SUBENUM_* variables or the config
+// file (keyed by flag name) on the remembered form values (#118).
+func withSettings(sc savedConfig, settings map[string]string) savedConfig {
+	for name, v := range settings {
+		n, _ := strconv.Atoi(v)
+		b, _ := strconv.ParseBool(v)
+		switch name {
+		case "w":
+			sc.Wordlist = v
+		case "dns-server":
+			sc.DNSServer = v
+		case "t":
+			sc.Concurrency = n
+		case "timeout":
+			sc.TimeoutMs = n
+		case "attempts":
+			sc.Attempts = n
+		case "hit-rate":
+			sc.HitRate = n
+		case "type":
+			sc.Types = v
+		case "depth":
+			sc.Depth = n
+		case "rate":
+			sc.Rate = n
+		case "max-queries":
+			sc.MaxQueries = n
+		case "exclude":
+			sc.Exclude = v
+		case "o":
+			sc.Output = v
+		case "format":
+			sc.Format = v
+		case "simulate":
+			sc.Simulate = b
+		case "force":
+			sc.Force = b
+		case "recursive":
+			sc.Recursive = b
+		case "no-abort":
+			sc.NoAbort = b
+		}
+	}
+	return sc
 }

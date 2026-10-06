@@ -562,7 +562,7 @@ func run() (code int) {
 		if fs.NFlag() > 1 || len(positionals) > 0 {
 			fmt.Fprintln(os.Stderr, "Warning: -tui ignores every other flag and argument; set them in the form instead")
 		}
-		return tui.Start()
+		return tui.Start(tui.Options{Version: resolveVersion(), Settings: defaults.settings(fs)})
 	}
 
 	if f.printConfig {

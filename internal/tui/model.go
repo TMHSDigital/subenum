@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"slices"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
@@ -35,21 +38,37 @@ type Model struct {
 	// is configured on the form.
 	out     *output.Writer
 	outFile *output.File
+
+	opts    Options
+	vals    formValues // the running scan's settings, for its report
+	seed    uint64
+	started time.Time
+}
+
+// Options configure the TUI.
+type Options struct {
+	// Version is reported in the run-quality summary.
+	Version string
+	// Settings are flag values from SUBENUM_* variables or the config file,
+	// keyed by flag name. They pre-fill the form over its remembered values,
+	// as they override built-in defaults on the command line (#118).
+	Settings map[string]string
 }
 
 // New creates the root model starting on the form screen.
-func New() Model {
+func New(opts Options) Model {
 	saved, _ := loadSavedConfig()
 	return Model{
 		state: stateForm,
-		form:  newFormModel(saved),
+		form:  newFormModel(withSettings(saved, opts.Settings)),
+		opts:  opts,
 	}
 }
 
 // Start runs the TUI and returns an exit code: 1 if the TUI itself failed or
 // the last scan failed (#55), else 0.
-func Start() int {
-	p := tea.NewProgram(New(), tea.WithAltScreen())
+func Start(opts Options) int {
+	p := tea.NewProgram(New(opts), tea.WithAltScreen())
 	final, err := p.Run()
 	if err != nil {
 		return 1
@@ -156,7 +175,11 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int) (tea.Mo
 		m.outFile = f
 		m.out = output.NewFile(f.Writer, vals.simulate, vals.format)
 		m.out.SetSeed(seed)
+		// Same file shape as the CLI's: a takeover column when CNAME
+		// records are requested (#118).
+		m.out.SetTakeoverColumn(slices.Contains(vals.recordTypes, "CNAME"))
 	}
+	m.vals, m.seed, m.started = vals, seed, time.Now()
 
 	m.state = stateScan
 	m.scanView = newScanViewModel(m.width, m.height, vals.simulate)
@@ -213,7 +236,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Restore last-used values so the user doesn't re-type everything.
 				saved, _ := loadSavedConfig()
 				m.state = stateForm
-				m.form = newFormModel(saved)
+				m.form = newFormModel(withSettings(saved, m.opts.Settings))
 				m.events = nil
 				return m, m.form.initCmd()
 			}
@@ -240,7 +263,11 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		// Successful completion (including user abort, which still drains and
 		// emits EventDone): finalize structured output so buffered JSON/CSV is
-		// written and partial results are flushed.
+		// written and partial results are flushed. A JSONL file ends with the
+		// run-quality summary, as the CLI's does (#118).
+		if m.out != nil {
+			m.out.Summary(m.summary(msg))
+		}
 		m.reportOutputErr(m.finalizeOutput(true))
 		return m, svCmd
 	case abortedMsg:
@@ -280,6 +307,28 @@ func (m *Model) finalizeOutput(finish bool) error {
 	m.out = nil
 	m.outFile = nil
 	return firstErr
+}
+
+// summary builds the run-quality report for the finished scan.
+func (m *Model) summary(done doneMsg) output.Summary {
+	s := report.New(report.Run{
+		Version:   m.opts.Version,
+		Started:   m.started,
+		Simulated: m.vals.simulate,
+		Seed:      m.seed,
+		Resolver:  m.vals.dnsServer,
+		RateLimit: m.vals.rate,
+	})
+	status := "ok"
+	switch {
+	case m.scanView.failed():
+		status = "failed"
+	case m.scanView.aborted:
+		status = "interrupted"
+	}
+	final := scan.Event{Kind: scan.EventDone, Processed: done.processed, Total: done.total, Found: done.found, Stats: done.stats}
+	report.Finish(&s, []output.TargetSummary{report.Target(m.vals.domain, status, "", true, final)}, time.Since(m.started))
+	return s
 }
 
 // reportOutputErr surfaces an output-file failure in the scan view.
