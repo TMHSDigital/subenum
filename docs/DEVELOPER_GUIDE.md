@@ -160,6 +160,17 @@ To run all tests:
 go test -v -race ./...
 ```
 
+On Windows, use Go 1.26.3 or later for race runs. Go 1.26.0 reports false
+data races there (between `context.WithTimeout` and the net package's DNS
+lookup goroutine) and can crash with `Exception 0xc0000005` in `scan.Run`;
+neither is a bug in subenum, and Linux, where CI runs `-race`, is not
+affected. `go.mod` keeps `go 1.26.0` as the minimum, so pick the toolchain
+per command:
+
+```bash
+GOTOOLCHAIN=go1.26.3 go test -race ./...
+```
+
 Default `go test ./...` is hermetic (in-process DNS responder, no outbound
 network). The optional live resolver smoke test is gated on an env var:
 
