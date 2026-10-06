@@ -227,3 +227,13 @@ func TestValidateExclude(t *testing.T) {
 		t.Errorf("invalid pattern: got %q", errStr)
 	}
 }
+
+// TestSettingLabelsCoverEverySetting covers #100: the TUI names every engine
+// setting, so no {token} reaches the screen.
+func TestSettingLabelsCoverEverySetting(t *testing.T) {
+	for _, s := range scan.Settings {
+		if settingLabel(s) == "" {
+			t.Errorf("setting %q has no form label", s)
+		}
+	}
+}
