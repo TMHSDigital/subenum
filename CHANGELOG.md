@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Certificate Transparency seeding: `-ct` adds the names crt.sh knows under each target (one HTTPS request, no API key) as candidates after the wordlist and as `-permute` seeds; every name is still resolved before it is reported. A crt.sh outage is a warning, the report gains `ct_names` and `ct_error`, a resumed scan reuses the fetched names, and lab mode refuses `-ct` (#130).
 - `-sarif <file>` writes takeover candidates as a SARIF 2.1.0 log (validated against the OASIS schema): one rule per kind of finding, with a security severity, the CNAME target in the message and a stable fingerprint per name, ready for `github/codeql-action/upload-sarif`. The Monitoring page shows the upload step (#129).
 - `-silent` for pipelines: bare result names on stdout and nothing on stderr but errors and a one-line warning when results are simulated. A new [Pipelines](docs/pipelines.md) page chains subenum with dnsx, httpx and nuclei and gates each step on the run-quality verdict (#128).
 - A Go library API, `pkg/subenum`, so other programs can embed the engine: `Config` (every zero value takes the CLI's default), `Scan` for a finished run, `Run` to stream `Event` values, and `Result`, `Record` and `Stats`. The DNS internals stay unexported, engine messages name `Config` fields instead of CLI flags, and `Run` always ends with one terminal event carrying the final `Stats`. Runnable examples ship for pkg.go.dev (#77).

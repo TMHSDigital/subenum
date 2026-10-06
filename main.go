@@ -126,6 +126,7 @@ type cliFlags struct {
 	showVersion  bool
 	showProgress bool
 	silent       bool // -silent: results only on stdout, errors only on stderr (#128)
+	ct           bool // -ct: seed from Certificate Transparency logs (#130)
 	testMode     bool
 	testHitRate  int
 	seed         uint64
@@ -202,6 +203,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
 	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
+	fs.BoolVar(&f.ct, "ct", false, "Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds")
 	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
 	fs.StringVar(&f.stateFile, "state", defaultStateFile, "Where an interrupted run saves its state for -resume")
 	fs.String("resume", "", "Resume an interrupted run from its state file (no other arguments)")
@@ -315,6 +317,7 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 			{"simulate", f.testMode},
 			{"dns-server", f.dnsServer != DefaultDNSServer},
 			{"r", f.resolvers != ""},
+			{"ct", f.ct}, // an HTTPS request to crt.sh
 		} {
 			if c.set || flagSet(fs, c.name) {
 				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with %s", f.defaults.describe(fs, c.name))
@@ -887,6 +890,17 @@ func run() (code int) {
 		targetResults = nil
 		entryDigests[i] = entryDigest(entries)
 		saved := resume.target(target)
+		var ctInfo targetCT
+		targetSeeds := seeds
+		if f.ct {
+			ctInfo = certificateTransparency(ctx, target, saved, out)
+			var added int
+			entries, added = withCTEntries(entries, ctInfo.names, target)
+			targetSeeds = withCTSeeds(seeds, ctInfo.names, target)
+			if ctInfo.fetched {
+				out.Info("Certificate Transparency: %d names under %s, %d of them new candidates", len(ctInfo.names), target, added)
+			}
+		}
 		mainF := f // this target's main pass
 		var res targetResult
 		var mainSaved *resumePass
@@ -936,12 +950,13 @@ func run() (code int) {
 			if saved != nil {
 				prevPass = saved.Permute
 			}
-			res.permutation = runPermutationPass(ctx, f, target, entries, mainPassNames(targetResults), seeds, prevPass, restoredHits,
+			res.permutation = runPermutationPass(ctx, f, target, entries, mainPassNames(targetResults), targetSeeds, prevPass, restoredHits,
 				maxAttempts, recordTypes, out, outWriter, emitPermutation)
 			if p := res.permutation; p != nil && p.pass.failed {
 				res.failed = true
 			}
 		}
+		res.ct = ctInfo
 		results[i] = res
 		targetRuns[i] = targetResults
 		anyDone = anyDone || res.done
@@ -1085,6 +1100,7 @@ type targetResult struct {
 	err           string     // first error message, if any
 	final         scan.Event // the EventDone, when done
 	permutation   *permutationResult
+	ct            targetCT // -ct names, kept for the report and resume state
 }
 
 // scanTarget runs one domain's scan and streams its events to out.

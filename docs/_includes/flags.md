@@ -3,6 +3,7 @@
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | `-attempts <int>` | - | Total DNS resolution attempts per subdomain, 1 = no retry (default 1) |
+| `-ct` | - | Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds |
 | `-dL <string>` | - | File of apex domains to scan, one per line (- for stdin); replaces the &lt;domain&gt; argument |
 | `-depth <int>` | 1 | Max recursion depth when -recursive is set (1 = no recursion) |
 | `-diff <string>` | - | Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes |

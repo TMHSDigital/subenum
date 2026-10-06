@@ -49,6 +49,10 @@ type resumeTarget struct {
 	Entries string `json:"entries,omitempty"`
 	// Permute is the -permute pass's progress, once it had started (#107).
 	Permute *resumePass `json:"permute,omitempty"`
+	// CT holds the -ct names the interrupted run fetched, reused on resume
+	// so the candidate list is the same (#130).
+	CT        []string `json:"ct,omitempty"`
+	CTFetched bool     `json:"ct_fetched,omitempty"`
 }
 
 // resumePass is how far an interrupted scan pass got.
@@ -294,8 +298,8 @@ func saveResumeState(f cliFlags, args []string, settings map[string]string, prev
 			st.Targets = append(st.Targets, *saved)
 			continue
 		}
-		t := resumeTarget{Domain: domain, Results: runs[i], Entries: entryDigests[i]}
 		res := results[i]
+		t := resumeTarget{Domain: domain, Results: runs[i], Entries: entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total

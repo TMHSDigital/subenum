@@ -420,6 +420,16 @@ Results can only be as good as the wordlist. Without `-w`, subenum uses its bund
 
 List size sets the query volume: each entry costs one query per record type (two with the default `A,AAAA`), per attempt, per recursion level. A 1M-entry list at `-rate 500` is about 70 minutes of wire time per target, so pair big lists with `-rate` (and `-r` for a resolver pool), and use `-max-queries` as a budget. `tools/wordlist-gen` builds a small target-specific list from a domain's own terms.
 
+### Certificate Transparency: names no wordlist has
+
+Certificates name the hosts they cover, so Certificate Transparency logs show real names, including forgotten ones like `legacy-billing`, that no generic wordlist contains. `-ct` asks [crt.sh](https://crt.sh/) once per target (HTTPS, no API key) and adds the names under the target as candidates after the wordlist, and as seeds for `-permute`. They are only candidates: each is resolved like any other name, so expired certificates cost a query, never a false result.
+
+```bash
+subenum -ct -permute example.com
+```
+
+The run-quality report counts them per target (`ct_names`). If crt.sh is down or slow, the scan warns, records `ct_error` and carries on with the wordlist. The CT request goes to crt.sh, not to the target and not through `-rate`; lab mode (`-simulate-zone`) refuses `-ct`, and a resumed scan reuses the names the interrupted run fetched.
+
 ### Permutations: a second pass
 
 Once `api.example.com` and `dev.example.com` exist, the next names most likely to exist are `api-dev`, `dev-api`, `dev.api` and `api2`. `-permute` runs a second scan per target over permutations of the names the first pass found: built-in environment and role words (`dev`, `staging`, `prod`, `qa`, `internal`, `v1`, ...) joined with `-` on either side or as a new level, plus number increments (`api2` -> `api1`, `api3`, `api4`). `-seeds results.jsonl` adds names from an earlier run (any format) and implies `-permute`.

@@ -68,13 +68,17 @@ type TargetSummary struct {
 	Takeover    int64    `json:"takeover_candidates,omitempty"` // results with a takeover hint
 	// Permutation is the -permute pass, when one ran (#72).
 	Permutation *PermutationSummary `json:"permutation,omitempty"`
-	PoolHits    int64               `json:"pool_hits,omitempty"`   // -r: names a pool resolver said exist
-	Confirmed   int64               `json:"confirmed,omitempty"`   // pool hits the trusted resolver confirmed
-	Unconfirmed int64               `json:"unconfirmed,omitempty"` // pool hits the trusted resolver denied
-	Wildcard    bool                `json:"wildcard"`
-	Fingerprint []dns.Record        `json:"wildcard_fingerprint,omitempty"`
-	Verdict     string              `json:"verdict"`
-	Reason      string              `json:"reason"`
+	// CTNames counts the Certificate Transparency names -ct added as
+	// candidates and seeds; CTError says why the lookup failed (#130).
+	CTNames     int          `json:"ct_names,omitempty"`
+	CTError     string       `json:"ct_error,omitempty"`
+	PoolHits    int64        `json:"pool_hits,omitempty"`   // -r: names a pool resolver said exist
+	Confirmed   int64        `json:"confirmed,omitempty"`   // pool hits the trusted resolver confirmed
+	Unconfirmed int64        `json:"unconfirmed,omitempty"` // pool hits the trusted resolver denied
+	Wildcard    bool         `json:"wildcard"`
+	Fingerprint []dns.Record `json:"wildcard_fingerprint,omitempty"`
+	Verdict     string       `json:"verdict"`
+	Reason      string       `json:"reason"`
 }
 
 // PermutationSummary counts a target's -permute pass.

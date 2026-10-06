@@ -32,6 +32,7 @@ func buildSummary(f cliFlags, targets, status []string, results []targetResult, 
 
 func targetSummary(domain, status string, res targetResult) output.TargetSummary {
 	t := report.Target(domain, status, res.err, res.done, res.final)
+	t.CTNames, t.CTError = len(res.ct.names), res.ct.err
 	if p := res.permutation; p != nil && res.done && status != "" && status != "skipped" {
 		t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}
 		if p.pass.done {
