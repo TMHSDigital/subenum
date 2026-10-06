@@ -38,24 +38,24 @@ type Options struct {
 }
 
 // Validate checks the numeric ranges and the resolver address. Messages name
-// the CLI flag too, so they read well in both front ends. The resolver is
+// each setting as a {token} that the front end renders (#100). The resolver is
 // not checked in simulation mode, which sends no DNS traffic.
 func (o Options) Validate() error {
 	switch {
 	case o.Concurrency < 1:
-		return fmt.Errorf("concurrency (-t) must be at least 1, got %d", o.Concurrency)
+		return fmt.Errorf("concurrency ({concurrency}) must be at least 1, got %d", o.Concurrency)
 	case o.TimeoutMs < 1:
-		return fmt.Errorf("timeout (-timeout) must be at least 1 ms, got %d", o.TimeoutMs)
+		return fmt.Errorf("timeout ({timeout}) must be at least 1 ms, got %d", o.TimeoutMs)
 	case o.Attempts < 1:
-		return fmt.Errorf("attempts (-attempts) must be at least 1, got %d", o.Attempts)
+		return fmt.Errorf("attempts ({attempts}) must be at least 1, got %d", o.Attempts)
 	case o.Simulate && (o.HitRate < 1 || o.HitRate > 100):
-		return fmt.Errorf("hit rate (-hit-rate) must be 1-100, got %d", o.HitRate)
+		return fmt.Errorf("hit rate ({hit_rate}) must be 1-100, got %d", o.HitRate)
 	case o.Depth < 1:
-		return fmt.Errorf("depth (-depth) must be at least 1, got %d", o.Depth)
+		return fmt.Errorf("depth ({depth}) must be at least 1, got %d", o.Depth)
 	case o.Rate < 0:
-		return fmt.Errorf("rate (-rate) must be 0 (unlimited) or a positive integer, got %d", o.Rate)
+		return fmt.Errorf("rate ({rate}) must be 0 (unlimited) or a positive integer, got %d", o.Rate)
 	case o.MaxQueries < 0:
-		return fmt.Errorf("max queries (-max-queries) must be 0 (unlimited) or a positive integer, got %d", o.MaxQueries)
+		return fmt.Errorf("max queries ({max_queries}) must be 0 (unlimited) or a positive integer, got %d", o.MaxQueries)
 	}
 	if !o.Simulate {
 		if err := validate.DNSServer(o.DNSServer); err != nil {

@@ -452,7 +452,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	cfg.scope = sc
 	cfg.takeover = &dns.TakeoverCache{}
 	if sc.excluded(cfg.Domain) || sc.subtreeExcluded(cfg.Domain) {
-		events <- Event{Kind: EventError, Message: "refusing to scan " + cfg.Domain + ": it is out of scope (-exclude)"}
+		events <- Event{Kind: EventError, Message: "refusing to scan " + cfg.Domain + ": it is out of scope ({exclude})"}
 		return
 	}
 
@@ -460,16 +460,16 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		ceiling := RecursionCeiling(len(cfg.Entries), maxDepth)
 		if ceiling > recursionRefuseCeiling && cfg.MaxQueries == 0 && !cfg.Force {
 			events <- Event{Kind: EventError, Message: fmt.Sprintf(
-				"refusing to start: -recursive -depth %d with %d entries can generate up to %.1e queries; set -max-queries or -force",
+				"refusing to start: {recursive} {depth} %d with %d entries can generate up to %.1e queries; set {max_queries} or {force}",
 				maxDepth, len(cfg.Entries), ceiling)}
 			return
 		}
-		consider := "Consider -max-queries."
+		consider := "Consider {max_queries}."
 		if maxDepth > 1 {
-			consider = fmt.Sprintf("Consider -depth %d or -max-queries.", maxDepth-1)
+			consider = fmt.Sprintf("Consider {depth} %d or {max_queries}.", maxDepth-1)
 		}
 		events <- Event{Kind: EventNotice, Notice: NoticeCeiling, Message: fmt.Sprintf(
-			"Warning: -recursive -depth %d with %d entries can generate up to %.1e queries.\n%s",
+			"Warning: {recursive} {depth} %d with %d entries can generate up to %.1e queries.\n%s",
 			maxDepth, len(cfg.Entries), ceiling, consider)}
 	}
 
@@ -506,11 +506,11 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		// every candidate would resolve and flood the results (#47). -force
 		// scans anyway, but without a fingerprint to filter with.
 		if err != nil && !cfg.Force {
-			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error() + "; results could not be filtered. Use -force to scan anyway."}
+			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error() + "; results could not be filtered. Use {force} to scan anyway."}
 			return
 		}
 		if err != nil {
-			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of -force"}
+			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of {force}"}
 		}
 		fingerprint.add(fp)
 		if isWildcard {
@@ -518,7 +518,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
 			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: msg}
 			if !cfg.Force {
-				events <- Event{Kind: EventError, Message: "Results would be meaningless. Use -force to scan anyway."}
+				events <- Event{Kind: EventError, Message: "Results would be meaningless. Use {force} to scan anyway."}
 				return
 			}
 		}
@@ -680,7 +680,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			if skipped > 0 {
 				select {
 				case events <- Event{Kind: EventNotice, Notice: NoticeCap, Message: fmt.Sprintf(
-					"query cap reached (-max-queries %d); skipped %d additional jobs", cfg.MaxQueries, skipped)}:
+					"query cap reached ({max_queries} %d); skipped %d additional jobs", cfg.MaxQueries, skipped)}:
 				case <-ctx.Done():
 				}
 			}
@@ -910,7 +910,7 @@ func checkReliability(cfg Config, processed int64, st *counters, events chan<- E
 		if cfg.NoAbort {
 			verb = "warning"
 		}
-		msg := fmt.Sprintf("%s: %.0f%% of %d queries failed (timeout/refused/other); likely resolver rate-limiting at -t %d and -rate %d",
+		msg := fmt.Sprintf("%s: %.0f%% of %d queries failed (timeout/refused/other); likely resolver rate-limiting at {concurrency} %d and {rate} %d",
 			verb, rate, processed, cfg.Concurrency, cfg.Rate)
 		events <- Event{Kind: EventError, Message: msg}
 		if !cfg.NoAbort {

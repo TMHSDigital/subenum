@@ -327,7 +327,7 @@ func (m *Model) summary(done doneMsg) output.Summary {
 		status = "interrupted"
 	}
 	final := scan.Event{Kind: scan.EventDone, Processed: done.processed, Total: done.total, Found: done.found, Stats: done.stats}
-	report.Finish(&s, []output.TargetSummary{report.Target(m.vals.domain, status, "", true, final)}, time.Since(m.started))
+	report.Finish(&s, []output.TargetSummary{report.Target(m.vals.domain, status, "", true, final, settingLabel)}, time.Since(m.started))
 	return s
 }
 
@@ -365,9 +365,9 @@ func listenForEvents(events <-chan scan.Event) tea.Cmd {
 		case scan.EventProgress:
 			return progressMsg{processed: ev.Processed, total: ev.Total, found: ev.Found}
 		case scan.EventNotice:
-			return wildcardMsg{text: ev.Message}
+			return wildcardMsg{text: scan.Render(ev.Message, settingLabel)}
 		case scan.EventError:
-			return errorMsg{text: ev.Message}
+			return errorMsg{text: scan.Render(ev.Message, settingLabel)}
 		case scan.EventDone:
 			if ev.Stopped {
 				return stoppedMsg{}

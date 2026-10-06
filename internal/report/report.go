@@ -47,8 +47,15 @@ func New(r Run) output.Summary {
 
 // Target summarizes one domain's scan. status is "ok", "failed",
 // "interrupted", "skipped" or "" (never run); done reports whether the scan
-// sent its final event, final.
-func Target(domain, status, errMsg string, done bool, final scan.Event) output.TargetSummary {
+// finished, with final as its last event. name renders the settings the
+// verdict reason refers to, in the caller's terms (#100).
+func Target(domain, status, errMsg string, done bool, final scan.Event, name func(scan.Setting) string) output.TargetSummary {
+	t := target(domain, status, errMsg, done, final)
+	t.Reason = scan.Render(t.Reason, name)
+	return t
+}
+
+func target(domain, status, errMsg string, done bool, final scan.Event) output.TargetSummary {
 	t := output.TargetSummary{Domain: domain, Status: status, Error: errMsg}
 	switch {
 	case status == "" || status == "skipped":

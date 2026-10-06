@@ -42,7 +42,7 @@ func (s Stats) Verdict(interrupted bool) (verdict, reason string) {
 	case fails > 0 && fails*100 >= processed*degradedFailPercent:
 		return VerdictDegraded, detail
 	case s.Skipped > 0:
-		return VerdictDegraded, fmt.Sprintf("-max-queries reached; %d candidates not tested", s.Skipped)
+		return VerdictDegraded, fmt.Sprintf("{max_queries} reached; %d candidates not tested", s.Skipped)
 	case fails > 0:
 		return VerdictComplete, detail + ", under 1%"
 	}

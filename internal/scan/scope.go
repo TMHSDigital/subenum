@@ -24,7 +24,7 @@ func ValidateExcludes(patterns []string) error {
 	for _, p := range patterns {
 		n := normalizePattern(p)
 		if err := validate.Domain(strings.TrimPrefix(n, "*.")); err != nil {
-			return fmt.Errorf("invalid -exclude pattern %q: %w", p, err)
+			return fmt.Errorf("invalid {exclude} pattern %q: %w", p, err)
 		}
 	}
 	return nil

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Engine messages no longer hard-code command-line flags. They name settings with neutral tokens (`scan.Setting`), and each front end renders them in its own terms: the CLI as flags (unchanged output), the TUI as its form labels ("Use Force to scan anyway", "invalid Exclude pattern"), and `pkg/subenum` as `Config` fields, replacing its regexp that guessed flags out of message text. A test fails if an engine message names a flag or uses an unknown token (#100).
 - The scan engine always ends with exactly one done event, marked `Stopped` when the scan ended before testing any candidate (out of scope, recursion ceiling, failed preflight or wildcard check, a wildcard zone without `-force`, or Ctrl+C during those checks), so the CLI, the TUI and `pkg/subenum` handle one shape of ending instead of a channel that sometimes closes without one. `pkg/subenum`'s `Event` gains `Stopped`, and a stopped scan's `Stats` now include the queries its checks sent (#99).
 
 ### Fixed

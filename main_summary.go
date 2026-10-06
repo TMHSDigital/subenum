@@ -5,6 +5,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 // buildSummary assembles the run-quality report (#70) from each target's
@@ -31,7 +32,7 @@ func buildSummary(f cliFlags, targets, status []string, results []targetResult, 
 }
 
 func targetSummary(domain, status string, res targetResult) output.TargetSummary {
-	t := report.Target(domain, status, res.err, res.done, res.final)
+	t := report.Target(domain, status, res.err, res.done, res.final, scan.FlagName)
 	t.CTNames, t.CTError = len(res.ct.names), res.ct.err
 	if p := res.permutation; p != nil && res.done && status != "" && status != "skipped" {
 		t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}

@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -559,42 +558,26 @@ func orDefaultDuration(v, def time.Duration) time.Duration {
 	return v
 }
 
-// flagFields maps the command-line flags the engine names in its messages to
-// the Config fields that set them. A library caller has no flags, so
-// "Use -force to scan anyway" has to read "Use Force to scan anyway".
-var flagFields = map[string]string{
-	"attempts":    "Attempts",
-	"depth":       "Depth",
-	"dns-server":  "Resolver",
-	"exclude":     "Exclude",
-	"force":       "Force",
-	"hit-rate":    "HitRate",
-	"max-queries": "MaxQueries",
-	"no-abort":    "NoAbort",
-	"r":           "ResolverPool",
-	"rate":        "Rate",
-	"recursive":   "Recursive",
-	"t":           "Concurrency",
-	"timeout":     "Timeout",
-	"type":        "Types",
+// configFields names each engine setting as the Config field that sets it.
+// Engine messages refer to settings by token (#100), and a library caller
+// has no flags: "Use {force} to scan anyway" reads "Use Force to scan anyway".
+var configFields = map[scan.Setting]string{
+	scan.SettingConcurrency: "Concurrency",
+	scan.SettingTimeout:     "Timeout",
+	scan.SettingAttempts:    "Attempts",
+	scan.SettingHitRate:     "HitRate",
+	scan.SettingDepth:       "Depth",
+	scan.SettingRate:        "Rate",
+	scan.SettingMaxQueries:  "MaxQueries",
+	scan.SettingExclude:     "Exclude",
+	scan.SettingRecursive:   "Recursive",
+	scan.SettingForce:       "Force",
 }
 
-// flagRef matches a flag as the engine writes it: at the start of a message or
-// after a space or an opening bracket, so hyphenated words in prose are left
-// alone.
-var flagRef = regexp.MustCompile(`(^|[\s(\[])-([a-z][a-z-]*)\b`)
-
-// fieldNames rewrites flag references in an engine message to Config fields.
-// A flag with no field, if one is ever added, is left as it is.
+// fieldNames renders the setting tokens in an engine message as Config
+// fields.
 func fieldNames(msg string) string {
-	return flagRef.ReplaceAllStringFunc(msg, func(m string) string {
-		groups := flagRef.FindStringSubmatch(m)
-		field, ok := flagFields[groups[2]]
-		if !ok {
-			return m
-		}
-		return groups[1] + field
-	})
+	return scan.Render(msg, func(st scan.Setting) string { return configFields[st] })
 }
 
 // translate converts an internal event to the public one.

@@ -396,8 +396,8 @@ func TestRunReliabilityGuardAborts(t *testing.T) {
 	if !strings.Contains(msg, "timeout/refused/other") {
 		t.Errorf("error message %q: want failure classes", msg)
 	}
-	if !strings.Contains(msg, "-t 4") || !strings.Contains(msg, "-rate 0") {
-		t.Errorf("error message %q: want configured -t and -rate", msg)
+	if got := Render(msg, FlagName); !strings.Contains(got, "-t 4") || !strings.Contains(got, "-rate 0") {
+		t.Errorf("error message %q: want configured -t and -rate once rendered for the CLI", got)
 	}
 	if done == nil {
 		t.Fatal("no EventDone received after abort")

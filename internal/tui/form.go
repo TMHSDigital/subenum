@@ -461,7 +461,7 @@ func (m *formModel) validate() (formValues, string) {
 		force:       m.toggles[1],
 	}
 	if err := v.options(nil, 0).Validate(); err != nil {
-		return formValues{}, err.Error()
+		return formValues{}, scan.Render(err.Error(), settingLabel)
 	}
 	return v, ""
 }
@@ -488,6 +488,22 @@ func (v formValues) options(entries []string, seed uint64) scan.Options {
 		Exclude:     v.exclude,
 		NoAbort:     v.noAbort,
 	}
+}
+
+// settingLabel names an engine setting as its form field (#100).
+func settingLabel(s scan.Setting) string {
+	return map[scan.Setting]string{
+		scan.SettingConcurrency: "Concurrency",
+		scan.SettingTimeout:     "Timeout (ms)",
+		scan.SettingAttempts:    "Attempts",
+		scan.SettingHitRate:     "Hit Rate (%)",
+		scan.SettingDepth:       "Depth",
+		scan.SettingRate:        "Rate (qps)",
+		scan.SettingMaxQueries:  "Max Names",
+		scan.SettingExclude:     "Exclude",
+		scan.SettingRecursive:   "Recursive",
+		scan.SettingForce:       "Force",
+	}[s]
 }
 
 type formValues struct {

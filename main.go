@@ -327,7 +327,7 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 	}
 	// Range and resolver checks are shared with the TUI (#80).
 	if err := scanOptions(f, "", nil, maxAttempts, nil, nil).Validate(); err != nil {
-		out.Error("%v", err)
+		out.Error("%s", scan.Render(err.Error(), scan.FlagName))
 		return "", false
 	}
 	if f.concurrency > highConcurrency {
@@ -1130,11 +1130,12 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 				out.Progress(pct, ev.Processed, ev.Total, ev.Found)
 			}
 		case scan.EventNotice:
-			out.Info("%s", ev.Message)
+			out.Info("%s", scan.Render(ev.Message, scan.FlagName))
 		case scan.EventError:
-			out.Error("%s", ev.Message)
+			msg := scan.Render(ev.Message, scan.FlagName)
+			out.Error("%s", msg)
 			if !sawError {
-				res.err = ev.Message
+				res.err = msg
 			}
 			sawError = true
 			finishProgress()

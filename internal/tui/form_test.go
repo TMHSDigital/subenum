@@ -222,7 +222,8 @@ func TestValidateExclude(t *testing.T) {
 		t.Errorf("Exclude = %q", got)
 	}
 	m.inputs[13].SetValue("not a domain")
-	if _, errStr := m.validate(); !strings.Contains(errStr, "-exclude") {
+	// The engine's setting token is rendered as the form field (#100).
+	if _, errStr := m.validate(); !strings.Contains(errStr, "invalid Exclude pattern") {
 		t.Errorf("invalid pattern: got %q", errStr)
 	}
 }
