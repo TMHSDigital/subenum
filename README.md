@@ -275,6 +275,7 @@ make help           # list all targets
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
 | `-progress` | `true` | Live progress line on stderr. Off by default when stderr is not a terminal; passing `-progress` there prints whole progress lines instead of redrawing one |
+| `-silent` | `false` | Pipeline mode: bare result names on stdout, only errors (and a one-line simulation warning) on stderr. See [Pipelines](https://tmhsdigital.github.io/subenum/pipelines.html) |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |

@@ -82,6 +82,7 @@ type Writer struct {
 	stderr      io.Writer // diagnostics destination; nil means os.Stderr
 	progressLen int       // width of the progress line currently on screen
 	lineMode    bool      // progress as whole lines, never carriage-return overwrites (#78)
+	quiet       bool      // -silent: Info and Progress print nothing (#128)
 
 	seed           uint64 // simulation seed, named in the text file header
 	takeoverColumn bool   // CSV carries a takeover_candidate column
@@ -118,6 +119,10 @@ func (w *Writer) SetPlain(plain bool) { w.plain = plain }
 // stderr is not a terminal, so logs that merge stdout and stderr never get a
 // result glued onto a progress line (#78).
 func (w *Writer) SetProgressLines(lines bool) { w.lineMode = lines }
+
+// SetQuiet makes Info and Progress print nothing, for -silent pipelines
+// (#128). Error and Notice still print.
+func (w *Writer) SetQuiet(quiet bool) { w.quiet = quiet }
 
 // SetDiff switches to -diff output (#84): text lines get a "+ " or "- "
 // prefix and CSV gains a change column. JSON and JSONL carry Change as is.
@@ -351,6 +356,9 @@ func (w *Writer) errOut() io.Writer {
 func (w *Writer) Progress(pct float64, processed, total, found int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.quiet {
+		return
+	}
 	line := fmt.Sprintf("Progress: %.1f%% (%d/%d) | Found: %d ", pct, processed, total, found)
 	if w.lineMode {
 		_, _ = fmt.Fprintln(w.errOut(), strings.TrimSpace(line))
@@ -385,6 +393,15 @@ func (w *Writer) clearProgressLocked() {
 // Info writes an informational line to stderr. It is serialized with the
 // progress line, so concurrent verbose logging cannot splice into it (#36).
 func (w *Writer) Info(format string, a ...any) {
+	if w.quiet {
+		return
+	}
+	w.Notice(format, a...)
+}
+
+// Notice writes a line to stderr like Info, even under SetQuiet: for what a
+// user must not miss, such as results being simulated.
+func (w *Writer) Notice(format string, a ...any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.clearProgressLocked()

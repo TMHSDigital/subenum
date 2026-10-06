@@ -26,6 +26,7 @@
 | `-seed <uint>` | - | In simulation mode, seed for reproducible results (0 = random; the seed used is printed) |
 | `-seeds <string>` | - | Results file (any -format) whose names also seed -permute; implies -permute |
 | `-show-records` | - | In text format, append each result's records (TYPE=value) |
+| `-silent` | - | Pipeline mode: bare result names on stdout, and only errors (and a simulation warning) on stderr |
 | `-simulate` | - | Run in simulation mode without actual DNS queries (for testing) |
 | `-simulate-zone <string>` | - | Lab mode: answer every query from this scenario file via a local DNS server, so no traffic leaves the machine (see the Labs page) |
 | `-state <string>` | subenum-resume.json | Where an interrupted run saves its state for -resume |

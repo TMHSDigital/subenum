@@ -125,6 +125,7 @@ type cliFlags struct {
 	verbose      bool
 	showVersion  bool
 	showProgress bool
+	silent       bool // -silent: results only on stdout, errors only on stderr (#128)
 	testMode     bool
 	testHitRate  int
 	seed         uint64
@@ -178,6 +179,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 	fs.BoolVar(&f.verbose, "v", false, "Enable verbose output")
 	fs.BoolVar(&f.showVersion, "version", false, "Show version information")
 	fs.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")
+	fs.BoolVar(&f.silent, "silent", false, "Pipeline mode: bare result names on stdout, and only errors (and a simulation warning) on stderr")
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
 	fs.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
@@ -589,6 +591,7 @@ func run() (code int) {
 	recordTypes, typesErr := dns.ParseTypes(f.recordTypes)
 	maxAttempts, err := resolveAttempts(f.attempts, f.retries, defaults.source(fs, "attempts"), defaults.source(fs, "retries"))
 	out := output.New(nil, f.testMode, format)
+	out.SetQuiet(f.silent)
 	if formatErr != nil {
 		out.Error("%v", formatErr)
 		return exitUsage
@@ -622,6 +625,9 @@ func run() (code int) {
 	if f.testMode {
 		if f.seed == 0 {
 			f.seed = rand.Uint64()
+		}
+		if f.silent {
+			out.Notice("SIMULATION MODE: results are artificially generated (seed %d)", f.seed)
 		}
 		out.Info("")
 		out.Info("╔════════════════════════════════════════════════════════════════════╗")
@@ -729,8 +735,10 @@ func run() (code int) {
 		if w == nil {
 			continue
 		}
-		// Bare names when piped (no "Found:" banner), human-friendly on a terminal.
-		w.SetPlain(!stdoutIsTerminal())
+		// Bare names when piped or -silent (no "Found:" banner), human-friendly
+		// on a terminal.
+		w.SetPlain(f.silent || !stdoutIsTerminal())
+		w.SetQuiet(f.silent)
 		w.SetShowRecords(f.showRecords)
 		w.SetSeed(f.seed)
 		w.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
@@ -770,6 +778,9 @@ func run() (code int) {
 	// stderr is a pipe or file (2>&1, tee, CI logs) progress is off unless
 	// -progress was given explicitly, and then printed as whole lines (#78).
 	// SUBENUM_PROGRESS or a config value counts as explicit too (#116).
+	if f.silent {
+		f.showProgress = false
+	}
 	if !isTerminal(os.Stderr) {
 		if defaults.source(fs, "progress") != sourceDefault {
 			out.SetProgressLines(true)

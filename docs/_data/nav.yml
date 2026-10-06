@@ -12,6 +12,8 @@
 - section: Guides
   footer: true
   pages:
+    - title: Pipelines
+      url: /pipelines.html
     - title: Monitoring
       url: /monitoring.html
     - title: Labs

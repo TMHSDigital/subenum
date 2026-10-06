@@ -698,3 +698,33 @@ func TestE2EResume(t *testing.T) {
 		t.Errorf("-resume with extra arguments: exit %d, want 2", code)
 	}
 }
+
+// TestE2ESilent covers #128: -silent prints bare names on stdout and, on
+// stderr, nothing but the one-line simulation warning.
+func TestE2ESilent(t *testing.T) {
+	wl := writeFile(t, "wl.txt", e2eWords)
+	args := []string{"-silent", "-simulate", "-seed", "1", "-hit-rate", "100", "-w", wl, "example.com"}
+	code, stdout := runCLI(t, "", args...)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	names := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(names) != 6 {
+		t.Fatalf("stdout = %q, want 6 bare names", stdout)
+	}
+	for _, n := range names {
+		if !strings.HasSuffix(n, ".example.com") || strings.Contains(n, " ") {
+			t.Errorf("stdout line %q is not a bare name", n)
+		}
+	}
+	_, merged := runCLIMerged(t, args...)
+	var other []string
+	for _, line := range strings.Split(strings.TrimSpace(merged), "\n") {
+		if !strings.HasSuffix(line, ".example.com") {
+			other = append(other, line)
+		}
+	}
+	if len(other) != 1 || !strings.Contains(other[0], "SIMULATION") {
+		t.Errorf("stderr under -silent = %q, want only the simulation warning", other)
+	}
+}
