@@ -262,3 +262,16 @@ func TestLoadPrevious(t *testing.T) {
 		}
 	}
 }
+
+// TestE2EMissingDomainReportedFirst covers #120: a missing domain is the
+// error a user sees, not a missing -exclude-file, and no simulation banner
+// is printed before it.
+func TestE2EMissingDomainReportedFirst(t *testing.T) {
+	code, out := runCLIMerged(t, "-simulate", "-exclude-file", "no-such-file.txt")
+	if code != exitUsage || !strings.Contains(out, "missing <domain>") || strings.Contains(out, "exclude-file:") || strings.Contains(out, "SIMULATION MODE") {
+		t.Errorf("exit %d, output:\n%s", code, out)
+	}
+	if code, out := runCLIMerged(t, "-r", "no-such-resolvers.txt", "example.com"); code != exitFailure {
+		t.Errorf("unreadable -r: exit %d, want %d\n%s", code, exitFailure, out)
+	}
+}

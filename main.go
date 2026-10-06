@@ -271,20 +271,29 @@ func endsWithTerminator(fs *flag.FlagSet, consumed []string) bool {
 	return false // "--" was the value of the preceding flag
 }
 
-func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
+// validateArgs checks the domain arguments, before any input file is read,
+// so a missing domain is reported first (#120).
+func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer) bool {
 	if len(positionals) == 0 && f.domainList == "" {
 		// Say what is missing before the full flag list (#58).
 		out.Error("missing <domain> (or -dL <domains_file>)")
 		fs.SetOutput(os.Stderr)
 		fs.Usage()
-		return "", false
+		return false
 	}
 	if f.domainList != "" && len(positionals) > 0 {
 		out.Error("use either a <domain> argument or -dL, not both")
-		return "", false
+		return false
 	}
 	if len(positionals) > 1 {
 		out.Error("expected exactly one domain, got %d arguments: %s (use -dL for several)", len(positionals), strings.Join(positionals, " "))
+		return false
+	}
+	return true
+}
+
+func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
+	if !validateArgs(f, positionals, fs, out) {
 		return "", false
 	}
 	if f.wordlistFile == wordlist.Stdin && f.domainList == wordlist.Stdin {
@@ -593,6 +602,9 @@ func run() (code int) {
 		return exitUsage
 	}
 
+	if !validateArgs(f, positionals, fs, out) {
+		return exitUsage
+	}
 	excludes, err := loadExcludes(f)
 	if err != nil {
 		out.Error("reading -exclude-file: %v", err)
