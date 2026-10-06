@@ -365,9 +365,13 @@ func logPoolHealth(pool *dns.Pool, out *output.Writer) {
 		return
 	}
 	out.Info("Resolvers:")
-	out.Info("  %-24s %8s %8s %8s %8s %7s", "address", "lookups", "found", "nxdomain", "failed", "benched")
+	out.Info("  %-24s %8s %8s %8s %8s %7s %12s", "address", "lookups", "found", "nxdomain", "failed", "benched", "contradicted")
 	for _, r := range pool.Stats() {
-		out.Info("  %-24s %8d %8d %8d %8d %7d", r.Addr, r.Lookups, r.Found, r.NXDomain, r.Failed, r.Benched)
+		flag := ""
+		if r.Flagged {
+			flag = "  FLAGGED: dropped as lying"
+		}
+		out.Info("  %-24s %8d %8d %8d %8d %7d %12d%s", r.Addr, r.Lookups, r.Found, r.NXDomain, r.Failed, r.Benched, r.Contradicted, flag)
 	}
 }
 

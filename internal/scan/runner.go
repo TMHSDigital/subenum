@@ -465,6 +465,11 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			events <- Event{Kind: EventError, Message: msg}
 			return
 		}
+		// An apex the trusted resolver answers is the first canary for
+		// checking that pool members do not hide existing names (#105).
+		if outcome == dns.OutcomeFound && cfg.Pool != nil {
+			cfg.Pool.AddCanary(cfg.Domain)
+		}
 	}
 
 	fingerprint := newFingerprint(nil)
@@ -841,19 +846,30 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 // hijacking resolver) cannot inject results (#69). The trusted answer is the
 // one reported. A pool hit the trusted resolver cannot confirm because its
 // own lookup failed counts as that failure, not as a silent drop.
+//
+// Negative answers are guarded inside the pool (canary checks and second
+// opinions, #105); the trusted resolver's verdict on each hit is fed back so
+// a member that hid the name or injected it is flagged, and every confirmed
+// name becomes a canary.
 func resolveViaPool(ctx context.Context, cfg Config, name string, st *counters) ([]dns.Record, dns.Outcome) {
-	_, outcome, _ := cfg.Pool.Resolve(ctx, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
-	if outcome != dns.OutcomeFound {
-		return nil, outcome
+	a := cfg.Pool.Resolve(ctx, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+	if a.NoResolver {
+		// Every pool member was caught lying: the trusted resolver answers.
+		return dns.ResolveDomainWithRetry(ctx, cfg.Resolver, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+	}
+	if a.Outcome != dns.OutcomeFound {
+		return nil, a.Outcome
 	}
 	st.poolHits.Add(1)
 	records, trusted := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
 	switch trusted {
 	case dns.OutcomeFound:
 		st.confirmed.Add(1)
+		cfg.Pool.AddCanary(name)
 	case dns.OutcomeNXDomain:
 		st.unconfirmed.Add(1)
 	}
+	cfg.Pool.Disagree(a, trusted)
 	return records, trusted
 }
 

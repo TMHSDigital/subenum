@@ -146,3 +146,58 @@ func TestPoolBenchesDeadResolver(t *testing.T) {
 		t.Errorf("dead resolver got %d lookups; benching should have stopped that", deadStats.Lookups)
 	}
 }
+
+// TestPoolLyingNXDomainMember is #105's done-when: a pool member that
+// answers NXDOMAIN to everything hides no real name, and is flagged. With an
+// apex that resolves, canary checks catch it; without one, every untrusted
+// NXDOMAIN gets a second opinion from the honest member.
+func TestPoolLyingNXDomainMember(t *testing.T) {
+	for _, apex := range []bool{true, false} {
+		t.Run(map[bool]string{true: "canary", false: "second-opinion"}[apex], func(t *testing.T) {
+			exists := func(name string) bool {
+				return (apex && name == "example.com") || name == "p3.example.com" || name == "p17.example.com" || name == "p31.example.com"
+			}
+			honestHandler := func(name string) dnsAction {
+				return dnsAction{ip: [4]byte{192, 0, 2, 10}, hit: exists(name)}
+			}
+			trusted, stopT := startUDPDNSAction(t, honestHandler)
+			defer stopT()
+			honest, stopH := startUDPDNSAction(t, honestHandler)
+			defer stopH()
+			liar, stopL := startUDPDNSAction(t, func(string) dnsAction { return dnsAction{} })
+			defer stopL()
+
+			pool := dns.NewPool([]string{liar, honest}, time.Second)
+			cfg := Config{
+				Domain: "example.com", Entries: makeEntries(40), Concurrency: 4,
+				Timeout: time.Second, Attempts: 3, Types: []string{"A"},
+				Resolver: dns.NewResolver(time.Second, trusted), DNSServer: trusted, Pool: pool,
+			}
+			events := make(chan Event, 256)
+			go Run(context.Background(), cfg, events)
+			found := map[string]bool{}
+			for ev := range events {
+				if ev.Kind == EventResult {
+					found[ev.Domain] = true
+				}
+			}
+			for _, want := range []string{"p3.example.com", "p17.example.com", "p31.example.com"} {
+				if !found[want] {
+					t.Errorf("%s was hidden by the lying member; found %v", want, found)
+				}
+			}
+			var liarStats dns.ResolverStats
+			for _, s := range pool.Stats() {
+				if s.Addr == liar {
+					liarStats = s
+				}
+			}
+			if liarStats.Contradicted == 0 {
+				t.Errorf("the lying member was never contradicted: %+v", liarStats)
+			}
+			if apex && !liarStats.Flagged {
+				t.Errorf("the lying member was not flagged: %+v", liarStats)
+			}
+		})
+	}
+}

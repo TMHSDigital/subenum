@@ -111,7 +111,7 @@ body_class: is-home
     <div class="claims">
       <article class="claim">
         <h3>Resolver pools that can't lie to you</h3>
-        <p>Spread queries across many resolvers. Failing ones are benched, and every hit is re-checked against your trusted resolver before it's printed.</p>
+        <p>Spread queries across many resolvers. Failing ones are benched, every hit is re-checked against your trusted resolver before it's printed, and canary checks catch a resolver that hides names that exist.</p>
         <code class="evidence">-r resolvers.txt -dns-server 9.9.9.9</code>
       </article>
       <article class="claim">

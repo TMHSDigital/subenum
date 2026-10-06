@@ -484,8 +484,11 @@ func TestE2EResolverPool(t *testing.T) {
 		}
 		total += r.Lookups
 	}
-	if total != 6 {
-		t.Errorf("pool lookups = %d, want 6 (one per wordlist entry)", total)
+	// Nothing in this zone exists, so there is no canary to vouch for a
+	// member's NXDOMAIN answers, and each is confirmed by the other member
+	// (#105): two lookups per wordlist entry.
+	if total != 12 {
+		t.Errorf("pool lookups = %d, want 12 (two per wordlist entry)", total)
 	}
 
 	bad := writeFile(t, "bad.txt", "dns.example.com\n")
