@@ -30,8 +30,8 @@ type File struct {
 // would, so a umask of 077 keeps results private (#119). A path that is a
 // symlink is followed: the file it points at is replaced and the link kept.
 func CreateFile(path string) (*File, error) {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
 	}
 	keep := os.FileMode(0)
 	if fi, err := os.Stat(path); err == nil {
