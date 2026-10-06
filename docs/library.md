@@ -57,7 +57,7 @@ for ev := range events {
 }
 ```
 
-Drain the channel, or cancel `ctx` and then drain it. A consumer that stops reading blocks the scan once the buffer fills. Cancelling still delivers `KindDone` with the counts so far.
+Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with a deferred `cancel()` is safe: once `ctx` is cancelled the scan stops without waiting for a reader, and its goroutines exit within about a second whether or not the channel is read. A consumer that keeps reading after cancelling still gets `KindDone` with the counts so far. While `ctx` is live, a consumer that stops reading pauses the scan once the buffer fills.
 
 ## Configuration
 

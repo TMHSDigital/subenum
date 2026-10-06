@@ -3,6 +3,7 @@ package subenum_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -388,5 +389,60 @@ func TestRateLimitIsApplied(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < time.Second {
 		t.Errorf("40 queries at 20/s took %s, want at least a second", elapsed)
+	}
+}
+
+// TestBreakAndCancelLeaksNothing covers #112: the idiomatic
+// `for ev := range events { break }` with a deferred cancel leaves no
+// goroutine of the scan behind, even though the channel is never drained.
+func TestBreakAndCancelLeaksNothing(t *testing.T) {
+	defer subenum.SetDoneGrace(10 * time.Millisecond)()
+	base := runtime.NumGoroutine()
+	for i := 0; i < 5; i++ {
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			events, err := subenum.Run(ctx, subenum.Config{Domain: "example.com", Simulate: true, HitRate: 100, Seed: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range events {
+				break
+			}
+		}()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > base+2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := runtime.NumGoroutine(); n > base+2 {
+		t.Errorf("%d goroutines remain after 5 abandoned runs, started with %d", n, base)
+	}
+}
+
+// TestCancelThenDrainStillEndsWithDone: a caller that cancels and keeps
+// reading still gets the final event.
+func TestCancelThenDrainStillEndsWithDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	events, err := subenum.Run(ctx, subenum.Config{Domain: "example.com", Simulate: true, HitRate: 100, Seed: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-events
+	cancel()
+	last := subenum.Event{Kind: subenum.KindResult}
+	for ev := range events {
+		last = ev
+	}
+	if last.Kind != subenum.KindDone {
+		t.Errorf("last event %v, want KindDone", last.Kind)
+	}
+}
+
+// TestSubMillisecondTimeoutRoundsUp: a positive Timeout below the engine's
+// 1ms resolution is rounded up, not rejected as zero.
+func TestSubMillisecondTimeoutRoundsUp(t *testing.T) {
+	if _, _, err := subenum.Scan(context.Background(), subenum.Config{Domain: "example.com", Words: []string{"www"}, Simulate: true, Timeout: 500 * time.Microsecond}); err != nil {
+		t.Errorf("Timeout 500µs: %v", err)
 	}
 }

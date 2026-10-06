@@ -19,7 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TMHSDigital/subenum/data"
@@ -300,6 +302,11 @@ type Event struct {
 // Config.Words defaults to it. The returned slice is a fresh copy, safe to
 // append to or filter.
 func DefaultWords() []string {
+	return slices.Clone(defaultWords())
+}
+
+// defaultWords parses the bundled list once; callers must not modify it.
+var defaultWords = sync.OnceValue(func() []string {
 	lines, err := wordlist.ReadLinesFrom(strings.NewReader(data.Subdomains5k))
 	if err != nil {
 		// The list is compiled into the binary, so this cannot fail.
@@ -307,7 +314,11 @@ func DefaultWords() []string {
 	}
 	words, _, _ := wordlist.Build(lines, "")
 	return words
-}
+})
+
+// doneGrace is how long Run's forwarder waits to hand over the final event
+// after ctx is cancelled, when the caller may have stopped reading.
+var doneGrace = time.Second
 
 // ErrNoWords is returned when a Config's wordlist has no usable entries.
 var ErrNoWords = errors.New("subenum: wordlist has no usable entries")
@@ -317,9 +328,14 @@ var ErrNoWords = errors.New("subenum: wordlist has no usable entries")
 // final Stats. Problems with cfg itself are reported before the scan starts,
 // as an error and no channel.
 //
-// The caller must drain the channel, or cancel ctx and then drain it, or the
-// scan blocks once the buffer fills. Cancelling ctx stops the scan and still
-// delivers KindDone with the counts so far.
+// Read the channel until it closes, or cancel ctx: the usual
+// `for ev := range events { ... break ... }` with a deferred cancel is safe.
+// While ctx is live, an unread channel pauses the scan once its buffer
+// fills. Once ctx is cancelled the scan stops and never waits for the
+// caller: results nobody reads may be dropped, and a caller that keeps
+// reading still gets KindDone with the counts so far. Every goroutine the
+// scan started exits within about a second of cancellation, whether or not
+// the channel is read (#112).
 func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 	internal, err := cfg.options()
 	if err != nil {
@@ -335,16 +351,43 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 		for ev := range in {
 			translated := translate(ev)
 			done = done || translated.Kind == KindDone
-			out <- translated
+			forward(ctx, out, translated)
 		}
 		// The engine returns without a final event when a scan never gets
 		// to start, such as a wildcard zone without Force. Report the same
 		// terminal event anyway, so consumers need only one shape.
 		if !done {
-			out <- Event{Kind: KindDone}
+			forward(ctx, out, Event{Kind: KindDone})
 		}
 	}()
 	return out, nil
+}
+
+// forward hands ev to the caller. Before cancellation it waits for the
+// caller to read. After it, it never blocks the engine, which must be
+// drained to finish: other events are dropped when the buffer is full, and
+// the final event waits at most doneGrace for a reader.
+func forward(ctx context.Context, out chan<- Event, ev Event) {
+	if ctx.Err() == nil {
+		select {
+		case out <- ev:
+			return
+		case <-ctx.Done():
+		}
+	}
+	if ev.Kind != KindDone {
+		select {
+		case out <- ev:
+		default:
+		}
+		return
+	}
+	timer := time.NewTimer(doneGrace)
+	defer timer.Stop()
+	select {
+	case out <- ev:
+	case <-timer.C:
+	}
 }
 
 // Scan runs a scan to completion and returns everything it found, in the
@@ -437,7 +480,7 @@ func (c Config) options() (scan.Options, error) {
 		Domain:      domain,
 		Entries:     entries,
 		Concurrency: orDefault(c.Concurrency, DefaultConcurrency),
-		TimeoutMs:   int(orDefaultDuration(c.Timeout, DefaultTimeout).Milliseconds()),
+		TimeoutMs:   ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout)),
 		DNSServer:   resolver,
 		Simulate:    c.Simulate,
 		HitRate:     orDefault(c.HitRate, DefaultHitRate),
@@ -485,6 +528,12 @@ func parseTypes(types []string) ([]string, error) {
 		return nil, fmt.Errorf("subenum: Types: %w", err)
 	}
 	return parsed, nil
+}
+
+// ceilMillis rounds a duration up to whole milliseconds, the engine's unit,
+// so a positive Timeout below 1ms becomes 1ms instead of an invalid 0.
+func ceilMillis(d time.Duration) int {
+	return int((d + time.Millisecond - 1) / time.Millisecond)
 }
 
 func orDefault(v, def int) int {
