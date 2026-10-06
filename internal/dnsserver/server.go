@@ -81,13 +81,20 @@ type Server struct {
 
 	connections   atomic.Int64
 	streamQueries atomic.Int64
+	closeAfter    atomic.Int64 // close stream connections after this many answers (0 = never)
 
 	total  atomic.Int64
 	mu     sync.Mutex
 	counts map[countKey]int64
 
 	closers []io.Closer
+	// wg covers every goroutine the server starts: listeners, stream
+	// connections and UDP answers, so Close returns only once no handler
+	// can still run (#122).
 	wg      sync.WaitGroup
+	connMu  sync.Mutex
+	conns   map[net.Conn]struct{}
+	closing bool
 }
 
 type countKey struct {
@@ -132,7 +139,7 @@ func Listen(opts Options, h Handler) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no free UDP+TCP port pair: %w", err)
 	}
-	s := &Server{Addr: ln.Addr().String(), counts: map[countKey]int64{}, closers: []io.Closer{ln, pc}}
+	s := &Server{Addr: ln.Addr().String(), counts: map[countKey]int64{}, closers: []io.Closer{ln, pc}, conns: map[net.Conn]struct{}{}}
 
 	s.wg.Add(2)
 	go func() {
@@ -146,12 +153,43 @@ func Listen(opts Options, h Handler) (*Server, error) {
 	return s, nil
 }
 
-// Close stops the server's listeners and waits for them to exit.
+// Close stops the server: it closes the listeners and every open stream
+// connection, and waits until no handler is running, including delayed UDP
+// answers and connections parked on a dropped query.
 func (s *Server) Close() {
+	s.connMu.Lock()
+	s.closing = true
+	for c := range s.conns {
+		_ = c.Close()
+	}
+	s.connMu.Unlock()
 	for _, c := range s.closers {
 		_ = c.Close()
 	}
 	s.wg.Wait()
+}
+
+// CloseStreamsAfter makes the server close each TCP or TLS connection after
+// answering n queries on it, as servers with a short idle timeout or a
+// per-connection query limit do. 0 restores the default (never).
+func (s *Server) CloseStreamsAfter(n int) { s.closeAfter.Store(int64(n)) }
+
+// track registers an open stream connection; it reports false once the
+// server is closing, and the caller must then close c itself.
+func (s *Server) track(c net.Conn) bool {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	if s.closing {
+		return false
+	}
+	s.conns[c] = struct{}{}
+	return true
+}
+
+func (s *Server) untrack(c net.Conn) {
+	s.connMu.Lock()
+	delete(s.conns, c)
+	s.connMu.Unlock()
 }
 
 // Queries returns how many queries the server has received.
@@ -185,7 +223,7 @@ func (s *Server) serveUDP(pc net.PacketConn, serial bool, h Handler) {
 		if serial {
 			answer()
 		} else {
-			go answer()
+			s.wg.Go(answer)
 		}
 	}
 }
@@ -198,9 +236,16 @@ func (s *Server) serveTCP(ln net.Listener, h Handler) {
 		if err != nil {
 			return
 		}
+		if !s.track(conn) {
+			_ = conn.Close()
+			return
+		}
+		s.wg.Add(1)
 		go func(c net.Conn) {
+			defer s.wg.Done()
+			defer s.untrack(c)
 			defer func() { _ = c.Close() }()
-			for {
+			for answered := int64(1); ; answered++ {
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				var size [2]byte
 				if _, err := io.ReadFull(c, size[:]); err != nil {
@@ -223,6 +268,9 @@ func (s *Server) serveTCP(ln net.Listener, h Handler) {
 					return
 				}
 				s.streamQueries.Add(1)
+				if n := s.closeAfter.Load(); n > 0 && answered >= n {
+					return
+				}
 			}
 		}(conn)
 		s.connections.Add(1)

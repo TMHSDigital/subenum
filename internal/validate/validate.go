@@ -11,6 +11,24 @@ import (
 	"strings"
 )
 
+// DoTAddress splits a tls://host[:port] server into the address to dial
+// (port 853 by default) and the host to verify the certificate against. An
+// IPv6 host may be bracketed with or without a port: tls://[2001:db8::1],
+// tls://[2001:db8::1]:853 and tls://2001:db8::1 are all accepted (#115).
+// Both the validator and the DNS dialer use it, so they cannot disagree.
+func DoTAddress(server string) (hostport, host string, err error) {
+	rest := strings.TrimPrefix(server, "tls://")
+	if h, _, err := net.SplitHostPort(rest); err == nil {
+		return rest, h, nil
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(rest, "["), "]")
+	hostport = net.JoinHostPort(host, "853")
+	if _, _, err := net.SplitHostPort(hostport); err != nil {
+		return "", "", err
+	}
+	return hostport, host, nil
+}
+
 // DefaultDNSServer is the resolver used when none is given; the CLI, the TUI
 // and the DNS server error message all use this one constant (#80).
 const DefaultDNSServer = "8.8.8.8:53"
@@ -29,17 +47,14 @@ var (
 func DNSServer(server string) error {
 	switch {
 	case strings.HasPrefix(server, "tls://"):
-		hostport := strings.TrimPrefix(server, "tls://")
-		if _, _, err := net.SplitHostPort(hostport); err != nil {
-			hostport = net.JoinHostPort(hostport, "853")
-		}
-		host, portStr, err := net.SplitHostPort(hostport)
+		hostport, host, err := DoTAddress(server)
 		if err != nil || host == "" {
 			return fmt.Errorf("invalid DNS-over-TLS server %q, expected tls://host[:port]", server)
 		}
 		if net.ParseIP(host) == nil && Domain(host) != nil {
 			return fmt.Errorf("invalid DNS-over-TLS host: %s", host)
 		}
+		_, portStr, _ := net.SplitHostPort(hostport)
 		return checkPort(portStr)
 	case strings.HasPrefix(server, "https://"):
 		u, err := url.Parse(server)

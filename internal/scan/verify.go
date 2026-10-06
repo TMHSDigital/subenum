@@ -23,6 +23,7 @@ func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Out
 	if cfg.Resolver == nil {
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
 	}
+	defer dns.CloseIdleConnections(cfg.Resolver)
 	limiter := dns.NewRateLimiter(cfg.Rate)
 	live := !cfg.Simulate && cfg.resolveHook == nil
 	if live {

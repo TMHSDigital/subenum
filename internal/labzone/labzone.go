@@ -186,11 +186,32 @@ func (z *Zone) parseLine(fields []string) error {
 		if e.cname != "" || len(e.a)+len(e.aaaa) > 0 {
 			return fmt.Errorf("%s: a CNAME cannot be combined with other records", fields[0])
 		}
-		e.cname = strings.ToLower(value)
+		target, err := cnameTarget(value)
+		if err != nil {
+			return err
+		}
+		e.cname = target
 	default:
 		return fmt.Errorf("unknown type %s (known: A, AAAA, CNAME, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)", fields[1])
 	}
 	return nil
+}
+
+// cnameTarget validates a CNAME value: "@" (the scanned domain itself), a
+// name relative to it, or an absolute name ending in a dot. Wildcards and
+// malformed labels are rejected rather than served as a bogus target such as
+// "@.example.com" (#115).
+func cnameTarget(value string) (string, error) {
+	value = strings.ToLower(value)
+	if value == "@" {
+		return value, nil
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(value, "."), ".") {
+		if label == "" || len(label) > 63 || strings.ContainsAny(label, "*@ ") {
+			return "", fmt.Errorf("bad CNAME target %q", value)
+		}
+	}
+	return value, nil
 }
 
 // parseName returns the relative name and whether it is a wildcard; for
@@ -252,7 +273,10 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 		return dnsserver.Reply{A: e.a, AAAA: e.aaaa}
 	}
 	target := e.cname
-	if !strings.HasSuffix(target, ".") {
+	switch {
+	case target == "@":
+		target = origin
+	case !strings.HasSuffix(target, "."):
 		target += "." + origin
 	}
 	target = strings.TrimSuffix(target, ".")

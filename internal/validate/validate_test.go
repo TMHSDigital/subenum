@@ -135,7 +135,8 @@ func TestNormalizeDomain(t *testing.T) {
 
 // TestDNSServerTransports covers #86: DoT and DoH servers are accepted.
 func TestDNSServerTransports(t *testing.T) {
-	for _, ok := range []string{"tls://1.1.1.1", "tls://1.1.1.1:853", "tls://dns.google", "https://cloudflare-dns.com/dns-query", "https://1.1.1.1/dns-query"} {
+	for _, ok := range []string{"tls://1.1.1.1", "tls://1.1.1.1:853", "tls://dns.google", "https://cloudflare-dns.com/dns-query", "https://1.1.1.1/dns-query",
+		"tls://[::1]", "tls://[2606:4700::1111]", "tls://[::1]:853", "tls://::1"} {
 		if err := DNSServer(ok); err != nil {
 			t.Errorf("DNSServer(%q) = %v, want nil", ok, err)
 		}
@@ -143,6 +144,24 @@ func TestDNSServerTransports(t *testing.T) {
 	for _, bad := range []string{"tls://", "tls://1.1.1.1:99999", "https://", "quic://1.1.1.1", "tls://bad host"} {
 		if err := DNSServer(bad); err == nil {
 			t.Errorf("DNSServer(%q) accepted", bad)
+		}
+	}
+}
+
+// TestDoTAddress covers #115: bracketed IPv6 hosts without a port get 853,
+// and the certificate is checked against the bare host.
+func TestDoTAddress(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"tls://1.1.1.1":           {"1.1.1.1:853", "1.1.1.1"},
+		"tls://dns.google:8853":   {"dns.google:8853", "dns.google"},
+		"tls://[::1]":             {"[::1]:853", "::1"},
+		"tls://[2606:4700::1111]": {"[2606:4700::1111]:853", "2606:4700::1111"},
+		"tls://[::1]:853":         {"[::1]:853", "::1"},
+		"tls://::1":               {"[::1]:853", "::1"},
+	} {
+		hostport, host, err := DoTAddress(in)
+		if err != nil || hostport != want[0] || host != want[1] {
+			t.Errorf("DoTAddress(%q) = %q, %q, %v; want %q, %q", in, hostport, host, err, want[0], want[1])
 		}
 	}
 }

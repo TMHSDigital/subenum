@@ -18,6 +18,7 @@ www      A      192.0.2.10
 www      AAAA   2001:db8::10
 shop     CNAME  www
 blog     CNAME  ghost.example.net.
+home     CNAME  @
 vpn.corp A      192.0.2.30
 *.dev    A      192.0.2.99
 api.dev  A      192.0.2.40
@@ -48,6 +49,7 @@ func TestAnswer(t *testing.T) {
 		{rel: "www", a: []string{"192.0.2.10"}},
 		{rel: "shop", cname: "www.lab.example", a: []string{"192.0.2.10"}},
 		{rel: "blog", cname: "ghost.example.net"},
+		{rel: "home", cname: "lab.example", a: []string{"192.0.2.1"}}, // @ is the scanned domain (#115)
 		{rel: "corp"}, // NODATA: vpn.corp exists below it
 		{rel: "x.dev", a: []string{"192.0.2.99"}}, // wildcard
 		{rel: "a.b.dev", a: []string{"192.0.2.99"}},
@@ -117,6 +119,9 @@ func TestParseErrors(t *testing.T) {
 		"$TTL 60\nwww A 192.0.2.1",
 		"a..b A 192.0.2.1",
 		"a.*.b A 192.0.2.1",
+		"shop CNAME *.www",
+		"shop CNAME a..b",
+		"shop CNAME @.www",
 	} {
 		if _, err := Parse(strings.NewReader(bad)); err == nil {
 			t.Errorf("Parse(%q) succeeded, want an error", bad)

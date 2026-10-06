@@ -2,8 +2,11 @@ package dns
 
 import (
 	"context"
+	"crypto/x509"
+	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,4 +122,103 @@ func TestDoTReusesConnections(t *testing.T) {
 	if n := srv.QueriesFor("www.example.com", dnsmessage.TypeA); n != 20 {
 		t.Fatalf("server saw %d A queries, want 20", n)
 	}
+}
+
+// TestDoTDiscardsClosedConnections covers #113: a server that closes each
+// connection after one answer costs one dial per query, not two, because a
+// pooled connection the server closed is detected before it is reused.
+func TestDoTDiscardsClosedConnections(t *testing.T) {
+	srv, servers := startAllTransports(t)
+	srv.CloseStreamsAfter(1)
+	r := NewResolver(2*time.Second, servers[TransportTLS])
+	var sent atomic.Int64
+	ctx := WithQueryCounter(context.Background(), &sent)
+	before := srv.Connections()
+	for i := 0; i < 10; i++ {
+		if _, _, err := ResolveTypes(ctx, r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond) // let the server's close arrive
+	}
+	if opened := srv.Connections() - before; opened != 10 {
+		t.Errorf("10 lookups opened %d connections, want 10", opened)
+	}
+	if sent.Load() != 10 {
+		t.Errorf("counted %d queries, want 10", sent.Load())
+	}
+}
+
+// TestCloseIdleConnections: a scan's DoT connections are closed when it
+// ends, and the resolver still works afterwards.
+func TestCloseIdleConnections(t *testing.T) {
+	srv, servers := startAllTransports(t)
+	r := NewResolver(2*time.Second, servers[TransportTLS])
+	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+		t.Fatal(err)
+	}
+	CloseIdleConnections(r)
+	before := srv.Connections()
+	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+		t.Fatal(err)
+	}
+	if srv.Connections() == before {
+		t.Error("the lookup after CloseIdleConnections reused a connection that should have been closed")
+	}
+}
+
+// TestDoHRefusesRedirects covers #114: a DoH server that redirects, even to
+// plain http://, never gets the query sent there.
+func TestDoHRefusesRedirects(t *testing.T) {
+	var plainHits atomic.Int64
+	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { plainHits.Add(1) }))
+	defer plain.Close()
+	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/dns-query", http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+	trustOnly(t, redirect)
+
+	r := NewResolver(2*time.Second, redirect.URL+"/dns-query")
+	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err == nil {
+		t.Fatal("lookup through a redirecting server succeeded")
+	}
+	if plainHits.Load() != 0 {
+		t.Errorf("the query was sent in cleartext %d times", plainHits.Load())
+	}
+}
+
+// TestDoHThrottlingIsRefused covers #114: HTTP 429 and 503 count as
+// REFUSED, the rate-limit signal, not as "other".
+func TestDoHThrottlingIsRefused(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+		trustOnly(t, srv)
+		r := NewResolver(2*time.Second, srv.URL+"/dns-query")
+		_, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"})
+		srv.Close()
+		if outcome := Classify(err); outcome != OutcomeRefused {
+			t.Errorf("HTTP %d: outcome %v, want refused", status, outcome)
+		}
+	}
+}
+
+// TestDoTRejectsUntrustedCertificate: certificate verification is on, so a
+// server whose certificate is not trusted never answers a lookup.
+func TestDoTRejectsUntrustedCertificate(t *testing.T) {
+	_, servers := startAllTransports(t)
+	testRootCAs = x509.NewCertPool() // trusts nothing; startAllTransports restores it
+	r := NewResolver(2*time.Second, servers[TransportTLS])
+	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err == nil {
+		t.Fatal("lookup over an untrusted DoT certificate succeeded")
+	}
+}
+
+// trustOnly makes DoT and DoH trust srv's certificate for this test.
+func trustOnly(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	old := testRootCAs
+	testRootCAs = pool
+	t.Cleanup(func() { testRootCAs = old })
 }

@@ -12,9 +12,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+	"weak"
+
+	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
 // Transports a -dns-server can use (#86).
@@ -46,31 +50,79 @@ type dialer interface {
 	dial(ctx context.Context, network string) (net.Conn, error)
 }
 
+// idleCloser is a dialer that keeps connections between queries.
+type idleCloser interface {
+	closeIdle()
+}
+
+// pooledDialers maps a resolver from NewResolver to its DoT or DoH dialer,
+// so CloseIdleConnections can find it. Keys are weak, and an entry is
+// removed (and its connections closed) once the resolver is collected.
+var pooledDialers sync.Map // weak.Pointer[net.Resolver] -> idleCloser
+
+func registerDialer(r *net.Resolver, d dialer) {
+	c, ok := d.(idleCloser)
+	if !ok {
+		return
+	}
+	key := weak.Make(r)
+	pooledDialers.Store(key, c)
+	runtime.AddCleanup(r, func(k weak.Pointer[net.Resolver]) {
+		if v, ok := pooledDialers.LoadAndDelete(k); ok {
+			v.(idleCloser).closeIdle()
+		}
+	}, key)
+}
+
+// CloseIdleConnections closes the DoT connections and idle DoH connections
+// a resolver from NewResolver keeps for reuse. The resolver stays usable. A
+// scan calls it when it ends, so a long-lived program that scans repeatedly
+// does not hold connections open between scans.
+func CloseIdleConnections(r *net.Resolver) {
+	if r == nil {
+		return
+	}
+	if v, ok := pooledDialers.Load(weak.Make(r)); ok {
+		v.(idleCloser).closeIdle()
+	}
+}
+
+// dotIdleConns bounds the DoT connections kept for reuse; it matches the
+// default -t, so a default scan rarely closes one only to dial it again.
+const dotIdleConns = 128
+
 // newDialer returns the dialer for a -dns-server value. It is validated
 // earlier (validate.DNSServer), so errors here fall back to UDP.
 func newDialer(timeout time.Duration, server string) dialer {
 	switch Transport(server) {
 	case TransportTLS:
-		host := strings.TrimPrefix(server, "tls://")
-		if _, _, err := net.SplitHostPort(host); err != nil {
-			host = net.JoinHostPort(host, "853")
+		addr, name, err := validate.DoTAddress(server)
+		if err != nil {
+			break
 		}
-		name, _, _ := net.SplitHostPort(host)
 		return &dotDialer{
-			addr:    host,
+			addr:    addr,
 			tls:     &tls.Config{ServerName: name, RootCAs: testRootCAs, MinVersion: tls.VersionTLS12},
 			timeout: timeout,
-			idle:    make(chan idleConn, 16),
+			idle:    make(chan idleConn, dotIdleConns),
 		}
 	case TransportHTTPS:
 		return &dohDialer{
 			url: server,
-			client: &http.Client{Transport: &http.Transport{
-				TLSClientConfig:     &tls.Config{RootCAs: testRootCAs, MinVersion: tls.VersionTLS12},
-				ForceAttemptHTTP2:   true,
-				MaxIdleConnsPerHost: 64,
-				IdleConnTimeout:     30 * time.Second,
-			}},
+			client: &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig:     &tls.Config{RootCAs: testRootCAs, MinVersion: tls.VersionTLS12},
+					ForceAttemptHTTP2:   true,
+					MaxIdleConnsPerHost: 64,
+					IdleConnTimeout:     30 * time.Second,
+				},
+				// A redirect could send the query somewhere else, or in
+				// cleartext over http://; a DoH server has no reason to
+				// redirect, so none is followed (#114).
+				CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+					return fmt.Errorf("DNS-over-HTTPS server redirected to %s; refusing to follow", req.URL.Redacted())
+				},
+			},
 		}
 	}
 	return &udpDialer{addr: server, timeout: timeout}
@@ -88,8 +140,13 @@ func (d *udpDialer) dial(ctx context.Context, network string) (net.Conn, error) 
 
 // dotIdleMax bounds how long a DoT connection is kept for reuse. Servers
 // close idle connections after some seconds; reusing one they already closed
-// would fail a query, so connections older than this are discarded.
-const dotIdleMax = 5 * time.Second
+// would fail a query, so connections older than this are discarded. A
+// younger one is still probed before reuse (see alive).
+const dotIdleMax = 4 * time.Second
+
+// dotProbe is how long alive waits for a pooled connection to show it was
+// closed. A closed one reports EOF at once; a live one has nothing to read.
+const dotProbe = time.Millisecond
 
 type idleConn struct {
 	conn  *tls.Conn
@@ -109,7 +166,10 @@ func (d *dotDialer) dial(ctx context.Context, _ string) (net.Conn, error) {
 	for {
 		select {
 		case ic := <-d.idle:
-			if time.Since(ic.since) > dotIdleMax {
+			// A connection the server already closed would fail this query
+			// after it had been counted and paced, so it is checked first
+			// (#113).
+			if time.Since(ic.since) > dotIdleMax || !alive(ic.conn) {
 				_ = ic.conn.Close()
 				continue
 			}
@@ -124,6 +184,35 @@ func (d *dotDialer) dial(ctx context.Context, _ string) (net.Conn, error) {
 		return nil, err
 	}
 	return &pooledConn{Conn: c.(*tls.Conn), pool: d}, nil
+}
+
+// alive reports whether an idle DoT connection is still open. Between
+// queries a server sends nothing, so a read that times out means open, and
+// EOF, an error or unexpected data means it must not be reused. A read
+// timeout leaves a tls.Conn usable.
+func alive(c *tls.Conn) bool {
+	if err := c.SetReadDeadline(time.Now().Add(dotProbe)); err != nil {
+		return false
+	}
+	var b [1]byte
+	_, err := c.Read(b[:])
+	var ne net.Error
+	if !errors.As(err, &ne) || !ne.Timeout() {
+		return false
+	}
+	return c.SetReadDeadline(time.Time{}) == nil
+}
+
+// closeIdle closes every pooled connection.
+func (d *dotDialer) closeIdle() {
+	for {
+		select {
+		case ic := <-d.idle:
+			_ = ic.conn.Close()
+		default:
+			return
+		}
+	}
 }
 
 // pooledConn returns its TLS connection to the pool on Close, unless a read
@@ -174,6 +263,8 @@ type dohDialer struct {
 func (d *dohDialer) dial(ctx context.Context, _ string) (net.Conn, error) {
 	return &dohConn{ctx: ctx, d: d}, nil
 }
+
+func (d *dohDialer) closeIdle() { d.client.CloseIdleConnections() }
 
 // dohConn accepts length-prefixed DNS messages on Write, exchanges each one
 // over HTTPS, and serves the length-prefixed answers on Read.
@@ -227,7 +318,13 @@ func (c *dohConn) exchange(msg []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		// The HTTP form of REFUSED: the server is shedding load. Worded so
+		// Classify counts it as refused, the rate-limit signal (#114).
+		return nil, fmt.Errorf("DNS-over-HTTPS server refused the query (HTTP %s)", resp.Status)
+	default:
 		return nil, fmt.Errorf("DNS-over-HTTPS server returned %s", resp.Status)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 65535))

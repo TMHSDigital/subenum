@@ -125,7 +125,7 @@ func ParseTypes(s string) ([]string, error) {
 // slot, which keeps -rate exact however many queries Go decides to send (#50).
 func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 	dl := newDialer(timeout, dnsServer) // UDP/TCP, DoT or DoH (#86)
-	return &net.Resolver{
+	r := &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
 			if c, ok := dialCtx.Value(queryCounterKey{}).(*atomic.Int64); ok {
@@ -152,6 +152,8 @@ func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 			return &rcodeTCPConn{Conn: c, b: b}, nil
 		},
 	}
+	registerDialer(r, dl)
+	return r
 }
 
 // wireBudget follows one per-type lookup through Go's resolver: the rate
