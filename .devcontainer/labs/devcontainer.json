@@ -1,0 +1,13 @@
+{
+  "name": "subenum labs",
+  "image": "mcr.microsoft.com/devcontainers/go:1.26-bookworm",
+  "postCreateCommand": "go mod download && go build -o subenum . && echo 'Lab 1: ./subenum -w examples/labs/words.txt -simulate-zone examples/labs/lab1-first-scan.zone lab.example'",
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"]
+    },
+    "codespaces": {
+      "openFiles": ["docs/labs.md", "examples/labs/lab1-first-scan.zone"]
+    }
+  }
+}

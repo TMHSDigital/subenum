@@ -19,8 +19,9 @@ against a live zone, and the results are the same on every run.
 
 You need a subenum binary (see [Installation](https://github.com/TMHSDigital/subenum#installation))
 and a copy of the repository for the scenario files. For a zero-install
-classroom, [open the repository in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum):
-the container builds `./subenum` for you.
+classroom, [open the labs in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum?devcontainer_path=.devcontainer/labs/devcontainer.json&quickstart=1):
+the container builds `./subenum`, opens this page and the first scenario, and
+prints the lab 1 command.
 
 Every lab scans `lab.example` with the short wordlist `examples/labs/words.txt`.
 Run the commands from the repository root:

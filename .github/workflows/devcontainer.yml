@@ -37,3 +37,13 @@ jobs:
             golangci-lint run
             ./subenum -simulate -seed 1 -stats run.json example.com > /dev/null
             grep -q '"verdict": "complete"' run.json
+
+      - name: Build the labs devcontainer and run lab 1 inside it
+        uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+        with:
+          push: never
+          configFile: .devcontainer/labs/devcontainer.json
+          runCmd: |
+            set -e
+            ./subenum -w examples/labs/words.txt -simulate-zone examples/labs/lab1-first-scan.zone -stats lab1.json lab.example
+            grep -q '"verdict": "complete"' lab1.json
