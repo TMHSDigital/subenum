@@ -19,7 +19,7 @@ import (
 // test fails when a flag whose usage mentions a file is missing here (#117).
 var fileFlags = map[string]bool{
 	"w": true, "dL": true, "o": true, "stats": true, "diff": true, "r": true, "exclude-file": true,
-	"simulate-zone": true, "seeds": true, "resume": true, "state": true,
+	"simulate-zone": true, "seeds": true, "resume": true, "state": true, "sarif": true,
 }
 
 // completionShells are the shells `subenum completion` writes scripts for.

@@ -23,6 +23,7 @@
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
 | `-resume <string>` | - | Resume an interrupted run from its state file (no other arguments) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
+| `-sarif <string>` | - | Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME in -type) |
 | `-seed <uint>` | - | In simulation mode, seed for reproducible results (0 = random; the seed used is printed) |
 | `-seeds <string>` | - | Results file (any -format) whose names also seed -permute; implies -permute |
 | `-show-records` | - | In text format, append each result's records (TYPE=value) |

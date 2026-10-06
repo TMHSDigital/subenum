@@ -143,6 +143,7 @@ type cliFlags struct {
 	noAbort      bool
 	maxQueries   int
 	statsFile    string
+	sarifFile    string // -sarif: takeover candidates as SARIF (#129)
 	exclude      string
 	excludeFile  string
 	resolvers    string          // -r: file of resolver addresses for a pool
@@ -197,6 +198,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
 	fs.StringVar(&f.statsFile, "stats", "", "Write a JSON run-quality report (outcomes, queries sent, verdict) to this file")
+	fs.StringVar(&f.sarifFile, "sarif", "", "Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME in -type)")
 	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
 	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
@@ -600,6 +602,9 @@ func run() (code int) {
 		out.Error("%v", typesErr)
 		return exitUsage
 	}
+	if f.sarifFile != "" && !slices.Contains(recordTypes, "CNAME") {
+		out.Info("Note: -sarif lists takeover candidates, which need CNAME lookups; add -type A,AAAA,CNAME")
+	}
 	if err != nil {
 		out.Error("%v", err)
 		return exitUsage
@@ -744,6 +749,7 @@ func run() (code int) {
 		w.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
 	}
 	var targetResults []output.Result // the current target's results: -permute seeds, saved on interrupt
+	var takeovers []output.Result     // every target's takeover candidates, for -sarif
 	restored := map[string]bool{}     // names re-emitted from a -resume state
 	emitResult := func(ev scan.Event, permutation bool) {
 		if restored[ev.Domain] {
@@ -751,6 +757,9 @@ func run() (code int) {
 		}
 		res := output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Permutation: permutation}
 		targetResults = append(targetResults, res)
+		if res.Takeover != "" {
+			takeovers = append(takeovers, res)
+		}
 		if diff == nil {
 			out.Emit(res)
 			return
@@ -994,6 +1003,12 @@ func run() (code int) {
 	if f.statsFile != "" {
 		if err := output.WriteSummaryFile(f.statsFile, summary); err != nil {
 			out.Error("writing -stats file: %v", err)
+			fileErrReported = true
+		}
+	}
+	if f.sarifFile != "" && anyDone {
+		if err := output.WriteSARIF(f.sarifFile, resolveVersion(), takeovers); err != nil {
+			out.Error("writing -sarif file: %v", err)
 			fileErrReported = true
 		}
 	}

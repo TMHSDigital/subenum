@@ -169,3 +169,60 @@ func TestE2ELabRefusesEnvAndConfigResolvers(t *testing.T) {
 		})
 	}
 }
+
+// TestE2ESARIF covers #129: lab 1's dangling CNAME becomes a SARIF result
+// with a rule, a location and a stable fingerprint.
+func TestE2ESARIF(t *testing.T) {
+	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
+	path := filepath.Join(t.TempDir(), "takeovers.sarif")
+	if code, _ := runCLI(t, "", "-progress=false", "-type", "A,CNAME", "-sarif", path, "-simulate-zone", zone, "lab.example"); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var log struct {
+		Version string `json:"version"`
+		Runs    []struct {
+			Tool struct {
+				Driver struct {
+					Name  string `json:"name"`
+					Rules []struct {
+						ID string `json:"id"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []struct {
+				RuleID    string `json:"ruleId"`
+				Message   struct{ Text string } `json:"message"`
+				Locations []struct {
+					PhysicalLocation struct {
+						ArtifactLocation struct{ URI string } `json:"artifactLocation"`
+					} `json:"physicalLocation"`
+				} `json:"locations"`
+				PartialFingerprints map[string]string `json:"partialFingerprints"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(data, &log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Version != "2.1.0" || len(log.Runs) != 1 || log.Runs[0].Tool.Driver.Name != "subenum" {
+		t.Fatalf("not a SARIF 2.1.0 subenum log:\n%s", data)
+	}
+	run := log.Runs[0]
+	if len(run.Results) != 1 {
+		t.Fatalf("got %d results, want lab 1's one dangling CNAME:\n%s", len(run.Results), data)
+	}
+	r := run.Results[0]
+	if r.RuleID != "subenum/dangling-cname" || len(run.Tool.Driver.Rules) != 1 || run.Tool.Driver.Rules[0].ID != r.RuleID {
+		t.Errorf("rule %q, rules %+v", r.RuleID, run.Tool.Driver.Rules)
+	}
+	if len(r.Locations) != 1 || r.Locations[0].PhysicalLocation.ArtifactLocation.URI != "blog.lab.example" || r.PartialFingerprints["subenumTakeover/v1"] == "" {
+		t.Errorf("result = %+v", r)
+	}
+	if !strings.Contains(r.Message.Text, "ghost-lab.example.net") {
+		t.Errorf("message %q does not name the CNAME target", r.Message.Text)
+	}
+}
