@@ -194,4 +194,6 @@ lab points at a real host.
 Scenarios work with every other flag, such as `-dL` (each listed domain gets
 the same zone), `-permute`, `-diff`, `-format json` and `-stats`, which
 records the scenario file under `zone`. `-simulate-zone` cannot be combined
-with `-simulate`, `-dns-server` or `-r`.
+with `-simulate`, `-dns-server` or `-r`, whether they come from the command
+line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
+rather than send a query off the machine.

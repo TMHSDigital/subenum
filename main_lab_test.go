@@ -144,3 +144,28 @@ func TestE2ELabFlagConflicts(t *testing.T) {
 		t.Errorf("bad zone file: exit %d, want %d", code, exitFailure)
 	}
 }
+
+// TestE2ELabRefusesEnvAndConfigResolvers covers #106: a resolver list or
+// simulation mode from SUBENUM_* or the config file must not turn a lab run
+// into one that sends queries off the machine.
+func TestE2ELabRefusesEnvAndConfigResolvers(t *testing.T) {
+	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
+	resolvers := writeFile(t, "resolvers.txt", "192.0.2.53\n")
+	for _, c := range []struct{ env, value, want string }{
+		{"SUBENUM_R", resolvers, "SUBENUM_R"},
+		{"SUBENUM_SIMULATE", "true", "SUBENUM_SIMULATE"},
+		{"SUBENUM_DNS_SERVER", "192.0.2.1:53", "SUBENUM_DNS_SERVER"},
+		{configEnv, writeFile(t, "config.json", `{"r": "`+filepath.ToSlash(resolvers)+`"}`), "config file"},
+	} {
+		t.Run(c.env, func(t *testing.T) {
+			t.Setenv(c.env, c.value)
+			code, out := runCLIMerged(t, "-simulate-zone", zone, "lab.example")
+			if code != exitUsage || !strings.Contains(out, c.want) {
+				t.Errorf("exit %d, want %d naming %q\n%s", code, exitUsage, c.want, out)
+			}
+			if strings.Contains(out, "Resolver pool") {
+				t.Errorf("the resolver pool was loaded:\n%s", out)
+			}
+		})
+	}
+}

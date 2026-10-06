@@ -144,15 +144,16 @@ type cliFlags struct {
 	statsFile    string
 	exclude      string
 	excludeFile  string
-	resolvers    string    // -r: file of resolver addresses for a pool
-	diff         string    // -diff: previous results file to compare against
-	stateFile    string    // where an interrupted run saves its resume state
-	resumeFrom   int       // per target, set while resuming (#73)
-	resumeNames  []string  // per target, names found before the interrupt
-	permute      bool      // -permute: second pass over permutations of found names
-	seedsFile    string    // -seeds: extra permutation seeds (any results format)
-	pool         *dns.Pool // built from -r; nil means the single -dns-server
-	excludes     []string  // -exclude and -exclude-file patterns, merged
+	resolvers    string          // -r: file of resolver addresses for a pool
+	diff         string          // -diff: previous results file to compare against
+	stateFile    string          // where an interrupted run saves its resume state
+	resumeFrom   int             // per target, set while resuming (#73)
+	resumeNames  []string        // per target, names found before the interrupt
+	permute      bool            // -permute: second pass over permutations of found names
+	seedsFile    string          // -seeds: extra permutation seeds (any results format)
+	pool         *dns.Pool       // built from -r; nil means the single -dns-server
+	excludes     []string        // -exclude and -exclude-file patterns, merged
+	defaults     *defaultsLoader // where config-file and env values came from; nil in tests
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
@@ -209,13 +210,17 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cli
 		fs.PrintDefaults()
 		_, _ = fmt.Fprint(w, "\n"+exitCodesHelp)
 	}
+	// A bad config or env value must not hide the command line: -h, -version
+	// and -print-config still work, and the caller decides (#116).
+	var cfgErr error
 	if applyDefaults != nil {
-		if err := applyDefaults(fs); err != nil {
-			return f, nil, fs, err
-		}
+		cfgErr = applyDefaults(fs)
 	}
 	positionals, err := parseInterspersed(fs, args)
-	return f, positionals, fs, err
+	if err != nil {
+		return f, positionals, fs, err
+	}
+	return f, positionals, fs, cfgErr
 }
 
 // parseInterspersed parses flags that appear anywhere in args. The standard flag
@@ -287,9 +292,19 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 		return "", false
 	}
 	if f.simZone != "" {
-		for _, other := range []string{"simulate", "dns-server", "r"} {
-			if flagSet(fs, other) {
-				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with -%s", other)
+		// Effective values, not just command-line flags: a resolver list or
+		// simulation mode from the config file or SUBENUM_* would otherwise
+		// send lab queries off the machine (#106).
+		for _, c := range []struct {
+			name string
+			set  bool
+		}{
+			{"simulate", f.testMode},
+			{"dns-server", f.dnsServer != DefaultDNSServer},
+			{"r", f.resolvers != ""},
+		} {
+			if c.set || flagSet(fs, c.name) {
+				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with %s", f.defaults.describe(fs, c.name))
 				return "", false
 			}
 		}
@@ -316,19 +331,21 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 	return domain, true
 }
 
-// loadPool builds the -r resolver pool (#69). It reports its own errors.
-func loadPool(f cliFlags, out *output.Writer) (*dns.Pool, error) {
+// loadPool builds the -r resolver pool (#69). It reports its own errors and
+// returns the exit code for them: an unreadable file is a failure like any
+// other input file, a malformed one a usage error (#120).
+func loadPool(f cliFlags, out *output.Writer) (*dns.Pool, int) {
 	if f.resolvers == "" {
-		return nil, nil
+		return nil, exitOK
 	}
 	if f.testMode {
 		out.Info("Note: -r is ignored in simulation mode, which sends no DNS queries")
-		return nil, nil
+		return nil, exitOK
 	}
 	lines, err := wordlist.ReadLines(f.resolvers)
 	if err != nil {
 		out.Error("reading -r resolver list: %v", err)
-		return nil, err
+		return nil, exitFailure
 	}
 	addrs, err := dns.ParseResolverList(lines)
 	if err == nil && len(addrs) == 0 {
@@ -336,10 +353,10 @@ func loadPool(f cliFlags, out *output.Writer) (*dns.Pool, error) {
 	}
 	if err != nil {
 		out.Error("-r: %v", err)
-		return nil, err
+		return nil, exitUsage
 	}
 	out.Info("Resolver pool: %d resolvers; every hit is re-validated against %s", len(addrs), f.dnsServer)
-	return dns.NewPool(addrs, time.Duration(f.timeoutMs)*time.Millisecond), nil
+	return dns.NewPool(addrs, time.Duration(f.timeoutMs)*time.Millisecond), exitOK
 }
 
 // logPoolHealth prints each pool resolver's accounting at the end of a run.
@@ -516,9 +533,16 @@ func run() (code int) {
 	}
 	defaults := newDefaultsLoader()
 	f, positionals, fs, parseErr := parseFlagsWith(args, defaults.apply)
+	f.defaults = defaults
 	if errors.Is(parseErr, errConfig) {
-		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
-		return exitUsage
+		// -version, -print-config and -tui stay usable with a broken config,
+		// so the bad value can be found and fixed (#116).
+		if !f.showVersion && !f.printConfig && !f.tui {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
+			return exitUsage
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: %v\n", parseErr)
+		parseErr = nil
 	}
 	if parseErr != nil {
 		// The FlagSet has already printed the error and usage.
@@ -550,7 +574,7 @@ func run() (code int) {
 
 	format, formatErr := output.ParseFormat(f.format)
 	recordTypes, typesErr := dns.ParseTypes(f.recordTypes)
-	maxAttempts, err := resolveAttempts(f.attempts, f.retries)
+	maxAttempts, err := resolveAttempts(f.attempts, f.retries, defaults.source(fs, "attempts"), defaults.source(fs, "retries"))
 	out := output.New(nil, f.testMode, format)
 	if formatErr != nil {
 		out.Error("%v", formatErr)
@@ -562,6 +586,20 @@ func run() (code int) {
 	}
 	if err != nil {
 		out.Error("%v", err)
+		return exitUsage
+	}
+
+	excludes, err := loadExcludes(f)
+	if err != nil {
+		out.Error("reading -exclude-file: %v", err)
+		return exitFailure
+	}
+	f.excludes = excludes
+
+	// Arguments are checked before any banner is printed or the resolver list
+	// is read, so a usage error is the first thing a user sees (#120).
+	domain, ok := validateFlags(f, positionals, fs, out, maxAttempts)
+	if !ok {
 		return exitUsage
 	}
 
@@ -578,23 +616,11 @@ func run() (code int) {
 		out.Info("")
 	}
 
-	pool, poolErr := loadPool(f, out)
-	if poolErr != nil {
-		return exitUsage
+	pool, poolCode := loadPool(f, out)
+	if poolCode != exitOK {
+		return poolCode
 	}
 	f.pool = pool
-
-	excludes, err := loadExcludes(f)
-	if err != nil {
-		out.Error("reading -exclude-file: %v", err)
-		return exitFailure
-	}
-	f.excludes = excludes
-
-	domain, ok := validateFlags(f, positionals, fs, out, maxAttempts)
-	if !ok {
-		return exitUsage
-	}
 
 	targets, ok := loadTargets(f, domain, out)
 	if !ok {
@@ -712,8 +738,9 @@ func run() (code int) {
 	// A carriage-return progress line only makes sense on a terminal. When
 	// stderr is a pipe or file (2>&1, tee, CI logs) progress is off unless
 	// -progress was given explicitly, and then printed as whole lines (#78).
+	// SUBENUM_PROGRESS or a config value counts as explicit too (#116).
 	if !isTerminal(os.Stderr) {
-		if flagSet(fs, "progress") {
+		if defaults.source(fs, "progress") != sourceDefault {
 			out.SetProgressLines(true)
 		} else {
 			f.showProgress = false
@@ -1034,10 +1061,21 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 	return res
 }
 
-// resolveAttempts merges the -attempts and deprecated -retries flags.
-func resolveAttempts(attempts, retries int) (int, error) {
+// resolveAttempts merges the -attempts and deprecated -retries flags. When
+// both are set, the one from the higher-precedence source wins (a flag over
+// an env value over the config file); both at the same level is an error
+// (#116).
+func resolveAttempts(attempts, retries int, attemptsSrc, retriesSrc string) (int, error) {
 	attemptsSet := attempts != 0
 	retriesSet := retries != 0
+	if attemptsSet && retriesSet {
+		switch ra, rr := sourceRank[attemptsSrc], sourceRank[retriesSrc]; {
+		case ra > rr:
+			retriesSet = false
+		case rr > ra:
+			attemptsSet = false
+		}
+	}
 
 	switch {
 	case attemptsSet && retriesSet:

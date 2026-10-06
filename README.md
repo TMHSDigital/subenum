@@ -392,9 +392,9 @@ Settings you repeat on every run can live in a config file or the environment. P
 { "dns-server": "1.1.1.1:53", "rate": 200, "t": 50, "r": "/home/me/resolvers.txt" }
 ```
 
-- The config file is `config.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows), or the path in `SUBENUM_CONFIG`. Keys are flag names.
+- The config file is `config.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows), or the path in `SUBENUM_CONFIG`. Keys are flag names; values are strings, numbers or booleans, and `exclude` and `type` also take a list of strings.
 - Each flag also reads `SUBENUM_<FLAG>`, upper-cased with dashes as underscores: `SUBENUM_DNS_SERVER`, `SUBENUM_RATE`, `SUBENUM_T`.
-- `subenum -print-config` shows every effective setting and where it came from (`flag`, `env`, `config` or `default`).
+- `subenum -print-config` shows every effective setting and where it came from (`flag`, `env`, `config` or `default`). It, `-h` and `-version` still work when a value is bad, so you can find it; a scan refuses to start and names every bad value.
 
 Shell completions and a man page are generated from the same flags, and release archives include them under `completions/` and `man/`:
 

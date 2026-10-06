@@ -35,7 +35,42 @@ const (
 
 // noDefaultFlags are never taken from the config file or environment: they
 // select a mode or an action rather than a setting.
-var noDefaultFlags = map[string]bool{"tui": true, "version": true, "print-config": true, "h": true, "help": true}
+var noDefaultFlags = map[string]bool{"tui": true, "version": true, "print-config": true, "resume": true, "h": true, "help": true}
+
+// listFlags take comma-separated values, so the config file may also give
+// them as a JSON array of strings.
+var listFlags = map[string]bool{"exclude": true, "type": true}
+
+// sourceRank orders sources by precedence, highest last.
+var sourceRank = map[string]int{sourceDefault: 0, sourceConfig: 1, sourceEnv: 2, sourceFlag: 3}
+
+// configValue turns one config-file value into a flag value. Only strings,
+// numbers and booleans are settings; fmt.Sprint of null or an object would
+// silently become a bogus value such as "<nil>".
+func configValue(name string, v any) (string, error) {
+	switch v := v.(type) {
+	case string:
+		return v, nil
+	case json.Number, bool:
+		return fmt.Sprint(v), nil
+	case []any:
+		if listFlags[name] {
+			parts := make([]string, len(v))
+			for i, p := range v {
+				s, ok := p.(string)
+				if !ok {
+					return "", fmt.Errorf("list entries must be strings")
+				}
+				parts[i] = s
+			}
+			return strings.Join(parts, ","), nil
+		}
+	}
+	if listFlags[name] {
+		return "", fmt.Errorf("must be a string or a list of strings")
+	}
+	return "", fmt.Errorf("must be a string, number or boolean")
+}
 
 // defaultsLoader applies config-file and environment defaults to a FlagSet
 // and remembers where each value came from.
@@ -64,20 +99,19 @@ func envName(flagName string) string {
 
 // apply sets config-file, then environment values on fs without marking
 // them as given on the command line, so explicit-only checks keep working.
+// A bad value does not stop the others from being applied: every problem is
+// returned, joined, so one run reports them all.
 func (d *defaultsLoader) apply(fs *flag.FlagSet) error {
 	d.sources = map[string]string{}
 	d.values = map[string]string{}
-	set := func(name, value, source string) error {
-		fl := fs.Lookup(name)
-		if fl == nil || noDefaultFlags[name] {
-			return fmt.Errorf("%w: %s sets unknown setting %q", errConfig, source, name)
+	var errs []error
+	set := func(name, value, source string) bool {
+		if err := fs.Lookup(name).Value.Set(value); err != nil {
+			errs = append(errs, fmt.Errorf("%w: %s value %q for %s: %w", errConfig, source, value, name, err))
+			return false
 		}
-		if err := fl.Value.Set(value); err != nil {
-			return fmt.Errorf("%w: %s value %q for %s: %w", errConfig, source, value, name, err)
-		}
-		d.sources[name] = source
 		d.values[name] = value
-		return nil
+		return true
 	}
 
 	if d.path != "" {
@@ -85,43 +119,79 @@ func (d *defaultsLoader) apply(fs *flag.FlagSet) error {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 		case err != nil:
-			return fmt.Errorf("%w: reading %s: %w", errConfig, d.path, err)
+			errs = append(errs, fmt.Errorf("%w: reading %s: %w", errConfig, d.path, err))
 		default:
 			var cfg map[string]any
 			// UseNumber keeps 1000000 as "1000000", not float64's "1e+06".
 			dec := json.NewDecoder(bytes.NewReader(data))
 			dec.UseNumber()
 			if err := dec.Decode(&cfg); err != nil {
-				return fmt.Errorf("%w: %s: %w", errConfig, d.path, err)
+				errs = append(errs, fmt.Errorf("%w: %s: %w", errConfig, d.path, err))
+				break
 			}
 			names := make([]string, 0, len(cfg))
 			for name := range cfg {
 				names = append(names, name)
 			}
 			sort.Strings(names)
+			source := sourceConfig + " " + d.path
 			for _, name := range names {
-				if err := set(name, fmt.Sprint(cfg[name]), sourceConfig+" "+d.path); err != nil {
-					return err
+				switch {
+				case noDefaultFlags[name]:
+					errs = append(errs, fmt.Errorf("%w: %s sets %q, which is not allowed in a config file (give it on the command line)", errConfig, source, name))
+					continue
+				case fs.Lookup(name) == nil:
+					errs = append(errs, fmt.Errorf("%w: %s sets unknown setting %q", errConfig, source, name))
+					continue
 				}
-				d.sources[name] = sourceConfig
+				value, err := configValue(name, cfg[name])
+				if err != nil {
+					errs = append(errs, fmt.Errorf("%w: %s value for %s %w", errConfig, source, name, err))
+					continue
+				}
+				if set(name, value, source) {
+					d.sources[name] = sourceConfig
+				}
 			}
 		}
 	}
 
-	var err error
 	fs.VisitAll(func(fl *flag.Flag) {
-		if err != nil || noDefaultFlags[fl.Name] {
+		if noDefaultFlags[fl.Name] {
 			return
 		}
-		if v := d.getenv(envName(fl.Name)); v != "" {
-			if e := set(fl.Name, v, envName(fl.Name)); e != nil {
-				err = e
-				return
-			}
+		if v := d.getenv(envName(fl.Name)); v != "" && set(fl.Name, v, envName(fl.Name)) {
 			d.sources[fl.Name] = sourceEnv
 		}
 	})
-	return err
+	return errors.Join(errs...)
+}
+
+// source reports where a flag's effective value came from: flag, env,
+// config or default.
+func (d *defaultsLoader) source(fs *flag.FlagSet, name string) string {
+	if flagSet(fs, name) {
+		return sourceFlag
+	}
+	if d != nil {
+		if s, ok := d.sources[name]; ok {
+			return s
+		}
+	}
+	return sourceDefault
+}
+
+// describe names where a non-default setting came from, for error messages:
+// "-r", "SUBENUM_R" or "r in the config file".
+func (d *defaultsLoader) describe(fs *flag.FlagSet, name string) string {
+	switch d.source(fs, name) {
+	case sourceEnv:
+		return envName(name)
+	case sourceConfig:
+		return fmt.Sprintf("%q in the config file", name)
+	default:
+		return "-" + name
+	}
 }
 
 // printConfig writes every setting's effective value and its source.

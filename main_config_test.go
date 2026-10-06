@@ -136,3 +136,64 @@ func TestGeneratedDocsCoverEveryFlag(t *testing.T) {
 		t.Errorf("unknown shell: exit %d, want 2", code)
 	}
 }
+
+// TestDefaultsValueTypes covers #116: only scalars are settings, list flags
+// also take a JSON array, and mode flags are refused by name.
+func TestDefaultsValueTypes(t *testing.T) {
+	dir := t.TempDir()
+	load := func(content string) (cliFlags, error) {
+		path := filepath.Join(dir, "config.json")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		d := &defaultsLoader{path: path, getenv: func(string) string { return "" }}
+		f, _, _, err := parseFlagsWith(nil, d.apply)
+		return f, err
+	}
+	for _, bad := range []string{`{"format": null}`, `{"t": {"n": 1}}`, `{"t": [1]}`, `{"exclude": [1]}`} {
+		if _, err := load(bad); err == nil || !strings.Contains(err.Error(), "must be") {
+			t.Errorf("%s: err = %v, want a type error", bad, err)
+		}
+	}
+	for _, mode := range []string{`{"resume": "state.json"}`, `{"tui": true}`} {
+		if _, err := load(mode); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Errorf("%s: err = %v, want \"not allowed\"", mode, err)
+		}
+	}
+	f, err := load(`{"exclude": ["a.example.com", "*.b.example.com"], "type": ["A", "CNAME"]}`)
+	if err != nil || f.exclude != "a.example.com,*.b.example.com" || f.recordTypes != "A,CNAME" {
+		t.Errorf("list values: exclude %q, type %q, err %v", f.exclude, f.recordTypes, err)
+	}
+	// Every bad value is reported, not just the first.
+	if _, err := load(`{"t": "many", "rate": "fast"}`); err == nil || !strings.Contains(err.Error(), "many") || !strings.Contains(err.Error(), "fast") {
+		t.Errorf("two bad values: err = %v", err)
+	}
+}
+
+// TestE2EBrokenConfigStillAnswersHelp covers #116: -h, -version and
+// -print-config work with a bad SUBENUM_* value; a scan still refuses.
+func TestE2EBrokenConfigStillAnswersHelp(t *testing.T) {
+	t.Setenv("SUBENUM_T", "abc")
+	for _, args := range [][]string{{"-h"}, {"-version"}, {"-print-config"}} {
+		if code, out := runCLIMerged(t, args...); code != exitOK {
+			t.Errorf("%v: exit %d, want 0\n%s", args, code, out)
+		}
+	}
+	if code, out := runCLIMerged(t, "-simulate", "example.com"); code != exitUsage || !strings.Contains(out, "SUBENUM_T") {
+		t.Errorf("scan with a bad env value: exit %d\n%s", code, out)
+	}
+}
+
+// TestE2EAttemptsPrecedence covers #116: an explicit flag beats a config or
+// env value of the other spelling instead of conflicting with it.
+func TestE2EAttemptsPrecedence(t *testing.T) {
+	wl := writeFile(t, "wl.txt", "www\n")
+	t.Setenv(configEnv, writeFile(t, "config.json", `{"attempts": 3}`))
+	if code, out := runCLIMerged(t, "-simulate", "-retries", "2", "-w", wl, "example.com"); code != exitOK {
+		t.Errorf("config attempts + -retries: exit %d\n%s", code, out)
+	}
+	t.Setenv("SUBENUM_RETRIES", "2")
+	if code, out := runCLIMerged(t, "-simulate", "-attempts", "2", "-w", wl, "example.com"); code != exitOK {
+		t.Errorf("SUBENUM_RETRIES + -attempts: exit %d\n%s", code, out)
+	}
+}
