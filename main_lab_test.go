@@ -194,7 +194,7 @@ func TestE2ESARIF(t *testing.T) {
 				} `json:"driver"`
 			} `json:"tool"`
 			Results []struct {
-				RuleID    string `json:"ruleId"`
+				RuleID    string                `json:"ruleId"`
 				Message   struct{ Text string } `json:"message"`
 				Locations []struct {
 					PhysicalLocation struct {

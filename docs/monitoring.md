@@ -147,5 +147,22 @@ A failed, degraded or unreliable scan uploads nothing, so the next run still
 compares against the last complete baseline. To keep a baseline longer than 90 days,
 commit `previous.jsonl` to a branch or store it in object storage instead.
 
+## Takeover candidates in code scanning
+
+Add `-type A,AAAA,CNAME -sarif takeovers.sarif` to the scan and upload the file
+after it, and every dangling or takeover-prone CNAME becomes an alert in the
+repository's Security tab, where it can be triaged and dismissed. Alerts are
+fingerprinted per name, so a candidate seen every week stays one alert. The
+job needs `security-events: write`:
+
+```yaml
+      - name: Upload takeover candidates
+        if: always() && hashFiles('takeovers.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: takeovers.sarif
+          category: subenum
+```
+
 A webhook works the same way as the issue step: post `changes.jsonl` (or the
 `added` names) to Slack, Teams or your alerting endpoint.

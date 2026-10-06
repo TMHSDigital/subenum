@@ -285,6 +285,7 @@ make help           # list all targets
 | `-exclude <list>` | n/a | Comma-separated out-of-scope names: exact (`vpn.example.com`) or `*.parent` (every name below `parent`, not `parent` itself). Excluded names are never queried, probed or expanded, and are counted as `excluded` |
 | `-exclude-file <file>` | n/a | Same patterns, one per line (`#` comments allowed), e.g. a bug-bounty program's out-of-scope list |
 | `-stats <file>` | n/a | Write a JSON run-quality report (outcomes, queries sent, verdict); see [Run-quality report](#run-quality-report) |
+| `-sarif <file>` | n/a | Write takeover candidates as SARIF 2.1.0 for GitHub code scanning; needs CNAME in `-type` |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-version` | n/a | Print version and exit |
 | `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
