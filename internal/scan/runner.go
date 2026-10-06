@@ -61,7 +61,8 @@ type Config struct {
 	// Tests inject classified outcomes through this field without network I/O.
 	resolveHook func(ctx context.Context, domain string) ([]dns.Record, dns.Outcome)
 
-	scope *scope // built from Exclude by Run
+	scope    *scope             // built from Exclude by Run
+	takeover *dns.TakeoverCache // one CNAME-target lookup per target per scan (#121)
 }
 
 // logf returns the verbose logger for lookups, or nil when Verbose is off.
@@ -432,6 +433,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// out of scope, or whose every candidate would be, is refused outright.
 	sc := newScope(cfg.Exclude)
 	cfg.scope = sc
+	cfg.takeover = &dns.TakeoverCache{}
 	if sc.excluded(cfg.Domain) || sc.subtreeExcluded(cfg.Domain) {
 		events <- Event{Kind: EventError, Message: "refusing to scan " + cfg.Domain + ": it is out of scope (-exclude)"}
 		return
@@ -810,7 +812,7 @@ func processJob(ctx context.Context, cfg Config, j job, maxDepth int, limiter *d
 	// with the trusted resolver. Simulated records are never checked.
 	takeover := ""
 	if !cfg.Simulate && cfg.resolveHook == nil {
-		takeover = dns.TakeoverHint(ctx, cfg.Resolver, records, cfg.Timeout, cfg.Attempts)
+		takeover = cfg.takeover.Hint(ctx, cfg.Resolver, records, cfg.Timeout, cfg.Attempts)
 	}
 	if takeover != "" {
 		st.takeover.Add(1)

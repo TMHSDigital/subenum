@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -65,17 +67,28 @@ func TakeoverProvider(target string) string {
 // nothing suspicious. The target is resolved with resolver; an inconclusive
 // lookup (timeout, SERVFAIL) is not called dangling.
 func TakeoverHint(ctx context.Context, resolver *net.Resolver, records []Record, timeout time.Duration, attempts int) string {
+	target := cnameTarget(records)
+	if target == "" {
+		return ""
+	}
+	_, outcome := ResolveDomainWithRetry(ctx, resolver, target, timeout, nil, attempts, DefaultTypes)
+	return takeoverMarker(target, outcome)
+}
+
+// cnameTarget returns the CNAME target among records, or "".
+func cnameTarget(records []Record) string {
 	target := ""
 	for _, r := range records {
 		if r.Type == "CNAME" {
 			target = r.Value
 		}
 	}
-	if target == "" {
-		return ""
-	}
+	return target
+}
+
+// takeoverMarker turns a CNAME target and its lookup outcome into a hint.
+func takeoverMarker(target string, outcome Outcome) string {
 	provider := TakeoverProvider(target)
-	_, outcome := ResolveDomainWithRetry(ctx, resolver, target, timeout, nil, attempts, DefaultTypes)
 	switch {
 	case outcome == OutcomeNXDomain && provider != "":
 		return "dangling:" + provider
@@ -85,4 +98,66 @@ func TakeoverHint(ctx context.Context, resolver *net.Resolver, records []Record,
 		return "provider:" + provider
 	}
 	return ""
+}
+
+// TakeoverCache is TakeoverHint with one lookup per CNAME target for the
+// life of the cache (a scan): many names aliased to the same CDN or SaaS
+// host cost one query and one rate slot, not one each (#121). Concurrent
+// callers for the same target share the lookup. An inconclusive outcome
+// (timeout, SERVFAIL, cancellation) is not kept, so a later name retries.
+type TakeoverCache struct {
+	mu      sync.Mutex
+	entries map[string]*takeoverEntry
+	lookups atomic.Int64
+}
+
+type takeoverEntry struct {
+	done    chan struct{}
+	outcome Outcome
+}
+
+// Lookups reports how many target lookups the cache sent.
+func (c *TakeoverCache) Lookups() int64 { return c.lookups.Load() }
+
+// Hint is TakeoverHint through the cache.
+func (c *TakeoverCache) Hint(ctx context.Context, resolver *net.Resolver, records []Record, timeout time.Duration, attempts int) string {
+	target := cnameTarget(records)
+	if target == "" {
+		return ""
+	}
+	key := strings.ToLower(strings.TrimSuffix(target, "."))
+	for {
+		c.mu.Lock()
+		if c.entries == nil {
+			c.entries = map[string]*takeoverEntry{}
+		}
+		e, ok := c.entries[key]
+		if !ok {
+			e = &takeoverEntry{done: make(chan struct{})}
+			c.entries[key] = e
+			c.mu.Unlock()
+			c.lookups.Add(1)
+			_, e.outcome = ResolveDomainWithRetry(ctx, resolver, target, timeout, nil, attempts, DefaultTypes)
+			if e.outcome != OutcomeFound && e.outcome != OutcomeNXDomain {
+				c.mu.Lock()
+				delete(c.entries, key) // inconclusive: let a later name retry
+				c.mu.Unlock()
+			}
+			close(e.done)
+			return takeoverMarker(target, e.outcome)
+		}
+		c.mu.Unlock()
+		select {
+		case <-e.done:
+		case <-ctx.Done():
+			return takeoverMarker(target, OutcomeCanceled)
+		}
+		if e.outcome == OutcomeFound || e.outcome == OutcomeNXDomain {
+			return takeoverMarker(target, e.outcome)
+		}
+		// The shared lookup was inconclusive and dropped; try again.
+		if ctx.Err() != nil {
+			return takeoverMarker(target, OutcomeCanceled)
+		}
+	}
 }

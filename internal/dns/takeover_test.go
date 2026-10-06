@@ -2,8 +2,13 @@ package dns
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
+
+	"github.com/TMHSDigital/subenum/internal/dnstest"
 )
 
 func TestTakeoverProvider(t *testing.T) {
@@ -47,5 +52,40 @@ func TestTakeoverHint(t *testing.T) {
 				t.Errorf("TakeoverHint(%v) = %q, want %q", recs, got, want)
 			}
 		})
+	}
+}
+
+// TestTakeoverCache covers #121: many names aliased to one CNAME target cost
+// one lookup of it, even when they arrive at once, and the hints match
+// TakeoverHint's.
+func TestTakeoverCache(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Name == "acme.herokuapp.com" {
+			return dnstest.Reply{A: []string{"192.0.2.20"}}
+		}
+		return dnstest.NXDomain
+	})
+	r := NewResolver(time.Second, srv.Addr)
+	var c TakeoverCache
+	targets := map[string]string{"gone.example.net": "dangling", "acme.herokuapp.com": "provider:heroku"}
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		for target, want := range targets {
+			wg.Go(func() {
+				recs := []Record{{Type: "CNAME", Value: target}}
+				if got := c.Hint(context.Background(), r, recs, time.Second, 1); got != want {
+					t.Errorf("Hint(%s) = %q, want %q", target, got, want)
+				}
+			})
+		}
+	}
+	wg.Wait()
+	if c.Lookups() != 2 {
+		t.Errorf("cache sent %d target lookups, want 2", c.Lookups())
+	}
+	for target := range targets {
+		if n := srv.QueriesFor(target, dnsmessage.TypeA); n != 1 {
+			t.Errorf("server saw %d A queries for %s, want 1", n, target)
+		}
 	}
 }
