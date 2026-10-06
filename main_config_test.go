@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -195,5 +196,21 @@ func TestE2EAttemptsPrecedence(t *testing.T) {
 	t.Setenv("SUBENUM_RETRIES", "2")
 	if code, out := runCLIMerged(t, "-simulate", "-attempts", "2", "-w", wl, "example.com"); code != exitOK {
 		t.Errorf("SUBENUM_RETRIES + -attempts: exit %d\n%s", code, out)
+	}
+}
+
+// TestFileFlagsAreComplete covers #117: every flag that takes a path is in
+// fileFlags, so shells complete file names for it. A new flag whose usage
+// mentions a file fails here until it is added.
+func TestFileFlagsAreComplete(t *testing.T) {
+	for _, f := range flagInfos() {
+		if strings.Contains(strings.ToLower(f.usage), "file") && !f.isBool && !fileFlags[f.name] {
+			t.Errorf("-%s takes a path (%q) but is not in fileFlags", f.name, f.usage)
+		}
+	}
+	for name := range fileFlags {
+		if !slices.ContainsFunc(flagInfos(), func(f flagInfo) bool { return f.name == name }) {
+			t.Errorf("fileFlags lists -%s, which is not a flag", name)
+		}
 	}
 }
