@@ -1,4 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" fill="#141820"/>
-  <text x="6" y="23" font-family="IBM Plex Mono, Consolas, monospace" font-size="18" font-weight="700" fill="#3d9a6a">$</text>
+  <rect width="32" height="32" rx="7" fill="#0E1726"/>
+  <g transform="translate(0 0) scale(1)">
+    <path d="M10 16H14M14 8V24M14 8H19M14 16H19M14 24H19" fill="none" stroke="#E8ECF2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="7.5" cy="16" r="3.5" fill="#F2B441"/>
+    <rect x="19.5" y="5" width="6" height="6" rx="1.2" fill="#4CC9A0"/>
+    <rect x="19.5" y="13" width="6" height="6" rx="1.2" fill="#4CC9A0"/>
+    <rect x="20.25" y="21.75" width="4.5" height="4.5" rx="0.9" fill="none" stroke="#6F7E97" stroke-width="1.5"/>
+  </g>
 </svg>

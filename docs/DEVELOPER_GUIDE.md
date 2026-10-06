@@ -81,9 +81,12 @@ subenum/
 │   ├── DOCUMENTATION_STRUCTURE.md
 │   ├── ROADMAP.md              # Planned work
 │   ├── docker.md               # Container setup and volume mounting
+│   ├── start.md, cli.md, library.md, labs.md, monitoring.md  # User guides
 │   ├── _config.yml             # Jekyll config for GitHub Pages
-│   ├── _includes/, _layouts/, assets/  # Jekyll site templates, CSS, images
-│   └── index.md                # GitHub Pages landing page
+│   ├── _data/nav.yml           # Site navigation: sidebar, footer, search, reading order
+│   ├── _includes/, _layouts/, assets/  # Jekyll site templates, CSS, JS, images
+│   ├── search.json             # Search index, generated at build time
+│   └── index.html              # GitHub Pages landing page
 ├── examples/
 │   ├── sample_wordlist.txt     # 50-entry starter wordlist
 │   ├── sample_domains.txt      # Sample domain list for -dL
@@ -285,6 +288,28 @@ If you need to add a further dependency:
     go get github.com/example/dependency
     ```
 3.  Run `go mod tidy` to update the `go.mod` and `go.sum` files.
+
+## Working on the Website
+
+The site at [tmhsdigital.github.io/subenum](https://tmhsdigital.github.io/subenum/) is built from `docs/` by the stock GitHub Pages Jekyll action (`.github/workflows/pages.yml`), with no theme and no JavaScript dependencies.
+
+- `docs/index.html` is the landing page; every other page is Markdown with `layout: default`, which adds the sidebar, the on-page contents and the previous/next links.
+- `docs/_data/nav.yml` is the single list of pages and sections. Add a new page there or it won't appear in the sidebar, the footer or search.
+- `docs/search.json` is generated at build time from the pages in `nav.yml`; `docs/assets/js/site.js` runs search, tabs, copy buttons and the hero animation.
+- The palette lives at the top of `docs/assets/css/site.css`. The outcome colours (resolved, nxdomain, timeout, refused) mean the same thing everywhere, so reuse the tokens rather than adding colours.
+
+To preview locally, build with the same image the workflow uses and serve the output:
+
+```bash
+docker run --rm -w /src -v "$PWD/docs:/src/docs:ro" -v "$PWD/docs/_preview/site:/src/_site" \
+  -e INPUT_SOURCE=./docs -e INPUT_DESTINATION=./_site -e INPUT_TOKEN="$(gh auth token)" \
+  -e GITHUB_WORKSPACE=/src -e GITHUB_REPOSITORY=TMHSDigital/subenum -e PAGES_REPO_NWO=TMHSDigital/subenum \
+  ghcr.io/actions/jekyll-build-pages:v1.0.13
+mkdir -p /tmp/subenum-site && rm -rf /tmp/subenum-site/subenum && cp -r docs/_preview/site /tmp/subenum-site/subenum
+python3 -m http.server 4000 -d /tmp/subenum-site   # http://localhost:4000/subenum/
+```
+
+The token is needed because the header shows the latest release tag. `docs/_preview/` is gitignored.
 
 ## Already Shipped
 

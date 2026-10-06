@@ -1,0 +1,39 @@
+# Documentation navigation: drives the sidebar, the mobile drawer, the footer
+# columns and the previous/next links at the bottom of each page. A page that
+# is not listed here still builds, it just has no place in the reading order.
+- section: Start here
+  footer: true
+  pages:
+    - title: Getting started
+      url: /start.html
+    - title: CLI reference
+      url: /cli.html
+
+- section: Guides
+  footer: true
+  pages:
+    - title: Monitoring
+      url: /monitoring.html
+    - title: Labs
+      url: /labs.html
+    - title: Docker
+      url: /docker.html
+    - title: Go library
+      url: /library.html
+
+- section: Internals
+  pages:
+    - title: Architecture
+      url: /ARCHITECTURE.html
+    - title: Developer guide
+      url: /DEVELOPER_GUIDE.html
+
+- section: Project
+  footer: true
+  pages:
+    - title: Contributing
+      url: /CONTRIBUTING.html
+    - title: Roadmap
+      url: /ROADMAP.html
+    - title: Code of conduct
+      url: /CODE_OF_CONDUCT.html

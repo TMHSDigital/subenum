@@ -1,0 +1,23 @@
+---
+layout: null
+sitemap: false
+---
+{%- comment -%} Client-side search index: one entry per documentation page, in nav order. {%- endcomment -%}
+[
+{%- assign first = true -%}
+{%- for group in site.data.nav -%}
+  {%- for item in group.pages -%}
+    {%- assign doc = site.pages | where: "url", item.url | first -%}
+    {%- if doc -%}
+      {%- unless first %},{% endunless -%}
+      {%- assign first = false %}
+  {
+    "title": {{ item.title | jsonify }},
+    "section": {{ group.section | jsonify }},
+    "url": {{ item.url | relative_url | jsonify }},
+    "body": {{ doc.content | markdownify | strip_html | normalize_whitespace | jsonify }}
+  }
+    {%- endif -%}
+  {%- endfor -%}
+{%- endfor %}
+]

@@ -1,11 +1,16 @@
 title: subenum
-description: Subdomain enumeration you can trust - every DNS query accounted for. A single static Go binary.
+tagline: every DNS query, accounted for
+description: Subdomain enumeration you can trust. subenum classifies every DNS lookup, grades the run complete, degraded or unreliable, and ships as a single static Go binary.
 show_downloads: false
 url: "https://tmhsdigital.github.io"
 baseurl: "/subenum"
 repository: TMHSDigital/subenum
 # Shown when a page link is shared (og:image / twitter:card).
 social_image: /assets/social-preview.png
+kramdown:
+  input: GFM
+  hard_wrap: false
+  auto_ids: true
 # Internal templates and local build output are not part of the site.
 exclude:
   - DOCUMENTATION_STRUCTURE.md

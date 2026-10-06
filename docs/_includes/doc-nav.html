@@ -1,0 +1,10 @@
+{%- for group in site.data.nav %}
+<div class="nav-group">
+  <h2 class="nav-group-title">{{ group.section }}</h2>
+  <ul>
+    {%- for item in group.pages %}
+    <li><a href="{{ item.url | relative_url }}"{% if page.url == item.url %} aria-current="page"{% endif %}>{{ item.title }}</a></li>
+    {%- endfor %}
+  </ul>
+</div>
+{%- endfor %}

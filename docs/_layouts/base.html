@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en-US" data-theme="dark">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {%- if page.title == "Home" -%}
+      {%- assign page_title = site.title | append: ": " | append: site.tagline -%}
+    {%- else -%}
+      {%- assign page_title = page.title | append: " | " | append: site.title -%}
+    {%- endif -%}
+    {%- assign page_description = page.description | default: site.description %}
+    <title>{{ page_title }}</title>
+    <meta name="description" content="{{ page_description }}">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0E1726">
+    <link rel="canonical" href="{{ page.url | absolute_url }}">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{ site.title }}">
+    <meta property="og:title" content="{{ page_title }}">
+    <meta property="og:description" content="{{ page_description }}">
+    <meta property="og:url" content="{{ page.url | absolute_url }}">
+    <meta property="og:image" content="{{ site.social_image | absolute_url }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="subenum: every DNS query, accounted for">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ page_title }}">
+    <meta name="twitter:description" content="{{ page_description }}">
+    <meta name="twitter:image" content="{{ site.social_image | absolute_url }}">
+    <link rel="icon" href="{{ '/assets/favicon.svg' | relative_url }}" type="image/svg+xml">
+    <script>
+      // Set the theme before first paint so a light-mode reader never sees a dark flash.
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem('subenum-theme'); } catch (e) {}
+        if (t !== 'light' && t !== 'dark') {
+          t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+    <link rel="stylesheet" href="{{ '/assets/css/site.css' | relative_url }}?v={{ site.time | date: '%s' }}">
+  </head>
+  <body class="{{ page.body_class | default: 'is-doc' }}">
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="{{ '/' | relative_url }}" aria-label="subenum home">
+          <svg class="brand-mark" viewBox="2 2 26 28" aria-hidden="true">
+            <path d="M10 16H14M14 8V24M14 8H19M14 16H19M14 24H19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="7.5" cy="16" r="3.5" class="mark-apex"/>
+            <rect x="19.5" y="5" width="6" height="6" rx="1.2" class="mark-hit"/>
+            <rect x="19.5" y="13" width="6" height="6" rx="1.2" class="mark-hit"/>
+            <rect x="20.25" y="21.75" width="4.5" height="4.5" rx="0.9" class="mark-miss"/>
+          </svg>
+          <span class="brand-word">subenum</span>
+        </a>
+        {%- if site.github.latest_release.tag_name %}
+        <a class="release-tag" href="{{ site.github.latest_release.html_url }}" title="Latest release">{{ site.github.latest_release.tag_name }}</a>
+        {%- endif %}
+
+        <nav class="topnav" aria-label="Primary">
+          <a href="{{ '/start.html' | relative_url }}"{% if page.url == '/start.html' %} aria-current="page"{% endif %}>Docs</a>
+          <a href="{{ '/cli.html' | relative_url }}"{% if page.url == '/cli.html' %} aria-current="page"{% endif %}>CLI reference</a>
+          <a href="{{ '/labs.html' | relative_url }}"{% if page.url == '/labs.html' %} aria-current="page"{% endif %}>Labs</a>
+          <a href="{{ '/library.html' | relative_url }}"{% if page.url == '/library.html' %} aria-current="page"{% endif %}>Go library</a>
+        </nav>
+
+        <div class="topbar-tools">
+          <button type="button" class="search-trigger" data-search-open aria-label="Search the docs">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4 4"/></svg>
+            <span class="search-trigger-label">Search</span>
+            <kbd>/</kbd>
+          </button>
+          <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch to light theme">
+            <svg class="i-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M4.3 15.7l1.4-1.4M14.3 5.7l1.4-1.4"/></svg>
+            <svg class="i-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16 12.5A6.5 6.5 0 0 1 7.5 4a6.5 6.5 0 1 0 8.5 8.5z"/></svg>
+          </button>
+          <a class="icon-btn" href="https://github.com/{{ site.repository }}" aria-label="subenum on GitHub">
+            <svg viewBox="0 0 16 16" aria-hidden="true" class="i-fill"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          </a>
+          <button type="button" class="icon-btn menu-btn" data-menu-open aria-label="Open navigation" aria-expanded="false" aria-controls="drawer">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="drawer" id="drawer" hidden>
+      <div class="drawer-scrim" data-menu-close></div>
+      <nav class="drawer-panel" aria-label="Documentation">
+        <div class="drawer-head">
+          <span class="brand-word">subenum</span>
+          <button type="button" class="icon-btn" data-menu-close aria-label="Close navigation">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
+          </button>
+        </div>
+        <a class="drawer-home" href="{{ '/' | relative_url }}">Home</a>
+        {% include doc-nav.html %}
+      </nav>
+    </div>
+
+    {{ content }}
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <span class="brand-word">subenum</span>
+          <p>Subdomain enumeration that tells you how far to trust the answer. Free software under GPL-3.0, maintained by <a href="https://github.com/TMHSDigital">TMHSDigital</a>.</p>
+          <p class="footer-legal">Scan only domains you own or have written permission to test.</p>
+        </div>
+        {%- for group in site.data.nav %}
+        {%- if group.footer %}
+        <div class="footer-col">
+          <h2>{{ group.section }}</h2>
+          <ul>
+            {%- for item in group.pages %}
+            <li><a href="{% if item.external %}{{ item.url }}{% else %}{{ item.url | relative_url }}{% endif %}">{{ item.title }}</a></li>
+            {%- endfor %}
+          </ul>
+        </div>
+        {%- endif %}
+        {%- endfor %}
+        <div class="footer-col">
+          <h2>Elsewhere</h2>
+          <ul>
+            <li><a href="https://github.com/{{ site.repository }}/releases">Releases</a></li>
+            <li><a href="https://github.com/{{ site.repository }}/blob/main/CHANGELOG.md">Changelog</a></li>
+            <li><a href="https://github.com/{{ site.repository }}/blob/main/SECURITY.md">Security policy</a></li>
+            <li><a href="https://pkg.go.dev/github.com/{{ site.repository }}/pkg/subenum">pkg.go.dev</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <div class="search" data-search hidden>
+      <div class="search-scrim" data-search-close></div>
+      <div class="search-panel" role="dialog" aria-modal="true" aria-label="Search the docs">
+        <div class="search-field">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4 4"/></svg>
+          <input type="search" placeholder="Search flags, guides, internals" autocomplete="off" spellcheck="false" aria-label="Search query" aria-controls="search-results" data-search-input>
+          <kbd>esc</kbd>
+        </div>
+        <ol class="search-results" id="search-results" data-search-results></ol>
+        <p class="search-empty" data-search-empty hidden></p>
+      </div>
+    </div>
+
+    <script>window.SUBENUM = { searchIndex: "{{ '/search.json' | relative_url }}" };</script>
+    <script src="{{ '/assets/js/site.js' | relative_url }}?v={{ site.time | date: '%s' }}" defer></script>
+  </body>
+</html>

@@ -1,0 +1,232 @@
+---
+layout: base
+title: Home
+body_class: is-home
+---
+<main id="content">
+
+<section class="hero">
+  <div class="hero-copy">
+    <h1>Every DNS query, accounted&nbsp;for.</h1>
+    <p class="lede">subenum brute-forces subdomains from a wordlist, then tells you how much of the answer to trust. Each lookup is counted as resolved, NXDOMAIN, timeout or refused, and every run ends with a verdict a script can check.</p>
+
+    <div class="install" data-tabs>
+      <div class="install-tabs" role="tablist" aria-label="Install method">
+        <button type="button" role="tab" id="tab-go" aria-controls="pane-go" aria-selected="true">Go</button>
+        <button type="button" role="tab" id="tab-docker" aria-controls="pane-docker" aria-selected="false" tabindex="-1">Docker</button>
+        <button type="button" role="tab" id="tab-bin" aria-controls="pane-bin" aria-selected="false" tabindex="-1">Binary</button>
+      </div>
+      <div class="install-pane" role="tabpanel" id="pane-go" aria-labelledby="tab-go">
+        <pre class="cmd"><code>go install github.com/TMHSDigital/subenum@latest</code></pre>
+      </div>
+      <div class="install-pane" role="tabpanel" id="pane-docker" aria-labelledby="tab-docker" hidden>
+        <pre class="cmd"><code>docker pull ghcr.io/tmhsdigital/subenum:latest</code></pre>
+      </div>
+      <div class="install-pane" role="tabpanel" id="pane-bin" aria-labelledby="tab-bin" hidden>
+        <p class="install-note">Static builds for Linux, macOS, Windows and FreeBSD. <a href="https://github.com/{{ site.repository }}/releases/latest">Download the latest release</a>.</p>
+      </div>
+    </div>
+
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="{{ '/start.html' | relative_url }}">Get started</a>
+      <a class="btn" href="https://github.com/{{ site.repository }}">View on GitHub</a>
+    </div>
+    <p class="hero-fineprint">Scan only domains you own or have written permission to test.</p>
+  </div>
+
+  <figure class="console" data-console aria-label="A sample scan of example.com: resolved names on stdout and the run report in run.json">
+    <div class="console-cmd"><span class="prompt" aria-hidden="true">$</span> subenum -rate 200 -type A,CNAME -show-records -stats run.json example.com</div>
+
+    <div class="console-pane">
+      <div class="pane-label">stdout</div>
+      <ol class="console-out">
+        <li data-at="0.10"><span class="host">www.example.com</span> A=203.0.113.10</li>
+        <li data-at="0.18"><span class="host">api.example.com</span> A=203.0.113.24</li>
+        <li data-at="0.27"><span class="host">mail.example.com</span> A=203.0.113.31</li>
+        <li data-at="0.39"><span class="host">cdn.example.com</span> CNAME=example.edgesuite.net</li>
+        <li data-at="0.51"><span class="host">vpn.example.com</span> A=198.51.100.7</li>
+        <li data-at="0.63" class="flag"><span class="host">old.example.com</span> CNAME=old-app.herokuapp.com <mark>TAKEOVER?=dangling:heroku</mark></li>
+        <li data-at="0.78"><span class="host">status.example.com</span> CNAME=example.statuspage.io</li>
+        <li data-at="0.90" class="more">&hellip; 24 more</li>
+      </ol>
+    </div>
+
+    <div class="console-pane ledger">
+      <div class="pane-label">run.json</div>
+      <div class="ledger-progress">
+        <span>lookups</span>
+        <span class="num"><span data-count="5000">5,000</span> / 5,000</span>
+        <span class="bar" aria-hidden="true"><span data-progress style="--p:1"></span></span>
+      </div>
+      <dl class="outcomes">
+        <div class="o-resolved"><dt>resolved</dt><dd data-count="31">31</dd></div>
+        <div class="o-nxdomain"><dt>nxdomain</dt><dd data-count="4957">4,957</dd></div>
+        <div class="o-timeout"><dt>timeout</dt><dd data-count="9">9</dd></div>
+        <div class="o-refused"><dt>refused</dt><dd data-count="3">3</dd></div>
+      </dl>
+      <div class="verdict-line" data-verdict>
+        <span class="verdict v-complete">complete</span>
+        <span class="reason">12 of 5000 lookups failed (timeout 9, refused 3, other 0), under 1%</span>
+      </div>
+    </div>
+    <button type="button" class="console-replay" data-replay hidden>Replay</button>
+  </figure>
+</section>
+
+<section class="band" id="verdicts" aria-labelledby="verdicts-h">
+  <div class="band-inner split">
+    <div class="split-copy">
+      <h2 id="verdicts-h">A missing name is only news if the lookup got an answer.</h2>
+      <p>When resolvers time out, a wordlist scan doesn't fail loudly. It returns fewer names and looks finished. subenum keeps a ledger of every lookup and grades the run, so you know whether &ldquo;not found&rdquo; means <em>not there</em> or <em>not asked</em>.</p>
+      <p>The verdict and its reason land in <code>-stats run.json</code> and on the last line of <code>-format jsonl</code>. One <code>jq</code> call turns it into a pipeline gate.</p>
+      <pre class="cmd"><code>jq -e '.verdict == "complete"' run.json</code></pre>
+    </div>
+
+    <ol class="specimens" aria-label="The three verdicts">
+      <li class="specimen">
+        <div class="specimen-head"><span class="verdict v-complete">complete</span><span class="rule">under 1% of lookups failed</span></div>
+        <div class="gauge" style="--at: 7.2%" role="img" aria-label="Failure rate 0.24 percent, below the 1 percent line"><span class="gauge-marker"></span></div>
+        <p class="reason">12 of 5000 lookups failed (timeout 9, refused 3, other 0), under 1%</p>
+      </li>
+      <li class="specimen">
+        <div class="specimen-head"><span class="verdict v-degraded">degraded</span><span class="rule">1% or more failed, or the run was cut short</span></div>
+        <div class="gauge" style="--at: 31%" role="img" aria-label="Failure rate 1.4 percent, past the 1 percent line"><span class="gauge-marker"></span></div>
+        <p class="reason">71 of 5000 lookups failed (timeout 64, refused 7, other 0)</p>
+      </li>
+      <li class="specimen">
+        <div class="specimen-head"><span class="verdict v-unreliable">unreliable</span><span class="rule">over 20% failed; the scan stops itself</span></div>
+        <div class="gauge" style="--at: 75.9%" role="img" aria-label="Failure rate 22.9 percent, past the 20 percent line"><span class="gauge-marker"></span></div>
+        <p class="reason">the reliability guard aborted the scan: 412 of 1800 lookups failed (timeout 398, refused 14, other 0)</p>
+      </li>
+    </ol>
+    <div class="gauge-legend" aria-hidden="true"><span>0%</span><span style="--x:30%">1%</span><span style="--x:75%">20%</span><span>100%</span></div>
+  </div>
+</section>
+
+<section class="band band-plain" aria-labelledby="claims-h">
+  <div class="band-inner">
+    <h2 id="claims-h" class="band-title">What you can rely on</h2>
+    <p class="band-lede">Each of these is a flag or a field you can check for yourself, not a promise in a README.</p>
+
+    <div class="claims">
+      <article class="claim">
+        <h3>Resolver pools that can't lie to you</h3>
+        <p>Spread queries across many resolvers. Failing ones are benched, and every hit is re-checked against your trusted resolver before it's printed.</p>
+        <code class="evidence">-r resolvers.txt -dns-server 9.9.9.9</code>
+      </article>
+      <article class="claim">
+        <h3>Wildcards, including rotating ones</h3>
+        <p>subenum fingerprints wildcard answers before the scan and learns CDN pools that rotate. An inconclusive check is reported as inconclusive, never as &ldquo;no wildcard&rdquo;.</p>
+        <code class="evidence">"wildcard": true, "wildcard_filtered": 112</code>
+      </article>
+      <article class="claim">
+        <h3>A rate limit you can quote</h3>
+        <p><code>-rate</code> caps packets on the wire, counting retries and every record type, so the number in your rules of engagement is the number you send.</p>
+        <code class="evidence">-rate 200 &nbsp;&nbsp;"achieved_qps": 198.6</code>
+      </article>
+      <article class="claim">
+        <h3>Scope that holds</h3>
+        <p>Excluded names are never queried, not filtered afterwards. Exact names and <code>*.parent</code> patterns, inline or from a file.</p>
+        <code class="evidence">-exclude '*.corp.example.com'</code>
+      </article>
+      <article class="claim">
+        <h3>Takeover hints</h3>
+        <p>CNAMEs that dangle or point at takeover-prone services such as S3, GitHub Pages, Heroku and Azure are flagged for you to verify by hand.</p>
+        <code class="evidence">TAKEOVER?=dangling:heroku</code>
+      </article>
+      <article class="claim">
+        <h3>Change detection</h3>
+        <p>Compare against the last run and print only names that appeared or disappeared. Exit code 4 means something changed.</p>
+        <code class="evidence">-diff previous.jsonl</code>
+      </article>
+      <article class="claim">
+        <h3>Encrypted transport</h3>
+        <p>Send queries over plain DNS, DNS over TLS or DNS over HTTPS by changing one address.</p>
+        <code class="evidence">-dns-server tls://1.1.1.1</code>
+      </article>
+      <article class="claim">
+        <h3>One static binary</h3>
+        <p>No runtime, no services, no API keys. A 5,000-entry wordlist is built in, so <code>subenum yourdomain.com</code> works out of the box.</p>
+        <code class="evidence">go install github.com/TMHSDigital/subenum@latest</code>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="recipes-h">
+  <div class="band-inner">
+    <h2 id="recipes-h" class="band-title">Run it the way your work runs</h2>
+
+    <div class="recipes" data-tabs>
+      <div class="recipe-tabs" role="tablist" aria-label="Workflows">
+        <button type="button" role="tab" id="r-tab-1" aria-controls="r-pane-1" aria-selected="true">First scan</button>
+        <button type="button" role="tab" id="r-tab-2" aria-controls="r-pane-2" aria-selected="false" tabindex="-1">CI gate</button>
+        <button type="button" role="tab" id="r-tab-3" aria-controls="r-pane-3" aria-selected="false" tabindex="-1">Monitoring</button>
+        <button type="button" role="tab" id="r-tab-4" aria-controls="r-pane-4" aria-selected="false" tabindex="-1">Lab</button>
+        <button type="button" role="tab" id="r-tab-5" aria-controls="r-pane-5" aria-selected="false" tabindex="-1">Go library</button>
+      </div>
+
+      <div class="recipe" role="tabpanel" id="r-pane-1" aria-labelledby="r-tab-1">
+        <p>Resolved names go to stdout, one per line, so they pipe cleanly. Progress and the per-outcome breakdown go to stderr.</p>
+        <pre><code>subenum example.com
+subenum -w big-wordlist.txt -type A,AAAA,CNAME -show-records example.com</code></pre>
+        <a class="more-link" href="{{ '/start.html' | relative_url }}">Getting started</a>
+      </div>
+      <div class="recipe" role="tabpanel" id="r-pane-2" aria-labelledby="r-tab-2" hidden>
+        <p>A thorough scan over a resolver pool at a fixed rate, with results and the run report written atomically. The job fails unless every lookup was accounted for.</p>
+        <pre><code>subenum -w big-wordlist.txt -r resolvers.txt -rate 500 -type A,AAAA,CNAME \
+  -format jsonl -o results.jsonl -stats run.json example.com
+jq -e '.verdict == "complete"' run.json</code></pre>
+        <a class="more-link" href="{{ '/cli.html' | relative_url }}">CLI reference</a>
+      </div>
+      <div class="recipe" role="tabpanel" id="r-pane-3" aria-labelledby="r-tab-3" hidden>
+        <p>Run on a schedule and get told only about what changed. The guide includes a ready-made GitHub Actions workflow that opens an issue.</p>
+        <pre><code>subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl example.com
+echo $?   # 4 when names were added or removed</code></pre>
+        <a class="more-link" href="{{ '/monitoring.html' | relative_url }}">Monitoring guide</a>
+      </div>
+      <div class="recipe" role="tabpanel" id="r-pane-4" aria-labelledby="r-tab-4" hidden>
+        <p>Answer every query from a scenario file instead of the network: wildcards, rate limits and failing resolvers, reproducibly, with zero packets sent.</p>
+        <pre><code>subenum -w examples/labs/words.txt \
+  -simulate-zone examples/labs/lab2-wildcard.zone lab.example</code></pre>
+        <a class="more-link" href="{{ '/labs.html' | relative_url }}">Five hands-on labs</a>
+      </div>
+      <div class="recipe" role="tabpanel" id="r-pane-5" aria-labelledby="r-tab-5" hidden>
+        <p>Embed the same engine in your own tool. Every zero value takes the CLI default, and <code>Run</code> streams results as they arrive.</p>
+        <pre><code>results, stats, err := subenum.Scan(ctx, subenum.Config{
+    Domain: "example.com",
+    Rate:   100,
+    Types:  []string{"A", "AAAA", "CNAME"},
+})</code></pre>
+        <a class="more-link" href="{{ '/library.html' | relative_url }}">Go library</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band band-plain" aria-labelledby="fit-h">
+  <div class="band-inner split split-media">
+    <div class="split-copy">
+      <h2 id="fit-h">Where it fits</h2>
+      <p><a href="https://github.com/projectdiscovery/subfinder">subfinder</a> covers passive sources. <a href="https://github.com/d3mondev/puredns">puredns</a>, <a href="https://github.com/projectdiscovery/shuffledns">shuffledns</a> and <a href="https://github.com/projectdiscovery/dnsx">dnsx</a> are built for raw mass resolution. subenum is the active brute-force step for when you need to defend the result: a single binary that shows its working.</p>
+      <p>It also teaches. <code>-simulate</code> gives marked, reproducible output with no network traffic, and <code>-tui</code> puts every option in a form.</p>
+    </div>
+    <figure class="shot">
+      <img src="{{ '/assets/tui-form.png' | relative_url }}" alt="The subenum terminal UI: a Configure Scan form with domain, wordlist, simulate, hit rate, DNS server, concurrency, timeout and attempts fields" width="620" height="348" loading="lazy">
+      <figcaption><code>subenum -tui</code></figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="closer" aria-labelledby="closer-h">
+  <div class="closer-inner">
+    <h2 id="closer-h">Start with one command.</h2>
+    <pre class="cmd"><code>go install github.com/TMHSDigital/subenum@latest &amp;&amp; subenum -simulate example.com</code></pre>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="{{ '/start.html' | relative_url }}">Read the docs</a>
+      <a class="btn" href="https://github.com/{{ site.repository }}/releases/latest">Download a release</a>
+    </div>
+  </div>
+</section>
+
+</main>

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/wordmark.svg" alt="subenum" width="600"/>
+<img src="docs/assets/wordmark.svg" alt="subenum: every DNS query, accounted for" width="520"/>
 
 <br>
 
@@ -24,7 +24,7 @@
 
 <br>
 
-[Quick Start](#quick-start) &nbsp;|&nbsp; [Configuration](#configuration) &nbsp;|&nbsp; [Usage](#usage) &nbsp;|&nbsp; [Architecture](#system-architecture) &nbsp;|&nbsp; [Changelog](./CHANGELOG.md)
+[Website](https://tmhsdigital.github.io/subenum/) &nbsp;|&nbsp; [Quick Start](#quick-start) &nbsp;|&nbsp; [Configuration](#configuration) &nbsp;|&nbsp; [Usage](#usage) &nbsp;|&nbsp; [Architecture](#system-architecture) &nbsp;|&nbsp; [Changelog](./CHANGELOG.md)
 
 </div>
 
@@ -588,15 +588,15 @@ subenum/
 │   └── PULL_REQUEST_TEMPLATE.md
 ├── data/
 │   └── wordlist.txt            # Default wordlist for Docker/Make
-├── docs/
-│   ├── assets/
-│   │   └── tui-form.png        # TUI screenshot
+├── docs/                       # Source of the website (GitHub Pages)
+│   ├── assets/                 # Brand, CSS, JS, TUI screenshot
 │   ├── ARCHITECTURE.md
 │   ├── CONTRIBUTING.md
 │   ├── DEVELOPER_GUIDE.md
-│   ├── docker.md
+│   ├── start.md, cli.md, library.md, labs.md, monitoring.md, docker.md
+│   ├── _data/nav.yml           # Site navigation
 │   ├── _config.yml
-│   └── index.md
+│   └── index.html              # Landing page
 ├── examples/
 │   ├── sample_wordlist.txt
 │   ├── advanced_usage.md
