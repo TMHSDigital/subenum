@@ -52,7 +52,7 @@ type scanViewModel struct {
 	stats     scan.Stats
 	done      bool
 	aborted   bool   // the user pressed ctrl+c
-	closed    bool   // the scan ended without EventDone (preflight, wildcard abort)
+	stopped   bool   // the scan stopped before testing candidates (preflight, wildcard abort, #99)
 	errText   string // first scan error; the reason shown for a failed scan
 	noAbort   bool   // -no-abort: an error with a finished scan is only a warning
 	width     int
@@ -179,8 +179,8 @@ func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
 		m.stats = msg.stats
 		m.refresh()
 
-	case abortedMsg:
-		m.closed = true
+	case stoppedMsg:
+		m.stopped = true
 		m.done = true
 		m.refresh()
 	}
@@ -225,7 +225,7 @@ func (m scanViewModel) View() string {
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)) + "\n")
 		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
-	case m.done && (m.aborted || m.closed):
+	case m.done && (m.aborted || m.stopped):
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
 			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
@@ -253,7 +253,7 @@ func (m scanViewModel) View() string {
 // that ended without EventDone after an error (preflight failure, wildcard
 // abort) is a failure, not a user abort (#55).
 func (m scanViewModel) failed() bool {
-	return m.done && m.errText != "" && (m.closed || !m.noAbort)
+	return m.done && m.errText != "" && (m.stopped || !m.noAbort)
 }
 
 // Event message types for Bubble Tea.
@@ -269,7 +269,7 @@ type doneMsg struct {
 	processed, total, found int64
 	stats                   scan.Stats
 }
-type abortedMsg struct{}
+type stoppedMsg struct{}
 type wordlistLoadedMsg struct {
 	cfg     formValues
 	entries []string

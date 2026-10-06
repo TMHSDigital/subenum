@@ -446,3 +446,24 @@ func TestSubMillisecondTimeoutRoundsUp(t *testing.T) {
 		t.Errorf("Timeout 500µs: %v", err)
 	}
 }
+
+// TestStoppedScanEndsWithOneDone covers #99: a scan refused before it starts
+// (here, an out-of-scope domain) still ends with exactly one KindDone, marked
+// Stopped, after the KindError.
+func TestStoppedScanEndsWithOneDone(t *testing.T) {
+	events, err := subenum.Run(context.Background(), subenum.Config{
+		Domain: "example.com", Words: []string{"www"}, Simulate: true, Exclude: []string{"example.com"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []subenum.Kind
+	var last subenum.Event
+	for ev := range events {
+		kinds = append(kinds, ev.Kind)
+		last = ev
+	}
+	if len(kinds) != 2 || kinds[0] != subenum.KindError || last.Kind != subenum.KindDone || !last.Stopped {
+		t.Errorf("events %v, last %+v; want an error, then one done with Stopped", kinds, last)
+	}
+}

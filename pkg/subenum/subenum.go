@@ -296,6 +296,12 @@ type Event struct {
 
 	// Stats is the final accounting, on KindDone.
 	Stats Stats
+
+	// Stopped is set on KindDone when the scan ended before testing any
+	// candidate, after a KindError (the domain is out of scope, a wildcard
+	// zone without Force, a failed resolver check) or because ctx was
+	// cancelled during those checks. Stats then covers only the checks.
+	Stopped bool
 }
 
 // DefaultWords returns the bundled wordlist: the most common subdomain labels,
@@ -350,17 +356,10 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 	out := make(chan Event, 64)
 	go func() {
 		defer close(out)
-		done := false
+		// scan.Run always ends with exactly one EventDone (#99), so the
+		// channel ends with exactly one KindDone too.
 		for ev := range in {
-			translated := translate(ev)
-			done = done || translated.Kind == KindDone
-			forward(ctx, out, translated)
-		}
-		// The engine returns without a final event when a scan never gets
-		// to start, such as a wildcard zone without Force. Report the same
-		// terminal event anyway, so consumers need only one shape.
-		if !done {
-			forward(ctx, out, Event{Kind: KindDone})
+			forward(ctx, out, translate(ev))
 		}
 	}()
 	return out, nil
@@ -620,6 +619,7 @@ func translate(ev scan.Event) Event {
 	case scan.EventDone:
 		out.Kind = KindDone
 		out.Stats = stats(ev.Stats)
+		out.Stopped = ev.Stopped
 	}
 	return out
 }

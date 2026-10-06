@@ -343,8 +343,12 @@ const (
 	EventResult   EventKind = iota
 	EventProgress           // progress update
 	EventNotice             // informational notice; see Event.Notice
-	EventError              // non-fatal error message
-	EventDone               // scan finished
+	// EventError reports a problem. Usually the scan then stops and its
+	// EventDone has Stopped set; after the reliability guard (with NoAbort)
+	// the scan goes on.
+	EventError
+	// EventDone is always the last event, sent exactly once (#99).
+	EventDone
 )
 
 // NoticeKind says what an EventNotice is about, so consumers can style or
@@ -388,6 +392,11 @@ type Event struct {
 	Found     int64        // EventProgress / EventDone
 	Message   string       // EventError / EventNotice
 	Stats     Stats        // EventDone: per-outcome counters
+	// Stopped is set on EventDone when the scan ended before testing any
+	// candidate: after an EventError (out of scope, recursion ceiling, failed
+	// preflight or wildcard check, wildcard zone without Force) or when ctx
+	// was cancelled during those checks. Its Stats cover only the checks.
+	Stopped bool
 }
 
 // Run executes the subdomain scan, sending events to the provided channel.
@@ -427,6 +436,14 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	}
 	var queriesSent atomic.Int64
 	ctx = dns.WithQueryCounter(ctx, &queriesSent)
+	// Every scan ends with exactly one EventDone (#99): one that stops before
+	// the candidates sends it here, with Stopped set, before close(events).
+	doneSent := false
+	defer func() {
+		if !doneSent {
+			events <- Event{Kind: EventDone, Stopped: true, Total: int64(len(cfg.Entries)), Stats: Stats{QueriesSent: queriesSent.Load()}}
+		}
+	}()
 	wildcardRoot := false
 
 	// Out-of-scope names are never queried (#87). A target that is itself
@@ -745,6 +762,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// wait for it after cancel, so this send must not be select-guarded on
 	// ctx.Done(): once ctx is cancelled that select is a coin-flip drop.
 	// Contract: consumers drain until close. See #23.
+	doneSent = true
 	events <- Event{
 		Kind:      EventDone,
 		Processed: atomic.LoadInt64(&processed),

@@ -15,7 +15,7 @@ import (
 // TestFinalizeOutputGatesStructuredOutput locks in the TUI's replication of the
 // CLI contract: structured output is finalized only on the success path
 // (doneMsg -> finalizeOutput(true)). The early-error path
-// (abortedMsg -> finalizeOutput(false)) must not emit an empty JSON array, the
+// (stoppedMsg -> finalizeOutput(false)) must not emit an empty JSON array, the
 // bug fixed once for the CLI in main.run, and must leave an existing results
 // file untouched (#52).
 func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
@@ -185,7 +185,7 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 	}
 
 	// Preflight failure: error, then the channel closes without EventDone.
-	sv := update(newScanViewModel(120, 40, false), errorMsg{text: "resolver failed preflight"}, abortedMsg{})
+	sv := update(newScanViewModel(120, 40, false), errorMsg{text: "resolver failed preflight"}, stoppedMsg{})
 	if !sv.failed() || !strings.Contains(sv.View(), "Failed: resolver failed preflight") || strings.Contains(sv.View(), "Aborted") {
 		t.Errorf("preflight failure not shown as Failed:\n%s", sv.View())
 	}

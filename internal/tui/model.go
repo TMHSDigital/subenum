@@ -270,10 +270,10 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.reportOutputErr(m.finalizeOutput(true))
 		return m, svCmd
-	case abortedMsg:
-		// Channel closed without EventDone (early error such as wildcard without
-		// -force): close the file without finalizing, mirroring the CLI which
-		// skips Finish on the error path to avoid an empty JSON array.
+	case stoppedMsg:
+		// The scan stopped before testing candidates (an early error such as a
+		// wildcard zone without Force, #99): close the file without finalizing,
+		// mirroring the CLI, which skips Finish so no empty JSON array is written.
 		m.reportOutputErr(m.finalizeOutput(false))
 		return m, svCmd
 	}
@@ -355,7 +355,9 @@ func listenForEvents(events <-chan scan.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-events
 		if !ok {
-			return abortedMsg{}
+			// scan.Run always sends EventDone before closing (#99), and the
+			// listener is not re-armed after it; a closed channel is defensive.
+			return stoppedMsg{}
 		}
 		switch ev.Kind {
 		case scan.EventResult:
@@ -367,6 +369,9 @@ func listenForEvents(events <-chan scan.Event) tea.Cmd {
 		case scan.EventError:
 			return errorMsg{text: ev.Message}
 		case scan.EventDone:
+			if ev.Stopped {
+				return stoppedMsg{}
+			}
 			return doneMsg{processed: ev.Processed, total: ev.Total, found: ev.Found, stats: ev.Stats}
 		}
 		return nil

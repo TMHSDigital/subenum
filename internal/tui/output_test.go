@@ -40,7 +40,7 @@ func runTUIScan(t *testing.T, format output.Format, formatName string, types []s
 		if _, done := msg.(doneMsg); done {
 			break
 		}
-		if _, aborted := msg.(abortedMsg); aborted {
+		if _, aborted := msg.(stoppedMsg); aborted {
 			t.Fatal("scan ended without a final event")
 		}
 	}

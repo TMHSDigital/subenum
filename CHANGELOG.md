@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The scan engine always ends with exactly one done event, marked `Stopped` when the scan ended before testing any candidate (out of scope, recursion ceiling, failed preflight or wildcard check, a wildcard zone without `-force`, or Ctrl+C during those checks), so the CLI, the TUI and `pkg/subenum` handle one shape of ending instead of a channel that sometimes closes without one. `pkg/subenum`'s `Event` gains `Stopped`, and a stopped scan's `Stats` now include the queries its checks sent (#99).
+
 ### Fixed
 - `tools/wordlist-gen` parses flags that appear after a positional the same way `subenum` does, instead of silently ignoring both: a leftover argument is now a usage error (2) that points at `-domain`, and an invalid `-combine` value or an empty `-o` exits 2 instead of 1 (#120).
 

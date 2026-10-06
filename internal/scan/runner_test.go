@@ -521,8 +521,8 @@ func TestRunRecursionCeilingRefuse(t *testing.T) {
 	if !strings.Contains(errs[0].Message, "refusing to start") {
 		t.Errorf("message %q", errs[0].Message)
 	}
-	if done != nil {
-		t.Error("refused scan should not emit EventDone")
+	if done == nil || !done.Stopped {
+		t.Errorf("refused scan: final event %+v, want EventDone with Stopped (#99)", done)
 	}
 }
 
@@ -609,8 +609,8 @@ func TestRunPreflightFailsOnBlackHole(t *testing.T) {
 	if !strings.Contains(errs[0].Message, "preflight") || !strings.Contains(errs[0].Message, addr) {
 		t.Errorf("message %q: want preflight and resolver addr", errs[0].Message)
 	}
-	if done != nil {
-		t.Error("failed preflight should not emit EventDone")
+	if done == nil || !done.Stopped {
+		t.Errorf("failed preflight: final event %+v, want EventDone with Stopped (#99)", done)
 	}
 }
 
@@ -1159,5 +1159,69 @@ func TestNoticesCarryKind(t *testing.T) {
 		if !kinds[k] {
 			t.Errorf("no %s notice; got %v", k, kinds)
 		}
+	}
+}
+
+// TestRunAlwaysEndsWithOneDone covers #99: every early exit ends with
+// exactly one EventDone, marked Stopped, as the last event.
+func TestRunAlwaysEndsWithOneDone(t *testing.T) {
+	drop, stopDrop := startUDPDNSAction(t, func(string) dnsAction { return dnsAction{drop: true} })
+	defer stopDrop()
+	wildcard, stopWild := startUDPDNSAction(t, func(string) dnsAction { return dnsAction{ip: [4]byte{192, 0, 2, 1}, hit: true} })
+	defer stopWild()
+	flakyProbes, stopFlaky := startUDPDNSAction(t, func(name string) dnsAction {
+		if name == "example.com" {
+			return dnsAction{ip: [4]byte{192, 0, 2, 1}, hit: true}
+		}
+		return dnsAction{servFail: true}
+	})
+	defer stopFlaky()
+	live := func(server string) Config {
+		return Config{Domain: "example.com", Entries: makeEntries(5), Concurrency: 2, Timeout: 100 * time.Millisecond,
+			Attempts: 1, Types: []string{"A"}, DNSServer: server, Resolver: dns.NewResolver(100*time.Millisecond, server)}
+	}
+	cases := map[string]struct {
+		cfg       Config
+		cancelIn  time.Duration
+		wantError bool
+	}{
+		"out of scope":      {cfg: Config{Domain: "example.com", Entries: makeEntries(5), Simulate: true, HitRate: 50, Exclude: []string{"example.com"}}, wantError: true},
+		"recursion ceiling": {cfg: Config{Domain: "example.com", Entries: makeEntries(1000), Simulate: true, HitRate: 50, Recursive: true, Depth: 4}, wantError: true},
+		"failed preflight":  {cfg: live(drop), wantError: true},
+		"wildcard check":    {cfg: live(flakyProbes), wantError: true},
+		"wildcard zone":     {cfg: live(wildcard), wantError: true},
+		"cancelled": {cfg: func() Config {
+			c := live(drop)
+			c.Timeout, c.Resolver = 5*time.Second, dns.NewResolver(5*time.Second, drop)
+			return c
+		}(), cancelIn: 50 * time.Millisecond},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if c.cancelIn > 0 {
+				time.AfterFunc(c.cancelIn, cancel)
+			}
+			events := make(chan Event, 64)
+			go Run(ctx, c.cfg, events)
+			var all []Event
+			for ev := range events {
+				all = append(all, ev)
+			}
+			dones := 0
+			sawError := false
+			for _, ev := range all {
+				dones += map[bool]int{true: 1}[ev.Kind == EventDone]
+				sawError = sawError || ev.Kind == EventError
+			}
+			last := all[len(all)-1]
+			if dones != 1 || last.Kind != EventDone || !last.Stopped {
+				t.Fatalf("%d EventDone, last event %+v; want exactly one, last, with Stopped", dones, last)
+			}
+			if sawError != c.wantError {
+				t.Errorf("EventError seen %v, want %v", sawError, c.wantError)
+			}
+		})
 	}
 }

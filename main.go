@@ -1138,11 +1138,16 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 			}
 			sawError = true
 			finishProgress()
-			// Keep draining so EventDone (and Stats) can still arrive after a
-			// reliability abort. Early errors such as wildcard detection close
-			// the channel without EventDone.
+			// Keep draining: EventDone always follows (#99), Stopped after an
+			// early error such as wildcard detection, with Stats after a
+			// reliability abort.
 		case scan.EventDone:
 			finishProgress()
+			if ev.Stopped {
+				// Nothing was scanned: the run failed (or was interrupted)
+				// before the candidates, so it does not count as done.
+				break
+			}
 			res.done = true
 			res.final = ev
 			logScanBreakdown(domain, ev, out)
