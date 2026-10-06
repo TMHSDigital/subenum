@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/TMHSDigital/subenum/data"
@@ -318,7 +319,9 @@ var defaultWords = sync.OnceValue(func() []string {
 
 // doneGrace is how long Run's forwarder waits to hand over the final event
 // after ctx is cancelled, when the caller may have stopped reading.
-var doneGrace = time.Second
+var doneGrace atomic.Int64 // a time.Duration; atomic so tests can change it while forwarders run
+
+func init() { doneGrace.Store(int64(time.Second)) }
 
 // ErrNoWords is returned when a Config's wordlist has no usable entries.
 var ErrNoWords = errors.New("subenum: wordlist has no usable entries")
@@ -382,7 +385,7 @@ func forward(ctx context.Context, out chan<- Event, ev Event) {
 		}
 		return
 	}
-	timer := time.NewTimer(doneGrace)
+	timer := time.NewTimer(time.Duration(doneGrace.Load()))
 	defer timer.Stop()
 	select {
 	case out <- ev:
