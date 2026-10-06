@@ -14,19 +14,25 @@ to discuss it or offer help.
 
 Work in progress or next up.
 
-- **Patch release for static Linux binaries** ([#46](https://github.com/TMHSDigital/subenum/issues/46)).
-  The build fix is on `main`; a v0.8.1 release replaces the dynamically linked asset.
-- **Repository hardening** ([#60](https://github.com/TMHSDigital/subenum/issues/60)):
-  protected `main`, Dependabot alerts, Actions pinned by SHA.
+- **v0.9.0** ([#104](https://github.com/TMHSDigital/subenum/issues/104)): the
+  first release with the library API, lab mode, DoT/DoH, resume, permutations,
+  monitoring and config defaults, built by GoReleaser with static binaries
+  ([#46](https://github.com/TMHSDigital/subenum/issues/46)), checksums, SBOMs
+  and attestations.
 
 ## Next
 
 Planned features that make results more trustworthy and the tool easier to get.
 
 - **A packaged GitHub Action** for scheduled monitoring, building on `-diff`
-  and the example workflow in [Monitoring](monitoring.html).
+  and the example workflow in [Monitoring](monitoring.html)
+  ([#126](https://github.com/TMHSDigital/subenum/issues/126)).
 - **Package managers** ([#62](https://github.com/TMHSDigital/subenum/issues/62)):
   Homebrew, Scoop, AUR, Nix, Kali/BlackArch.
+- **Certificate Transparency seeding** (`-ct`) to feed permutations and brute
+  force without API keys ([#130](https://github.com/TMHSDigital/subenum/issues/130)).
+- **A reproducible benchmark** against other DNS brute-forcers on lab zones
+  ([#127](https://github.com/TMHSDigital/subenum/issues/127)).
 
 ## Later
 
@@ -34,6 +40,9 @@ Ideas we want, with no date attached.
 
 - Try AXFR and detect NSEC-walkable zones before brute-forcing ([#85](https://github.com/TMHSDigital/subenum/issues/85)).
 - Discoverability: demo GIF and launch posts ([#74](https://github.com/TMHSDigital/subenum/issues/74)).
+- Pipelines guide and `-silent` for chaining with dnsx, httpx and nuclei ([#128](https://github.com/TMHSDigital/subenum/issues/128)).
+- SARIF output for takeover candidates ([#129](https://github.com/TMHSDigital/subenum/issues/129)).
+- An MCP server mode for budgeted scans by AI agents ([#131](https://github.com/TMHSDigital/subenum/issues/131)).
 
 ## What 1.0 means
 
