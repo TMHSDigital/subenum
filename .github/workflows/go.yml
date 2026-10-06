@@ -259,6 +259,18 @@ jobs:
     - name: Install cosign (keyless signing)
       uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
+    # CITATION.cff must name the release being cut (#102); checked before
+    # anything is built or published.
+    - name: Check CITATION.cff version
+      shell: bash
+      run: |
+        want="${GITHUB_REF_NAME#v}"
+        got=$(sed -n 's/^version: *//p' CITATION.cff)
+        if [ "$got" != "$want" ]; then
+          echo "::error::CITATION.cff says version $got but the tag is ${GITHUB_REF_NAME}; update version and date-released"
+          exit 1
+        fi
+
     - name: Release notes from CHANGELOG.md
       shell: bash
       run: .github/scripts/release-notes.sh "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/notes.md"

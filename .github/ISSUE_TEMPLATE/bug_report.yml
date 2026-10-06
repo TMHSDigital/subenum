@@ -43,7 +43,7 @@ body:
     attributes:
       label: subenum version
       description: Output of `subenum -version`.
-      placeholder: v0.8.0
+      placeholder: v0.9.0
     validations:
       required: true
   - type: input
