@@ -5,6 +5,9 @@ show_downloads: false
 url: "https://tmhsdigital.github.io"
 baseurl: "/subenum"
 repository: TMHSDigital/subenum
+# sitemap.xml for search engines (#125); jekyll-sitemap ships with GitHub Pages.
+plugins:
+  - jekyll-sitemap
 # Shown when a page link is shared (og:image / twitter:card).
 social_image: /assets/social-preview.png
 kramdown:

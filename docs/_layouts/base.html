@@ -14,6 +14,16 @@
     <meta name="color-scheme" content="dark light">
     <meta name="theme-color" content="#0E1726">
     <link rel="canonical" href="{{ page.url | absolute_url }}">
+    {%- if page.title == "Home" %}
+    <script type="application/ld+json">
+      {"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "subenum",
+       "applicationCategory": "SecurityApplication", "operatingSystem": "Linux, macOS, Windows, FreeBSD",
+       "description": {{ site.description | jsonify }}, "url": {{ "/" | absolute_url | jsonify }},
+       "license": "https://www.gnu.org/licenses/gpl-3.0.html", "isAccessibleForFree": true,
+       "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+       "sameAs": ["https://github.com/{{ site.repository }}"]}
+    </script>
+    {%- endif %}
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="{{ site.title }}">
     <meta property="og:title" content="{{ page_title }}">

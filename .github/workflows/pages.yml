@@ -1,9 +1,17 @@
 name: GitHub Pages
 
+# Only site changes redeploy, so a code-only push does not publish docs for
+# behaviour that is not released yet (#125).
 on:
   push:
     branches:
       - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+      - ".github/scripts/check-links.py"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +36,9 @@ jobs:
         with:
           source: ./docs
           destination: ./_site
+      # A broken internal link or #anchor fails the build instead of shipping.
+      - name: Check internal links
+        run: python3 .github/scripts/check-links.py _site /subenum
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
