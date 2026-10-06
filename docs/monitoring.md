@@ -43,6 +43,61 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
   object with the `added` and `removed` counts, plus `still_resolving` and
   `unverified` when there were any.
 
+## The subenum GitHub Action
+
+The repository is also a GitHub Action. It installs a release (checked against
+its `checksums.txt`), diffs against the previous complete run's results kept as
+an artifact, writes a summary table to the job, and fails the job when the
+verdict is not good enough:
+
+```yaml
+name: Subdomain monitor
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write   # only for the SARIF upload
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: subenum
+        uses: TMHSDigital/subenum@v0.9.0   # pin a release, or its commit SHA
+        with:
+          domain: example.com            # a domain you own or may test
+          wordlist: wordlist.txt
+          args: -rate 200 -type A,AAAA,CNAME -ct
+          baseline-artifact: subenum-example.com
+          sarif: takeovers.sarif
+          fail-on: degraded
+      - if: always() && hashFiles('takeovers.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: takeovers.sarif
+          category: subenum
+```
+
+| Input | Default | Meaning |
+|---|---|---|
+| `domain` / `domains-file` | | What to scan (one of them) |
+| `wordlist` | bundled top 5000 | `-w` |
+| `args` | | Extra flags, space-separated |
+| `previous` | | A previous results file to diff against |
+| `baseline-artifact` | | Artifact name for the baseline: downloaded before, replaced after a complete run |
+| `sarif` | | Write takeover candidates as SARIF |
+| `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never` |
+| `version` | `latest` | Release to install, or `source` to build the action's checkout |
+
+Outputs: `verdict`, `found`, `added`, `removed`, and the paths `results` (JSONL)
+and `stats` (the run-quality report). The step below builds the same thing by
+hand, if you prefer to see every command.
+
 ## Example: a scheduled GitHub Actions workflow
 
 This workflow scans every Monday, keeps the previous results as a workflow

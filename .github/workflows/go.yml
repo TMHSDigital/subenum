@@ -97,6 +97,58 @@ jobs:
       if: matrix.go == 'stable'
       run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+  # Runs the composite action (action.yml, #126) from this checkout against
+  # a lab zone on every runner OS: a scan, then a diff against its results.
+  action:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      with:
+        go-version-file: 'go.mod'
+        cache: false
+
+    - name: Scan a lab zone with the action
+      id: scan
+      uses: ./
+      with:
+        version: source
+        domain: lab.example
+        args: -simulate-zone examples/labs/lab1-first-scan.zone -type A,CNAME
+        sarif: takeovers.sarif
+
+    - name: Check the first scan
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "${{ steps.scan.outputs.verdict }}" = complete
+        test "${{ steps.scan.outputs.found }}" -ge 5
+        grep -q 'dangling-cname' takeovers.sarif
+        cp "${{ steps.scan.outputs.results }}" previous.jsonl
+        echo "gone.lab.example" >> previous.jsonl
+
+    - name: Diff against it
+      id: diff
+      uses: ./
+      with:
+        version: source
+        domain: lab.example
+        args: -simulate-zone examples/labs/lab1-first-scan.zone -type A,CNAME
+        previous: previous.jsonl
+
+    - name: Check the diff
+      shell: bash
+      run: |
+        test "${{ steps.diff.outputs.added }}" = 0
+        test "${{ steps.diff.outputs.removed }}" = 1
+
   # Builds the Dockerfile for both published platforms without pushing, so a
   # broken image is caught on the PR rather than during a release.
   docker:

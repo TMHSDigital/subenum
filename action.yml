@@ -1,0 +1,208 @@
+name: subenum
+description: Subdomain enumeration you can trust, with change detection and a run-quality verdict that gates the job.
+author: TMHSDigital
+branding:
+  icon: search
+  color: blue
+
+inputs:
+  domain:
+    description: Domain to scan. Only scan domains you own or are authorized to test.
+    required: false
+    default: ""
+  domains-file:
+    description: File of apex domains, one per line (-dL), instead of domain.
+    required: false
+    default: ""
+  wordlist:
+    description: Wordlist file (-w). Empty uses the bundled top-5000 list.
+    required: false
+    default: ""
+  args:
+    description: Extra subenum flags, space-separated (no quoting), e.g. "-rate 200 -type A,AAAA,CNAME -ct".
+    required: false
+    default: ""
+  previous:
+    description: A previous results file to diff against (-diff). Overrides baseline-artifact.
+    required: false
+    default: ""
+  baseline-artifact:
+    description: >-
+      Name of a workflow artifact holding the previous results. The newest one
+      is downloaded and diffed against, and a complete run uploads its results
+      under the same name for next time. Empty disables it.
+    required: false
+    default: ""
+  sarif:
+    description: Write takeover candidates to this SARIF file, for github/codeql-action/upload-sarif. Needs CNAME in -type.
+    required: false
+    default: ""
+  fail-on:
+    description: "Fail the step when the verdict is at least this bad: unreliable, degraded or never."
+    required: false
+    default: unreliable
+  version:
+    description: subenum release to install ("latest", or a tag such as v0.9.0), or "source" to build the action's own checkout (needs Go).
+    required: false
+    default: latest
+  token:
+    description: Token for downloading the release and the baseline artifact.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  verdict:
+    description: Run-quality verdict, complete, degraded or unreliable.
+    value: ${{ steps.scan.outputs.verdict }}
+  found:
+    description: Names found.
+    value: ${{ steps.scan.outputs.found }}
+  added:
+    description: Names added since the previous results (with previous or baseline-artifact).
+    value: ${{ steps.scan.outputs.added }}
+  removed:
+    description: Names removed since the previous results.
+    value: ${{ steps.scan.outputs.removed }}
+  results:
+    description: Path of the full results (JSONL).
+    value: ${{ steps.scan.outputs.results }}
+  stats:
+    description: Path of the run-quality report (JSON).
+    value: ${{ steps.scan.outputs.stats }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install subenum
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        bin="$RUNNER_TEMP/subenum-bin"
+        mkdir -p "$bin"
+        if [ "$VERSION" = source ]; then
+          (cd "$GITHUB_ACTION_PATH" && go build -trimpath -o "$bin/" .)
+        else
+          if [ "$VERSION" = latest ]; then
+            VERSION=$(gh release view --repo TMHSDigital/subenum --json tagName --jq .tagName)
+          fi
+          v="${VERSION#v}"
+          case "$(uname -s)" in
+            Linux) os=linux ext=tar.gz ;;
+            Darwin) os=darwin ext=tar.gz ;;
+            MINGW* | MSYS* | CYGWIN*) os=windows ext=zip ;;
+            *) echo "unsupported runner OS $(uname -s)"; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64 | amd64) arch=amd64 ;;
+            arm64 | aarch64) arch=arm64 ;;
+            *) echo "unsupported runner architecture $(uname -m)"; exit 1 ;;
+          esac
+          archive="subenum_${v}_${os}_${arch}.${ext}"
+          dl="$RUNNER_TEMP/subenum-dl"
+          mkdir -p "$dl"
+          gh release download "v${v}" --repo TMHSDigital/subenum --dir "$dl" --clobber \
+            --pattern "$archive" --pattern checksums.txt
+          (cd "$dl" && if command -v sha256sum > /dev/null; then sha256sum --check --ignore-missing checksums.txt; \
+            else shasum -a 256 --check --ignore-missing checksums.txt; fi)
+          if [ "$ext" = zip ]; then unzip -o -q "$dl/$archive" -d "$dl/x"; else mkdir -p "$dl/x" && tar -xzf "$dl/$archive" -C "$dl/x"; fi
+          find "$dl/x" -maxdepth 2 -name 'subenum*' -type f \( -name subenum -o -name subenum.exe \) -exec cp {} "$bin/" \;
+        fi
+        echo "$bin" >> "$GITHUB_PATH"
+
+    - name: Download the baseline
+      if: inputs.baseline-artifact != '' && inputs.previous == ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        NAME: ${{ inputs.baseline-artifact }}
+      run: |
+        set -euo pipefail
+        dir="$RUNNER_TEMP/subenum-baseline"
+        mkdir -p "$dir"
+        run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME&per_page=1" \
+          --jq '.artifacts[0] | select(.expired == false) | .workflow_run.id // empty')
+        if [ -n "$run" ]; then
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "$NAME" --dir "$dir"
+        else
+          echo "No baseline artifact named $NAME yet; this run sets it."
+        fi
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        DOMAIN: ${{ inputs.domain }}
+        DOMAINS_FILE: ${{ inputs.domains-file }}
+        WORDLIST: ${{ inputs.wordlist }}
+        ARGS: ${{ inputs.args }}
+        PREVIOUS: ${{ inputs.previous }}
+        BASELINE: ${{ inputs.baseline-artifact }}
+        SARIF: ${{ inputs.sarif }}
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -o pipefail
+        out="$RUNNER_TEMP/subenum-out"
+        mkdir -p "$out"
+        flags=(-silent -format jsonl -o "$out/results.jsonl" -stats "$out/run.json")
+        [ -n "$WORDLIST" ] && flags+=(-w "$WORDLIST")
+        [ -n "$SARIF" ] && flags+=(-sarif "$SARIF")
+        prev="$PREVIOUS"
+        if [ -z "$prev" ] && [ -n "$BASELINE" ] && [ -s "$RUNNER_TEMP/subenum-baseline/results.jsonl" ]; then
+          prev="$RUNNER_TEMP/subenum-baseline/results.jsonl"
+        fi
+        [ -n "$prev" ] && flags+=(-diff "$prev")
+        read -r -a extra <<< "$ARGS"
+        if [ -n "$DOMAINS_FILE" ]; then target=(-dL "$DOMAINS_FILE"); else target=("$DOMAIN"); fi
+        if [ -z "$DOMAIN" ] && [ -z "$DOMAINS_FILE" ]; then echo "::error::set domain or domains-file"; exit 2; fi
+
+        subenum "${flags[@]}" "${extra[@]}" "${target[@]}" > "$out/changes.jsonl"
+        code=$?
+        if [ ! -s "$out/run.json" ]; then echo "::error::subenum exited $code without a report"; exit "$code"; fi
+
+        verdict=$(jq -r .verdict "$out/run.json")
+        reason=$(jq -r .reason "$out/run.json")
+        found=$(jq '[.targets[].found] | add // 0' "$out/run.json")
+        added=$(jq '.diff.added // 0' "$out/run.json")
+        removed=$(jq '.diff.removed // 0' "$out/run.json")
+        {
+          echo "verdict=$verdict"; echo "found=$found"; echo "added=$added"; echo "removed=$removed"
+          echo "results=$out/results.jsonl"; echo "stats=$out/run.json"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### subenum: $verdict"
+          echo
+          echo "$reason"
+          echo
+          echo "| Target | Verdict | Found | Queries |"
+          echo "|---|---|---|---|"
+          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \(.found // 0) | \(.queries_sent // 0) |"' "$out/run.json"
+          if [ -n "$prev" ]; then
+            echo
+            echo "**Changes since the previous results:** $added added, $removed removed."
+            jq -r 'select(.change == "added") | "- `+ \(.subdomain)`"' "$out/changes.jsonl" | head -50
+            jq -r 'select(.change == "removed") | "- `- \(.subdomain)`"' "$out/changes.jsonl" | head -50
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ -n "$BASELINE" ] && [ "$verdict" = complete ]; then
+          echo "upload=true" >> "$GITHUB_OUTPUT"
+        fi
+        # 0 = ok, 4 = changes found; 3 = some -dL targets failed (the verdict says how bad).
+        case "$code" in 0 | 3 | 4) ;; *) exit "$code" ;; esac
+        case "$FAIL_ON:$verdict" in
+          unreliable:unreliable | degraded:unreliable | degraded:degraded)
+            echo "::error::subenum verdict is $verdict: $reason"; exit 1 ;;
+        esac
+
+    - name: Save the baseline
+      if: steps.scan.outputs.upload == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.baseline-artifact }}
+        path: ${{ runner.temp }}/subenum-out/results.jsonl
+        retention-days: 90
+        overwrite: true
