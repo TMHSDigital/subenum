@@ -357,7 +357,7 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 subenum -resume subenum-resume.json
 ```
 
-The resumed run refuses to start if an input file changed, re-emits the earlier results (so `-o` and JSON output end up complete), skips targets that had finished, and continues the interrupted one from the first wordlist entry not yet fully looked up. At most about one worker pool's worth (`-t`) of lookups is repeated. In recursive mode, names found before the interrupt have their children re-scanned. Runs that read the wordlist or domain list from stdin cannot be resumed.
+The resumed run refuses to start if an input file, the wordlist (including the bundled one, which changes with the binary) or an effective setting (for example a `SUBENUM_*` variable or the config file) changed. It re-emits the earlier results (so `-o` and JSON output end up complete), skips targets that had finished, and continues the interrupted one from the first wordlist entry not yet fully looked up; a `-permute` pass resumes from its own position. At most about one worker pool's worth (`-t`) of lookups is repeated, and `-max-queries` covers the whole scan, so a resumed run only gets what is left of it. In recursive mode, names found before the interrupt have their children re-scanned. A resumed run that finishes deletes its state file. Runs that read the wordlist or domain list from stdin cannot be resumed.
 
 **Exit codes**
 
@@ -421,7 +421,7 @@ List size sets the query volume: each entry costs one query per record type (two
 
 Once `api.example.com` and `dev.example.com` exist, the next names most likely to exist are `api-dev`, `dev-api`, `dev.api` and `api2`. `-permute` runs a second scan per target over permutations of the names the first pass found: built-in environment and role words (`dev`, `staging`, `prod`, `qa`, `internal`, `v1`, ...) joined with `-` on either side or as a new level, plus number increments (`api2` -> `api1`, `api3`, `api4`). `-seeds results.jsonl` adds names from an earlier run (any format) and implies `-permute`.
 
-The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist are skipped. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates and hits per target.
+The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist, and any whose full name would pass 253 characters, are skipped. It is one level deep even under `-recursive`, so a permutation hit is reported but not expanded further. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates and hits per target.
 
 ```bash
 subenum -permute -format jsonl -o results.jsonl example.com

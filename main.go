@@ -648,8 +648,13 @@ func run() (code int) {
 	if f.wordlistFile == "" {
 		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", bundledWordlistName)
 	}
+	settings := effectiveSettings(fs)
 	if resume != nil {
 		if err := resume.checkInputs(f); err != nil {
+			out.Error("cannot resume: %v", err)
+			return exitFailure
+		}
+		if err := resume.checkSettings(fs, defaults); err != nil {
 			out.Error("cannot resume: %v", err)
 			return exitFailure
 		}
@@ -663,6 +668,18 @@ func run() (code int) {
 	if probe, _, _ := wordlist.Build(wordLines, ""); len(probe) == 0 {
 		out.Error("wordlist %s has no valid entries", f.wordlistFile)
 		return 1
+	}
+	if resume != nil {
+		// The bundled wordlist changes with the binary, so the file digests
+		// alone cannot tell that a saved position still means the same entry.
+		for _, target := range targets {
+			if t := resume.target(target); t != nil && !t.Done && t.Entries != "" {
+				if entries, _, _ := wordlist.Build(wordLines, target); entryDigest(entries) != t.Entries {
+					out.Error("cannot resume: the wordlist for %s changed since the interrupted run (a different -w file or subenum version); start a new scan instead", target)
+					return exitFailure
+				}
+			}
+		}
 	}
 
 	var diff *differ
@@ -702,14 +719,12 @@ func run() (code int) {
 		w.SetSeed(f.seed)
 		w.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
 	}
-	var targetFound []string          // the current target's hits, seeds for -permute
-	var targetResults []output.Result // the current target's results, saved on interrupt
+	var targetResults []output.Result // the current target's results: -permute seeds, saved on interrupt
 	restored := map[string]bool{}     // names re-emitted from a -resume state
 	emitResult := func(ev scan.Event, permutation bool) {
 		if restored[ev.Domain] {
 			return
 		}
-		targetFound = append(targetFound, ev.Domain)
 		res := output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Permutation: permutation}
 		targetResults = append(targetResults, res)
 		if diff == nil {
@@ -805,6 +820,7 @@ func run() (code int) {
 	status := make([]string, len(targets))
 	results := make([]targetResult, len(targets))
 	targetRuns := make([][]output.Result, len(targets)) // results per target, for -resume state
+	entryDigests := make([]string, len(targets))        // per target, for -resume state
 	failedTargets := 0
 	started := time.Now()
 	for i, target := range targets {
@@ -832,41 +848,60 @@ func run() (code int) {
 			failedTargets++
 			continue
 		}
-		targetFound = targetFound[:0]
 		targetResults = nil
+		entryDigests[i] = entryDigest(entries)
 		saved := resume.target(target)
-		f.resumeFrom, f.resumeNames = 0, nil
+		mainF := f // this target's main pass
+		var res targetResult
+		var mainSaved *resumePass
+		restoredHits := 0 // permutation results restored from the state
 		if saved != nil {
 			// Re-emit what was found before the interrupt, so -o and the
 			// structured output hold the whole result set.
 			for _, r := range saved.Results {
 				emitResult(scan.Event{Domain: r.Subdomain, Records: r.Records, Takeover: r.Takeover}, r.Permutation)
 				restored[r.Subdomain] = true
+				if r.Permutation {
+					restoredHits++
+				}
 			}
-			savedFinal := scan.Event{Kind: scan.EventDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results))}
+			mainSaved = &resumePass{RootDone: saved.RootDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results) - restoredHits)}
 			if saved.Done {
 				out.Info("%s was finished before the interrupt; %d results restored", target, len(saved.Results))
-				results[i] = targetResult{done: true, final: savedFinal}
+				results[i] = targetResult{done: true, final: mainSaved.event()}
 				targetRuns[i] = targetResults
 				anyDone = true
 				status[i] = "ok"
 				continue
 			}
-			f.resumeFrom, f.resumeNames = saved.RootDone, append([]string(nil), targetFound...)
+			mainF.resumeFrom, mainF.resumeNames = saved.RootDone, mainPassNames(targetResults)
 			out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
 		}
-		res := scanTarget(ctx, f, target, entries, maxAttempts, recordTypes, out, outWriter, emit)
-		if saved != nil && res.done {
-			res.final.Stats = mergeStats(saved.Stats, res.final.Stats)
-			res.final.Processed += saved.Processed
-			res.final.Found += int64(len(saved.Results))
-			res.final.Total = max(res.final.Total+saved.Processed, saved.Total)
+		left, budgetLeft := 0, true
+		if mainSaved != nil {
+			left, budgetLeft = remainingBudget(f.maxQueries, mainSaved.Processed)
+			mainF.maxQueries = left
+		}
+		if budgetLeft {
+			res = scanTarget(ctx, mainF, target, entries, maxAttempts, recordTypes, out, outWriter, emit)
+			if mainSaved != nil && res.done {
+				res.final = mainSaved.merge(res.final)
+			}
+		} else {
+			out.Info("%s: the -max-queries budget of %d was spent before the interrupt", target, f.maxQueries)
+			res = targetResult{done: true, final: mainSaved.event()}
 		}
 		// -permute: a second pass over permutations of what was found (#72),
-		// skipped after an interrupt or a resolver abort.
+		// skipped after an interrupt or a resolver abort. Its seeds are the
+		// main pass's names only, so a resumed pass rebuilds the same
+		// candidate list, and it resumes from its own position (#107).
 		if f.permute && res.done && !res.resolverAbort && signalCode.Load() == 0 {
-			found := append([]string(nil), targetFound...)
-			res.permutation = runPermutationPass(ctx, f, target, entries, found, seeds, maxAttempts, recordTypes, out, outWriter, emitPermutation)
+			var prevPass *resumePass
+			if saved != nil {
+				prevPass = saved.Permute
+			}
+			res.permutation = runPermutationPass(ctx, f, target, entries, mainPassNames(targetResults), seeds, prevPass, restoredHits,
+				maxAttempts, recordTypes, out, outWriter, emitPermutation)
 			if p := res.permutation; p != nil && p.pass.failed {
 				res.failed = true
 			}
@@ -911,7 +946,12 @@ func run() (code int) {
 	logPoolHealth(f.pool, out)
 
 	if signalCode.Load() != 0 {
-		saveResumeState(f, args, targets, status, results, targetRuns, out)
+		saveResumeState(f, args, settings, resume, targets, status, entryDigests, results, targetRuns, out)
+	} else if resume != nil && !anyFailed {
+		// The resumed run finished: its state file is spent (#109).
+		if err := os.Remove(resume.path); err == nil {
+			out.Info("Removed the finished run's resume state %s", resume.path)
+		}
 	}
 
 	// The run-quality report (#70): the last jsonl line, and the -stats file.

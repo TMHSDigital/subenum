@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -26,7 +28,12 @@ type resumeState struct {
 	Version int               `json:"version"`
 	Args    []string          `json:"args"`   // the original command line, without -resume
 	Inputs  map[string]string `json:"inputs"` // input file -> sha256, checked before resuming
-	Targets []resumeTarget    `json:"targets"`
+	// Settings are the effective flag values, including those from the
+	// environment and config file, which a resume re-applies (#109).
+	Settings map[string]string `json:"settings,omitempty"`
+	Targets  []resumeTarget    `json:"targets"`
+
+	path string // the state file this run resumed from
 }
 
 type resumeTarget struct {
@@ -37,6 +44,94 @@ type resumeTarget struct {
 	Processed int64           `json:"processed"`
 	Total     int64           `json:"total"`
 	Results   []output.Result `json:"results"` // names found so far, re-emitted on resume
+	// Entries is the sha256 of the target's normalized wordlist, so a
+	// changed bundled list (a new binary) or -w file refuses to resume (#109).
+	Entries string `json:"entries,omitempty"`
+	// Permute is the -permute pass's progress, once it had started (#107).
+	Permute *resumePass `json:"permute,omitempty"`
+}
+
+// resumePass is how far an interrupted scan pass got.
+type resumePass struct {
+	RootDone  int        `json:"root_done"`
+	Stats     scan.Stats `json:"stats"`
+	Processed int64      `json:"processed"`
+	Total     int64      `json:"total"`
+	Found     int64      `json:"found"`
+}
+
+// newResumePass records a pass's final event.
+func newResumePass(ev scan.Event) *resumePass {
+	return &resumePass{RootDone: int(ev.Stats.RootDone), Stats: ev.Stats, Processed: ev.Processed, Total: ev.Total, Found: ev.Found}
+}
+
+// event is the saved pass as a final event, for a pass with nothing left.
+func (p *resumePass) event() scan.Event {
+	return scan.Event{Kind: scan.EventDone, Stats: p.Stats, Processed: p.Processed, Total: p.Total, Found: p.Found}
+}
+
+// merge adds the saved part of a pass to the resumed part's final event.
+func (p *resumePass) merge(ev scan.Event) scan.Event {
+	ev.Stats = mergeStats(p.Stats, ev.Stats)
+	ev.Processed += p.Processed
+	ev.Found += p.Found
+	ev.Total = max(ev.Total+p.Processed, p.Total)
+	return ev
+}
+
+// remainingBudget is the -max-queries budget left for a resumed pass that had
+// already processed n names; ok is false once it is spent. Without the
+// subtraction, every interrupt and resume could exceed the cap again (#108).
+func remainingBudget(maxQueries int, processed int64) (left int, ok bool) {
+	if maxQueries <= 0 {
+		return 0, true
+	}
+	left = maxQueries - int(processed)
+	return left, left > 0
+}
+
+// entryDigest fingerprints a target's normalized wordlist.
+func entryDigest(entries []string) string {
+	h := sha256.New()
+	for _, e := range entries {
+		_, _ = h.Write([]byte(e))
+		_, _ = h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// unsavedSettings do not change what a scan queries, so a resume may differ
+// in them: the seed is pinned in the replayed arguments, and the rest only
+// change what is printed.
+var unsavedSettings = map[string]bool{"seed": true, "state": true, "v": true, "progress": true}
+
+// effectiveSettings returns every setting's effective value.
+func effectiveSettings(fs *flag.FlagSet) map[string]string {
+	m := map[string]string{}
+	fs.VisitAll(func(fl *flag.Flag) {
+		if !noDefaultFlags[fl.Name] && !unsavedSettings[fl.Name] {
+			m[fl.Name] = fl.Value.String()
+		}
+	})
+	return m
+}
+
+// checkSettings refuses to resume when a setting differs from the
+// interrupted run, for example because SUBENUM_DEPTH or the config file
+// changed in between: the saved position would mean something else.
+func (st *resumeState) checkSettings(fs *flag.FlagSet, d *defaultsLoader) error {
+	now := effectiveSettings(fs)
+	names := make([]string, 0, len(st.Settings))
+	for name := range st.Settings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if v, ok := now[name]; ok && v != st.Settings[name] {
+			return fmt.Errorf("-%s is %q now but was %q in the interrupted run (now set by %s); start a new scan instead of resuming", name, v, st.Settings[name], d.describe(fs, name))
+		}
+	}
+	return nil
 }
 
 // resumeArgs looks for -resume in args. When present it must be the only
@@ -76,6 +171,7 @@ func resumeArgs(args []string) ([]string, *resumeState, error) {
 	if st.Version != resumeStateVersion {
 		return nil, nil, fmt.Errorf("-resume %s: unsupported state version %d", path, st.Version)
 	}
+	st.path = path
 	return st.Args, &st, nil
 }
 
@@ -92,10 +188,16 @@ func fileDigest(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// inputDigests fingerprints the inputs a resume must find unchanged.
+// inputDigests fingerprints the inputs a resume must find unchanged. The
+// -diff file is left out when it is also the -o file, which an interrupted
+// run rewrites with its partial results.
 func inputDigests(f cliFlags) (map[string]string, error) {
 	out := map[string]string{}
-	for _, p := range []string{f.wordlistFile, f.domainList, f.excludeFile, f.resolvers} {
+	diff := f.diff
+	if diff == f.outputFile {
+		diff = ""
+	}
+	for _, p := range []string{f.wordlistFile, f.domainList, f.excludeFile, f.resolvers, f.simZone, f.seedsFile, diff} {
 		d, err := fileDigest(p)
 		if err != nil {
 			return nil, err
@@ -170,8 +272,12 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 }
 
 // saveResumeState writes the state file after an interrupt and tells the
-// user how to continue. Runs that read stdin cannot be replayed.
-func saveResumeState(f cliFlags, args []string, targets, status []string, results []targetResult, runs [][]output.Result, out *output.Writer) {
+// user how to continue. Runs that read stdin cannot be replayed. prev is the
+// state this run resumed from, if any: a target interrupted again before its
+// scan reported progress keeps the earlier resume point (#109), and one this
+// run never reached keeps its saved state unchanged.
+func saveResumeState(f cliFlags, args []string, settings map[string]string, prev *resumeState, targets, status, entryDigests []string,
+	results []targetResult, runs [][]output.Result, out *output.Writer) {
 	if f.wordlistFile == "-" || f.domainList == "-" {
 		out.Info("Not saving resume state: the wordlist or domain list came from stdin")
 		return
@@ -181,13 +287,28 @@ func saveResumeState(f cliFlags, args []string, targets, status []string, result
 		out.Error("saving resume state: %v", err)
 		return
 	}
-	st := resumeState{Version: resumeStateVersion, Args: withSeed(args, f), Inputs: inputs}
+	st := resumeState{Version: resumeStateVersion, Args: withSeed(args, f), Inputs: inputs, Settings: settings}
 	for i, domain := range targets {
-		t := resumeTarget{Domain: domain, Results: runs[i]}
+		saved := prev.target(domain)
+		if status[i] == "" && saved != nil {
+			st.Targets = append(st.Targets, *saved)
+			continue
+		}
+		t := resumeTarget{Domain: domain, Results: runs[i], Entries: entryDigests[i]}
 		res := results[i]
-		if res.done {
+		switch {
+		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total
 			t.RootDone = int(res.final.Stats.RootDone)
+		case saved != nil:
+			// Interrupted during preflight or the wildcard probe, before the
+			// resumed scan reported anything.
+			t.Stats, t.Processed, t.Total, t.RootDone = saved.Stats, saved.Processed, saved.Total, saved.RootDone
+		}
+		if p := res.permutation; p != nil && p.pass.done {
+			t.Permute = newResumePass(p.pass.final)
+		} else if saved != nil {
+			t.Permute = saved.Permute
 		}
 		// A target is finished only if its scan (and any -permute pass)
 		// completed before the interrupt.
