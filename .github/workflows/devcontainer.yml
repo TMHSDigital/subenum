@@ -1,0 +1,39 @@
+name: Devcontainer
+
+# Builds the devcontainer that "Open in Codespaces" and the Labs page rely on,
+# and runs the tests, lint and a simulated scan inside it (#101). Weekly too,
+# because the base image tag moves under it.
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer.yml"
+  pull_request:
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer.yml"
+  schedule:
+    - cron: "0 5 * * 1"   # Mondays 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devcontainer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Build the devcontainer and run checks inside it
+        uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+        with:
+          push: never
+          runCmd: |
+            set -e
+            go version
+            make test
+            golangci-lint run
+            ./subenum -simulate -seed 1 -stats run.json example.com > /dev/null
+            grep -q '"verdict": "complete"' run.json
