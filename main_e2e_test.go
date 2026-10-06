@@ -17,6 +17,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/TMHSDigital/subenum/internal/dnstest"
+	"github.com/TMHSDigital/subenum/internal/output"
 )
 
 // runCLI invokes run() as the binary would, with args after the program name,
@@ -493,23 +494,27 @@ func TestE2EResolverPool(t *testing.T) {
 	}
 }
 
-// TestE2EDiff covers #84: -diff reports only added and removed names, exits
-// 4 on changes, keeps the full results in -o, and suppresses "removed" when
-// the run was not complete.
+// TestE2EDiff covers #84 and #110: -diff reports only added and removed
+// names, exits 4 on changes, keeps the full results in -o, and suppresses
+// "removed" when the run was not complete. A previous name this run did not
+// find is reported removed only once a fresh lookup says NXDOMAIN; one that
+// still resolves (it was not a candidate) or cannot be looked up is not.
 func TestE2EDiff(t *testing.T) {
 	dir := t.TempDir()
-	prev := filepath.Join(dir, "prev.jsonl")
-	sim := []string{"-simulate", "-seed", "1", "-hit-rate", "100", "-progress=false"}
+	zone := writeFile(t, "now.zone", "www A 192.0.2.10\nmail A 192.0.2.20\ndev A 192.0.2.30\nextra A 192.0.2.40\nlegacy TIMEOUT\n")
+	lab := []string{"-simulate-zone", zone, "-timeout", "200", "-progress=false"}
 	run := func(words string, extra ...string) (int, string) {
 		wl := writeFile(t, "wl.txt", words)
-		return runCLI(t, "", append(append(append([]string{}, sim...), extra...), "-w", wl, "example.com")...)
+		return runCLI(t, "", append(append(append([]string{}, lab...), extra...), "-w", wl, "lab.example")...)
 	}
-	if code, _ := run("www\nmail\napi\n", "-format", "jsonl", "-o", prev); code != 0 {
-		t.Fatalf("baseline exit %d", code)
-	}
+	// The previous run found names this run's wordlist does not contain:
+	// api and deep.www are gone from the zone, extra is still there, and
+	// legacy cannot be looked up.
+	prev := writeFile(t, "prev.txt", "www.lab.example\nmail.lab.example\napi.lab.example\ndeep.www.lab.example\nextra.lab.example\nlegacy.lab.example\n")
 
 	cur := filepath.Join(dir, "cur.jsonl")
-	code, out := run("www\nmail\ndev\n", "-format", "jsonl", "-diff", prev, "-o", cur)
+	stats := filepath.Join(dir, "stats.json")
+	code, out := run("www\nmail\ndev\n", "-format", "jsonl", "-diff", prev, "-o", cur, "-stats", stats)
 	if code != 4 {
 		t.Fatalf("exit %d, want 4 (changes)", code)
 	}
@@ -527,14 +532,22 @@ func TestE2EDiff(t *testing.T) {
 			changes[r.Subdomain] = r.Change
 		}
 	}
-	if len(changes) != 2 || changes["dev.example.com"] != "added" || changes["api.example.com"] != "removed" {
-		t.Fatalf("changes = %v, want dev added and api removed only", changes)
+	want := map[string]string{"dev.lab.example": "added", "api.lab.example": "removed", "deep.www.lab.example": "removed"}
+	if !maps.Equal(changes, want) {
+		t.Fatalf("changes = %v, want %v", changes, want)
+	}
+	var summary output.Summary
+	if data, err := os.ReadFile(stats); err != nil || json.Unmarshal(data, &summary) != nil {
+		t.Fatalf("reading -stats: %v", err)
+	}
+	if d := summary.Diff; d == nil || d.Added != 1 || d.Removed != 2 || d.StillResolving != 1 || d.Unverified != 1 {
+		t.Errorf("diff summary = %+v, want added 1, removed 2, still_resolving 1, unverified 1", d)
 	}
 	full, err := os.ReadFile(cur)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"www.example.com", "mail.example.com", "dev.example.com"} {
+	for _, name := range []string{"www.lab.example", "mail.lab.example", "dev.lab.example"} {
 		if !strings.Contains(string(full), `"subdomain":"`+name+`"`) {
 			t.Errorf("-o is missing %s; it should hold the full results:\n%s", name, full)
 		}
@@ -548,11 +561,11 @@ func TestE2EDiff(t *testing.T) {
 		t.Fatalf("unchanged run: exit %d, output %q", code, out)
 	}
 	// Text prefixes.
-	if _, out := run("www\nmail\ndev\nvpn\n", "-diff", cur); !strings.Contains(out, "+ vpn.example.com") {
-		t.Fatalf("text diff = %q, want '+ vpn.example.com'", out)
+	if _, out := run("www\nmail\ndev\nextra\n", "-diff", cur); !strings.Contains(out, "+ extra.lab.example") {
+		t.Fatalf("text diff = %q, want '+ extra.lab.example'", out)
 	}
 	// A capped (degraded) run must not claim names were removed.
-	if _, out := run("www\nmail\ndev\n", "-diff", cur, "-max-queries", "1"); strings.Contains(out, "- ") {
+	if _, out := run("www\nmail\ndev\n", "-diff", prev, "-max-queries", "1"); strings.Contains(out, "- ") {
 		t.Fatalf("degraded run reported removals: %q", out)
 	}
 }

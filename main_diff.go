@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"os"
@@ -105,10 +106,10 @@ func (d *differ) observe(name string) bool {
 	return true
 }
 
-// removedNames returns previous names under one of targets that this run did
-// not find, sorted. Names -exclude kept out of scope were never tested, so
-// they are not reported as removed.
-func (d *differ) removedNames(targets, exclude []string) []string {
+// missingNames returns previous names under one of targets that this run did
+// not find, sorted: candidates for removal. Names -exclude kept out of scope
+// were never tested, so they are left out.
+func (d *differ) missingNames(targets, exclude []string) []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var out []string
@@ -124,18 +125,48 @@ func (d *differ) removedNames(targets, exclude []string) []string {
 		}
 	}
 	sort.Strings(out)
-	d.removed = len(out)
 	return out
 }
 
 // emitRemoved writes the removed names, or explains why it does not: names
 // missing from a degraded or interrupted run may just be lookups that failed.
-func emitRemoved(d *differ, targets []string, f cliFlags, summary output.Summary, out *output.Writer) {
-	if summary.Verdict != scan.VerdictComplete {
-		out.Info("Note: -diff is not reporting removed names because the run was %s (%s)", summary.Verdict, summary.Reason)
-		return
+//
+// A name this run did not find is not necessarily gone: it may not have been
+// a candidate (a different wordlist, no -recursive or -permute), or its own
+// lookup may have failed under a run that is still "complete". So each
+// missing name is looked up again with the trusted resolver, and only an
+// NXDOMAIN is reported as removed (#110). It returns the DNS queries sent.
+func emitRemoved(ctx context.Context, d *differ, targets []string, f cliFlags, maxAttempts int, recordTypes []string,
+	diffSummary *output.DiffSummary, verdict, reason string, out *output.Writer) int64 {
+	if verdict != scan.VerdictComplete {
+		out.Info("Note: -diff is not reporting removed names because the run was %s (%s)", verdict, reason)
+		return 0
 	}
-	for _, name := range d.removedNames(targets, f.excludes) {
-		out.Emit(output.Result{Subdomain: name, Records: []dns.Record{}, Change: "removed"})
+	missing := d.missingNames(targets, f.excludes)
+	if len(missing) == 0 {
+		return 0
 	}
+	out.Info("Checking %d previous names this run did not find", len(missing))
+	cfg := scanOptions(f, "", nil, maxAttempts, recordTypes, nil).Config()
+	cfg.Pool = nil // the trusted resolver decides
+	outcomes, sent := scan.Verify(ctx, cfg, missing)
+	for _, name := range missing {
+		switch outcomes[name] {
+		case dns.OutcomeNXDomain:
+			d.removed++
+			out.Emit(output.Result{Subdomain: name, Records: []dns.Record{}, Change: "removed"})
+		case dns.OutcomeFound:
+			diffSummary.StillResolving++
+		default:
+			diffSummary.Unverified++
+		}
+	}
+	diffSummary.Removed = d.removed
+	if n := diffSummary.StillResolving; n > 0 {
+		out.Info("Note: %d previous names still resolve but were not among this run's candidates; not reported as removed", n)
+	}
+	if n := diffSummary.Unverified; n > 0 {
+		out.Info("Note: %d previous names could not be checked (lookup failed); not reported as removed", n)
+	}
+	return sent
 }

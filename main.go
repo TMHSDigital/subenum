@@ -957,8 +957,8 @@ func run() (code int) {
 	// The run-quality report (#70): the last jsonl line, and the -stats file.
 	summary := buildSummary(f, targets, status, results, started, time.Since(started))
 	if diff != nil {
-		emitRemoved(diff, targets, f, summary, out)
-		summary.Diff = &output.DiffSummary{Previous: f.diff, Added: diff.added, Removed: diff.removed}
+		summary.Diff = &output.DiffSummary{Previous: f.diff, Added: diff.added}
+		summary.QueriesSent += emitRemoved(ctx, diff, targets, f, maxAttempts, recordTypes, summary.Diff, summary.Verdict, summary.Reason, out)
 		if fileOut != nil {
 			fileOut.Summary(summary)
 		}

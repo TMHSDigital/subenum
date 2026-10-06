@@ -43,10 +43,15 @@ type Summary struct {
 
 // DiffSummary is the -diff part of a Summary (#84). Removed stays 0 when the
 // run was not complete, because missing names may only be failed lookups.
+// A previous name this run did not find is looked up again: only NXDOMAIN
+// counts as removed; StillResolving names were not among this run's
+// candidates, and Unverified ones could not be looked up (#110).
 type DiffSummary struct {
-	Previous string `json:"previous"`
-	Added    int    `json:"added"`
-	Removed  int    `json:"removed"`
+	Previous       string `json:"previous"`
+	Added          int    `json:"added"`
+	Removed        int    `json:"removed"`
+	StillResolving int    `json:"still_resolving,omitempty"`
+	Unverified     int    `json:"unverified,omitempty"`
 }
 
 // TargetSummary is one scanned domain's part of a Summary.

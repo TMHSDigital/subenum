@@ -33,10 +33,15 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
   missing from a degraded run may just be a lookup that failed, so removals are
   suppressed with a note instead. Names under `-exclude` patterns are never
   reported as removed.
-- Removals only make sense with the same wordlist and options as the previous
-  run: a name the current wordlist cannot produce is reported as removed.
+- A previous name this run did not find is looked up again with the trusted
+  resolver before it is reported, and only an NXDOMAIN answer counts as
+  removed. A name the current wordlist cannot produce (a smaller list, no
+  `-recursive` or `-permute`) still resolves, and a name whose lookup fails
+  cannot be checked; neither is reported as removed, and stderr says how many
+  there were.
 - With `-stats` (or `-format jsonl`), the run-quality report gains a `diff`
-  object with the `added` and `removed` counts.
+  object with the `added` and `removed` counts, plus `still_resolving` and
+  `unverified` when there were any.
 
 ## Example: a scheduled GitHub Actions workflow
 
