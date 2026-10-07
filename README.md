@@ -263,6 +263,7 @@ make help           # list all targets
 | `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
 | `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server address (validated on startup) |
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
+| `-ct` | `false` | Add names from Certificate Transparency logs (crt.sh; one HTTPS request per target, no API key) as candidates and `-permute` seeds |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
 | `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
 | `-max-queries <n>` | `0` | Max candidate names to test (0 = unlimited). Each name sends one query per record type per attempt (`CNAME` costs two) |
@@ -272,6 +273,7 @@ make help           # list all targets
 | `-rate <qps>` | `0` | Max DNS queries per second on the wire, all workers combined, including every record type, retry, wildcard probe and the preflight (0 = unlimited) |
 | `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME` |
 | `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
+| `-permute` | `false` | After each scan, scan permutations of discovered names (`api` → `api-dev`, `dev-api`, `dev.api`, `api2`, ...) |
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
 | `-v` | `false` | Verbose output: IPs, timings, per-query detail (stderr) |
 | `-progress` | `true` | Live progress line on stderr. Off by default when stderr is not a terminal; passing `-progress` there prints whole progress lines instead of redrawing one |
@@ -287,8 +289,12 @@ make help           # list all targets
 | `-stats <file>` | n/a | Write a JSON run-quality report (outcomes, queries sent, verdict); see [Run-quality report](#run-quality-report) |
 | `-sarif <file>` | n/a | Write takeover candidates as SARIF 2.1.0 for GitHub code scanning; needs CNAME in `-type` |
 | `-tui` | `false` | Launch the interactive Terminal UI |
+| `-print-config` | `false` | Print every setting's effective value and source (`flag`, env, config or default), then exit |
 | `-version` | n/a | Print version and exit |
 | `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
+| `-resume <file>` | n/a | Resume an interrupted run from its state file; takes no other arguments |
+| `-seeds <file>` | n/a | Results file (any `-format`) whose names also seed `-permute`; implies `-permute` |
+| `-state <file>` | `subenum-resume.json` | Where an interrupted run saves its state for `-resume` |
 
 <br>
 
