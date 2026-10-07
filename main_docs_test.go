@@ -12,6 +12,7 @@ import (
 // siteFlagsFile is the site's flag table, generated from the real FlagSet so
 // the docs cannot drift from `subenum -h` (#64).
 var siteFlagsFile = filepath.Join("docs", "_includes", "flags.md")
+var readmeFlagsFile = "README.md"
 
 // flagsMarkdown renders every flag as a Markdown table, sorted by name.
 func flagsMarkdown(fs *flag.FlagSet) string {
@@ -54,5 +55,66 @@ func TestSiteFlagTableUpToDate(t *testing.T) {
 	}
 	if strings.ReplaceAll(string(got), "\r\n", "\n") != want {
 		t.Fatalf("%s is out of date with the CLI flags; run `make docs-flags`", siteFlagsFile)
+	}
+}
+
+// TestREADMEFlagTableCoversCLI keeps the hand-written README table complete
+// when a CLI flag is added. The website table is generated, but the README is
+// maintained separately for quick reference (#137).
+func TestREADMEFlagTableCoversCLI(t *testing.T) {
+	contents, err := os.ReadFile(readmeFlagsFile) //nolint:gosec // a docs file
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inTable := false
+	tableStarted := false
+	documented := make(map[string]bool)
+	for _, line := range strings.Split(strings.ReplaceAll(string(contents), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "### CLI flags" {
+			inTable = true
+			continue
+		}
+		if !inTable {
+			continue
+		}
+		if !strings.HasPrefix(line, "|") {
+			if tableStarted {
+				break
+			}
+			continue
+		}
+		tableStarted = true
+
+		cells := strings.SplitN(line, "|", 3)
+		if len(cells) < 2 {
+			continue
+		}
+		cell := strings.TrimSpace(cells[1])
+		if !strings.HasPrefix(cell, "`-") {
+			continue
+		}
+		name := strings.TrimPrefix(cell, "`-")
+		if end := strings.IndexAny(name, " \t<`"); end >= 0 {
+			name = name[:end]
+		}
+		if name != "" {
+			documented[name] = true
+		}
+	}
+	if !inTable || !tableStarted {
+		t.Fatalf("%s has no CLI flags table", readmeFlagsFile)
+	}
+
+	_, _, fs, _ := parseFlags(nil)
+	var missing []string
+	fs.VisitAll(func(fl *flag.Flag) {
+		if !documented[fl.Name] {
+			missing = append(missing, "-"+fl.Name)
+		}
+	})
+	if len(missing) > 0 {
+		t.Fatalf("%s CLI flags table is missing flags: %s", readmeFlagsFile, strings.Join(missing, ", "))
 	}
 }
