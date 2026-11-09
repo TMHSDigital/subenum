@@ -214,3 +214,30 @@ func TestFileFlagsAreComplete(t *testing.T) {
 		}
 	}
 }
+
+// -print-config shows the attempts value a scan will use, not the raw 0
+// sentinel (#153).
+func TestPrintConfigEffectiveAttempts(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{nil, nil, `attempts       = "1"                      (default)`},
+		{[]string{"-attempts", "4"}, nil, `attempts       = "4"                      (flag)`},
+		{[]string{"-retries", "3"}, nil, `attempts       = "3"                      (flag, from retries)`},
+		{nil, map[string]string{"SUBENUM_RETRIES": "2"}, `attempts       = "2"                      (env, from retries)`},
+		{[]string{"-attempts", "5"}, map[string]string{"SUBENUM_RETRIES": "2"}, `attempts       = "5"                      (flag)`},
+	} {
+		d := &defaultsLoader{getenv: func(k string) string { return tc.env[k] }}
+		_, _, fs, err := parseFlagsWith(append(tc.args, "example.com"), d.apply)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		d.printConfig(&out, fs)
+		if !strings.Contains(out.String(), tc.want) {
+			t.Errorf("%v %v: -print-config lacks %q:\n%s", tc.args, tc.env, tc.want, out.String())
+		}
+	}
+}

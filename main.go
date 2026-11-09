@@ -1170,6 +1170,17 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 // an env value over the config file); both at the same level is an error
 // (#116).
 func resolveAttempts(attempts, retries int, attemptsSrc, retriesSrc string) (int, error) {
+	n, fromRetries, err := effectiveAttempts(attempts, retries, attemptsSrc, retriesSrc)
+	if err == nil && fromRetries {
+		fmt.Fprintln(os.Stderr, "Warning: -retries is deprecated, use -attempts instead")
+	}
+	return n, err
+}
+
+// effectiveAttempts is resolveAttempts without the deprecation warning. It
+// also reports whether the value came from -retries, so -print-config can
+// show the value the scanner will actually use.
+func effectiveAttempts(attempts, retries int, attemptsSrc, retriesSrc string) (n int, fromRetries bool, err error) {
 	attemptsSet := attempts != 0
 	retriesSet := retries != 0
 	if attemptsSet && retriesSet {
@@ -1183,13 +1194,12 @@ func resolveAttempts(attempts, retries int, attemptsSrc, retriesSrc string) (int
 
 	switch {
 	case attemptsSet && retriesSet:
-		return 0, fmt.Errorf("cannot use both -attempts and -retries; use -attempts only")
+		return 0, false, fmt.Errorf("cannot use both -attempts and -retries; use -attempts only")
 	case retriesSet:
-		fmt.Fprintln(os.Stderr, "Warning: -retries is deprecated, use -attempts instead")
-		return retries, nil
+		return retries, true, nil
 	case attemptsSet:
-		return attempts, nil
+		return attempts, false, nil
 	default:
-		return 1, nil
+		return 1, false, nil
 	}
 }

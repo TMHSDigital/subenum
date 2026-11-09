@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -212,8 +213,36 @@ func (d *defaultsLoader) printConfig(w io.Writer, fset *flag.FlagSet) {
 		if given[fl.Name] {
 			source = sourceFlag
 		}
-		_, _ = fmt.Fprintf(w, "%-14s = %-24q (%s)\n", fl.Name, fl.Value.String(), source)
+		value := fl.Value.String()
+		if fl.Name == "attempts" {
+			value, source = d.effectiveAttemptsSetting(fset, value, source)
+		}
+		_, _ = fmt.Fprintf(w, "%-14s = %-24q (%s)\n", fl.Name, value, source)
 	})
+}
+
+// effectiveAttemptsSetting resolves -attempts the way a scan does: 0 means
+// "unset", so the effective value is 1 or whatever -retries supplies. When
+// the two conflict the raw value is kept, since a scan would refuse to run.
+func (d *defaultsLoader) effectiveAttemptsSetting(fset *flag.FlagSet, value, source string) (string, string) {
+	retriesFlag := fset.Lookup("retries")
+	if retriesFlag == nil {
+		return value, source
+	}
+	attempts, err1 := strconv.Atoi(value)
+	retries, err2 := strconv.Atoi(retriesFlag.Value.String())
+	if err1 != nil || err2 != nil {
+		return value, source
+	}
+	retriesSrc := d.source(fset, "retries")
+	n, fromRetries, err := effectiveAttempts(attempts, retries, source, retriesSrc)
+	if err != nil {
+		return value, source
+	}
+	if fromRetries {
+		source = retriesSrc + ", from retries"
+	}
+	return strconv.Itoa(n), source
 }
 
 // settings returns the effective value of every setting that came from the
