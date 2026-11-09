@@ -43,6 +43,10 @@ type Model struct {
 	vals    formValues // the running scan's settings, for its report
 	seed    uint64
 	started time.Time
+
+	// outputErr records that the results file could not be written, so the
+	// process exits non-zero even when the scan itself succeeded (#155).
+	outputErr bool
 }
 
 // Options configure the TUI.
@@ -65,8 +69,9 @@ func New(opts Options) Model {
 	}
 }
 
-// Start runs the TUI and returns an exit code: 1 if the TUI itself failed or
-// the last scan failed (#55), else 0.
+// Start runs the TUI and returns an exit code: 1 if the TUI itself failed,
+// the last scan failed (#55), or the results file could not be written (#155),
+// else 0.
 func Start(opts Options) int {
 	p := tea.NewProgram(New(opts), tea.WithAltScreen())
 	final, err := p.Run()
@@ -78,7 +83,7 @@ func Start(opts Options) int {
 
 // exitCode maps the final model to the process exit code.
 func exitCode(final tea.Model) int {
-	if m, ok := final.(Model); ok && m.scanView.failed() {
+	if m, ok := final.(Model); ok && (m.scanView.failed() || m.outputErr) {
 		return 1
 	}
 	return 0
@@ -331,9 +336,11 @@ func (m *Model) summary(done doneMsg) output.Summary {
 	return s
 }
 
-// reportOutputErr surfaces an output-file failure in the scan view.
+// reportOutputErr surfaces an output-file failure in the scan view and makes
+// it fail the run, as it does on the command line (#155).
 func (m *Model) reportOutputErr(err error) {
 	if err != nil {
+		m.outputErr = true
 		m.scanView.addMessage(errorStyle.Render("✗ output file incomplete: " + err.Error()))
 	}
 }

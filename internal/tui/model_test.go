@@ -121,6 +121,35 @@ func TestFinalizeOutputReportsCloseError(t *testing.T) {
 	}
 }
 
+// TestOutputFileFailureSetsExitCode covers #155: when the results file cannot
+// be written, the TUI exits 1 like the CLI does, even though the scan itself
+// succeeded.
+func TestOutputFileFailureSetsExitCode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.txt")
+	f, err := output.CreateFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{out: output.NewFile(f.Writer, false, output.FormatText), outFile: f}
+	m.out.Result("a.example.com", nil)
+	// Put a non-empty directory where the results file goes, so the final
+	// rename into place fails.
+	if err := os.MkdirAll(filepath.Join(path, "blocker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.reportOutputErr(m.finalizeOutput(true))
+	if code := exitCode(m); code != 1 {
+		t.Fatalf("exit code = %d, want 1 after an output-file failure", code)
+	}
+	if !strings.Contains(m.scanView.View(), "output file incomplete") {
+		t.Errorf("scan view does not report the incomplete results file: %s", m.scanView.View())
+	}
+	// A run without an output-file failure still exits 0.
+	if code := exitCode(Model{}); code != 0 {
+		t.Errorf("exit code = %d, want 0 without an output-file failure", code)
+	}
+}
+
 // TestValidateRejectsStdinWordlist covers #55: "-" would read the stdin that
 // Bubble Tea owns and freeze the UI.
 func TestValidateRejectsStdinWordlist(t *testing.T) {
