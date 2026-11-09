@@ -71,7 +71,10 @@ func TestCloseWaitsForHandlers(t *testing.T) {
 	if running.Load() != finished.Load() {
 		t.Errorf("Close returned with %d handlers still running", running.Load()-finished.Load())
 	}
-	if took := time.Since(start); took > 10*time.Second {
+	// Close normally takes ~200ms (the delayed UDP answer). Without Close
+	// closing it, the parked stream connection holds until serveTCP's 5s read
+	// deadline, so the ceiling must stay below that to catch the regression.
+	if took := time.Since(start); took > 4*time.Second {
 		t.Errorf("Close took %s; a parked stream connection held it", took)
 	}
 }
