@@ -67,7 +67,24 @@ jobs:
       run: go build -v -buildvcs=false -ldflags "-X main.Version=$(git describe --tags --dirty)" ./...
 
     - name: Test
-      run: go test -v -race -shuffle=on ./...
+      run: go test -v -race -shuffle=on -coverprofile=coverage.out ./...
+
+    # Coverage is printed and kept per run, and must stay above a floor (#170).
+    - name: Coverage
+      if: matrix.go == 'stable'
+      shell: bash
+      run: |
+        total=$(go tool cover -func=coverage.out | awk '/^total:/ { sub("%", "", $3); print $3 }')
+        echo "Total coverage: ${total}%" | tee -a "$GITHUB_STEP_SUMMARY"
+        awk -v t="$total" 'BEGIN { exit !(t >= 75) }' || { echo "coverage ${total}% is below the 75% floor"; exit 1; }
+
+    - name: Upload coverage
+      if: matrix.go == 'stable'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: coverage
+        path: coverage.out
+        retention-days: 14
 
     # Every generated completion script must parse in the shell it targets
     # (#117); pwsh is preinstalled on the runner.
@@ -96,6 +113,29 @@ jobs:
     - name: Run govulncheck
       if: matrix.go == 'stable'
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # The unit tests on macOS and Windows, whose binaries ship too: file
+  # replacement, signals and paths differ there (#170). The race detector
+  # runs on Linux, in build.
+  test-os:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, windows-latest ]
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      with:
+        go-version: stable
+        check-latest: true
+        cache: false
+
+    - name: Test
+      run: go test -shuffle=on ./...
 
   # Runs the composite action (action.yml, #126) from this checkout against
   # a lab zone on every runner OS: a scan, then a diff against its results.
