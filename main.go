@@ -751,7 +751,10 @@ func runWith(a runArgs) (code int) {
 		out.Error("reading wordlist file: %v", err)
 		return exitFailure
 	}
-	if probe, _, _ := wordlist.Build(wordLines, ""); len(probe) == 0 {
+	// Normalized once for every target; per target only the name-length
+	// limit differs (#182).
+	words := wordlist.Prepare(wordLines)
+	if probe, _, _ := words.For(""); len(probe) == 0 {
 		out.Error("wordlist %s has no valid entries", f.wordlistFile)
 		return exitFailure
 	}
@@ -760,7 +763,7 @@ func runWith(a runArgs) (code int) {
 		// alone cannot tell that a saved position still means the same entry.
 		for _, target := range targets {
 			if t := resume.target(target); t != nil && !t.Done && t.Entries != "" {
-				if entries, _, _ := wordlist.Build(wordLines, target); entryDigest(entries) != t.Entries {
+				if entries, _, _ := words.For(target); entryDigest(entries) != t.Entries {
 					out.Error("cannot resume: the wordlist for %s changed since the interrupted run (a different -w file or subenum version); start a new scan instead", target)
 					return exitFailure
 				}
@@ -936,7 +939,7 @@ func runWith(a runArgs) (code int) {
 		if len(targets) > 1 {
 			out.Info("=== [%d/%d] %s ===", i+1, len(targets), target)
 		}
-		entries, duplicates, skipped := wordlist.Build(wordLines, target)
+		entries, duplicates, skipped := words.For(target)
 		if skipped > 0 {
 			out.Info("Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)
 		}

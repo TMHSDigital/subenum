@@ -6,14 +6,25 @@ import (
 	"bufio"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 )
 
-// labelRegex accepts one DNS label of 1-63 characters: letters, digits,
-// hyphens (not at either end) and underscores, so service labels such as
-// _dmarc or _domainkey are kept.
-var labelRegex = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$`)
+// validLabel accepts one lowercased DNS label of 1-63 characters: letters,
+// digits, hyphens (not at either end) and underscores, so service labels such
+// as _dmarc or _domainkey are kept. It is hand-rolled rather than a regexp
+// because it runs once per label of every wordlist line (#182).
+func validLabel(label string) bool {
+	if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(label); i++ {
+		c := label[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' && c != '-' {
+			return false
+		}
+	}
+	return true
+}
 
 // maxNameLen is the longest presentation-format domain name (RFC 1035).
 const maxNameLen = 253
@@ -42,12 +53,16 @@ func Normalize(line string) (entry string, ok bool) {
 	if entry == "" || strings.HasPrefix(entry, "#") {
 		return "", false
 	}
-	for _, label := range strings.Split(entry, ".") {
-		if !labelRegex.MatchString(label) {
+	for rest := entry; ; {
+		label, tail, more := strings.Cut(rest, ".")
+		if !validLabel(label) {
 			return "", false
 		}
+		if !more {
+			return entry, true
+		}
+		rest = tail
 	}
-	return entry, true
 }
 
 // IsComment reports whether a line is blank or a # comment, which are skipped
@@ -112,24 +127,65 @@ func ReadLinesFrom(r io.Reader) ([]string, error) {
 // first-occurrence order. Blank lines and # comments are ignored. Invalid
 // entries, and entries whose full name under domain would exceed 253
 // characters, are counted in skipped. duplicates counts case-insensitive
-// repeats.
+// repeats. To build one list for several domains, use Prepare and For.
 func Build(lines []string, domain string) (entries []string, duplicates, skipped int) {
-	apexLen := len(strings.TrimSuffix(domain, "."))
-	seen := make(map[string]struct{})
+	return Prepare(lines).For(domain)
+}
+
+// Prepared is a wordlist normalized once, so a run over many target domains
+// pays for normalization once and per target only for the name-length check
+// (#182).
+type Prepared struct {
+	entries []string // valid, deduplicated, in first-occurrence order
+	counts  []int    // occurrences of each entry in the raw lines
+	invalid int      // lines that are not valid DNS labels
+	maxLen  int      // longest entry
+}
+
+// Prepare normalizes raw wordlist lines; see Build.
+func Prepare(lines []string) *Prepared {
+	p := &Prepared{}
+	index := make(map[string]int)
 	for _, line := range lines {
 		if IsComment(line) {
 			continue
 		}
 		entry, ok := Normalize(line)
-		if !ok || len(entry)+1+apexLen > maxNameLen {
-			skipped++
+		if !ok {
+			p.invalid++
 			continue
 		}
-		if _, exists := seen[entry]; exists {
-			duplicates++
+		if i, exists := index[entry]; exists {
+			p.counts[i]++
 			continue
 		}
-		seen[entry] = struct{}{}
+		index[entry] = len(p.entries)
+		p.entries = append(p.entries, entry)
+		p.counts = append(p.counts, 1)
+		p.maxLen = max(p.maxLen, len(entry))
+	}
+	return p
+}
+
+// For returns the entries for domain with the same counts Build gives: an
+// entry too long for domain is skipped at every occurrence, any other entry
+// is kept once and its repeats are duplicates. The returned slice may be
+// shared between calls; appending to it copies.
+func (p *Prepared) For(domain string) (entries []string, duplicates, skipped int) {
+	limit := maxNameLen - 1 - len(strings.TrimSuffix(domain, "."))
+	skipped = p.invalid
+	if p.maxLen <= limit {
+		for _, c := range p.counts {
+			duplicates += c - 1
+		}
+		return p.entries[:len(p.entries):len(p.entries)], duplicates, skipped
+	}
+	for i, entry := range p.entries {
+		if len(entry) > limit {
+			skipped += p.counts[i]
+			continue
+		}
+		duplicates += p.counts[i] - 1
 		entries = append(entries, entry)
 	}
 	return entries, duplicates, skipped
