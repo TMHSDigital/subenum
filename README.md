@@ -181,7 +181,7 @@ go build -buildvcs=false -o subenum
 <details>
 <summary><strong>Pre-built binaries</strong></summary>
 
-Download the archive for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page: `subenum_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). Each archive holds the static binary, `LICENSE`, `README.md` and `CHANGELOG.md`.
+Download the archive for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page: `subenum_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). Each archive holds the static binary, `LICENSE`, `README.md`, `CHANGELOG.md`, shell completions (`completions/`) and the man page (`man/`).
 
 Platforms: Linux (amd64, arm64, 386) &middot; macOS (amd64, arm64) &middot; Windows (amd64, arm64) &middot; FreeBSD (amd64, arm64)
 
@@ -235,7 +235,7 @@ docker compose run --rm subenum -w /data/wordlist.txt yourdomain.com   # live
 
 ```bash
 make build          # compile binary
-make test           # run test suite with race detector
+make test           # run test suite (CI also runs it with -race)
 make lint           # run golangci-lint
 make simulate       # safe run - no DNS queries
 make tui            # launch interactive TUI
@@ -261,7 +261,7 @@ make help           # list all targets
 | `-dL <file>` | n/a | File of apex domains to scan, one per line (`-` reads stdin), instead of a `<domain>` argument. Each domain is an independent scan; results share one output |
 | `-t <n>` | `100` | Concurrent worker goroutines |
 | `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
-| `-dns-server <ip:port>` | `8.8.8.8:53` | DNS server address (validated on startup) |
+| `-dns-server <addr>` | `8.8.8.8:53` | DNS server: `ip:port` (UDP, TCP fallback), `tls://host[:853]` (DNS over TLS) or `https://host/path` (DNS over HTTPS); validated on startup |
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
 | `-ct` | `false` | Add names from Certificate Transparency logs (crt.sh; one HTTPS request per target, no API key) as candidates and `-permute` seeds |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
@@ -531,7 +531,7 @@ jq -e '.verdict == "complete"' run.json > /dev/null || { jq -r .reason run.json;
 ./subenum -tui
 ```
 
-No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `~/.config/subenum/last.json` and restored on next launch. The interface is shown at the top of this README.
+No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `last.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows) and restored on next launch. The interface is shown at the top of this README.
 
 ### Go library
 
@@ -561,7 +561,7 @@ API reference and runnable examples: [pkg.go.dev/github.com/TMHSDigital/subenum/
 | Key | Action |
 | :--- | :--- |
 | `tab` / `shift+tab` / `↑` `↓` | Navigate fields |
-| `space` | Toggle Simulate / Force |
+| `space` | Toggle Simulate, Recursive, Force or No-abort |
 | `ctrl+r` | Start scan |
 | `ctrl+c` | Abort a running scan; quit the form or a finished scan |
 | `r` | New scan - restores last-used values |
@@ -599,47 +599,58 @@ API reference and runnable examples: [pkg.go.dev/github.com/TMHSDigital/subenum/
 
 ```
 subenum/
+├── .devcontainer/              # Dev container, plus a labs container
 ├── .github/
 │   ├── workflows/
-│   │   ├── go.yml              # CI: build, test, lint, release
+│   │   ├── go.yml              # CI: build, test, lint, govulncheck, release
 │   │   ├── codeql.yml          # Weekly CodeQL security analysis
+│   │   ├── devcontainer.yml    # Builds the dev container and runs checks in it
 │   │   └── pages.yml           # GitHub Pages deployment
-│   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.md
-│   │   └── feature_request.md
+│   ├── ISSUE_TEMPLATE/         # bug_report.yml, feature_request.yml, config.yml
+│   ├── scripts/                # check-links.py, release-notes.sh
 │   ├── dependabot.yml
 │   └── PULL_REQUEST_TEMPLATE.md
 ├── data/
-│   └── wordlist.txt            # Default wordlist for Docker/Make
+│   ├── subdomains-5k.txt       # Bundled default wordlist, embedded by data.go
+│   ├── data.go
+│   └── wordlist.txt            # Sample wordlist for the Docker examples (mounted at /data)
 ├── docs/                       # Source of the website (GitHub Pages)
 │   ├── assets/                 # Brand, CSS, JS, TUI screenshot
-│   ├── ARCHITECTURE.md
-│   ├── CONTRIBUTING.md
-│   ├── DEVELOPER_GUIDE.md
-│   ├── start.md, cli.md, library.md, labs.md, monitoring.md, docker.md
-│   ├── _data/nav.yml           # Site navigation
-│   ├── _config.yml
+│   ├── _data/, _includes/, _layouts/
+│   ├── ARCHITECTURE.md, CONTRIBUTING.md, DEVELOPER_GUIDE.md, ROADMAP.md
+│   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md, docker.md
 │   └── index.html              # Landing page
 ├── examples/
-│   ├── sample_wordlist.txt
+│   ├── labs/                   # Lab scenario zones and their wordlist
+│   ├── sample_wordlist.txt, sample_domains.txt
 │   ├── advanced_usage.md
 │   └── demo.sh
 ├── internal/
-│   ├── dns/                    # ResolveTypes, ResolveDomainWithRetry, CheckWildcard, SimulateResolve
-│   ├── output/                 # Thread-safe Writer (stdout/stderr separation)
+│   ├── ct/                     # Certificate Transparency (crt.sh) client for -ct
+│   ├── dns/                    # Resolution, transports (UDP/TCP, DoT, DoH), resolver pool, wildcard checks
+│   ├── dnsserver/              # Scriptable local DNS server (labs, tests)
+│   ├── dnstest/                # Runs dnsserver for hermetic tests
+│   ├── labzone/                # Lab scenario file parser
+│   ├── output/                 # Thread-safe Writer, results file, SARIF and summary writers
+│   ├── permute/                # -permute candidate generation
+│   ├── report/                 # Run-quality report built from finished scans
 │   ├── scan/                   # Scan engine: Config, Event types, Run()
 │   ├── tui/                    # Bubble Tea UI: form, scan view, session config
-│   └── wordlist/               # LoadWordlist (dedup + sanitize)
+│   ├── validate/               # Input validators shared by the CLI and the TUI
+│   └── wordlist/               # Wordlist reading, sanitizing and dedup
+├── pkg/subenum/                # Public Go library API
 ├── tools/
 │   └── wordlist-gen.go
-├── main.go                     # CLI entry point
-├── main_test.go
+├── main.go, main_*.go          # CLI entry point and its subsystems (config, diff, resume, permute, CT, labs, ...)
+├── action.yml                  # GitHub Action
+├── .goreleaser.yaml            # Release archives, completions, man page
 ├── go.mod
 ├── Dockerfile
 ├── docker-compose.yml
 ├── Makefile
 ├── .golangci.yml               # golangci-lint v2 configuration
 ├── CHANGELOG.md
+├── CITATION.cff
 ├── SECURITY.md
 └── LICENSE                     # GNU General Public License v3.0
 ```
