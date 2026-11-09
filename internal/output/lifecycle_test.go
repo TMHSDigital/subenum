@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -97,9 +96,6 @@ func TestCreateFileMissingDirectory(t *testing.T) {
 }
 
 func TestCreateFileWritesNonRegularTargetDirectly(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("opening NUL with O_TRUNC fails on Windows")
-	}
 	fi, err := os.Stat(os.DevNull)
 	if err != nil || fi.Mode().IsRegular() {
 		t.Skipf("%s is not a device here", os.DevNull)
