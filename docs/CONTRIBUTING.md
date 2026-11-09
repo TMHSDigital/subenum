@@ -22,7 +22,7 @@ The `go` directive in `go.mod` must stay exactly `go 1.26.0`. CI fails the build
 if it drifts. Current `golang.org/x/sys` and `golang.org/x/text` declare
 `go 1.26.0`, so it is also the floor. New dependencies must keep it and pass
 `govulncheck`, which CI runs. On PowerShell, quote `-go=1.26.0`; unquoted it is
-parsed as `-go=1`. After changing dependencies run `make tidy`.
+parsed as `-go=1`. After changing dependencies run `make tidy` (plain `go mod tidy`), then confirm the `go` directive is still `go 1.26.0`.
 
 ### Codespaces / Dev Containers
 
@@ -53,13 +53,13 @@ The project includes a Makefile to simplify development tasks:
 # Build the binary
 make build
 
-# Run tests
+# Run tests (go test -v ./..., without the race detector; see Testing Requirements)
 make test
 
 # Run linter
 make lint
 
-# Tidy modules (keeps the go 1.26.0 pin)
+# Tidy modules: runs go mod tidy; then confirm the go directive is still go 1.26.0
 make tidy
 
 # Clean up build artifacts
@@ -90,11 +90,12 @@ make docker-run
 
 2. **Make your changes** and ensure they follow the project's coding standards
 
-3. **Test your changes**:
+3. **Test your changes** with the race detector, as CI does (see [Testing Requirements](#testing-requirements)), and lint them:
    ```bash
-   make test
+   go test -race ./...
    make lint
    ```
+   The race detector needs cgo and a C toolchain. If you have none, run `make test` locally; CI still runs the suite with `-race`.
 
 4. **Commit your changes** with a clear message describing the change
 
