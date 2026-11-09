@@ -34,7 +34,7 @@ func TestDefaultsPrecedence(t *testing.T) {
 	env := map[string]string{"SUBENUM_RATE": "300", "SUBENUM_T": "20"}
 	d := &defaultsLoader{path: cfg, getenv: func(k string) string { return env[k] }}
 
-	f, _, fs, err := parseFlagsWith([]string{"-t", "30", "example.com"}, d.apply)
+	f, _, fs, err := parseFlagsWith([]string{"-t", "30", "example.com"}, d.apply, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestDefaultsErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 		d := &defaultsLoader{path: path, getenv: func(string) string { return "" }}
-		if _, _, _, err := parseFlagsWith(nil, d.apply); err == nil {
+		if _, _, _, err := parseFlagsWith(nil, d.apply, nil); err == nil {
 			t.Errorf("%s: no error", name)
 		}
 	}
@@ -92,7 +92,7 @@ func TestDefaultsErrors(t *testing.T) {
 		}
 		return ""
 	}}
-	if _, _, _, err := parseFlagsWith(nil, d.apply); err == nil || !strings.Contains(err.Error(), "SUBENUM_RATE") {
+	if _, _, _, err := parseFlagsWith(nil, d.apply, nil); err == nil || !strings.Contains(err.Error(), "SUBENUM_RATE") {
 		t.Errorf("bad env value: err = %v", err)
 	}
 }
@@ -149,7 +149,7 @@ func TestDefaultsValueTypes(t *testing.T) {
 			t.Fatal(err)
 		}
 		d := &defaultsLoader{path: path, getenv: func(string) string { return "" }}
-		f, _, _, err := parseFlagsWith(nil, d.apply)
+		f, _, _, err := parseFlagsWith(nil, d.apply, nil)
 		return f, err
 	}
 	for _, bad := range []string{`{"format": null}`, `{"t": {"n": 1}}`, `{"t": [1]}`, `{"exclude": [1]}`} {
@@ -231,7 +231,7 @@ func TestPrintConfigEffectiveAttempts(t *testing.T) {
 		{[]string{"-attempts", "5"}, map[string]string{"SUBENUM_RETRIES": "2"}, `attempts       = "5"                      (flag)`},
 	} {
 		d := &defaultsLoader{getenv: func(k string) string { return tc.env[k] }}
-		_, _, fs, err := parseFlagsWith(append(tc.args, "example.com"), d.apply)
+		_, _, fs, err := parseFlagsWith(append(tc.args, "example.com"), d.apply, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

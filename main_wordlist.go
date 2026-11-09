@@ -16,5 +16,5 @@ func readWordlist(f cliFlags) ([]string, error) {
 	if f.wordlistFile == "" {
 		return wordlist.ReadLinesFrom(strings.NewReader(data.Subdomains5k))
 	}
-	return wordlist.ReadLines(f.wordlistFile)
+	return f.readLines(f.wordlistFile)
 }

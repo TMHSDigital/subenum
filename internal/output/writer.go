@@ -79,9 +79,10 @@ type Writer struct {
 	outWriter *bufio.Writer
 	simulate  bool
 	format    Format
-	stdout    bool // mirror results to os.Stdout (false for the TUI)
-	plain     bool // text stdout prints bare names, no "Found:" banner
-	records   bool // text output appends record types and values
+	stdout    bool      // mirror results to stdout (false for the TUI)
+	out       io.Writer // stdout destination; nil means os.Stdout
+	plain     bool      // text stdout prints bare names, no "Found:" banner
+	records   bool      // text output appends record types and values
 
 	stderr      io.Writer // diagnostics destination; nil means os.Stderr
 	progressLen int       // width of the progress line currently on screen
@@ -115,6 +116,15 @@ func New(outWriter *bufio.Writer, simulate bool, format Format) *Writer {
 func NewFile(outWriter *bufio.Writer, simulate bool, format Format) *Writer {
 	return &Writer{outWriter: outWriter, simulate: simulate, format: format, stdout: false}
 }
+
+// SetStdout sends results meant for stdout to out instead of os.Stdout, so
+// the CLI can run against injected streams (#158). Call it before the first
+// result.
+func (w *Writer) SetStdout(out io.Writer) { w.out = out }
+
+// SetStderr sends diagnostics, progress and notices to errOut instead of
+// os.Stderr.
+func (w *Writer) SetStderr(errOut io.Writer) { w.stderr = errOut }
 
 // SetPlain makes text-mode stdout print bare subdomain names, one per line,
 // without the "Found:" banner, so output pipes straight into other tools. The
@@ -211,11 +221,11 @@ func (w *Writer) writeText(res Result) {
 	if w.stdout {
 		switch {
 		case w.plain:
-			fmt.Println(line)
+			_, _ = fmt.Fprintln(w.stdOut(), line)
 		case w.simulate:
-			fmt.Printf("Found (SIMULATED): %s\n", line)
+			_, _ = fmt.Fprintf(w.stdOut(), "Found (SIMULATED): %s\n", line)
 		default:
-			fmt.Printf("Found: %s\n", line)
+			_, _ = fmt.Fprintf(w.stdOut(), "Found: %s\n", line)
 		}
 	}
 	if w.outWriter != nil {
@@ -268,7 +278,7 @@ func (w *Writer) writeJSONElement(res Result) {
 	w.jsonOpen = true
 	data := bytes.TrimSuffix(w.jsonBuf.Bytes(), []byte("\n")) // Encode ends each value with a newline
 	if w.stdout {
-		_, _ = os.Stdout.Write(data)
+		_, _ = w.stdOut().Write(data)
 	}
 	if w.outWriter != nil {
 		_, _ = w.outWriter.Write(data)
@@ -294,7 +304,7 @@ func (w *Writer) writeJSONL(res Result) {
 		return
 	}
 	if w.stdout {
-		fmt.Printf("%s\n", data)
+		_, _ = fmt.Fprintf(w.stdOut(), "%s\n", data)
 	}
 	if w.outWriter != nil {
 		_, _ = fmt.Fprintf(w.outWriter, "%s\n", data)
@@ -317,7 +327,7 @@ func (w *Writer) ensureCSV() {
 		header = append(header, "change")
 	}
 	if w.stdout {
-		w.csvStdout = csv.NewWriter(os.Stdout)
+		w.csvStdout = csv.NewWriter(w.stdOut())
 		_ = w.csvStdout.Write(header)
 	}
 	if w.outWriter != nil {
@@ -369,7 +379,7 @@ func (w *Writer) Finish() error {
 		}
 		w.jsonOpen = false
 		if w.stdout {
-			fmt.Print(end)
+			_, _ = io.WriteString(w.stdOut(), end)
 		}
 		if w.outWriter != nil {
 			if _, err := w.outWriter.WriteString(end); err != nil {
@@ -395,7 +405,15 @@ func (w *Writer) Finish() error {
 	return nil
 }
 
-// errOut is where diagnostics go; tests may swap it.
+// stdOut is where results meant for stdout go.
+func (w *Writer) stdOut() io.Writer {
+	if w.out != nil {
+		return w.out
+	}
+	return os.Stdout
+}
+
+// errOut is where diagnostics go.
 func (w *Writer) errOut() io.Writer {
 	if w.stderr != nil {
 		return w.stderr

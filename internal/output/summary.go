@@ -120,7 +120,7 @@ func (w *Writer) Summary(s Summary) {
 	}
 	if w.stdout {
 		w.clearProgressLocked()
-		fmt.Printf("%s\n", data)
+		_, _ = fmt.Fprintf(w.stdOut(), "%s\n", data)
 	}
 	if w.outWriter != nil {
 		_, _ = fmt.Fprintf(w.outWriter, "%s\n", data)

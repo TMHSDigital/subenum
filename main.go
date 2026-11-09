@@ -28,6 +28,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"os"
 	"os/signal"
@@ -160,20 +161,33 @@ type cliFlags struct {
 	pool         *dns.Pool       // built from -r; nil means the single -dns-server
 	excludes     []string        // -exclude and -exclude-file patterns, merged
 	defaults     *defaultsLoader // where config-file and env values came from; nil in tests
+	stdin        io.Reader       // read for a "-" path; nil means os.Stdin
+}
+
+// readLines reads path, or f.stdin when path is "-".
+func (f cliFlags) readLines(path string) ([]string, error) {
+	if path == wordlist.Stdin && f.stdin != nil {
+		return wordlist.ReadLinesFrom(f.stdin)
+	}
+	return wordlist.ReadLines(path)
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
 // after the domain; the returned positionals are every non-flag argument.
 func parseFlags(args []string) (cliFlags, []string, *flag.FlagSet, error) {
-	return parseFlagsWith(args, nil)
+	return parseFlagsWith(args, nil, nil)
 }
 
 // parseFlagsWith is parseFlags with applyDefaults run after the flags are
 // defined and before the command line is parsed, so config-file and
 // environment defaults sit between built-in defaults and explicit flags (#88).
-func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error) (cliFlags, []string, *flag.FlagSet, error) {
+// Parse errors and usage go to stderr; nil means os.Stderr.
+func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stderr io.Writer) (cliFlags, []string, *flag.FlagSet, error) {
 	var f cliFlags
 	fs := flag.NewFlagSet(ProgramName, flag.ContinueOnError)
+	if stderr != nil {
+		fs.SetOutput(stderr)
+	}
 	fs.BoolVar(&f.tui, "tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
 	fs.BoolVar(&f.printConfig, "print-config", false, "Print every setting's effective value and its source (flag, env, config or default), then exit")
 	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file (- for stdin); omitted: the bundled top-5000 list")
@@ -288,7 +302,6 @@ func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *outpu
 	if len(positionals) == 0 && f.domainList == "" {
 		// Say what is missing before the full flag list (#58).
 		out.Error("missing <domain> (or -dL <domains_file>)")
-		fs.SetOutput(os.Stderr)
 		fs.Usage()
 		return false
 	}
@@ -371,7 +384,7 @@ func loadPool(f cliFlags, out *output.Writer) (*dns.Pool, int) {
 		out.Info("Note: -r is ignored in simulation mode, which sends no DNS queries")
 		return nil, exitOK
 	}
-	lines, err := wordlist.ReadLines(f.resolvers)
+	lines, err := f.readLines(f.resolvers)
 	if err != nil {
 		out.Error("reading -r resolver list: %v", err)
 		return nil, exitFailure
@@ -416,7 +429,7 @@ func loadExcludes(f cliFlags) ([]string, error) {
 	if f.excludeFile == "" {
 		return patterns, nil
 	}
-	lines, err := wordlist.ReadLines(f.excludeFile)
+	lines, err := f.readLines(f.excludeFile)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +448,7 @@ func loadTargets(f cliFlags, domain string, out *output.Writer) ([]string, bool)
 	if f.domainList == "" {
 		return []string{domain}, true
 	}
-	lines, err := wordlist.ReadLines(f.domainList)
+	lines, err := f.readLines(f.domainList)
 	if err != nil {
 		out.Error("reading domain list: %v", err)
 		return nil, false
@@ -478,13 +491,13 @@ func openOutputFile(path string, testMode bool, format output.Format, out *outpu
 	return output.New(f.Writer, testMode, format), f, true
 }
 
-// stdoutIsTerminal reports whether stdout is an interactive terminal rather than
-// a pipe or file.
-func stdoutIsTerminal() bool { return isTerminal(os.Stdout) }
-
-// isTerminal reports whether f is a character device (a terminal) rather than
-// a pipe or file.
-func isTerminal(f *os.File) bool {
+// isTerminal reports whether w is a character device (a terminal) rather than
+// a pipe, file or in-memory buffer.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
@@ -553,28 +566,43 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	}
 }
 
-func run() (code int) {
+// runArgs is the process environment a run reads: the arguments after the
+// program name and the standard streams. Tests pass their own, so they do
+// not swap os.Args, os.Stdin, os.Stdout and os.Stderr (#158).
+type runArgs struct {
+	args   []string
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func run() int {
+	return runWith(runArgs{args: os.Args[1:], stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr})
+}
+
+func runWith(a runArgs) (code int) {
 	// completion, man (#88): handled before flag parsing.
-	if code, ok := runSubcommand(os.Args[1:], os.Stdout, os.Stderr); ok {
+	if code, ok := runSubcommand(a.args, a.stdout, a.stderr); ok {
 		return code
 	}
 
-	args, resume, resumeErr := resumeArgs(os.Args[1:])
+	args, resume, resumeErr := resumeArgs(a.args)
 	if resumeErr != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", resumeErr)
+		_, _ = fmt.Fprintf(a.stderr, "Error: %v\n", resumeErr)
 		return exitUsage
 	}
 	defaults := newDefaultsLoader()
-	f, positionals, fs, parseErr := parseFlagsWith(args, defaults.apply)
+	f, positionals, fs, parseErr := parseFlagsWith(args, defaults.apply, a.stderr)
 	f.defaults = defaults
+	f.stdin = a.stdin
 	if errors.Is(parseErr, errConfig) {
 		// -version, -print-config and -tui stay usable with a broken config,
 		// so the bad value can be found and fixed (#116).
 		if !f.showVersion && !f.printConfig && !f.tui {
-			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
+			_, _ = fmt.Fprintf(a.stderr, "Error: %v\n", parseErr)
 			return exitUsage
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: %v\n", parseErr)
+		_, _ = fmt.Fprintf(a.stderr, "Warning: %v\n", parseErr)
 		parseErr = nil
 	}
 	if parseErr != nil {
@@ -589,26 +617,32 @@ func run() (code int) {
 	// (-o -tui) or an argument after "--" (#58).
 	if f.tui {
 		if fs.NFlag() > 1 || len(positionals) > 0 {
-			fmt.Fprintln(os.Stderr, "Warning: -tui ignores every other flag and argument; set them in the form instead")
+			_, _ = fmt.Fprintln(a.stderr, "Warning: -tui ignores every other flag and argument; set them in the form instead")
 		}
 		return tui.Start(tui.Options{Version: resolveVersion(), Settings: defaults.settings(fs)})
 	}
 
 	if f.printConfig {
-		defaults.printConfig(os.Stdout, fs)
+		defaults.printConfig(a.stdout, fs)
 		return exitOK
 	}
 
 	// -version answers before anything else prints, banners included (#58).
 	if f.showVersion {
-		fmt.Println(formatVersion())
+		_, _ = fmt.Fprintln(a.stdout, formatVersion())
 		return exitOK
 	}
 
 	format, formatErr := output.ParseFormat(f.format)
 	recordTypes, typesErr := dns.ParseTypes(f.recordTypes)
 	maxAttempts, fromRetries, err := effectiveAttempts(f.attempts, f.retries, defaults.source(fs, "attempts"), defaults.source(fs, "retries"))
-	out := output.New(nil, f.testMode, format)
+	// Every writer of the run uses the injected streams.
+	wire := func(w *output.Writer) *output.Writer {
+		w.SetStdout(a.stdout)
+		w.SetStderr(a.stderr)
+		return w
+	}
+	out := wire(output.New(nil, f.testMode, format))
 	out.SetQuiet(f.silent)
 	if fromRetries {
 		out.Info("Warning: -retries is deprecated, use -attempts instead") // quiet under -silent (#166)
@@ -751,6 +785,7 @@ func run() (code int) {
 	if !ok {
 		return exitFailure
 	}
+	wire(combined)
 	var outWriter *bufio.Writer
 	if outFile != nil {
 		outWriter = outFile.Writer
@@ -759,7 +794,7 @@ func run() (code int) {
 	// the full current results, ready to be the next run's -diff input (#84).
 	var fileOut *output.Writer
 	if diff != nil && outFile != nil {
-		fileOut = output.NewFile(outFile.Writer, f.testMode, format)
+		fileOut = wire(output.NewFile(outFile.Writer, f.testMode, format))
 	} else {
 		out = combined
 	}
@@ -770,7 +805,7 @@ func run() (code int) {
 		}
 		// Bare names when piped or -silent (no "Found:" banner), human-friendly
 		// on a terminal.
-		w.SetPlain(f.silent || !stdoutIsTerminal())
+		w.SetPlain(f.silent || !isTerminal(a.stdout))
 		w.SetQuiet(f.silent)
 		w.SetShowRecords(f.showRecords)
 		w.SetSeed(f.seed)
@@ -820,7 +855,7 @@ func run() (code int) {
 	if f.silent {
 		f.showProgress = false
 	}
-	if !isTerminal(os.Stderr) {
+	if !isTerminal(a.stderr) {
 		if defaults.source(fs, "progress") != sourceDefault {
 			out.SetProgressLines(true)
 		} else {

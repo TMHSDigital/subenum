@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,47 +22,34 @@ import (
 	"github.com/TMHSDigital/subenum/internal/output"
 )
 
-// runCLI invokes run() as the binary would, with args after the program name,
-// optional stdin, and stdout captured. Stderr is discarded. Simulation mode
-// keeps these tests free of network I/O.
+// runCLI invokes runWith as the binary would, with args after the program
+// name, optional stdin, and stdout captured. Stderr is discarded. Simulation
+// mode keeps these tests free of network I/O. No process globals are swapped
+// (#158).
 func runCLI(t *testing.T, stdin string, args ...string) (int, string) {
 	t.Helper()
-	oldArgs, oldStdout, oldStderr, oldStdin := os.Args, os.Stdout, os.Stderr, os.Stdin
-	t.Cleanup(func() { os.Args, os.Stdout, os.Stderr, os.Stdin = oldArgs, oldStdout, oldStderr, oldStdin })
+	var stdout bytes.Buffer
+	code := runWith(runArgs{args: args, stdin: strings.NewReader(stdin), stdout: &stdout, stderr: io.Discard})
+	return code, stdout.String()
+}
 
-	os.Args = append([]string{ProgramName}, args...)
-	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = devnull.Close() }()
-	os.Stderr = devnull
+// lockedBuffer is a bytes.Buffer safe for concurrent writers, standing in
+// for one pipe that both stdout and stderr write to.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
 
-	if stdin != "" {
-		in, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		go func() {
-			_, _ = io.WriteString(w, stdin)
-			_ = w.Close()
-		}()
-		os.Stdin = in
-	}
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	outCh := make(chan string)
-	go func() {
-		b, _ := io.ReadAll(r)
-		outCh <- string(b)
-	}()
-	code := run()
-	_ = w.Close()
-	return code, <-outCh
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func writeFile(t *testing.T, name, content string) string {
@@ -203,26 +192,13 @@ func TestE2EFailedRunKeepsOutputFile(t *testing.T) {
 	}
 }
 
-// runCLIMerged is runCLI with stdout and stderr sharing one pipe, like
+// runCLIMerged is runCLI with stdout and stderr sharing one stream, like
 // `subenum ... 2>&1 | tee log`.
 func runCLIMerged(t *testing.T, args ...string) (int, string) {
 	t.Helper()
-	oldArgs, oldStdout, oldStderr := os.Args, os.Stdout, os.Stderr
-	t.Cleanup(func() { os.Args, os.Stdout, os.Stderr = oldArgs, oldStdout, oldStderr })
-	os.Args = append([]string{ProgramName}, args...)
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout, os.Stderr = w, w
-	outCh := make(chan string)
-	go func() {
-		b, _ := io.ReadAll(r)
-		outCh <- string(b)
-	}()
-	code := run()
-	_ = w.Close()
-	return code, <-outCh
+	var merged lockedBuffer
+	code := runWith(runArgs{args: args, stdin: strings.NewReader(""), stdout: &merged, stderr: &merged})
+	return code, merged.String()
 }
 
 // TestE2EMergedStreamsHaveNoCarriageReturns covers #78: with stdout and

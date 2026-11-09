@@ -606,3 +606,31 @@ func TestTakeoverHintOutput(t *testing.T) {
 		t.Errorf("text without -show-records = %q, want the bare name", out)
 	}
 }
+
+// TestSetStdoutCapturesEveryFormat covers #158: with SetStdout, every format
+// (and the jsonl summary) writes to the injected writer, never os.Stdout, so
+// the CLI can run against in-memory streams.
+func TestSetStdoutCapturesEveryFormat(t *testing.T) {
+	for _, format := range []Format{FormatText, FormatJSON, FormatJSONL, FormatCSV} {
+		var out, errOut bytes.Buffer
+		w := New(nil, false, format)
+		w.SetStdout(&out)
+		w.SetStderr(&errOut)
+		leaked := captureStdout(t, func() {
+			w.Result("www.example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}})
+			w.Summary(Summary{})
+			if err := w.Finish(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if leaked != "" {
+			t.Errorf("format %v: %q went to os.Stdout", format, leaked)
+		}
+		if !strings.Contains(out.String(), "www.example.com") {
+			t.Errorf("format %v: injected stdout = %q, want the result", format, out.String())
+		}
+		if format == FormatJSONL && !strings.Contains(out.String(), "verdict") {
+			t.Errorf("jsonl summary missing from injected stdout: %q", out.String())
+		}
+	}
+}
