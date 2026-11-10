@@ -21,7 +21,7 @@ func TestTakeoverProvider(t *testing.T) {
 		"forum.trydiscourse.com.":        "discourse",
 		"herokuapp.com.evil.example.com": "",
 		"animaapp.io.evil.example.com":   "",
-		"trydiscourse.com.evil.test":    "",
+		"trydiscourse.com.evil.test":     "",
 		"cdn.example.net":                "",
 	} {
 		if got := TakeoverProvider(target); got != want {
