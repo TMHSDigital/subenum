@@ -285,6 +285,43 @@ func TestE2EMissingDomainReportedFirst(t *testing.T) {
 	}
 }
 
+// TestLoadExcludes covers #174: -exclude and -exclude-file merge, blank and
+// comment lines add nothing, and an unreadable -exclude-file stops the run
+// with exit 1 and the file name, as an unreadable -r or wordlist does.
+func TestLoadExcludes(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	empty := write("empty.txt", "\n# only comments\n   \n\t# indented\n\n")
+	got, err := loadExcludes(cliFlags{excludeFile: empty}, &runtimeInputs{})
+	if err != nil || len(got) != 0 {
+		t.Errorf("blank and comment lines: %q, %v; want no patterns and no error", got, err)
+	}
+	mixed := write("mixed.txt", "# dev hosts\n  dev-*  \n\nstaging\n")
+	got, err = loadExcludes(cliFlags{exclude: " a , ,b", excludeFile: mixed}, &runtimeInputs{})
+	if want := []string{"a", "b", "dev-*", "staging"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("merged: %q, %v; want %q", got, err, want)
+	}
+	stdin := &runtimeInputs{stdin: strings.NewReader("www\n#x\n")}
+	if got, err := loadExcludes(cliFlags{excludeFile: "-"}, stdin); err != nil || !reflect.DeepEqual(got, []string{"www"}) {
+		t.Errorf("stdin: %q, %v; want [www]", got, err)
+	}
+
+	missing := filepath.Join(dir, "no-such-excludes.txt")
+	if _, err := loadExcludes(cliFlags{excludeFile: missing}, &runtimeInputs{}); err == nil {
+		t.Error("missing -exclude-file: no error")
+	}
+	code, out := runCLIMerged(t, "-simulate", "-exclude-file", missing, "example.com")
+	if code != exitFailure || !strings.Contains(out, "-exclude-file") || !strings.Contains(out, "no-such-excludes.txt") {
+		t.Errorf("missing -exclude-file: exit %d, want %d naming the file\n%s", code, exitFailure, out)
+	}
+}
+
 // TestTUIOptionsFromFlags covers #195: flags given with -tui pre-fill the
 // form over SUBENUM_* values, the domain argument fills the Domain field, and
 // what the form cannot take is named in a warning.

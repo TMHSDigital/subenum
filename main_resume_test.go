@@ -266,6 +266,51 @@ func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 	}
 }
 
+// TestSaveResumeStateRecordsFinishedPermutePass covers #174: a -permute pass
+// that finished before the interrupt is saved from its final EventDone, field
+// for field, and replays as that same event on resume.
+func TestSaveResumeStateRecordsFinishedPermutePass(t *testing.T) {
+	final := scan.Event{
+		Kind:      scan.EventDone,
+		Stats:     scan.Stats{RootDone: 12, Found: 3, NXDomain: 9},
+		Processed: 12,
+		Total:     12,
+		Found:     3,
+	}
+	f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json")}
+	saveResumeState(&session{
+		f: f, out: output.New(nil, false, output.FormatText),
+		targets:      []string{"a.example"},
+		status:       []string{"interrupted"},
+		entryDigests: []string{"d1"},
+		results: []targetResult{{
+			done:        true,
+			final:       scan.Event{Kind: scan.EventDone, Stats: scan.Stats{RootDone: 40}, Processed: 40, Total: 40},
+			permutation: &permutationResult{candidates: 12, pass: targetResult{done: true, final: final}},
+		}},
+		runs: [][]output.Result{nil},
+	})
+	data, err := os.ReadFile(f.stateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st resumeState
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	p := st.Targets[0].Permute
+	if p == nil {
+		t.Fatal("finished permute pass not saved")
+	}
+	want := resumePass{RootDone: 12, Stats: final.Stats, Processed: 12, Total: 12, Found: 3}
+	if !reflect.DeepEqual(*p, want) {
+		t.Errorf("saved pass = %+v, want %+v", *p, want)
+	}
+	if ev := p.event(); !reflect.DeepEqual(ev, final) {
+		t.Errorf("replayed event = %+v, want %+v", ev, final)
+	}
+}
+
 // TestE2EPermuteRecursive covers #111: -permute with -recursive runs the
 // permutation pass one level deep, so no name is built from a candidate
 // under another candidate and the pass is not refused.

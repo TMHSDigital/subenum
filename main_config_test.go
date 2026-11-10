@@ -142,6 +142,55 @@ func TestGeneratedDocsCoverEveryFlag(t *testing.T) {
 	}
 }
 
+// TestRunSubcommand covers #174: argument checks for each subcommand, a
+// non-subcommand falling through to a scan, and generate-assets writing every
+// file, or failing with exit 1 when the directory cannot be created. Runs on
+// every OS, unlike the release-build step in CI.
+func TestRunSubcommand(t *testing.T) {
+	for _, args := range [][]string{nil, {"example.com"}, {"-simulate"}, {"frobnicate", "x"}} {
+		if code, ok := runSubcommand(args, &bytes.Buffer{}, &bytes.Buffer{}); ok || code != 0 {
+			t.Errorf("%q: (%d, %v), want (0, false)", args, code, ok)
+		}
+	}
+	for _, args := range [][]string{{"completion"}, {"completion", "bash", "zsh"}, {"generate-assets"}, {"generate-assets", "a", "b"}} {
+		var stdout, stderr bytes.Buffer
+		code, ok := runSubcommand(args, &stdout, &stderr)
+		if !ok || code != exitUsage || !strings.Contains(stderr.String(), "Usage: subenum "+args[0]) || stdout.Len() != 0 {
+			t.Errorf("%q: (%d, %v), stderr %q, stdout %q; want a usage error", args, code, ok, stderr.String(), stdout.String())
+		}
+	}
+	var man bytes.Buffer
+	if code, ok := runSubcommand([]string{"man"}, &man, &bytes.Buffer{}); !ok || code != exitOK || !strings.HasPrefix(man.String(), ".TH") {
+		t.Errorf("man: (%d, %v), output starts %.20q", code, ok, man.String())
+	}
+
+	dir := t.TempDir()
+	if code, ok := runSubcommand([]string{"generate-assets", dir}, &bytes.Buffer{}, &bytes.Buffer{}); !ok || code != exitOK {
+		t.Fatalf("generate-assets: (%d, %v), want (0, true)", code, ok)
+	}
+	want := []string{filepath.Join("man", "subenum.1")}
+	for _, name := range completionFiles {
+		want = append(want, filepath.Join("completions", name))
+	}
+	for _, rel := range want {
+		if fi, err := os.Stat(filepath.Join(dir, rel)); err != nil || fi.Size() == 0 {
+			t.Errorf("generate-assets did not write %s: %v", rel, err)
+		}
+	}
+
+	// A regular file where the directory should go cannot be created on any
+	// OS, even as root, unlike a permission-based read-only directory.
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	code, ok := runSubcommand([]string{"generate-assets", filepath.Join(blocker, "out")}, &bytes.Buffer{}, &stderr)
+	if !ok || code != exitFailure || !strings.Contains(stderr.String(), "Error:") {
+		t.Errorf("unwritable dir: (%d, %v), stderr %q; want exit 1 with an error", code, ok, stderr.String())
+	}
+}
+
 // TestDefaultsValueTypes covers #116: only scalars are settings, list flags
 // also take a JSON array, and mode flags are refused by name.
 func TestDefaultsValueTypes(t *testing.T) {

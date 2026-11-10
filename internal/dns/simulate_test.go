@@ -85,22 +85,66 @@ func TestSimulateResolveTypes(t *testing.T) {
 }
 
 // TestSimulateResolveConcurrent calls SimulateResolve from many goroutines at
-// once. Results are a pure function of (seed, name), so this is race-free; the test
-// exists to be caught by `go test -race`.
-func TestSimulateResolveConcurrent(_ *testing.T) {
+// once and checks every call matches a serial run with the same seed: results
+// are a pure function of (seed, name), so concurrency must not change them
+// (#174). Under `go test -race` it also checks the calls share no state.
+func TestSimulateResolveConcurrent(t *testing.T) {
 	const goroutines = 64
 	const perGoroutine = 200
 
+	type outcome struct {
+		recs []Record
+		ok   bool
+	}
+	names := []struct {
+		name    string
+		hitRate int
+		logf    Logf
+	}{
+		{"api.example.com", 50, nil},
+		{"zzz-random.example.com", 25, func(string, ...any) {}},
+	}
+	want := make([][]outcome, len(names))
+	for n, c := range names {
+		for i := 0; i < perGoroutine; i++ {
+			recs, ok := SimulateResolve(c.name, c.hitRate, uint64(i), c.logf, DefaultTypes)
+			want[n] = append(want[n], outcome{recs, ok})
+		}
+	}
+
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var mismatches []string
 	for g := 0; g < goroutines; g++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
-				SimulateResolve("api.example.com", 50, uint64(i), nil, DefaultTypes)
-				SimulateResolve("zzz-random.example.com", 25, uint64(i), func(string, ...any) {}, DefaultTypes)
+				for n, c := range names {
+					recs, ok := SimulateResolve(c.name, c.hitRate, uint64(i), c.logf, DefaultTypes)
+					if w := want[n][i]; ok != w.ok || !reflect.DeepEqual(recs, w.recs) {
+						mu.Lock()
+						mismatches = append(mismatches, fmt.Sprintf("%s seed %d: got (%v, %v), want (%v, %v)", c.name, i, recs, ok, w.recs, w.ok))
+						mu.Unlock()
+					}
+				}
 			}
 		}()
 	}
 	wg.Wait()
+	if len(mismatches) > 0 {
+		t.Fatalf("%d concurrent calls differed from the serial run; first: %s", len(mismatches), mismatches[0])
+	}
+	// The seeds must exercise both outcomes, or the comparison proves little.
+	var hits, misses int
+	for _, o := range want[0] {
+		if o.ok {
+			hits++
+		} else {
+			misses++
+		}
+	}
+	if hits == 0 || misses == 0 {
+		t.Errorf("serial run at hitRate 50: %d hits, %d misses; want both", hits, misses)
+	}
 }
