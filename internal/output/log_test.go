@@ -28,9 +28,12 @@ func decodeLogLines(t *testing.T, stderr string) []map[string]any {
 }
 
 func TestParseLogFormat(t *testing.T) {
-	for in, want := range map[string]LogFormat{"": LogText, "text": LogText, "JSON": LogJSON, " json ": LogJSON, "jsonl": LogJSON} {
-		if got, err := ParseLogFormat(in); err != nil || got != want {
-			t.Errorf("ParseLogFormat(%q) = %v, %v; want %v", in, got, err, want)
+	for _, tc := range []struct {
+		in   string
+		want LogFormat
+	}{{"", LogText}, {"text", LogText}, {"JSON", LogJSON}, {" json ", LogJSON}, {"jsonl", LogJSON}} {
+		if got, err := ParseLogFormat(tc.in); err != nil || got != tc.want {
+			t.Errorf("ParseLogFormat(%q) = %v, %v; want %v", tc.in, got, err, tc.want)
 		}
 	}
 	if _, err := ParseLogFormat("yaml"); err == nil {
