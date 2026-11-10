@@ -15,6 +15,11 @@ import (
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
+// found is a plain engine result, as the TUI writes it.
+func found(name string, records []dns.Record) output.Result {
+	return output.Result{Result: scan.Result{Subdomain: name, Records: records}}
+}
+
 // TestListenForEventsHandlesEveryKind covers #165: every engine event kind,
 // and one the TUI does not know, becomes a message, and an unknown kind
 // re-arms the listener instead of stalling the scan.
@@ -43,8 +48,8 @@ func TestListenForEventsHandlesEveryKind(t *testing.T) {
 
 // TestFinalizeOutputGatesStructuredOutput locks in the TUI's replication of the
 // CLI contract: structured output is finalized only on the success path
-// (doneMsg -> finalizeOutput(true)). The early-error path
-// (stoppedMsg -> finalizeOutput(false)) must not emit an empty JSON array, the
+// (EventDone -> finalizeOutput(true)). The early-error path
+// (stopped EventDone -> finalizeOutput(false)) must not emit an empty JSON array, the
 // bug fixed once for the CLI in main.run, and must leave an existing results
 // file untouched (#52).
 func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
@@ -64,7 +69,7 @@ func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
 	// Success path: finalize(true) emits the buffered JSON array.
 	path := filepath.Join(dir, "ok.json")
 	m := mkModel(t, path)
-	m.out.Result("a.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+	m.out.Emit(found("a.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}}))
 	if err := m.finalizeOutput(true); err != nil {
 		t.Fatalf("finalizeOutput: %v", err)
 	}
@@ -85,7 +90,7 @@ func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	m2 := mkModel(t, path2)
-	m2.out.Result("b.example.com", nil)
+	m2.out.Emit(found("b.example.com", nil))
 	if err := m2.finalizeOutput(false); err != nil {
 		t.Fatalf("finalizeOutput: %v", err)
 	}
@@ -139,7 +144,7 @@ func TestFinalizeOutputReportsCloseError(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &Model{out: output.NewFile(f.Writer, false, output.FormatText), outFile: f}
-	m.out.Result("a.example.com", nil)
+	m.out.Emit(found("a.example.com", nil))
 	// Put a non-empty directory where the results file goes, so the final
 	// rename into place fails.
 	if err := os.MkdirAll(filepath.Join(path, "blocker"), 0o755); err != nil {
@@ -160,7 +165,7 @@ func TestOutputFileFailureSetsExitCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := Model{out: output.NewFile(f.Writer, false, output.FormatText), outFile: f}
-	m.out.Result("a.example.com", nil)
+	m.out.Emit(found("a.example.com", nil))
 	// Put a non-empty directory where the results file goes, so the final
 	// rename into place fails.
 	if err := os.MkdirAll(filepath.Join(path, "blocker"), 0o755); err != nil {
@@ -244,7 +249,7 @@ func TestScanStatusShowsETA(t *testing.T) {
 		if i == 1 && strings.Contains(sv.View(), "ETA") {
 			t.Errorf("ETA shown during warm-up:\n%s", sv.View())
 		}
-		sv, _ = sv.Update(progressMsg{processed: i * 10, total: 1000})
+		sv, _ = sv.Update(eventMsg{scan.Event{Kind: scan.EventProgress, Processed: i * 10, Total: 1000}})
 		now = now.Add(time.Second)
 	}
 	if !strings.Contains(sv.View(), "ETA 1m34s") {
@@ -261,7 +266,7 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 	}
 
 	// Preflight failure: error, then the channel closes without EventDone.
-	sv := update(newScanViewModel(120, 40, false), errorMsg{text: "resolver failed preflight"}, stoppedMsg{})
+	sv := update(newScanViewModel(120, 40, false), eventMsg{scan.Event{Kind: scan.EventError, Message: "resolver failed preflight"}}, eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true}})
 	if !sv.failed() || !strings.Contains(sv.View(), "Failed: resolver failed preflight") || strings.Contains(sv.View(), "Aborted") {
 		t.Errorf("preflight failure not shown as Failed:\n%s", sv.View())
 	}
@@ -272,7 +277,7 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 	// Reliability warning under -no-abort with a finished scan is not a failure.
 	nv := newScanViewModel(120, 40, false)
 	nv.noAbort = true
-	nv = update(nv, errorMsg{text: "warning: 30% failed"}, doneMsg{processed: 5, total: 5})
+	nv = update(nv, eventMsg{scan.Event{Kind: scan.EventError, Message: "warning: 30% failed"}}, eventMsg{scan.Event{Kind: scan.EventDone, Processed: 5, Total: 5}})
 	if nv.failed() || exitCode(Model{scanView: nv}) != 0 {
 		t.Error("-no-abort warning counted as a failure")
 	}
@@ -280,14 +285,14 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 	// A user abort stays "Aborted" and exits 0.
 	av := newScanViewModel(120, 40, false)
 	av.aborted = true
-	av = update(av, doneMsg{processed: 1, total: 5})
+	av = update(av, eventMsg{scan.Event{Kind: scan.EventDone, Processed: 1, Total: 5}})
 	if av.failed() || !strings.Contains(av.View(), "Aborted") || exitCode(Model{scanView: av}) != 0 {
 		t.Errorf("user abort mis-rendered:\n%s", av.View())
 	}
 
 	// A completed scan whose results file failed to write exits 1, as the
 	// CLI does (#155).
-	om := Model{scanView: update(newScanViewModel(120, 40, false), doneMsg{processed: 5, total: 5})}
+	om := Model{scanView: update(newScanViewModel(120, 40, false), eventMsg{scan.Event{Kind: scan.EventDone, Processed: 5, Total: 5}})}
 	om.reportOutputErr(errors.New("disk full"))
 	if code := exitCode(om); code != 1 {
 		t.Errorf("output file error: exit code = %d, want 1", code)

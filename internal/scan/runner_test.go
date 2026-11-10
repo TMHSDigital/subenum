@@ -740,7 +740,7 @@ func TestRunRotatingPoolWildcardFiltered(t *testing.T) {
 	for ev := range events {
 		switch ev.Kind {
 		case EventResult:
-			found[ev.Domain] = true
+			found[ev.Result.Subdomain] = true
 		case EventDone:
 			e := ev
 			done = &e

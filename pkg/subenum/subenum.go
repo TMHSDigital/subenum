@@ -626,7 +626,7 @@ func translate(ev scan.Event) Event {
 	switch ev.Kind {
 	case scan.EventResult:
 		out.Kind = KindResult
-		out.Result = Result{Name: ev.Domain, Records: records(ev.Records), Takeover: ev.Takeover}
+		out.Result = Result{Name: ev.Result.Subdomain, Records: records(ev.Result.Records), Takeover: ev.Result.Takeover}
 	case scan.EventProgress:
 		out.Kind = KindProgress
 	case scan.EventNotice:

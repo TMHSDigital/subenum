@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 // Format selects how resolved results are rendered on stdout and in the output
@@ -48,16 +49,11 @@ func ParseFormat(s string) (Format, error) {
 	}
 }
 
-// Result is one resolved subdomain and its records, used for structured output.
-// Simulated is set on every result of a -simulate run, so invented names can
-// never pass for real recon output once saved or piped (#53).
+// Result is one resolved subdomain as written: the engine's scan.Result
+// (subdomain, records, simulated, takeover hint) plus what the CLI adds to it.
+// The embedded fields come first, so the JSON field order is unchanged (#162).
 type Result struct {
-	Subdomain string       `json:"subdomain"`
-	Records   []dns.Record `json:"records"`
-	Simulated bool         `json:"simulated,omitempty"`
-	// Takeover is a DNS-only subdomain-takeover hint ("dangling",
-	// "provider:<name>" or "dangling:<name>"); verify it by hand (#71).
-	Takeover string `json:"takeover_candidate,omitempty"`
+	scan.Result
 	// Change is "added" or "removed" in -diff mode (#84), or "changed" with
 	// -diff-records when a name's records differ from the baseline (#189).
 	Change string `json:"change,omitempty"`
@@ -167,19 +163,9 @@ func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
 // result's records as TYPE=value pairs.
 func (w *Writer) SetShowRecords(show bool) { w.records = show }
 
-// Result records a resolved domain. In text mode it prints immediately; in JSON
-// mode it is streamed as an array element that Finish closes; in CSV and
-// JSONL mode it is streamed.
-func (w *Writer) Result(domain string, records []dns.Record) {
-	w.ResultWithHint(domain, records, "")
-}
-
-// ResultWithHint is Result with a subdomain-takeover hint attached.
-func (w *Writer) ResultWithHint(domain string, records []dns.Record, takeover string) {
-	w.Emit(Result{Subdomain: domain, Records: records, Takeover: takeover})
-}
-
-// Emit writes one result in the configured format. Simulated is set from the
+// Emit writes one result in the configured format. In text mode it prints
+// immediately; in JSON mode it is streamed as an array element that Finish
+// closes; in CSV and JSONL mode it is streamed. Simulated is set from the
 // writer; Change marks a -diff result.
 func (w *Writer) Emit(res Result) {
 	w.mu.Lock()

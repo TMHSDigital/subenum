@@ -213,13 +213,11 @@ func newFingerprint(recs []dns.Record) *fingerprint {
 	return f
 }
 
-func recordKey(r dns.Record) string { return r.Type + "\x00" + r.Value }
-
 func (f *fingerprint) add(recs []dns.Record) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, r := range recs {
-		f.set[recordKey(r)] = struct{}{}
+		f.set[dns.RecordKey(r)] = struct{}{}
 	}
 }
 
@@ -251,7 +249,7 @@ func (f *fingerprint) match(got []dns.Record) (covered, overlaps bool) {
 	}
 	covered = true
 	for _, r := range got {
-		if _, ok := f.set[recordKey(r)]; ok {
+		if _, ok := f.set[dns.RecordKey(r)]; ok {
 			overlaps = true
 		} else {
 			covered = false
@@ -395,18 +393,32 @@ func (k NoticeKind) String() string {
 	return "notice"
 }
 
+// Result is one resolved subdomain. It is the single per-result type that
+// flows from the engine (Event.Result) to the writers, which embed it in
+// output.Result (#162), so its JSON tags and field order are part of the
+// structured output formats: change them only together with those formats.
+type Result struct {
+	Subdomain string       `json:"subdomain"`
+	Records   []dns.Record `json:"records"` // A/AAAA/CNAME
+	// Simulated is set on every result of a simulated scan, so invented
+	// names can never pass for real recon output once saved or piped (#53).
+	Simulated bool `json:"simulated,omitempty"`
+	// Takeover is a DNS-only subdomain-takeover hint ("dangling",
+	// "provider:<name>" or "dangling:<name>"), see dns.TakeoverHint;
+	// verify it by hand (#71).
+	Takeover string `json:"takeover_candidate,omitempty"`
+}
+
 // Event is emitted on the events channel during a scan.
 type Event struct {
 	Kind      EventKind
-	Notice    NoticeKind   // EventNotice: what the notice is about
-	Domain    string       // EventResult: the resolved subdomain
-	Records   []dns.Record // EventResult: the resolved records (A/AAAA/CNAME)
-	Takeover  string       // EventResult: subdomain-takeover hint, see dns.TakeoverHint (#71)
-	Processed int64        // EventProgress
-	Total     int64        // EventProgress
-	Found     int64        // EventProgress / EventDone
-	Message   string       // EventError / EventNotice
-	Stats     Stats        // EventDone: per-outcome counters
+	Notice    NoticeKind // EventNotice: what the notice is about
+	Result    Result     // EventResult: the resolved subdomain and its records
+	Processed int64      // EventProgress
+	Total     int64      // EventProgress
+	Found     int64      // EventProgress / EventDone
+	Message   string     // EventError / EventNotice
+	Stats     Stats      // EventDone: per-outcome counters
 	// Stopped is set on EventDone when the scan ended before testing any
 	// candidate: after an EventError (out of scope, recursion ceiling, failed
 	// preflight or wildcard check, wildcard zone without Force) or when ctx
@@ -715,7 +727,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 	if takeover != "" {
 		st.takeover.Add(1)
 	}
-	s.events <- Event{Kind: EventResult, Domain: j.domain, Records: records, Takeover: takeover}
+	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: j.domain, Records: records, Simulated: cfg.Simulate, Takeover: takeover}}
 
 	if cfg.Recursive && j.depth < maxDepth {
 		// The wildcard probe would query inside the branch, so an out-of-scope

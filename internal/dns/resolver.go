@@ -23,6 +23,10 @@ type Record struct {
 	Value string `json:"value"`
 }
 
+// RecordKey identifies a record by type and value, for de-duplication and
+// fingerprint matching.
+func RecordKey(r Record) string { return r.Type + "\x00" + r.Value }
+
 // DefaultTypes is the record-type set used when none is specified; it preserves
 // the historical LookupHost behavior (A and AAAA).
 var DefaultTypes = []string{"A", "AAAA"}
@@ -469,7 +473,7 @@ func checkWildcard(ctx context.Context, resolver *net.Resolver, domain string, t
 	seen := map[string]struct{}{}
 	add := func(recs []Record) (grew bool) {
 		for _, r := range recs {
-			k := r.Type + "\x00" + r.Value
+			k := RecordKey(r)
 			if _, ok := seen[k]; !ok {
 				seen[k] = struct{}{}
 				fp = append(fp, r)

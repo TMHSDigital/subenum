@@ -31,9 +31,9 @@ func TestScanViewNoticesDoNotOverflow(t *testing.T) {
 	const width, height = 120, 30
 	m := newScanViewModel(width, height, false)
 	for i := 0; i < 50; i++ {
-		m, _ = m.Update(wildcardMsg{text: "wildcard DNS at x.example.com; skipping recursive expansion"})
+		m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventNotice, Message: "wildcard DNS at x.example.com; skipping recursive expansion"}})
 	}
-	m, _ = m.Update(doneMsg{processed: 1, total: 1})
+	m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventDone, Processed: 1, Total: 1}})
 	view := m.View()
 	if got := lipgloss.Height(view); got > height {
 		t.Errorf("view is %d lines on a %d-line terminal", got, height)
@@ -53,9 +53,9 @@ func TestScanViewFillsTerminalExactly(t *testing.T) {
 	for _, notices := range []int{0, 1, 5} {
 		m := newScanViewModel(width, height, false)
 		for i := 0; i < notices; i++ {
-			m, _ = m.Update(wildcardMsg{text: "notice"})
+			m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventNotice, Message: "notice"}})
 		}
-		m, _ = m.Update(doneMsg{processed: 1, total: 1})
+		m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventDone, Processed: 1, Total: 1}})
 		if got := lipgloss.Height(m.View()); got != height {
 			t.Errorf("%d notices: view is %d lines, want exactly %d", notices, got, height)
 		}
@@ -67,7 +67,7 @@ func TestScanViewFillsTerminalExactly(t *testing.T) {
 func TestScanViewLargeResultSetBounded(t *testing.T) {
 	m := newScanViewModel(80, 24, false)
 	for i := 0; i < maxResultLines+500; i++ {
-		m, _ = m.Update(resultMsg{domain: "h.example.com"})
+		m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventResult, Result: scan.Result{Subdomain: "h.example.com"}}})
 	}
 	if len(m.results) > maxResultLines {
 		t.Errorf("results buffer = %d, want <= %d", len(m.results), maxResultLines)
@@ -75,7 +75,7 @@ func TestScanViewLargeResultSetBounded(t *testing.T) {
 	if !m.dirty {
 		t.Error("large result sets should defer rendering until the next tick")
 	}
-	m, _ = m.Update(progressMsg{processed: 1, total: 2})
+	m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventProgress, Processed: 1, Total: 2}})
 	if m.dirty {
 		t.Error("progress tick should flush pending results")
 	}
@@ -102,18 +102,19 @@ func TestExpandHome(t *testing.T) {
 
 func TestScanViewSummaryIncludesStats(t *testing.T) {
 	m := newScanViewModel(100, 24, false)
-	m, _ = m.Update(doneMsg{
-		processed: 200,
-		total:     200,
-		found:     12,
-		stats: scan.Stats{
+	m, _ = m.Update(eventMsg{scan.Event{
+		Kind:      scan.EventDone,
+		Processed: 200,
+		Total:     200,
+		Found:     12,
+		Stats: scan.Stats{
 			Found:    12,
 			NXDomain: 180,
 			Timeout:  5,
 			Refused:  3,
 			Other:    0,
 		},
-	})
+	}})
 	view := m.View()
 	for _, want := range []string{
 		"found 12",

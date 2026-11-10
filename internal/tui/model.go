@@ -219,7 +219,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cancel != nil {
 				m.cancel()
 			}
-			// Mark the scan as aborted so the upcoming doneMsg (scan.Run still
+			// Mark the scan as aborted so the upcoming EventDone (scan.Run still
 			// drains and emits EventDone) renders the "Aborted" status line.
 			m.scanView.aborted = true
 		case "q":
@@ -231,7 +231,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cancel != nil {
 					m.cancel()
 				}
-				// Defensive: the output file is normally closed on doneMsg, but
+				// Defensive: the output file is normally closed on EventDone, but
 				// make sure it is not left open before starting a new scan.
 				_ = m.finalizeOutput(false)
 				// Restore last-used values so the user doesn't re-type everything.
@@ -253,33 +253,33 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// After each scan event, re-register the listener so the next event is
 	// consumed. Stop listening once the scan is done.
-	switch msg := msg.(type) {
-	case resultMsg:
-		if m.out != nil {
-			m.out.ResultWithHint(msg.domain, msg.records, msg.takeover)
-		}
-		return m, tea.Batch(svCmd, listenForEvents(m.events))
-	case progressMsg, wildcardMsg, errorMsg, ignoredEventMsg:
-		return m, tea.Batch(svCmd, listenForEvents(m.events))
-	case doneMsg:
-		// Successful completion (including user abort, which still drains and
-		// emits EventDone): finalize structured output so buffered JSON/CSV is
-		// written and partial results are flushed. A JSONL file ends with the
-		// run-quality summary, as the CLI's does (#118).
-		if m.out != nil {
-			m.out.Summary(m.summary(msg))
-		}
-		m.reportOutputErr(m.finalizeOutput(true))
+	ev, ok := msg.(eventMsg)
+	if !ok {
 		return m, svCmd
-	case stoppedMsg:
+	}
+	switch {
+	case ev.Kind == scan.EventDone && ev.Stopped:
 		// The scan stopped before testing candidates (an early error such as a
 		// wildcard zone without Force, #99): close the file without finalizing,
 		// mirroring the CLI, which skips Finish so no empty JSON array is written.
 		m.reportOutputErr(m.finalizeOutput(false))
 		return m, svCmd
+	case ev.Kind == scan.EventDone:
+		// Successful completion (including user abort, which still drains and
+		// emits EventDone): finalize structured output so buffered JSON/CSV is
+		// written and partial results are flushed. A JSONL file ends with the
+		// run-quality summary, as the CLI's does (#118).
+		if m.out != nil {
+			m.out.Summary(m.summary(ev.Event))
+		}
+		m.reportOutputErr(m.finalizeOutput(true))
+		return m, svCmd
+	case ev.Kind == scan.EventResult && m.out != nil:
+		m.out.Emit(output.Result{Result: ev.Result})
 	}
-
-	return m, svCmd
+	// A kind this view does not know yet must not stall the scan: the
+	// listener is re-armed for it like any other event (#165).
+	return m, tea.Batch(svCmd, listenForEvents(m.events))
 }
 
 // finalizeOutput closes the optional output file. When finish is true the
@@ -311,7 +311,7 @@ func (m *Model) finalizeOutput(finish bool) error {
 }
 
 // summary builds the run-quality report for the finished scan.
-func (m *Model) summary(done doneMsg) output.Summary {
+func (m *Model) summary(final scan.Event) output.Summary {
 	s := report.New(report.Run{
 		Version:   m.opts.Version,
 		Started:   m.started,
@@ -327,7 +327,6 @@ func (m *Model) summary(done doneMsg) output.Summary {
 	case m.scanView.aborted:
 		status = "interrupted"
 	}
-	final := scan.Event{Kind: scan.EventDone, Processed: done.processed, Total: done.total, Found: done.found, Stats: done.stats}
 	report.Finish(&s, []output.TargetSummary{report.Target(m.vals.domain, status, "", true, final, settingLabel)}, time.Since(m.started))
 	return s
 }
@@ -351,36 +350,19 @@ func (m Model) View() string {
 	return ""
 }
 
-// listenForEvents returns a tea.Cmd that drains the events channel,
-// converting each scan.Event into the appropriate tea.Msg.
+// listenForEvents returns a tea.Cmd that delivers the next scan.Event as an
+// eventMsg.
 func listenForEvents(events <-chan scan.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-events
 		if !ok {
 			// scan.Run always sends EventDone before closing (#99), and the
 			// listener is not re-armed after it; a closed channel is defensive.
-			return stoppedMsg{}
+			return eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true}}
 		}
-		switch ev.Kind {
-		case scan.EventResult:
-			return resultMsg{domain: ev.Domain, records: ev.Records, takeover: ev.Takeover}
-		case scan.EventProgress:
-			return progressMsg{processed: ev.Processed, total: ev.Total, found: ev.Found}
-		case scan.EventNotice:
-			return wildcardMsg{text: scan.Render(ev.Message, settingLabel)}
-		case scan.EventError:
-			return errorMsg{text: scan.Render(ev.Message, settingLabel)}
-		case scan.EventDone:
-			if ev.Stopped {
-				return stoppedMsg{}
-			}
-			return doneMsg{processed: ev.Processed, total: ev.Total, found: ev.Found, stats: ev.Stats}
-		}
-		// A kind this view does not know yet must not stall the scan: the
-		// listener is re-armed for it like any other event (#165).
-		return ignoredEventMsg{}
+		return eventMsg{ev}
 	}
 }
 
-// ignoredEventMsg stands for an engine event the TUI does not display.
-type ignoredEventMsg struct{}
+// eventMsg carries one engine event into Bubble Tea (#162).
+type eventMsg struct{ scan.Event }

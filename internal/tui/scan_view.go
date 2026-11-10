@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
@@ -140,14 +139,27 @@ func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
 		m.layout()
 		m.refresh()
 
-	case resultMsg:
+	case eventMsg:
+		m.applyEvent(msg.Event)
+	}
+
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// applyEvent updates the view for one engine event. Kinds it does not know
+// are ignored.
+func (m *scanViewModel) applyEvent(ev scan.Event) {
+	switch ev.Kind {
+	case scan.EventResult:
 		prefix := "Found: "
 		if m.simMode {
 			prefix = "Found (sim): "
 		}
-		line := resultStyle.Render(prefix + msg.domain)
-		if msg.takeover != "" {
-			line += wildcardStyle.Render("  ⚠ takeover? " + msg.takeover)
+		line := resultStyle.Render(prefix + ev.Result.Subdomain)
+		if ev.Result.Takeover != "" {
+			line += wildcardStyle.Render("  ⚠ takeover? " + ev.Result.Takeover)
 		}
 		m.results = append(m.results, line)
 		if len(m.results) > maxResultLines {
@@ -161,45 +173,41 @@ func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
 			m.refresh()
 		}
 
-	case progressMsg:
-		m.processed = msg.processed
-		m.total = msg.total
-		m.found = msg.found
+	case scan.EventProgress:
+		m.processed = ev.Processed
+		m.total = ev.Total
+		m.found = ev.Found
 		m.etaText = ""
 		if m.eta == nil {
 			m.eta = &output.ETA{}
 		}
-		if left, ok := m.eta.Update(msg.processed, msg.total); ok {
+		if left, ok := m.eta.Update(ev.Processed, ev.Total); ok {
 			m.etaText = output.FormatETA(left)
 		}
 		m.refresh()
 
-	case wildcardMsg:
-		m.addMessage(wildcardStyle.Render("⚠ " + msg.text))
+	case scan.EventNotice:
+		m.addMessage(wildcardStyle.Render("⚠ " + scan.Render(ev.Message, settingLabel)))
 
-	case errorMsg:
-		m.addMessage(errorStyle.Render("✗ " + msg.text))
+	case scan.EventError:
+		text := scan.Render(ev.Message, settingLabel)
+		m.addMessage(errorStyle.Render("✗ " + text))
 		if m.errText == "" {
-			m.errText = msg.text
+			m.errText = text
 		}
 
-	case doneMsg:
+	case scan.EventDone:
 		m.done = true
-		m.processed = msg.processed
-		m.total = msg.total
-		m.found = msg.found
-		m.stats = msg.stats
-		m.refresh()
-
-	case stoppedMsg:
-		m.stopped = true
-		m.done = true
+		if ev.Stopped {
+			m.stopped = true
+		} else {
+			m.processed = ev.Processed
+			m.total = ev.Total
+			m.found = ev.Found
+			m.stats = ev.Stats
+		}
 		m.refresh()
 	}
-
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
 }
 
 func (m scanViewModel) View() string {
@@ -269,20 +277,6 @@ func (m scanViewModel) failed() bool {
 	return m.done && m.errText != "" && (m.stopped || !m.noAbort)
 }
 
-// Event message types for Bubble Tea.
-type resultMsg struct {
-	domain   string
-	records  []dns.Record
-	takeover string // DNS-only takeover hint (#71)
-}
-type progressMsg struct{ processed, total, found int64 }
-type wildcardMsg struct{ text string }
-type errorMsg struct{ text string }
-type doneMsg struct {
-	processed, total, found int64
-	stats                   scan.Stats
-}
-type stoppedMsg struct{}
 type wordlistLoadedMsg struct {
 	cfg     formValues
 	entries []string

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 // runTUIScan runs a simulated scan through the TUI model to completion and
@@ -37,11 +38,11 @@ func runTUIScan(t *testing.T, format output.Format, formatName string, types []s
 		msg := listenForEvents(m.events)()
 		next, _ := m.updateScan(msg)
 		m = next.(Model)
-		if _, done := msg.(doneMsg); done {
+		if ev := msg.(eventMsg); ev.Kind == scan.EventDone {
+			if ev.Stopped {
+				t.Fatal("scan ended without a final event")
+			}
 			break
-		}
-		if _, aborted := msg.(stoppedMsg); aborted {
-			t.Fatal("scan ended without a final event")
 		}
 	}
 	data, err := os.ReadFile(path)

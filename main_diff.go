@@ -243,7 +243,7 @@ func emitRemoved(ctx context.Context, s *session, summary *output.Summary) int64
 			diffSummary.Unverified++ // never looked up; not a found name (#151)
 		case outcome == dns.OutcomeNXDomain:
 			d.removed++
-			out.Emit(output.Result{Subdomain: name, Records: []dns.Record{}, Change: "removed"})
+			out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: []dns.Record{}}, Change: "removed"})
 		case outcome == dns.OutcomeFound:
 			diffSummary.StillResolving++
 		default:

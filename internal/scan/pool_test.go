@@ -135,10 +135,10 @@ func TestPoolHitsAreRevalidated(t *testing.T) {
 			done = &e
 		}
 	}
-	if len(results) != 1 || results[0].Domain != "www.example.com" {
+	if len(results) != 1 || results[0].Result.Subdomain != "www.example.com" {
 		t.Fatalf("results = %+v, want only www", results)
 	}
-	if got := results[0].Records; len(got) != 1 || got[0].Value != "192.0.2.10" {
+	if got := results[0].Result.Records; len(got) != 1 || got[0].Value != "192.0.2.10" {
 		t.Fatalf("records = %v, want the trusted answer 192.0.2.10", got)
 	}
 	if s := done.Stats; s.PoolHits != 2 || s.Confirmed != 1 || s.Unconfirmed != 1 {
@@ -212,7 +212,7 @@ func TestPoolLyingNXDomainMember(t *testing.T) {
 			found := map[string]bool{}
 			for ev := range events {
 				if ev.Kind == EventResult {
-					found[ev.Domain] = true
+					found[ev.Result.Subdomain] = true
 				}
 			}
 			for _, want := range []string{"p3.example.com", "p17.example.com", "p31.example.com"} {

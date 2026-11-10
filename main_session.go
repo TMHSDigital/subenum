@@ -431,11 +431,11 @@ func (s *session) handleSignals(ctx context.Context, cancel context.CancelFunc) 
 // file and, when it changed, to stdout. Names restored from a -resume state
 // were already written.
 func (s *session) emitResult(ev scan.Event, permutation bool) {
-	if s.restored[ev.Domain] {
+	if s.restored[ev.Result.Subdomain] {
 		s.refound++
 		return
 	}
-	res := output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Permutation: permutation}
+	res := output.Result{Result: ev.Result, Permutation: permutation}
 	s.targetResults = append(s.targetResults, res)
 	if res.Takeover != "" {
 		s.takeovers = append(s.takeovers, res)
@@ -447,7 +447,7 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 	if s.fileOut != nil {
 		s.fileOut.Emit(res)
 	}
-	if change, previous := s.diff.observe(ev.Domain, ev.Records); change != "" {
+	if change, previous := s.diff.observe(res.Subdomain, res.Records); change != "" {
 		res.Change, res.PreviousRecords = change, previous
 		s.out.Emit(res)
 	}
@@ -577,7 +577,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 // saved state and the number of permutation results restored.
 func (s *session) restoreTarget(saved *resumeTarget) (mainSaved *resumePass, restoredHits int) {
 	for _, r := range saved.Results {
-		s.emitResult(scan.Event{Domain: r.Subdomain, Records: r.Records, Takeover: r.Takeover}, r.Permutation)
+		s.emitResult(scan.Event{Result: r.Result}, r.Permutation)
 		s.restored[r.Subdomain] = true
 		if r.Permutation {
 			restoredHits++

@@ -292,6 +292,7 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 	a.Unconfirmed += b.Unconfirmed
 	a.Takeover += b.Takeover
 	a.Aborted = a.Aborted || b.Aborted
+	a.Expired = a.Expired || b.Expired
 	a.Wildcard = a.Wildcard || b.Wildcard
 	if len(b.Fingerprint) > 0 {
 		a.Fingerprint = b.Fingerprint

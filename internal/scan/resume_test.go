@@ -20,7 +20,7 @@ func runCollect(t *testing.T, cfg Config, stopAfter int) (map[string]bool, Stats
 	for ev := range events {
 		switch ev.Kind {
 		case EventResult:
-			found[ev.Domain] = true
+			found[ev.Result.Subdomain] = true
 			if stopAfter > 0 && len(found) == stopAfter {
 				cancel()
 			}

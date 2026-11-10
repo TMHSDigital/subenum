@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 // Package-level tests for the results file, SARIF, summary and diff/quiet
@@ -128,7 +129,7 @@ func readSARIF(t *testing.T, path string) (sarifLog, []byte) {
 
 func TestWriteSARIFNoResults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.sarif")
-	results := []Result{{Subdomain: "www.example.com", Records: []dns.Record{{Type: "A", Value: "192.0.2.1"}}}}
+	results := []Result{{Result: scan.Result{Subdomain: "www.example.com", Records: []dns.Record{{Type: "A", Value: "192.0.2.1"}}}}}
 	if err := WriteSARIF(path, "v1.2.3", results); err != nil {
 		t.Fatal(err)
 	}
@@ -147,11 +148,11 @@ func TestWriteSARIFNoResults(t *testing.T) {
 func TestWriteSARIFTakeovers(t *testing.T) {
 	cname := []dns.Record{{Type: "CNAME", Value: "gone.herokuapp.com."}}
 	results := []Result{
-		{Subdomain: "a.example.com", Records: cname, Takeover: "dangling:heroku"},
-		{Subdomain: "a.example.com", Records: cname, Takeover: "provider:heroku"},
-		{Subdomain: "b.example.com", Takeover: "dangling"},
-		{Subdomain: "c.example.com", Records: cname, Takeover: "dangling:heroku"},
-		{Subdomain: "www.example.com"},
+		{Result: scan.Result{Subdomain: "a.example.com", Records: cname, Takeover: "dangling:heroku"}},
+		{Result: scan.Result{Subdomain: "a.example.com", Records: cname, Takeover: "provider:heroku"}},
+		{Result: scan.Result{Subdomain: "b.example.com", Takeover: "dangling"}},
+		{Result: scan.Result{Subdomain: "c.example.com", Records: cname, Takeover: "dangling:heroku"}},
+		{Result: scan.Result{Subdomain: "www.example.com"}},
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "out.sarif")
@@ -206,7 +207,7 @@ func TestWriteSARIFTakeovers(t *testing.T) {
 func TestWriteSARIFUnwritablePath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "missing", "out.sarif")
-	if err := WriteSARIF(path, "v1", []Result{{Subdomain: "a.example.com", Takeover: "dangling"}}); err == nil {
+	if err := WriteSARIF(path, "v1", []Result{{Result: scan.Result{Subdomain: "a.example.com", Takeover: "dangling"}}}); err == nil {
 		t.Fatal("WriteSARIF to a missing directory succeeded")
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -258,9 +259,9 @@ func TestSummaryLineOnlyInJSONL(t *testing.T) {
 
 func TestDiffOutput(t *testing.T) {
 	results := []Result{
-		{Subdomain: "new.example.com", Change: "added", Records: []dns.Record{{Type: "A", Value: "192.0.2.1"}}},
-		{Subdomain: "old.example.com", Change: "removed"},
-		{Subdomain: "moved.example.com", Change: "changed", Records: []dns.Record{{Type: "A", Value: "192.0.2.3"}}},
+		{Result: scan.Result{Subdomain: "new.example.com", Records: []dns.Record{{Type: "A", Value: "192.0.2.1"}}}, Change: "added"},
+		{Result: scan.Result{Subdomain: "old.example.com"}, Change: "removed"},
+		{Result: scan.Result{Subdomain: "moved.example.com", Records: []dns.Record{{Type: "A", Value: "192.0.2.3"}}}, Change: "changed"},
 	}
 	emit := func(format Format) string {
 		var stdout bytes.Buffer

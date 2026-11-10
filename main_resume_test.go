@@ -6,9 +6,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -169,7 +171,7 @@ func TestE2EResumeCountsRefoundNamesOnce(t *testing.T) {
 	// were complete when the scan was interrupted.
 	var saved []output.Result
 	for _, e := range entries[:10] {
-		saved = append(saved, output.Result{Subdomain: e + ".example.com"})
+		saved = append(saved, output.Result{Result: scan.Result{Subdomain: e + ".example.com"}})
 	}
 	path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{{
 		Domain: "example.com", RootDone: 5, Processed: 10, Total: int64(len(entries)), Results: saved,
@@ -234,7 +236,7 @@ func TestE2EResumeRefusesChangedSettings(t *testing.T) {
 // never reached, keep their saved resume points.
 func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 	prev := &resumeState{Targets: []resumeTarget{
-		{Domain: "a.example", RootDone: 40, Processed: 40, Stats: scan.Stats{NXDomain: 38}, Results: []output.Result{{Subdomain: "x.a.example"}}},
+		{Domain: "a.example", RootDone: 40, Processed: 40, Stats: scan.Stats{NXDomain: 38}, Results: []output.Result{{Result: scan.Result{Subdomain: "x.a.example"}}}},
 		{Domain: "b.example", RootDone: 7, Processed: 7, Permute: &resumePass{RootDone: 3}},
 	}}
 	f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json"), wordlistFile: ""}
@@ -245,7 +247,7 @@ func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 		status:       []string{"interrupted", ""},
 		entryDigests: []string{"d1", ""},
 		results:      []targetResult{{}, {}},
-		runs:         [][]output.Result{{{Subdomain: "x.a.example"}}, nil},
+		runs:         [][]output.Result{{{Result: scan.Result{Subdomain: "x.a.example"}}}, nil},
 	})
 	data, err := os.ReadFile(f.stateFile)
 	if err != nil {
@@ -309,6 +311,41 @@ func TestPermutationCandidatesRespectNameLength(t *testing.T) {
 	for _, c := range candidates {
 		if n := len(c) + 1 + len(target); n > 253 {
 			t.Errorf("candidate %s is %d characters long", c, n)
+		}
+	}
+}
+
+// TestMergeStatsCoversEveryField is the drift guard of #162: a field added to
+// scan.Stats that mergeStats drops fails here. Each field set in either the
+// saved or the resumed run must survive the merge; RootDone is the one field
+// taken from the resumed run alone.
+func TestMergeStatsCoversEveryField(t *testing.T) {
+	zero := mergeStats(scan.Stats{}, scan.Stats{})
+	st := reflect.TypeOf(scan.Stats{})
+	for i := range st.NumField() {
+		name := st.Field(i).Name
+		for _, side := range []string{"saved", "resumed"} {
+			if side == "saved" && name == "RootDone" {
+				continue
+			}
+			var a, b scan.Stats
+			v := reflect.ValueOf(&b).Elem().Field(i)
+			if side == "saved" {
+				v = reflect.ValueOf(&a).Elem().Field(i)
+			}
+			switch v.Kind() {
+			case reflect.Int64:
+				v.SetInt(1)
+			case reflect.Bool:
+				v.SetBool(true)
+			case reflect.Slice:
+				v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+			default:
+				t.Fatalf("scan.Stats.%s: unhandled kind %s", name, v.Kind())
+			}
+			if got := mergeStats(a, b); reflect.DeepEqual(got, zero) {
+				t.Errorf("mergeStats drops scan.Stats.%s from the %s run", name, side)
+			}
 		}
 	}
 }
