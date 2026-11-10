@@ -150,3 +150,20 @@ func ExampleConfig_recursive() {
 	// dev.example.com
 	// out of scope, never queried: 2
 }
+
+// Permutations suggests the names most likely to sit next to ones a scan
+// already found. Its output is relative to the apex, so it can feed the Words
+// of a second scan. Pass nil words for the CLI's built-in list.
+func ExamplePermutations() {
+	for _, name := range subenum.Permutations([]string{"api"}, []string{"dev"}) {
+		fmt.Println(name)
+	}
+
+	// Output:
+	// api-dev
+	// api1
+	// api2
+	// api3
+	// dev-api
+	// dev.api
+}

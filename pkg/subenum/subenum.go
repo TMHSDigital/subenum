@@ -27,6 +27,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/data"
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/permute"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/validate"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -342,6 +343,22 @@ var defaultWords = sync.OnceValue(func() []string {
 	words, _, _ := wordlist.Build(lines, "")
 	return words
 })
+
+// Permutations returns second-pass candidates for names a scan already found,
+// the same ones the CLI's -permute tries: api suggests api-dev, dev-api,
+// dev.api, api2 and so on. Each seed is a name relative to the apex, such as
+// "api" for api.example.com or "api.us" for api.us.example.com; its leftmost
+// label is permuted and the rest kept. words are combined with each seed
+// label; nil selects the CLI's built-in list of environment, version and role
+// names. Candidates that are not valid DNS names are left out. The result is
+// relative to the apex, like Config.Words, sorted and duplicate-free, so it
+// can be passed as the Words of a follow-up scan. It sends no DNS queries.
+func Permutations(seeds, words []string) []string {
+	if words == nil {
+		words = permute.Words
+	}
+	return permute.Generate(seeds, words, nil)
+}
 
 // doneGrace is how long Run's forwarder waits to hand over the final event
 // after ctx is cancelled, when the caller may have stopped reading.

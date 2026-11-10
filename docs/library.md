@@ -59,6 +59,20 @@ for ev := range events {
 
 Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with a deferred `cancel()` is safe: once `ctx` is cancelled the scan stops without waiting for a reader, and its goroutines exit within about a second whether or not the channel is read. A consumer that keeps reading after cancelling still gets `KindDone` with the counts so far. While `ctx` is live, a consumer that stops reading pauses the scan once the buffer fills.
 
+## Permutations: second-pass candidates
+
+`Permutations` makes the candidates the CLI's `-permute` tries: from names a scan already found, the variants most likely to sit next to them (`api` suggests `api-dev`, `dev-api`, `dev.api`, `api2` and so on). Seeds and results are relative to the apex, like `Words`, so the output feeds a second scan directly. Pass `nil` words for the CLI's built-in list of environment, version and role names. It sends no DNS queries:
+
+```go
+seeds := []string{"api", "mail"} // api.example.com and mail.example.com were found
+more, _, err := subenum.Scan(ctx, subenum.Config{
+    Domain: "example.com",
+    Words:  subenum.Permutations(seeds, nil),
+})
+```
+
+The result is sorted and duplicate-free, and names that are not valid in DNS are left out.
+
 ## Configuration
 
 | Field | Default | What it does |
