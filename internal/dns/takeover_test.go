@@ -17,7 +17,11 @@ func TestTakeoverProvider(t *testing.T) {
 		"ACME.GitHub.io":                 "github-pages",
 		"bucket.s3.amazonaws.com":        "aws-s3",
 		"site.azurewebsites.net":         "azure",
+		"site.animaapp.io":               "anima",
+		"forum.trydiscourse.com.":        "discourse",
 		"herokuapp.com.evil.example.com": "",
+		"animaapp.io.evil.example.com":   "",
+		"trydiscourse.com.evil.test":    "",
 		"cdn.example.net":                "",
 	} {
 		if got := TakeoverProvider(target); got != want {

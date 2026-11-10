@@ -46,6 +46,8 @@ var takeoverProviders = []struct{ suffix, name string }{
 	{".readme.io", "readme"},
 	{".agilecrm.com", "agilecrm"},
 	{".canny.io", "canny"},
+	{".animaapp.io", "anima"},
+	{".trydiscourse.com", "discourse"},
 }
 
 // TakeoverProvider returns the takeover-prone service a CNAME target belongs
