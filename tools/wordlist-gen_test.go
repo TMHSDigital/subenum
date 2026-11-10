@@ -168,3 +168,21 @@ func TestRunTerminator(t *testing.T) {
 		t.Errorf("-- terminator: exit %d, stderr %q; want 2", code, stderr.String())
 	}
 }
+
+// TestRunInterspersedFlags checks that wordlist-gen uses the shared
+// cliargs parser (#136): flags after a stray positional are still parsed (so
+// an unknown one is a usage error), and "--" as a flag value is not a terminator.
+func TestRunInterspersedFlags(t *testing.T) {
+	var stderr strings.Builder
+	if code := run([]string{"acme.com", "-bogus"}, io.Discard, &stderr); code != 2 || !strings.Contains(stderr.String(), "-bogus") {
+		t.Errorf("unknown flag after positional: exit %d, stderr %q; want 2 naming -bogus", code, stderr.String())
+	}
+
+	// "-o --" sets the output path to "--"; flag parsing continues past the
+	// positional, so -bogus is reported rather than "unexpected argument".
+	stderr.Reset()
+	code := run([]string{"-o", "--", "acme.com", "-bogus"}, io.Discard, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "-bogus") || strings.Contains(stderr.String(), "unexpected argument") {
+		t.Errorf("-o -- then positional: exit %d, stderr %q; want 2 naming -bogus", code, stderr.String())
+	}
+}
