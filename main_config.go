@@ -111,6 +111,9 @@ func (d *defaultsLoader) apply(fs *flag.FlagSet) error {
 			errs = append(errs, fmt.Errorf("%w: %s value %q for %s: %w", errConfig, source, value, name, err))
 			return false
 		}
+		if v, ok := fs.Lookup(name).Value.(interface{ markDefault() }); ok {
+			v.markDefault()
+		}
 		d.values[name] = value
 		return true
 	}

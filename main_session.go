@@ -273,7 +273,7 @@ func (s *session) loadInputs() bool {
 	f, out := s.f, s.out
 	// The wordlist is read once (stdin can only be read once) and normalized
 	// per target, since the name-length limit depends on the domain.
-	if f.wordlistFile == "" {
+	if len(f.wordlists.paths) == 0 {
 		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", bundledWordlistName)
 	}
 	s.settings = effectiveSettings(s.fs)
@@ -297,7 +297,7 @@ func (s *session) loadInputs() bool {
 	// limit differs (#182).
 	s.words = wordlist.Prepare(wordLines)
 	if probe, _, _ := s.words.For(""); len(probe) == 0 {
-		out.Error("wordlist %s has no valid entries", f.wordlistFile)
+		out.Error("wordlist %s has no valid entries", f.wordlists.describe())
 		return false
 	}
 	if s.resume != nil {

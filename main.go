@@ -111,7 +111,7 @@ func main() {
 type cliFlags struct {
 	tui          bool
 	printConfig  bool
-	wordlistFile string
+	wordlists    wordlistPaths // -w, repeatable (#199)
 	domainList   string
 	concurrency  int
 	timeoutMs    int
@@ -200,7 +200,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	}
 	fs.BoolVar(&f.tui, "tui", false, "Launch the interactive terminal UI (all other flags are ignored)")
 	fs.BoolVar(&f.printConfig, "print-config", false, "Print every setting's effective value and its source (flag, env, config or default), then exit")
-	fs.StringVar(&f.wordlistFile, "w", "", "Path to the wordlist file (- for stdin); omitted: the bundled top-5000 list")
+	fs.Var(&f.wordlists, "w", "Path to a wordlist `file` (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list")
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
 	fs.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
@@ -331,8 +331,12 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 	if !validateArgs(f, positionals, fs, out) {
 		return "", false
 	}
-	if f.wordlistFile == wordlist.Stdin && f.domainList == wordlist.Stdin {
+	if f.wordlists.readsStdin() && f.domainList == wordlist.Stdin {
 		out.Error("-w and -dL cannot both read standard input")
+		return "", false
+	}
+	if n := countStdin(f.wordlists.paths); n > 1 {
+		out.Error("-w - is given %d times; standard input can only be read once", n)
 		return "", false
 	}
 	if f.simZone != "" {
@@ -535,10 +539,10 @@ func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Wri
 		out.Info("Mode: LIVE DNS RESOLUTION")
 	}
 	out.Info("Target domain: %s", domain)
-	if f.wordlistFile == "" {
+	if len(f.wordlists.paths) == 0 {
 		out.Info("Wordlist: %s", bundledWordlistName)
 	} else {
-		out.Info("Wordlist: %s", f.wordlistFile)
+		out.Info("Wordlist: %s", f.wordlists.describe())
 	}
 	out.Info("Concurrency: %d workers", f.concurrency)
 	out.Info("Timeout: %d ms", f.timeoutMs)

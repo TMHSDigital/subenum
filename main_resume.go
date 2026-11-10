@@ -226,7 +226,8 @@ func inputDigests(f cliFlags) (map[string]string, error) {
 	if diff == f.outputFile {
 		diff = ""
 	}
-	for _, p := range []string{f.wordlistFile, f.domainList, f.excludeFile, f.resolvers, f.simZone, f.seedsFile, diff} {
+	paths := append(slices.Clone(f.wordlists.paths), f.domainList, f.excludeFile, f.resolvers, f.simZone, f.seedsFile, diff)
+	for _, p := range paths {
 		d, err := fileDigest(p)
 		if err != nil {
 			return nil, err
@@ -308,7 +309,7 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 // run never reached keeps its saved state unchanged.
 func saveResumeState(s *session) {
 	f, out, prev := s.f, s.out, s.resume
-	if f.wordlistFile == "-" || f.domainList == "-" {
+	if f.wordlists.readsStdin() || f.domainList == "-" {
 		out.Info("Not saving resume state: the wordlist or domain list came from stdin")
 		return
 	}

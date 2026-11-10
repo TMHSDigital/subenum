@@ -239,7 +239,7 @@ func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 		{Domain: "a.example", RootDone: 40, Processed: 40, Stats: scan.Stats{NXDomain: 38}, Results: []output.Result{{Result: scan.Result{Subdomain: "x.a.example"}}}},
 		{Domain: "b.example", RootDone: 7, Processed: 7, Permute: &resumePass{RootDone: 3}},
 	}}
-	f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json"), wordlistFile: ""}
+	f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json")}
 	out := output.New(nil, false, output.FormatText)
 	saveResumeState(&session{
 		f: f, out: out, resume: prev,
