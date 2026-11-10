@@ -68,6 +68,11 @@ type Config struct {
 	// and wildcard probes always use Resolver.
 	ResolverPool []string
 
+	// RatePerResolver caps the DNS queries per second sent to each
+	// ResolverPool member; Rate still caps the total, so the stricter limit
+	// wins. 0 is unlimited. Ignored without a ResolverPool.
+	RatePerResolver int
+
 	// Concurrency is the number of workers looking up names at once.
 	Concurrency int
 
@@ -472,6 +477,8 @@ func (c Config) options() (scan.Options, error) {
 		return scan.Options{}, fmt.Errorf("subenum: Attempts must not be negative, got %d", c.Attempts)
 	case c.Rate < 0:
 		return scan.Options{}, fmt.Errorf("subenum: Rate must be 0 (unlimited) or positive, got %d", c.Rate)
+	case c.RatePerResolver < 0:
+		return scan.Options{}, fmt.Errorf("subenum: RatePerResolver must be 0 (unlimited) or positive, got %d", c.RatePerResolver)
 	case c.MaxQueries < 0:
 		return scan.Options{}, fmt.Errorf("subenum: MaxQueries must be 0 (unlimited) or positive, got %d", c.MaxQueries)
 	case c.MaxDuration < 0:
@@ -545,6 +552,7 @@ func (c Config) options() (scan.Options, error) {
 			return scan.Options{}, errors.New("subenum: ResolverPool lists no resolvers")
 		}
 		opts.Pool = dns.NewPool(addrs, time.Duration(opts.TimeoutMs)*time.Millisecond)
+		opts.Pool.SetRatePerResolver(c.RatePerResolver)
 	}
 
 	if err := opts.Validate(); err != nil {

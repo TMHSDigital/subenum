@@ -254,6 +254,7 @@ var tuiOmittedFlags = map[string]bool{
 	"simulate-zone": true, "retries": true, "show-records": true, "max-duration": true, "stats": true,
 	"sarif": true, "exclude-file": true, "permute": true, "ct": true, "seeds": true, "state": true,
 	"diff": true, "diff-records": true, "r": true, "dL": true, "seed": true, "resume": true,
+	"rate-per-resolver": true, // only applies to -r, which the TUI has no field for
 }
 
 // TestSettingNamesAgreeAcrossFrontEnds covers #160: every flag is either wired

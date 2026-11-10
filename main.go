@@ -143,6 +143,7 @@ type cliFlags struct {
 	exclude      string
 	excludeFile  string
 	resolvers    string // -r: file of resolver addresses for a pool
+	ratePerRes   int    // -rate-per-resolver: per-member cap for the -r pool (#196)
 	diff         string // -diff: previous results file to compare against
 	diffRecords  bool   // -diff-records: also report names whose records changed (#189)
 	stateFile    string // where an interrupted run saves its resume state
@@ -237,6 +238,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.StringVar(&f.diff, "diff", "", "Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes")
 	fs.BoolVar(&f.diffRecords, "diff-records", false, "With -diff, also report names whose records changed (a re-pointed CNAME, moved addresses), compared over the -type record types; needs a json, jsonl or csv -diff file")
 	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")
+	fs.IntVar(&f.ratePerRes, "rate-per-resolver", 0, "With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited)")
 	fs.Usage = func() {
 		w := fs.Output()
 		_, _ = fmt.Fprintln(w, "Usage: subenum [-w <wordlist_file>] [options] <domain>")
@@ -361,6 +363,10 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 		out.Error("-max-duration must be 0 (unlimited) or positive, got %s", f.maxDuration)
 		return "", false
 	}
+	if f.ratePerRes < 0 {
+		out.Error("-rate-per-resolver must be 0 (unlimited) or positive, got %d", f.ratePerRes)
+		return "", false
+	}
 	if f.diffRecords && f.diff == "" {
 		out.Error("-diff-records compares records against a previous results file; add -diff <file>")
 		return "", false
@@ -407,7 +413,9 @@ func loadPool(f cliFlags, in *runtimeInputs, out *output.Writer) (*dns.Pool, int
 		return nil, exitUsage
 	}
 	out.Info("Resolver pool: %d resolvers; every hit is re-validated against %s", len(addrs), f.dnsServer)
-	return dns.NewPool(addrs, time.Duration(f.timeoutMs)*time.Millisecond), exitOK
+	pool := dns.NewPool(addrs, time.Duration(f.timeoutMs)*time.Millisecond)
+	pool.SetRatePerResolver(f.ratePerRes)
+	return pool, exitOK
 }
 
 // logPoolHealth prints each pool resolver's accounting at the end of a run.
@@ -416,13 +424,13 @@ func logPoolHealth(pool *dns.Pool, out *output.Writer) {
 		return
 	}
 	out.Info("Resolvers:")
-	out.Info("  %-24s %8s %8s %8s %8s %7s %12s", "address", "lookups", "found", "nxdomain", "failed", "benched", "contradicted")
+	out.Info("  %-24s %8s %8s %8s %8s %7s %9s %12s", "address", "lookups", "found", "nxdomain", "failed", "benched", "throttled", "contradicted")
 	for _, r := range pool.Stats() {
 		flag := ""
 		if r.Flagged {
 			flag = "  FLAGGED: dropped as lying"
 		}
-		out.Info("  %-24s %8d %8d %8d %8d %7d %12d%s", r.Addr, r.Lookups, r.Found, r.NXDomain, r.Failed, r.Benched, r.Contradicted, flag)
+		out.Info("  %-24s %8d %8d %8d %8d %7d %9d %12d%s", r.Addr, r.Lookups, r.Found, r.NXDomain, r.Failed, r.Benched, r.Throttled, r.Contradicted, flag)
 	}
 }
 

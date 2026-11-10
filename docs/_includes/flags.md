@@ -23,6 +23,7 @@
 | `-progress` | true | Show progress during scanning |
 | `-r <string>` | - | File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server |
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |
+| `-rate-per-resolver <int>` | - | With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited) |
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
 | `-resume <string>` | - | Resume an interrupted run from its state file (no other arguments) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |

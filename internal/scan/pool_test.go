@@ -66,6 +66,40 @@ func TestPoolSpreadsLoad(t *testing.T) {
 	}
 }
 
+// TestPoolRatePerResolver: with a per-resolver cap (#196) a scan still
+// completes, and takes at least as long as the busiest member's queries need
+// at the cap. Only that lower bound is checked; there is no upper bound on
+// wall-clock time (#207).
+func TestPoolRatePerResolver(t *testing.T) {
+	trusted := slowServer(t, 0)
+	pool := dns.NewPool([]string{slowServer(t, 0), slowServer(t, 0)}, 5*time.Second)
+	const perSecond = 40
+	pool.SetRatePerResolver(perSecond)
+	cfg := Config{
+		Domain: "example.com", Entries: makeEntries(20), Concurrency: 8,
+		Timeout: 5 * time.Second, Attempts: 1, Types: []string{"A"},
+		Resolver: dns.NewResolver(5*time.Second, trusted), DNSServer: trusted,
+		Pool: pool,
+	}
+	start := time.Now()
+	done, errs := runPool(t, cfg)
+	elapsed := time.Since(start)
+	if len(errs) != 0 || done.Processed != 20 {
+		t.Fatalf("errs=%v processed=%d", errs, done.Processed)
+	}
+	var busiest, total int64
+	for _, s := range pool.Stats() {
+		busiest = max(busiest, s.Lookups)
+		total += s.Lookups
+	}
+	if total < 20 {
+		t.Fatalf("pool answered %d lookups, want at least 20: %+v", total, pool.Stats())
+	}
+	if floor := time.Duration(busiest-1) * time.Second / perSecond; elapsed < floor {
+		t.Fatalf("scan took %v, under the %v its busiest member's %d lookups need at %d/s", elapsed, floor, busiest, perSecond)
+	}
+}
+
 // BenchmarkPoolSpreadsLoad compares a scan over one slow resolver with the
 // same scan over twenty; run with -bench to see the speedup.
 func BenchmarkPoolSpreadsLoad(b *testing.B) {

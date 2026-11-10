@@ -276,6 +276,7 @@ func TestConfigErrors(t *testing.T) {
 		{"negative timeout", subenum.Config{Domain: "example.com", Timeout: -time.Second}, "Timeout"},
 		{"negative attempts", subenum.Config{Domain: "example.com", Attempts: -2}, "Attempts"},
 		{"negative rate", subenum.Config{Domain: "example.com", Rate: -5}, "Rate"},
+		{"negative rate per resolver", subenum.Config{Domain: "example.com", RatePerResolver: -5}, "RatePerResolver"},
 		{"negative max queries", subenum.Config{Domain: "example.com", MaxQueries: -5}, "MaxQueries"},
 		{"negative depth", subenum.Config{Domain: "example.com", Depth: -1}, "Depth"},
 		{"hit rate too high", subenum.Config{Domain: "example.com", Simulate: true, HitRate: 101}, "HitRate"},
