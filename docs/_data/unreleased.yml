@@ -1,0 +1,19 @@
+# Documented on main but not in the latest release yet (#213). The site tags
+# each one "unreleased" through _includes/unreleased.html, and `make
+# docs-flags` tags the listed flags in the generated CLI table.
+#
+# In the release commit, empty these lists and run `make docs-flags`.
+flags:
+  - diff-records
+  - dry-run
+  - log-format
+  - max-duration
+  - rate-per-resolver
+# action.yml inputs and outputs
+action:
+  - max-duration
+  - changed
+# pkg/subenum identifiers
+library:
+  - MaxDuration
+  - Permutations

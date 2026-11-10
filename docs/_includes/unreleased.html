@@ -1,0 +1,13 @@
+{%- comment -%}
+  Tags a flag, Action input/output or library identifier that is on main but
+  not released yet, while it is listed in _data/unreleased.yml (#213).
+  Usage: {% include unreleased.html flag="max-duration" %}, action="...", library="..."
+{%- endcomment -%}
+{%- assign u = site.data.unreleased -%}
+{%- assign tagged = false -%}
+{%- if include.flag and u.flags contains include.flag -%}{%- assign tagged = true -%}{%- endif -%}
+{%- if include.action and u.action contains include.action -%}{%- assign tagged = true -%}{%- endif -%}
+{%- if include.library and u.library contains include.library -%}{%- assign tagged = true -%}{%- endif -%}
+{%- if tagged -%}
+<span class="unreleased" title="On main, not in {{ site.github.latest_release.tag_name | default: 'a release' }} yet">unreleased</span>
+{%- endif -%}

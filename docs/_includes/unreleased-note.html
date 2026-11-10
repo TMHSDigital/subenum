@@ -1,0 +1,7 @@
+{%- comment -%}
+  Explains the "unreleased" tag above the flag table, only while
+  _data/unreleased.yml lists a flag (#213).
+{%- endcomment -%}
+{%- if site.data.unreleased.flags.size > 0 -%}
+<p class="unreleased-note">Flags tagged <span class="unreleased">unreleased</span> are on <code>main</code> but not in {{ site.github.latest_release.tag_name | default: "the latest release" }} yet, so a release binary rejects them. To use them now, build from main: <code>go install github.com/TMHSDigital/subenum@main</code>.</p>
+{%- endif -%}

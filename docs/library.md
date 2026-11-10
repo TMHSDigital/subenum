@@ -61,7 +61,7 @@ Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with
 
 ## Permutations: second-pass candidates
 
-`Permutations` makes the candidates the CLI's `-permute` tries: from names a scan already found, the variants most likely to sit next to them (`api` suggests `api-dev`, `dev-api`, `dev.api`, `api2` and so on). Seeds and results are relative to the apex, like `Words`, so the output feeds a second scan directly. Pass `nil` words for the CLI's built-in list of environment, version and role names. It sends no DNS queries:
+`Permutations`{% include unreleased.html library="Permutations" %} makes the candidates the CLI's `-permute` tries: from names a scan already found, the variants most likely to sit next to them (`api` suggests `api-dev`, `dev-api`, `dev.api`, `api2` and so on). Seeds and results are relative to the apex, like `Words`, so the output feeds a second scan directly. Pass `nil` words for the CLI's built-in list of environment, version and role names. It sends no DNS queries:
 
 ```go
 seeds := []string{"api", "mail"} // api.example.com and mail.example.com were found
@@ -88,7 +88,7 @@ The result is sorted and duplicate-free, and names that are not valid in DNS are
 | `Types` | `A`, `AAAA` | Record types. `CNAME` populates `Result.Takeover`. |
 | `Recursive`, `Depth` | off, `1` | Enumerate again under each name found. |
 | `MaxQueries` | unlimited | Cap on candidate names tested. |
-| `MaxDuration` | unlimited | Time budget from the start of `Run`. Then no new names are tested and the rest are counted in `Stats.Skipped`, with `Stats.Expired` set. |
+| `MaxDuration`{% include unreleased.html library="MaxDuration" %} | unlimited | Time budget from the start of `Run`. Then no new names are tested and the rest are counted in `Stats.Skipped`, with `Stats.Expired` set. |
 | `Exclude` | none | Out-of-scope names and `*.parent` branches, never queried. |
 | `Force` | off | Scan a wildcard zone, dropping answers that match its fingerprint. |
 | `NoAbort` | off | Keep going when more than a fifth of lookups fail. `Run` still sends the warning as a `KindError` event; `Scan` returns no error for a scan that finished. |

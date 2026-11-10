@@ -344,6 +344,7 @@ The site at [tmhsdigital.github.io/subenum](https://tmhsdigital.github.io/subenu
 - `docs/_data/nav.yml` is the single list of pages and sections. Add a new page there or it won't appear in the sidebar, the footer or search.
 - `docs/search.json` is generated at build time from the pages in `nav.yml`; `docs/assets/js/site.js` runs search, tabs, copy buttons and the hero animation.
 - The palette lives at the top of `docs/assets/css/site.css`. The outcome colours (resolved, nxdomain, timeout, refused) mean the same thing everywhere, so reuse the tokens rather than adding colours.
+- The site deploys from `main`, so it can document a feature before a release has it. List such a flag, Action input or output, or library identifier in `docs/_data/unreleased.yml`, run `make docs-flags`, and put `{% raw %}{% include unreleased.html flag="name" %}{% endraw %}` (or `action=` / `library=`) after it in prose; the site then tags it "unreleased". In the release commit, empty those lists and run `make docs-flags` again.
 
 To preview locally, build with the same image the workflow uses and serve the output:
 

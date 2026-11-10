@@ -80,7 +80,7 @@ subenum -silent -dL scope.txt -exclude-file out-of-scope.txt -stats run.json \
 
 ## Machine-readable diagnostics
 
-`-log-format json` turns stderr into JSON Lines, so CI can act on a warning
+`-log-format json`{% include unreleased.html flag="log-format" %} turns stderr into JSON Lines, so CI can act on a warning
 without matching `Note:` or `Warning:` text. Each line has `time`, `level`
 (`error`, `warn`, `notice`, `info`, `debug`), `kind`, `target` (the domain
 being scanned, when there is one) and `message`; engine notices also list the

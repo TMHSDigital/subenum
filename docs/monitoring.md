@@ -47,7 +47,7 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
 
 A name can stay in place while what it points at moves. A CNAME re-pointed
 at an unclaimed service is a takeover waiting to happen, and plain `-diff`
-reports it as unchanged. Add `-diff-records` to also compare the records of
+reports it as unchanged. Add `-diff-records`{% include unreleased.html flag="diff-records" %} to also compare the records of
 every name found again:
 
 ```bash
@@ -113,12 +113,12 @@ jobs:
 | `previous` | | A previous results file to diff against (add `-diff-records` to `args` to also catch record changes) |
 | `baseline-artifact` | | Artifact name for the baseline: downloaded before, replaced after a complete run |
 | `sarif` | | Write takeover candidates as SARIF |
-| `max-duration` | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report |
+| `max-duration`{% include unreleased.html action="max-duration" %} | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report |
 | `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never` |
 | `version` | `latest` | Release to install, or `source` to build the action's checkout |
 | `token` | `github.token` | Token for downloading the release and the baseline artifact |
 
-Outputs: `verdict`, `found`, `added`, `removed`, `changed` (with `-diff-records`), and the paths `results` (JSONL)
+Outputs: `verdict`, `found`, `added`, `removed`, `changed`{% include unreleased.html action="changed" %} (with `-diff-records`), and the paths `results` (JSONL)
 and `stats` (the run-quality report). The step below builds the same thing by
 hand, if you prefer to see every command.
 

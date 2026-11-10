@@ -227,6 +227,26 @@ kbd {
   color: var(--text);
 }
 
+/* On main, not in the latest release (_data/unreleased.yml, #213). */
+.unreleased {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px dashed var(--accent);
+  border-radius: 3px;
+  color: var(--accent-text);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.45;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.unreleased-note .unreleased {
+  margin-left: 0;
+}
+
 .topnav {
   display: flex;
   gap: 4px;
