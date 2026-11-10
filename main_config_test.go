@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/TMHSDigital/subenum/internal/scan"
+	"github.com/TMHSDigital/subenum/internal/tui"
 )
 
 // TestMain keeps every test in this package hermetic: no developer config
@@ -239,6 +242,52 @@ func TestPrintConfigEffectiveAttempts(t *testing.T) {
 		d.printConfig(&out, fs)
 		if !strings.Contains(out.String(), tc.want) {
 			t.Errorf("%v %v: -print-config lacks %q:\n%s", tc.args, tc.env, tc.want, out.String())
+		}
+	}
+}
+
+// tuiOmittedFlags are flags the TUI form deliberately has no field for: they
+// control CLI-only output, input sources, run state or modes the form does not
+// offer, so a SUBENUM_* or config file value for them never seeds the form.
+var tuiOmittedFlags = map[string]bool{
+	"tui": true, "print-config": true, "version": true, "v": true, "progress": true, "silent": true,
+	"simulate-zone": true, "retries": true, "show-records": true, "max-duration": true, "stats": true,
+	"sarif": true, "exclude-file": true, "permute": true, "ct": true, "seeds": true, "state": true,
+	"diff": true, "diff-records": true, "r": true, "dL": true, "seed": true, "resume": true,
+}
+
+// TestSettingNamesAgreeAcrossFrontEnds covers #160: every flag is either wired
+// into the TUI form or listed in tuiOmittedFlags, every flag the form reads
+// exists, and every engine setting names a real flag. Adding a flag, a form
+// field or a setting in one place but not the others fails here.
+func TestSettingNamesAgreeAcrossFrontEnds(t *testing.T) {
+	_, _, fs, _ := parseFlags(nil)
+	wired := map[string]bool{}
+	for _, name := range tui.Flags() {
+		if wired[name] {
+			t.Errorf("TUI reads -%s for two fields", name)
+		}
+		wired[name] = true
+		if fs.Lookup(name) == nil {
+			t.Errorf("TUI reads -%s, which is not a flag", name)
+		}
+		if tuiOmittedFlags[name] {
+			t.Errorf("-%s is wired into the TUI and also listed in tuiOmittedFlags", name)
+		}
+	}
+	fs.VisitAll(func(fl *flag.Flag) {
+		if !wired[fl.Name] && !tuiOmittedFlags[fl.Name] {
+			t.Errorf("-%s is neither wired into the TUI form nor listed in tuiOmittedFlags", fl.Name)
+		}
+	})
+	for name := range tuiOmittedFlags {
+		if fs.Lookup(name) == nil {
+			t.Errorf("tuiOmittedFlags lists -%s, which is not a flag", name)
+		}
+	}
+	for _, s := range scan.Settings {
+		if fs.Lookup(s.Names().Flag) == nil {
+			t.Errorf("setting %q names flag %q, which is not a flag", s, s.Names().Flag)
 		}
 	}
 }

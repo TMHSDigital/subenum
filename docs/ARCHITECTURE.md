@@ -59,7 +59,7 @@ internal/scan/options.go       - Options: user-facing settings shared by CLI and
 internal/scan/runner.go        - Scan engine: Config, Event/EventKind/NoticeKind, Stats, Run
 internal/scan/dispatcher.go    - dispatcher: lazy candidate generation, budgets, resume watermark
 internal/scan/scope.go         - -exclude patterns (ValidateExcludes, IsExcluded)
-internal/scan/settings.go      - Setting tokens in engine messages, rendered per front end (Render, FlagName)
+internal/scan/settings.go      - Setting tokens and the one table naming each setting as flag, Config field and form label (Render, Names)
 internal/scan/verdict.go       - Run-quality verdicts (Stats.Verdict, VerdictRank)
 internal/scan/verify.go        - Verify: re-check names against the trusted resolver (used by -diff)
 internal/dns/resolver.go       - NewResolver, ResolveTypes, ResolveDomainWithRetry, Classify,

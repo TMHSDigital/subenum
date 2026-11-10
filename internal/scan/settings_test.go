@@ -16,10 +16,27 @@ func TestRender(t *testing.T) {
 	if got := Render("no tokens", FlagName); got != "no tokens" {
 		t.Errorf("Render changed a message without tokens: %q", got)
 	}
+}
+
+// TestSettingTable covers #160: every setting has a flag, a Config field and
+// a form label, and no two settings share one.
+func TestSettingTable(t *testing.T) {
+	seen := map[string]Setting{}
 	for _, s := range Settings {
-		if FlagName(s) == "" {
-			t.Errorf("setting %q has no flag name", s)
+		n := s.Names()
+		for kind, name := range map[string]string{"flag": n.Flag, "field": n.Field, "label": n.Label} {
+			if name == "" {
+				t.Errorf("setting %q has no %s", s, kind)
+				continue
+			}
+			if prev, dup := seen[kind+":"+name]; dup {
+				t.Errorf("settings %q and %q share the %s %q", prev, s, kind, name)
+			}
+			seen[kind+":"+name] = s
 		}
+	}
+	if n := Setting("unknown").Names(); n != (SettingNames{}) || FlagName("unknown") != "" {
+		t.Errorf("unknown setting has names %+v", n)
 	}
 }
 

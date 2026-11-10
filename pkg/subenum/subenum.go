@@ -592,27 +592,12 @@ func orDefaultDuration(v, def time.Duration) time.Duration {
 	return v
 }
 
-// configFields names each engine setting as the Config field that sets it.
-// Engine messages refer to settings by token (#100), and a library caller
-// has no flags: "Use {force} to scan anyway" reads "Use Force to scan anyway".
-var configFields = map[scan.Setting]string{
-	scan.SettingConcurrency: "Concurrency",
-	scan.SettingTimeout:     "Timeout",
-	scan.SettingAttempts:    "Attempts",
-	scan.SettingHitRate:     "HitRate",
-	scan.SettingDepth:       "Depth",
-	scan.SettingRate:        "Rate",
-	scan.SettingMaxQueries:  "MaxQueries",
-	scan.SettingMaxDuration: "MaxDuration",
-	scan.SettingExclude:     "Exclude",
-	scan.SettingRecursive:   "Recursive",
-	scan.SettingForce:       "Force",
-}
-
 // fieldNames renders the setting tokens in an engine message as Config
-// fields.
+// fields (scan.FieldName). Engine messages refer to settings by token (#100),
+// and a library caller has no flags: "Use {force} to scan anyway" reads
+// "Use Force to scan anyway".
 func fieldNames(msg string) string {
-	return scan.Render(msg, func(st scan.Setting) string { return configFields[st] })
+	return scan.Render(msg, scan.FieldName)
 }
 
 // translate converts an internal event to the public one.

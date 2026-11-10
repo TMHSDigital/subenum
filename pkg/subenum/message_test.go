@@ -47,11 +47,7 @@ func TestFieldNames(t *testing.T) {
 func TestConfigFieldsCoverEverySetting(t *testing.T) {
 	cfg := reflect.TypeOf(Config{})
 	for _, st := range scan.Settings {
-		field, ok := configFields[st]
-		if !ok {
-			t.Errorf("setting %q has no Config field", st)
-			continue
-		}
+		field := scan.FieldName(st)
 		if _, ok := cfg.FieldByName(field); !ok {
 			t.Errorf("setting %q maps to %q, which is not a Config field", st, field)
 		}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -106,47 +105,26 @@ func saveConfig(fv formValues) error {
 }
 
 // withSettings overlays flag values from SUBENUM_* variables or the config
-// file (keyed by flag name) on the remembered form values (#118).
+// file (keyed by flag name) on the remembered form values (#118), using each
+// form field's flag (#160).
 func withSettings(sc savedConfig, settings map[string]string) savedConfig {
-	for name, v := range settings {
-		n, _ := strconv.Atoi(v)
-		b, _ := strconv.ParseBool(v)
-		switch name {
-		case "w":
-			sc.Wordlist = v
-		case "dns-server":
-			sc.DNSServer = v
-		case "t":
-			sc.Concurrency = n
-		case "timeout":
-			sc.TimeoutMs = n
-		case "attempts":
-			sc.Attempts = n
-		case "hit-rate":
-			sc.HitRate = n
-		case "type":
-			sc.Types = v
-		case "depth":
-			sc.Depth = n
-		case "rate":
-			sc.Rate = n
-		case "max-queries":
-			sc.MaxQueries = n
-		case "exclude":
-			sc.Exclude = v
-		case "o":
-			sc.Output = v
-		case "format":
-			sc.Format = v
-		case "simulate":
-			sc.Simulate = b
-		case "force":
-			sc.Force = b
-		case "recursive":
-			sc.Recursive = b
-		case "no-abort":
-			sc.NoAbort = b
+	for _, spec := range formFields {
+		if v, ok := settings[spec.flagName()]; ok && spec.flagName() != "" {
+			spec.set(&sc, v)
 		}
 	}
 	return sc
+}
+
+// Flags lists the flags whose SUBENUM_* or config file value seeds the form,
+// so the CLI can check that every flag is either wired here or deliberately
+// left out of the TUI.
+func Flags() []string {
+	var out []string
+	for _, spec := range formFields {
+		if f := spec.flagName(); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }

@@ -242,25 +242,36 @@ func TestSettingLabelsCoverEverySetting(t *testing.T) {
 	}
 }
 
-// TestFormFieldSpec covers #161: every formFields entry is complete, and a
-// gate always names a toggle.
+// TestFormFieldSpec covers #161 and #160: every formFields entry is complete,
+// a gate always names a toggle, and a field with an engine setting takes its
+// label and flag from scan's table rather than its own.
 func TestFormFieldSpec(t *testing.T) {
 	for f, spec := range formFields {
-		if spec.label == "" {
+		if spec.name() == "" {
 			t.Errorf("field %d has no label", f)
 		}
-		switch spec.kind {
-		case textField:
-			if spec.value == nil || spec.placeholder == "" {
-				t.Errorf("text field %q lacks a value or placeholder", spec.label)
+		if spec.setting != "" && (spec.label != "" || spec.flag != "") {
+			t.Errorf("field %q names its setting's label or flag itself", spec.name())
+		}
+		if spec.saved == nil {
+			t.Errorf("field %q has no saved config slot", spec.name())
+			continue
+		}
+		var c savedConfig
+		switch spec.saved(&c).(type) {
+		case *string, *int:
+			if spec.kind != textField || spec.placeholder == "" {
+				t.Errorf("text field %q is not a text field or lacks a placeholder", spec.name())
 			}
-		case toggleField:
-			if spec.on == nil || spec.gate != 0 {
-				t.Errorf("toggle %q lacks an initial state or is gated", spec.label)
+		case *bool:
+			if spec.kind != toggleField || spec.gate != 0 {
+				t.Errorf("toggle %q is not a toggle or is gated", spec.name())
 			}
+		default:
+			t.Errorf("field %q is saved in an unsupported type", spec.name())
 		}
 		if spec.gate != 0 && formFields[spec.gate].kind != toggleField {
-			t.Errorf("field %q is gated on %q, which is not a toggle", spec.label, formFields[spec.gate].label)
+			t.Errorf("field %q is gated on %q, which is not a toggle", spec.name(), formFields[spec.gate].name())
 		}
 	}
 }
@@ -297,5 +308,28 @@ func TestFormViewRows(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("form rows:\n got %q\nwant %q", rows, want)
+	}
+}
+
+// TestWithSettingsSeedsEveryFlaggedField covers #160: a SUBENUM_* or config
+// file value for each field's flag reaches that field and no other.
+func TestWithSettingsSeedsEveryFlaggedField(t *testing.T) {
+	blank := newFormModel(savedConfig{})
+	for f, spec := range formFields {
+		flag := spec.flagName()
+		if flag == "" {
+			continue
+		}
+		v := "7"
+		if spec.kind == toggleField {
+			v = "true"
+		}
+		m := newFormModel(withSettings(savedConfig{}, map[string]string{flag: v}))
+		for g := range formFields {
+			changed := m.inputs[g].Value() != blank.inputs[g].Value() || m.toggles[g] != blank.toggles[g]
+			if want := g == f; changed != want {
+				t.Errorf("-%s=%s: field %q changed = %v, want %v", flag, v, formFields[g].name(), changed, want)
+			}
+		}
 	}
 }

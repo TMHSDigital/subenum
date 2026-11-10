@@ -50,78 +50,116 @@ const (
 	toggleField                  // an ON/OFF switch flipped with space
 )
 
-// formField describes one form row. The form is built, navigated, rendered and
-// labelled from formFields, so adding a field is one constant and one entry
-// (plus reading it in validate).
+// formField describes one form row. The form is built, navigated, rendered,
+// labelled, seeded and saved from formFields, so adding a field is one
+// constant and one entry (plus reading it in validate).
 type formField struct {
-	label       string                   // row label; also names setting in engine messages
-	kind        fieldKind                // text input or toggle
-	placeholder string                   // text fields: hint shown while empty
-	value       func(savedConfig) string // text fields: initial value
-	on          func(savedConfig) bool   // toggles: initial state
+	// setting is the engine setting this field sets, if any; its row label
+	// and flag then come from scan's setting table (#160).
+	setting     scan.Setting
+	label       string    // row label, for a field with no setting
+	flag        string    // CLI flag (config key) that seeds it, for a field with no setting
+	kind        fieldKind // text input or toggle
+	placeholder string    // text fields: hint shown while empty
+	def         string    // text fields: value when the saved one is empty or zero
+	// saved points at the savedConfig field this row is remembered in: a
+	// *string or *int for a text field, a *bool for a toggle.
+	saved func(*savedConfig) any
 	// gate is the toggle that must be ON for this field to be shown and
 	// reachable. Zero means always shown (fieldDomain is never a toggle).
-	gate    int
-	setting scan.Setting // engine setting this field sets, if any
+	gate int
 }
 
 // formFields is indexed by the field constants.
 var formFields = [fieldCount]formField{
 	fieldDomain: {label: "Domain*", kind: textField, placeholder: "e.g. example.com",
-		value: func(c savedConfig) string { return orDefault(c.Domain, "") }},
-	fieldWordlist: {label: "Wordlist*", kind: textField, placeholder: "e.g. examples/sample_wordlist.txt",
-		value: func(c savedConfig) string { return orDefault(c.Wordlist, "examples/sample_wordlist.txt") }},
-	fieldSimulate: {label: "Simulate", kind: toggleField,
-		on: func(c savedConfig) bool { return c.Simulate }},
-	fieldHitRate: {label: "Hit Rate (%)", kind: textField, placeholder: "1–100", gate: fieldSimulate, setting: scan.SettingHitRate,
-		value: func(c savedConfig) string { return intOrDefault(c.HitRate, "15") }},
-	fieldDNSServer: {label: "DNS Server", kind: textField, placeholder: "e.g. 8.8.8.8:53",
-		value: func(c savedConfig) string { return orDefault(c.DNSServer, validate.DefaultDNSServer) }},
-	fieldConcurrency: {label: "Concurrency", kind: textField, placeholder: "e.g. 100", setting: scan.SettingConcurrency,
-		value: func(c savedConfig) string { return intOrDefault(c.Concurrency, "100") }},
-	fieldTimeout: {label: "Timeout (ms)", kind: textField, placeholder: "e.g. 1000", setting: scan.SettingTimeout,
-		value: func(c savedConfig) string { return intOrDefault(c.TimeoutMs, "1000") }},
-	fieldAttempts: {label: "Attempts", kind: textField, placeholder: "e.g. 1", setting: scan.SettingAttempts,
-		value: func(c savedConfig) string { return intOrDefault(c.Attempts, "1") }},
-	fieldTypes: {label: "Record Types", kind: textField, placeholder: "e.g. A,AAAA,CNAME",
-		value: func(c savedConfig) string { return orDefault(c.Types, "A,AAAA") }},
-	fieldRecursive: {label: "Recursive", kind: toggleField, setting: scan.SettingRecursive,
-		on: func(c savedConfig) bool { return c.Recursive }},
-	fieldDepth: {label: "Depth", kind: textField, placeholder: "e.g. 2", gate: fieldRecursive, setting: scan.SettingDepth,
-		value: func(c savedConfig) string { return intOrDefault(c.Depth, "1") }},
-	fieldRate: {label: "Rate (qps)", kind: textField, placeholder: "0 = unlimited", setting: scan.SettingRate,
-		value: func(c savedConfig) string { return intOrDefault(c.Rate, "0") }},
-	fieldMaxQueries: {label: "Max Names", kind: textField, placeholder: "0 = unlimited", setting: scan.SettingMaxQueries,
-		value: func(c savedConfig) string { return intOrDefault(c.MaxQueries, "0") }},
-	fieldExclude: {label: "Exclude", kind: textField, placeholder: "optional, e.g. vpn.example.com,*.corp.example.com", setting: scan.SettingExclude,
-		value: func(c savedConfig) string { return orDefault(c.Exclude, "") }},
-	fieldOutput: {label: "Output File", kind: textField, placeholder: "optional, e.g. results.txt",
-		value: func(c savedConfig) string { return orDefault(c.Output, "") }},
-	fieldFormat: {label: "Format", kind: textField, placeholder: "text, json, jsonl, csv",
-		value: func(c savedConfig) string { return orDefault(c.Format, "text") }},
-	fieldForce: {label: "Force", kind: toggleField, setting: scan.SettingForce,
-		on: func(c savedConfig) bool { return c.Force }},
-	fieldNoAbort: {label: "No Abort", kind: toggleField,
-		on: func(c savedConfig) bool { return c.NoAbort }},
+		saved: func(c *savedConfig) any { return &c.Domain }},
+	fieldWordlist: {label: "Wordlist*", flag: "w", kind: textField, placeholder: "e.g. examples/sample_wordlist.txt", def: "examples/sample_wordlist.txt",
+		saved: func(c *savedConfig) any { return &c.Wordlist }},
+	fieldSimulate: {label: "Simulate", flag: "simulate", kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.Simulate }},
+	fieldHitRate: {setting: scan.SettingHitRate, kind: textField, placeholder: "1–100", def: "15", gate: fieldSimulate,
+		saved: func(c *savedConfig) any { return &c.HitRate }},
+	fieldDNSServer: {label: "DNS Server", flag: "dns-server", kind: textField, placeholder: "e.g. 8.8.8.8:53", def: validate.DefaultDNSServer,
+		saved: func(c *savedConfig) any { return &c.DNSServer }},
+	fieldConcurrency: {setting: scan.SettingConcurrency, kind: textField, placeholder: "e.g. 100", def: "100",
+		saved: func(c *savedConfig) any { return &c.Concurrency }},
+	fieldTimeout: {setting: scan.SettingTimeout, kind: textField, placeholder: "e.g. 1000", def: "1000",
+		saved: func(c *savedConfig) any { return &c.TimeoutMs }},
+	fieldAttempts: {setting: scan.SettingAttempts, kind: textField, placeholder: "e.g. 1", def: "1",
+		saved: func(c *savedConfig) any { return &c.Attempts }},
+	fieldTypes: {label: "Record Types", flag: "type", kind: textField, placeholder: "e.g. A,AAAA,CNAME", def: "A,AAAA",
+		saved: func(c *savedConfig) any { return &c.Types }},
+	fieldRecursive: {setting: scan.SettingRecursive, kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.Recursive }},
+	fieldDepth: {setting: scan.SettingDepth, kind: textField, placeholder: "e.g. 2", def: "1", gate: fieldRecursive,
+		saved: func(c *savedConfig) any { return &c.Depth }},
+	fieldRate: {setting: scan.SettingRate, kind: textField, placeholder: "0 = unlimited", def: "0",
+		saved: func(c *savedConfig) any { return &c.Rate }},
+	fieldMaxQueries: {setting: scan.SettingMaxQueries, kind: textField, placeholder: "0 = unlimited", def: "0",
+		saved: func(c *savedConfig) any { return &c.MaxQueries }},
+	fieldExclude: {setting: scan.SettingExclude, kind: textField, placeholder: "optional, e.g. vpn.example.com,*.corp.example.com",
+		saved: func(c *savedConfig) any { return &c.Exclude }},
+	fieldOutput: {label: "Output File", flag: "o", kind: textField, placeholder: "optional, e.g. results.txt",
+		saved: func(c *savedConfig) any { return &c.Output }},
+	fieldFormat: {label: "Format", flag: "format", kind: textField, placeholder: "text, json, jsonl, csv", def: "text",
+		saved: func(c *savedConfig) any { return &c.Format }},
+	fieldForce: {setting: scan.SettingForce, kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.Force }},
+	fieldNoAbort: {label: "No Abort", flag: "no-abort", kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.NoAbort }},
 }
 
-// settingsWithoutField label the engine settings the form has no field for.
-var settingsWithoutField = map[scan.Setting]string{
-	scan.SettingMaxDuration: "Max Duration",
-}
-
-func orDefault(saved, def string) string {
-	if saved != "" {
-		return saved
+// name is the field's row label.
+func (f formField) name() string {
+	if f.setting != "" {
+		return scan.Label(f.setting)
 	}
-	return def
+	return f.label
 }
 
-func intOrDefault(saved int, def string) string {
-	if saved > 0 {
-		return strconv.Itoa(saved)
+// flagName is the flag (and config file key) whose value seeds the field, or
+// "" for a field no flag sets.
+func (f formField) flagName() string {
+	if f.setting != "" {
+		return f.setting.Names().Flag
 	}
-	return def
+	return f.flag
+}
+
+// value is a text field's initial value: the saved one, or the default when
+// that is empty or not positive.
+func (f formField) value(c savedConfig) string {
+	switch p := f.saved(&c).(type) {
+	case *string:
+		if *p != "" {
+			return *p
+		}
+	case *int:
+		if *p > 0 {
+			return strconv.Itoa(*p)
+		}
+	}
+	return f.def
+}
+
+// on is a toggle's initial state.
+func (f formField) on(c savedConfig) bool {
+	p, _ := f.saved(&c).(*bool)
+	return p != nil && *p
+}
+
+// set stores a flag value in the field's savedConfig slot. A value that does
+// not parse stores the zero value, which the form then shows as the default.
+func (f formField) set(c *savedConfig, v string) {
+	switch p := f.saved(c).(type) {
+	case *string:
+		*p = v
+	case *int:
+		*p, _ = strconv.Atoi(v)
+	case *bool:
+		*p, _ = strconv.ParseBool(v)
+	}
 }
 
 var (
@@ -253,8 +291,8 @@ func (m formModel) View() string {
 
 	for f, spec := range formFields {
 		if !m.shown(f) {
-			gate := formFields[spec.gate].label
-			b.WriteString(dimmedRow.Render(fmt.Sprintf("  %-20s(enable %s)", spec.label+":", gate)) + "\n")
+			gate := formFields[spec.gate].name()
+			b.WriteString(dimmedRow.Render(fmt.Sprintf("  %-20s(enable %s)", spec.name()+":", gate)) + "\n")
 			continue
 		}
 		var content string
@@ -266,7 +304,7 @@ func (m formModel) View() string {
 		} else {
 			content = m.inputs[f].View()
 		}
-		lbl := labelStyle.Render(spec.label + ":")
+		lbl := labelStyle.Render(spec.name() + ":")
 		if m.focus == f {
 			b.WriteString(focusedStyle.Render("▸ ") + lbl + content + "\n")
 		} else {
@@ -440,14 +478,7 @@ func (v formValues) options(entries []string, seed uint64) scan.Options {
 }
 
 // settingLabel names an engine setting as its form field (#100).
-func settingLabel(s scan.Setting) string {
-	for _, spec := range formFields {
-		if s != "" && spec.setting == s {
-			return spec.label
-		}
-	}
-	return settingsWithoutField[s]
-}
+func settingLabel(s scan.Setting) string { return scan.Label(s) }
 
 type formValues struct {
 	domain      string
