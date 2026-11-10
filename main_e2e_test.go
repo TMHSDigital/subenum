@@ -192,6 +192,23 @@ func TestE2EFailedRunKeepsOutputFile(t *testing.T) {
 	}
 }
 
+// TestE2EBadSeedsLeavesNoTempFile: an unreadable -seeds file fails the run
+// before the -o file is opened, so no temporary file is left beside it (#212).
+func TestE2EBadSeedsLeavesNoTempFile(t *testing.T) {
+	wl := writeFile(t, "wl.txt", e2eWords)
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "out.txt")
+
+	code, _ := runCLI(t, "", "-simulate", "-progress=false", "-w", wl, "-o", outPath,
+		"-seeds", filepath.Join(dir, "missing.json"), "example.com")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Fatalf("files left behind: %v", left)
+	}
+}
+
 // runCLIMerged is runCLI with stdout and stderr sharing one stream, like
 // `subenum ... 2>&1 | tee log`.
 func runCLIMerged(t *testing.T, args ...string) (int, string) {

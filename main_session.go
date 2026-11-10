@@ -93,7 +93,10 @@ func runWith(a runArgs) (code int) {
 		}
 		logVerboseStart(s.f, targetDesc, s.in.maxAttempts, s.out)
 	}
-	if !s.loadInputs() || !s.openOutputs() || !s.loadSeeds() {
+	// Seeds are read before the -o file is opened: a failure after opening
+	// would return before its deferred Close is registered and leave the
+	// temporary file behind (#212).
+	if !s.loadInputs() || !s.loadSeeds() || !s.openOutputs() {
 		return exitFailure
 	}
 	s.setProgress()
