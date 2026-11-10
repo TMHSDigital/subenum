@@ -237,6 +237,18 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 	}
 }
 
+// TestPoolErrorStaysOnForm covers #195: a resolver pool file that cannot be
+// used is reported on the form instead of starting the scan.
+func TestPoolErrorStaysOnForm(t *testing.T) {
+	m := Model{state: stateForm, form: newFormModel(savedConfig{})}
+	m.form.loading = true
+	next, _ := m.updateForm(wordlistLoadedMsg{entries: []string{"www"}, poolErr: errors.New("cannot read resolver pool: missing")})
+	nm := next.(Model)
+	if nm.state != stateForm || nm.form.loading || !strings.Contains(nm.form.err, "cannot read resolver pool") {
+		t.Fatalf("state=%v loading=%v err=%q, want the pool error on the form", nm.state, nm.form.loading, nm.form.err)
+	}
+}
+
 // TestScanFailureStatusAndExitCode covers #55: a scan that ends with an error
 // shows "Failed", not "Aborted", and the TUI exits non-zero.
 // TestScanStatusShowsETA covers #191: the status bar shows the same time

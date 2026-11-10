@@ -248,13 +248,13 @@ func TestPrintConfigEffectiveAttempts(t *testing.T) {
 
 // tuiOmittedFlags are flags the TUI form deliberately has no field for: they
 // control CLI-only output, input sources, run state or modes the form does not
-// offer, so a SUBENUM_* or config file value for them never seeds the form.
+// offer, so a command-line, SUBENUM_* or config file value for them never
+// seeds the form (-tui warns about one given on the command line).
 var tuiOmittedFlags = map[string]bool{
 	"tui": true, "print-config": true, "version": true, "v": true, "progress": true, "silent": true,
 	"simulate-zone": true, "retries": true, "show-records": true, "max-duration": true, "stats": true,
 	"sarif": true, "exclude-file": true, "permute": true, "ct": true, "seeds": true, "state": true,
-	"diff": true, "diff-records": true, "r": true, "dL": true, "seed": true, "resume": true,
-	"rate-per-resolver": true, // only applies to -r, which the TUI has no field for
+	"diff": true, "diff-records": true, "dL": true, "seed": true, "resume": true,
 }
 
 // TestSettingNamesAgreeAcrossFrontEnds covers #160: every flag is either wired

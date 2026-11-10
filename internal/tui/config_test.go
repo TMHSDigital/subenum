@@ -24,23 +24,25 @@ func TestSaveLoadConfigRoundTrip(t *testing.T) {
 	redirectConfig(t)
 
 	fv := formValues{
-		domain:      "example.com",
-		wordlist:    "wl.txt",
-		dnsServer:   "1.1.1.1:53",
-		concurrency: 200,
-		timeoutMs:   500,
-		attempts:    3,
-		hitRate:     42,
-		recordTypes: []string{"A", "CNAME"},
-		recursive:   true,
-		depth:       4,
-		rate:        25,
-		maxQueries:  5000,
-		noAbort:     true,
-		outputFile:  "out.json",
-		formatName:  "json",
-		simulate:    true,
-		force:       true,
+		domain:          "example.com",
+		wordlist:        "wl.txt",
+		dnsServer:       "1.1.1.1:53",
+		resolvers:       "resolvers.txt",
+		ratePerResolver: 7,
+		concurrency:     200,
+		timeoutMs:       500,
+		attempts:        3,
+		hitRate:         42,
+		recordTypes:     []string{"A", "CNAME"},
+		recursive:       true,
+		depth:           4,
+		rate:            25,
+		maxQueries:      5000,
+		noAbort:         true,
+		outputFile:      "out.json",
+		formatName:      "json",
+		simulate:        true,
+		force:           true,
 	}
 
 	if err := saveConfig(fv); err != nil {
@@ -76,6 +78,10 @@ func TestSaveLoadConfigRoundTrip(t *testing.T) {
 	m := newFormModel(sc)
 	if got := m.inputs[fieldMaxQueries].Value(); got != "5000" || !m.toggles[fieldNoAbort] {
 		t.Errorf("form not seeded from saved max-queries/no-abort: %q, %v", got, m.toggles[fieldNoAbort])
+	}
+	// The resolver pool is remembered in last.json too (#195).
+	if m.inputs[fieldResolvers].Value() != "resolvers.txt" || m.inputs[fieldRatePerResolver].Value() != "7" {
+		t.Errorf("form not seeded from saved resolver pool: %q, %q", m.inputs[fieldResolvers].Value(), m.inputs[fieldRatePerResolver].Value())
 	}
 }
 

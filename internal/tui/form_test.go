@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -292,6 +294,8 @@ func TestFormViewRows(t *testing.T) {
 		"  Simulate:         OFF",
 		"  Hit Rate (%):       (enable Simulate)",
 		"  DNS Server:       > 8.8.8.8:53",
+		"  Resolver Pool:    > optional, file of resolver addresses",
+		"  Rate/Resolver:    > 0",
 		"  Concurrency:      > 100",
 		"  Timeout (ms):     > 1000",
 		"  Attempts:         > 1",
@@ -308,6 +312,92 @@ func TestFormViewRows(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("form rows:\n got %q\nwant %q", rows, want)
+	}
+}
+
+// TestLaunchOptionsPrefillTheForm covers #195: the domain argument and flags
+// given with -tui fill the form over its remembered values.
+func TestLaunchOptionsPrefillTheForm(t *testing.T) {
+	opts := Options{Domain: "example.org", Settings: map[string]string{
+		"w": "big.txt", "r": "resolvers.txt", "rate-per-resolver": "5", "t": "20", "simulate": "true",
+	}}
+	m := newFormModel(opts.prefill(savedConfig{Domain: "old.example.com", Wordlist: "old.txt", Concurrency: 100}))
+	for f, want := range map[int]string{
+		fieldDomain: "example.org", fieldWordlist: "big.txt", fieldResolvers: "resolvers.txt",
+		fieldRatePerResolver: "5", fieldConcurrency: "20",
+	} {
+		if got := m.inputs[f].Value(); got != want {
+			t.Errorf("%s = %q, want %q", formFields[f].name(), got, want)
+		}
+	}
+	if !m.toggles[fieldSimulate] {
+		t.Error("Simulate not switched on by -simulate")
+	}
+	// Without a domain argument the remembered domain stays.
+	if got := newFormModel(Options{}.prefill(savedConfig{Domain: "old.example.com"})).inputs[fieldDomain].Value(); got != "old.example.com" {
+		t.Errorf("no domain argument: Domain = %q", got)
+	}
+}
+
+// TestResolverPoolField covers #195: the Resolver Pool and Rate/Resolver
+// fields reach the scan, and bad values are reported on the form.
+func TestResolverPoolField(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "resolvers.txt")
+	if err := os.WriteFile(good, []byte("# pool\n1.1.1.1\n9.9.9.9:53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(dir, "bad.txt")
+	if err := os.WriteFile(bad, []byte("not an address\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(empty, []byte("# nothing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newFormModel(savedConfig{})
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldResolvers].SetValue(good)
+	m.inputs[fieldRatePerResolver].SetValue("3")
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	if vals.resolvers != good || vals.ratePerResolver != 3 {
+		t.Fatalf("resolvers=%q ratePerResolver=%d", vals.resolvers, vals.ratePerResolver)
+	}
+	pool, err := loadPool(vals)
+	if err != nil || pool == nil || len(pool.Stats()) != 2 {
+		t.Fatalf("loadPool = %v, %v; want a two-resolver pool", pool, err)
+	}
+
+	// Simulation sends no DNS queries, so no pool is built, as with -r.
+	sim := vals
+	sim.simulate = true
+	if pool, err := loadPool(sim); pool != nil || err != nil {
+		t.Errorf("simulate: loadPool = %v, %v; want no pool", pool, err)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(dir, "missing.txt"): "cannot read resolver pool",
+		bad:                               "resolver pool",
+		empty:                             "lists no resolvers",
+	} {
+		v := vals
+		v.resolvers = path
+		if _, err := loadPool(v); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: loadPool error = %v, want %q", filepath.Base(path), err, want)
+		}
+	}
+
+	m.inputs[fieldRatePerResolver].SetValue("-1")
+	if _, errStr := m.validate(); !strings.Contains(errStr, "Rate/Resolver must be 0") {
+		t.Errorf("negative Rate/Resolver: got %q", errStr)
+	}
+	m.inputs[fieldRatePerResolver].SetValue("0")
+	m.inputs[fieldResolvers].SetValue("-")
+	if _, errStr := m.validate(); !strings.Contains(errStr, "standard input") {
+		t.Errorf("stdin resolver pool: got %q", errStr)
 	}
 }
 

@@ -8,24 +8,28 @@ import (
 )
 
 type savedConfig struct {
-	Domain      string `json:"domain"`
-	Wordlist    string `json:"wordlist"`
-	DNSServer   string `json:"dns_server"`
-	Concurrency int    `json:"concurrency"`
-	TimeoutMs   int    `json:"timeout_ms"`
-	Attempts    int    `json:"attempts"`
-	HitRate     int    `json:"hit_rate"`
-	Types       string `json:"types"`
-	Depth       int    `json:"depth"`
-	Rate        int    `json:"rate"`
-	MaxQueries  int    `json:"max_queries"`
-	Exclude     string `json:"exclude,omitempty"`
-	Output      string `json:"output"`
-	Format      string `json:"format"`
-	Simulate    bool   `json:"simulate"`
-	Force       bool   `json:"force"`
-	Recursive   bool   `json:"recursive"`
-	NoAbort     bool   `json:"no_abort"`
+	Domain    string `json:"domain"`
+	Wordlist  string `json:"wordlist"`
+	DNSServer string `json:"dns_server"`
+	// Resolvers is the resolver pool file (-r) and RatePerResolver its
+	// per-member cap (-rate-per-resolver) (#195).
+	Resolvers       string `json:"resolvers,omitempty"`
+	RatePerResolver int    `json:"rate_per_resolver,omitempty"`
+	Concurrency     int    `json:"concurrency"`
+	TimeoutMs       int    `json:"timeout_ms"`
+	Attempts        int    `json:"attempts"`
+	HitRate         int    `json:"hit_rate"`
+	Types           string `json:"types"`
+	Depth           int    `json:"depth"`
+	Rate            int    `json:"rate"`
+	MaxQueries      int    `json:"max_queries"`
+	Exclude         string `json:"exclude,omitempty"`
+	Output          string `json:"output"`
+	Format          string `json:"format"`
+	Simulate        bool   `json:"simulate"`
+	Force           bool   `json:"force"`
+	Recursive       bool   `json:"recursive"`
+	NoAbort         bool   `json:"no_abort"`
 }
 
 func configPath() (string, error) {
@@ -61,24 +65,26 @@ func saveConfig(fv formValues) error {
 		return err
 	}
 	sc := savedConfig{
-		Domain:      fv.domain,
-		Wordlist:    fv.wordlist,
-		DNSServer:   fv.dnsServer,
-		Concurrency: fv.concurrency,
-		TimeoutMs:   fv.timeoutMs,
-		Attempts:    fv.attempts,
-		HitRate:     fv.hitRate,
-		Types:       strings.Join(fv.recordTypes, ","),
-		Depth:       fv.depth,
-		Rate:        fv.rate,
-		MaxQueries:  fv.maxQueries,
-		Exclude:     strings.Join(fv.exclude, ","),
-		Output:      fv.outputFile,
-		Format:      fv.formatName,
-		Simulate:    fv.simulate,
-		Force:       fv.force,
-		Recursive:   fv.recursive,
-		NoAbort:     fv.noAbort,
+		Domain:          fv.domain,
+		Wordlist:        fv.wordlist,
+		DNSServer:       fv.dnsServer,
+		Resolvers:       fv.resolvers,
+		RatePerResolver: fv.ratePerResolver,
+		Concurrency:     fv.concurrency,
+		TimeoutMs:       fv.timeoutMs,
+		Attempts:        fv.attempts,
+		HitRate:         fv.hitRate,
+		Types:           strings.Join(fv.recordTypes, ","),
+		Depth:           fv.depth,
+		Rate:            fv.rate,
+		MaxQueries:      fv.maxQueries,
+		Exclude:         strings.Join(fv.exclude, ","),
+		Output:          fv.outputFile,
+		Format:          fv.formatName,
+		Simulate:        fv.simulate,
+		Force:           fv.force,
+		Recursive:       fv.recursive,
+		NoAbort:         fv.noAbort,
 	}
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {

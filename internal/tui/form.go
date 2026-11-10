@@ -26,6 +26,8 @@ const (
 	fieldSimulate
 	fieldHitRate // only reachable when Simulate is ON
 	fieldDNSServer
+	fieldResolvers       // -r resolver pool file (#195)
+	fieldRatePerResolver // -rate-per-resolver; only used with a pool
 	fieldConcurrency
 	fieldTimeout
 	fieldAttempts
@@ -82,6 +84,10 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.HitRate }},
 	fieldDNSServer: {label: "DNS Server", flag: "dns-server", kind: textField, placeholder: "e.g. 8.8.8.8:53", def: validate.DefaultDNSServer,
 		saved: func(c *savedConfig) any { return &c.DNSServer }},
+	fieldResolvers: {label: "Resolver Pool", flag: "r", kind: textField, placeholder: "optional, file of resolver addresses",
+		saved: func(c *savedConfig) any { return &c.Resolvers }},
+	fieldRatePerResolver: {label: "Rate/Resolver", flag: "rate-per-resolver", kind: textField, placeholder: "0 = unlimited", def: "0",
+		saved: func(c *savedConfig) any { return &c.RatePerResolver }},
 	fieldConcurrency: {setting: scan.SettingConcurrency, kind: textField, placeholder: "e.g. 100", def: "100",
 		saved: func(c *savedConfig) any { return &c.Concurrency }},
 	fieldTimeout: {setting: scan.SettingTimeout, kind: textField, placeholder: "e.g. 1000", def: "1000",
@@ -370,6 +376,10 @@ func (m *formModel) validate() (formValues, string) {
 	if dnsServer == "" {
 		dnsServer = validate.DefaultDNSServer
 	}
+	resolvers := expandHome(strings.TrimSpace(text(fieldResolvers)))
+	if resolvers == wordlist.Stdin {
+		return formValues{}, "Resolver pool from standard input (-) is not supported in the TUI; enter a file path"
+	}
 
 	// The form only parses its text fields here; ranges and the resolver are
 	// checked by scan.Options.Validate, the same validator the CLI uses (#80).
@@ -399,7 +409,11 @@ func (m *formModel) validate() (formValues, string) {
 	}
 	rate := num(fieldRate, "Rate", 0)                    // blank means unlimited
 	maxQueries := num(fieldMaxQueries, "Max queries", 0) // blank means unlimited
-	var exclude []string                                 // out-of-scope names, never queried (#87)
+	ratePerResolver := num(fieldRatePerResolver, formFields[fieldRatePerResolver].name(), 0)
+	if err == nil && ratePerResolver < 0 {
+		err = fmt.Errorf("%s must be 0 (unlimited) or positive, got %d", formFields[fieldRatePerResolver].name(), ratePerResolver)
+	}
+	var exclude []string // out-of-scope names, never queried (#87)
 	for _, p := range strings.Split(text(fieldExclude), ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			exclude = append(exclude, p)
@@ -427,25 +441,27 @@ func (m *formModel) validate() (formValues, string) {
 	}
 
 	v := formValues{
-		domain:      domain,
-		wordlist:    wl,
-		dnsServer:   dnsServer,
-		concurrency: concurrency,
-		timeoutMs:   timeout,
-		attempts:    attempts,
-		hitRate:     hitRate,
-		recordTypes: recordTypes,
-		recursive:   m.toggles[fieldRecursive],
-		depth:       depth,
-		rate:        rate,
-		maxQueries:  maxQueries,
-		exclude:     exclude,
-		noAbort:     m.toggles[fieldNoAbort],
-		outputFile:  outputFile,
-		format:      format,
-		formatName:  formatStr,
-		simulate:    m.toggles[fieldSimulate],
-		force:       m.toggles[fieldForce],
+		domain:          domain,
+		wordlist:        wl,
+		dnsServer:       dnsServer,
+		resolvers:       resolvers,
+		ratePerResolver: ratePerResolver,
+		concurrency:     concurrency,
+		timeoutMs:       timeout,
+		attempts:        attempts,
+		hitRate:         hitRate,
+		recordTypes:     recordTypes,
+		recursive:       m.toggles[fieldRecursive],
+		depth:           depth,
+		rate:            rate,
+		maxQueries:      maxQueries,
+		exclude:         exclude,
+		noAbort:         m.toggles[fieldNoAbort],
+		outputFile:      outputFile,
+		format:          format,
+		formatName:      formatStr,
+		simulate:        m.toggles[fieldSimulate],
+		force:           m.toggles[fieldForce],
 	}
 	if err := v.options(nil, 0).Validate(); err != nil {
 		return formValues{}, scan.Render(err.Error(), settingLabel)
@@ -481,23 +497,25 @@ func (v formValues) options(entries []string, seed uint64) scan.Options {
 func settingLabel(s scan.Setting) string { return scan.Label(s) }
 
 type formValues struct {
-	domain      string
-	wordlist    string
-	dnsServer   string
-	concurrency int
-	timeoutMs   int
-	attempts    int
-	hitRate     int
-	recordTypes []string
-	recursive   bool
-	depth       int
-	rate        int
-	maxQueries  int
-	exclude     []string
-	noAbort     bool
-	outputFile  string
-	format      output.Format
-	formatName  string
-	simulate    bool
-	force       bool
+	domain          string
+	wordlist        string
+	dnsServer       string
+	resolvers       string // resolver pool file; "" means the single DNS server
+	ratePerResolver int
+	concurrency     int
+	timeoutMs       int
+	attempts        int
+	hitRate         int
+	recordTypes     []string
+	recursive       bool
+	depth           int
+	rate            int
+	maxQueries      int
+	exclude         []string
+	noAbort         bool
+	outputFile      string
+	format          output.Format
+	formatName      string
+	simulate        bool
+	force           bool
 }

@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
@@ -282,4 +283,6 @@ type wordlistLoadedMsg struct {
 	entries []string
 	skipped int
 	err     error
+	pool    *dns.Pool // built from the Resolver Pool file, if one is set (#195)
+	poolErr error     // the pool file could not be read or parsed
 }

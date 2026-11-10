@@ -38,7 +38,7 @@
 | `-stats <string>` | - | Write a JSON run-quality report (outcomes, queries sent, verdict) to this file |
 | `-t <int>` | 100 | Number of concurrent workers |
 | `-timeout <int>` | 1000 | DNS lookup timeout in milliseconds |
-| `-tui` | - | Launch the interactive terminal UI (all other flags are ignored) |
+| `-tui` | - | Launch the interactive terminal UI, its form pre-filled from the other flags and the domain argument |
 | `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME |
 | `-v` | - | Enable verbose output |
 | `-version` | - | Show version information |

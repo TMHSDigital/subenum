@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"os"
 	"os/signal"
@@ -157,10 +158,7 @@ func (s *session) parse() (code int, done bool) {
 	// -tui counts only as a real flag, not as the value of another flag
 	// (-o -tui) or an argument after "--" (#58).
 	if f.tui {
-		if fs.NFlag() > 1 || len(positionals) > 0 {
-			_, _ = fmt.Fprintln(a.stderr, "Warning: -tui ignores every other flag and argument; set them in the form instead")
-		}
-		return tui.Start(tui.Options{Version: resolveVersion(), Settings: defaults.settings(fs)}), true
+		return tui.Start(tuiOptions(f, fs, positionals, defaults, a.stderr)), true
 	}
 
 	if f.printConfig {
@@ -174,6 +172,43 @@ func (s *session) parse() (code int, done bool) {
 		return exitOK, true
 	}
 	return exitOK, false
+}
+
+// tuiOptions pre-fills the TUI form from the command line (#195): the domain
+// argument and every flag the form has a field for, over SUBENUM_* and config
+// file values. Flags the form has no field for are named in a warning, as are
+// extra domain arguments and extra -w files (the form takes one wordlist).
+func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *defaultsLoader, stderr io.Writer) tui.Options {
+	settings := defaults.settings(fs)
+	wired := map[string]bool{}
+	for _, name := range tui.Flags() {
+		wired[name] = true
+	}
+	var ignored []string
+	fs.Visit(func(fl *flag.Flag) {
+		switch {
+		case fl.Name == "tui":
+		case wired[fl.Name]:
+			settings[fl.Name] = fl.Value.String()
+		default:
+			ignored = append(ignored, "-"+fl.Name)
+		}
+	})
+	if len(f.wordlists.paths) > 1 {
+		settings["w"] = f.wordlists.paths[0]
+		_, _ = fmt.Fprintf(stderr, "Warning: the TUI takes one wordlist; using %s\n", f.wordlists.paths[0])
+	}
+	opts := tui.Options{Version: resolveVersion(), Settings: settings}
+	if len(positionals) > 0 {
+		opts.Domain = positionals[0]
+	}
+	if len(positionals) > 1 {
+		ignored = append(ignored, positionals[1:]...)
+	}
+	if len(ignored) > 0 {
+		_, _ = fmt.Fprintf(stderr, "Warning: -tui has no form field for %s; ignored\n", strings.Join(ignored, " "))
+	}
+	return opts
 }
 
 // wire points w at the run's injected streams.

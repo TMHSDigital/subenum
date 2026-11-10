@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -49,10 +50,14 @@ type Model struct {
 type Options struct {
 	// Version is reported in the run-quality summary.
 	Version string
-	// Settings are flag values from SUBENUM_* variables or the config file,
-	// keyed by flag name. They pre-fill the form over its remembered values,
-	// as they override built-in defaults on the command line (#118).
+	// Settings are flag values from the command line, SUBENUM_* variables or
+	// the config file, keyed by flag name. They pre-fill the form over its
+	// remembered values, as they override built-in defaults on the command
+	// line (#118, #195).
 	Settings map[string]string
+	// Domain is the domain argument given with -tui; it pre-fills the
+	// Domain field when set (#195).
+	Domain string
 }
 
 // New creates the root model starting on the form screen.
@@ -60,9 +65,18 @@ func New(opts Options) Model {
 	saved, _ := loadSavedConfig()
 	return Model{
 		state: stateForm,
-		form:  newFormModel(withSettings(saved, opts.Settings)),
+		form:  newFormModel(opts.prefill(saved)),
 		opts:  opts,
 	}
+}
+
+// prefill overlays the launch options on the remembered form values.
+func (o Options) prefill(saved savedConfig) savedConfig {
+	sc := withSettings(saved, o.Settings)
+	if o.Domain != "" {
+		sc.Domain = o.Domain
+	}
+	return sc
 }
 
 // Start runs the TUI and returns an exit code: 1 if the TUI itself failed,
@@ -135,7 +149,11 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.err = "wordlist has no valid entries"
 			return m, nil
 		}
-		return m.beginScan(msg.cfg, msg.entries, msg.skipped)
+		if msg.poolErr != nil {
+			m.form.err = msg.poolErr.Error()
+			return m, nil
+		}
+		return m.beginScan(msg.cfg, msg.entries, msg.skipped, msg.pool)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -147,15 +165,40 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// loadWordlistCmd reads and normalizes the wordlist in a tea.Cmd goroutine.
+// loadWordlistCmd reads and normalizes the wordlist, and builds the resolver
+// pool, in a tea.Cmd goroutine.
 func loadWordlistCmd(vals formValues) tea.Cmd {
 	return func() tea.Msg {
 		entries, _, skipped, err := wordlist.LoadWordlist(vals.wordlist, vals.domain)
-		return wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err}
+		pool, poolErr := loadPool(vals)
+		return wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err, pool: pool, poolErr: poolErr}
 	}
 }
 
-func (m Model) beginScan(vals formValues, entries []string, skipped int) (tea.Model, tea.Cmd) {
+// loadPool builds the resolver pool from the Resolver Pool file, as the CLI
+// does for -r (#195). It returns nil without a file, and in simulation mode,
+// which sends no DNS queries.
+func loadPool(vals formValues) (*dns.Pool, error) {
+	if vals.resolvers == "" || vals.simulate {
+		return nil, nil
+	}
+	lines, err := wordlist.ReadLines(vals.resolvers)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read resolver pool: %w", err)
+	}
+	addrs, err := dns.ParseResolverList(lines)
+	if err == nil && len(addrs) == 0 {
+		err = fmt.Errorf("%s lists no resolvers", vals.resolvers)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("resolver pool: %w", err)
+	}
+	pool := dns.NewPool(addrs, time.Duration(vals.timeoutMs)*time.Millisecond)
+	pool.SetRatePerResolver(vals.ratePerResolver)
+	return pool, nil
+}
+
+func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *dns.Pool) (tea.Model, tea.Cmd) {
 	// Create the context up front so cancel is always assigned to the model
 	// before any early return. This satisfies static analysis tools that
 	// require the cancellation function to be demonstrably reachable.
@@ -194,7 +237,13 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int) (tea.Mo
 		m.scanView.addMessage(wildcardStyle.Render(fmt.Sprintf("⚠ Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)))
 	}
 
-	cfg := vals.options(entries, seed).Config()
+	if vals.resolvers != "" && vals.simulate {
+		m.scanView.addMessage(dimStyle.Render("Note: the resolver pool is ignored in simulation mode, which sends no DNS queries"))
+	}
+
+	opts := vals.options(entries, seed)
+	opts.Pool = pool
+	cfg := opts.Config()
 
 	// Persist form values for next session (best-effort).
 	_ = saveConfig(vals)
@@ -234,10 +283,13 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Defensive: the output file is normally closed on EventDone, but
 				// make sure it is not left open before starting a new scan.
 				_ = m.finalizeOutput(false)
-				// Restore last-used values so the user doesn't re-type everything.
+				// Restore the values just scanned so the user doesn't re-type
+				// everything. They already include the launch options, which
+				// are not applied again: that would undo edits made on the
+				// form (#195).
 				saved, _ := loadSavedConfig()
 				m.state = stateForm
-				m.form = newFormModel(withSettings(saved, m.opts.Settings))
+				m.form = newFormModel(saved)
 				m.events = nil
 				return m, m.form.initCmd()
 			}

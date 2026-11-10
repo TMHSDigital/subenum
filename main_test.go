@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -281,5 +282,39 @@ func TestE2EMissingDomainReportedFirst(t *testing.T) {
 	}
 	if code, out := runCLIMerged(t, "-r", "no-such-resolvers.txt", "example.com"); code != exitFailure {
 		t.Errorf("unreadable -r: exit %d, want %d\n%s", code, exitFailure, out)
+	}
+}
+
+// TestTUIOptionsFromFlags covers #195: flags given with -tui pre-fill the
+// form over SUBENUM_* values, the domain argument fills the Domain field, and
+// what the form cannot take is named in a warning.
+func TestTUIOptionsFromFlags(t *testing.T) {
+	env := map[string]string{"SUBENUM_RATE": "300", "SUBENUM_T": "20"}
+	d := &defaultsLoader{path: filepath.Join(t.TempDir(), "none.json"), getenv: func(k string) string { return env[k] }}
+	f, pos, fs, err := parseFlagsWith([]string{"-tui", "-w", "big.txt", "-w", "extra.txt", "-r", "resolvers.txt",
+		"-rate-per-resolver", "5", "-t", "30", "-stats", "r.json", "example.com", "other.com"}, d.apply, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	opts := tuiOptions(f, fs, pos, d, &stderr)
+	if opts.Domain != "example.com" {
+		t.Errorf("Domain = %q, want example.com", opts.Domain)
+	}
+	want := map[string]string{"w": "big.txt", "r": "resolvers.txt", "rate-per-resolver": "5", "t": "30", "rate": "300"}
+	if !reflect.DeepEqual(opts.Settings, want) {
+		t.Errorf("Settings = %v, want %v", opts.Settings, want)
+	}
+	for _, w := range []string{"using big.txt", "-stats other.com; ignored"} {
+		if !strings.Contains(stderr.String(), w) {
+			t.Errorf("stderr lacks %q:\n%s", w, stderr.String())
+		}
+	}
+
+	// A bare -tui warns about nothing.
+	f, pos, fs, _ = parseFlagsWith([]string{"-tui"}, d.apply, nil)
+	stderr.Reset()
+	if opts := tuiOptions(f, fs, pos, d, &stderr); opts.Domain != "" || stderr.Len() != 0 {
+		t.Errorf("bare -tui: Domain %q, stderr %q", opts.Domain, stderr.String())
 	}
 }
