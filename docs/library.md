@@ -93,6 +93,7 @@ The result is sorted and duplicate-free, and names that are not valid in DNS are
 | `Force` | off | Scan a wildcard zone, dropping answers that match its fingerprint. |
 | `NoAbort` | off | Keep going when more than a fifth of lookups fail. `Run` still sends the warning as a `KindError` event; `Scan` returns no error for a scan that finished. |
 | `Simulate`, `HitRate`, `Seed` | off, `15`, random | Synthetic results with no DNS traffic, for tests and demos. |
+| `Verbose`, `Logf` | off, stderr | Log every lookup. Lines go to `Logf`, or to standard error when it is nil. |
 
 ## Accounting
 

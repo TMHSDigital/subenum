@@ -116,6 +116,7 @@ jobs:
 | `max-duration` | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report |
 | `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never` |
 | `version` | `latest` | Release to install, or `source` to build the action's checkout |
+| `token` | `github.token` | Token for downloading the release and the baseline artifact |
 
 Outputs: `verdict`, `found`, `added`, `removed`, `changed` (with `-diff-records`), and the paths `results` (JSONL)
 and `stats` (the run-quality report). The step below builds the same thing by
