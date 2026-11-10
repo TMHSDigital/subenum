@@ -36,7 +36,10 @@ func CreateFile(path string) (*File, error) {
 	keep := os.FileMode(0)
 	if fi, err := os.Stat(path); err == nil {
 		if !fi.Mode().IsRegular() {
-			f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+			// No O_TRUNC: truncating a device or pipe is meaningless, and
+			// Windows rejects it on the NUL device with ERROR_INVALID_FUNCTION
+			// (#208), which broke -o NUL.
+			f, err := os.OpenFile(path, os.O_WRONLY, 0)
 			if err != nil {
 				return nil, err
 			}
