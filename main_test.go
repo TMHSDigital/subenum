@@ -45,8 +45,8 @@ func TestParseFlagsInterspersed(t *testing.T) {
 			if f.testMode != tc.wantSim {
 				t.Errorf("simulate = %v, want %v", f.testMode, tc.wantSim)
 			}
-			if f.wordlistFile != "wl.txt" {
-				t.Errorf("wordlist = %q, want wl.txt", f.wordlistFile)
+			if got := f.wordlists.paths; len(got) != 1 || got[0] != "wl.txt" {
+				t.Errorf("wordlist = %q, want [wl.txt]", got)
 			}
 		})
 	}
@@ -95,7 +95,7 @@ func TestValidateFlagsDomainListConflicts(t *testing.T) {
 	if _, ok := validateFlags(f, &runtimeInputs{maxAttempts: 1}, []string{"example.com"}, fs, out); ok {
 		t.Error("domain argument plus -dL should be rejected")
 	}
-	f.wordlistFile, f.domainList = "-", "-"
+	f.wordlists.paths, f.domainList = []string{"-"}, "-"
 	if _, ok := validateFlags(f, &runtimeInputs{maxAttempts: 1}, nil, fs, out); ok {
 		t.Error("-w - with -dL - should be rejected")
 	}

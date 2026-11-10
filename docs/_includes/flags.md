@@ -41,4 +41,4 @@
 | `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME |
 | `-v` | - | Enable verbose output |
 | `-version` | - | Show version information |
-| `-w <string>` | - | Path to the wordlist file (- for stdin); omitted: the bundled top-5000 list |
+| `-w <file>` | - | Path to a wordlist file (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list |

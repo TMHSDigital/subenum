@@ -257,7 +257,7 @@ make help           # list all targets
 
 | Flag | Default | Description |
 | :--- | :---: | :--- |
-| `-w <file>` | bundled top-5000 | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin. Omit it to use the built-in list (see [Choosing a wordlist](#choosing-a-wordlist)) |
+| `-w <file>` | bundled top-5000 | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin. Repeat it to combine lists (`-w general.txt -w target.txt`); entries found in more than one are scanned once. Omit it to use the built-in list (see [Choosing a wordlist](#choosing-a-wordlist)) |
 | `-dL <file>` | n/a | File of apex domains to scan, one per line (`-` reads stdin), instead of a `<domain>` argument. Each domain is an independent scan; results share one output |
 | `-t <n>` | `100` | Concurrent worker goroutines |
 | `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
