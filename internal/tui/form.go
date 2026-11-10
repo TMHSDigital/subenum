@@ -18,30 +18,111 @@ import (
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
-// Field order - Simulate is now field 2 so it's reachable in 2 tabs.
-// Hit Rate only shows when Simulate is ON, so fieldCount varies; we handle
-// that in navigation by skipping fieldHitRate when simulate is off.
+// Form fields in tab order. Each constant is both the field's position on the
+// form and its index into formFields, formModel.inputs and formModel.toggles.
 const (
-	fieldDomain      = 0
-	fieldWordlist    = 1
-	fieldSimulate    = 2 // promoted from 7
-	fieldHitRate     = 3 // only active when simulate=ON
-	fieldDNSServer   = 4
-	fieldConcurrency = 5
-	fieldTimeout     = 6
-	fieldAttempts    = 7
-	fieldTypes       = 8
-	fieldRecursive   = 9
-	fieldDepth       = 10 // only active when recursive=ON
-	fieldRate        = 11
-	fieldMaxQueries  = 12
-	fieldExclude     = 13
-	fieldOutput      = 14
-	fieldFormat      = 15
-	fieldForce       = 16
-	fieldNoAbort     = 17
-	fieldCount       = 18
+	fieldDomain = iota
+	fieldWordlist
+	fieldSimulate
+	fieldHitRate // only reachable when Simulate is ON
+	fieldDNSServer
+	fieldConcurrency
+	fieldTimeout
+	fieldAttempts
+	fieldTypes
+	fieldRecursive
+	fieldDepth // only reachable when Recursive is ON
+	fieldRate
+	fieldMaxQueries
+	fieldExclude
+	fieldOutput
+	fieldFormat
+	fieldForce
+	fieldNoAbort
+	fieldCount
 )
+
+// fieldKind says how a form field is edited.
+type fieldKind int
+
+const (
+	textField   fieldKind = iota // a text input
+	toggleField                  // an ON/OFF switch flipped with space
+)
+
+// formField describes one form row. The form is built, navigated, rendered and
+// labelled from formFields, so adding a field is one constant and one entry
+// (plus reading it in validate).
+type formField struct {
+	label       string                   // row label; also names setting in engine messages
+	kind        fieldKind                // text input or toggle
+	placeholder string                   // text fields: hint shown while empty
+	value       func(savedConfig) string // text fields: initial value
+	on          func(savedConfig) bool   // toggles: initial state
+	// gate is the toggle that must be ON for this field to be shown and
+	// reachable. Zero means always shown (fieldDomain is never a toggle).
+	gate    int
+	setting scan.Setting // engine setting this field sets, if any
+}
+
+// formFields is indexed by the field constants.
+var formFields = [fieldCount]formField{
+	fieldDomain: {label: "Domain*", kind: textField, placeholder: "e.g. example.com",
+		value: func(c savedConfig) string { return orDefault(c.Domain, "") }},
+	fieldWordlist: {label: "Wordlist*", kind: textField, placeholder: "e.g. examples/sample_wordlist.txt",
+		value: func(c savedConfig) string { return orDefault(c.Wordlist, "examples/sample_wordlist.txt") }},
+	fieldSimulate: {label: "Simulate", kind: toggleField,
+		on: func(c savedConfig) bool { return c.Simulate }},
+	fieldHitRate: {label: "Hit Rate (%)", kind: textField, placeholder: "1–100", gate: fieldSimulate, setting: scan.SettingHitRate,
+		value: func(c savedConfig) string { return intOrDefault(c.HitRate, "15") }},
+	fieldDNSServer: {label: "DNS Server", kind: textField, placeholder: "e.g. 8.8.8.8:53",
+		value: func(c savedConfig) string { return orDefault(c.DNSServer, validate.DefaultDNSServer) }},
+	fieldConcurrency: {label: "Concurrency", kind: textField, placeholder: "e.g. 100", setting: scan.SettingConcurrency,
+		value: func(c savedConfig) string { return intOrDefault(c.Concurrency, "100") }},
+	fieldTimeout: {label: "Timeout (ms)", kind: textField, placeholder: "e.g. 1000", setting: scan.SettingTimeout,
+		value: func(c savedConfig) string { return intOrDefault(c.TimeoutMs, "1000") }},
+	fieldAttempts: {label: "Attempts", kind: textField, placeholder: "e.g. 1", setting: scan.SettingAttempts,
+		value: func(c savedConfig) string { return intOrDefault(c.Attempts, "1") }},
+	fieldTypes: {label: "Record Types", kind: textField, placeholder: "e.g. A,AAAA,CNAME",
+		value: func(c savedConfig) string { return orDefault(c.Types, "A,AAAA") }},
+	fieldRecursive: {label: "Recursive", kind: toggleField, setting: scan.SettingRecursive,
+		on: func(c savedConfig) bool { return c.Recursive }},
+	fieldDepth: {label: "Depth", kind: textField, placeholder: "e.g. 2", gate: fieldRecursive, setting: scan.SettingDepth,
+		value: func(c savedConfig) string { return intOrDefault(c.Depth, "1") }},
+	fieldRate: {label: "Rate (qps)", kind: textField, placeholder: "0 = unlimited", setting: scan.SettingRate,
+		value: func(c savedConfig) string { return intOrDefault(c.Rate, "0") }},
+	fieldMaxQueries: {label: "Max Names", kind: textField, placeholder: "0 = unlimited", setting: scan.SettingMaxQueries,
+		value: func(c savedConfig) string { return intOrDefault(c.MaxQueries, "0") }},
+	fieldExclude: {label: "Exclude", kind: textField, placeholder: "optional, e.g. vpn.example.com,*.corp.example.com", setting: scan.SettingExclude,
+		value: func(c savedConfig) string { return orDefault(c.Exclude, "") }},
+	fieldOutput: {label: "Output File", kind: textField, placeholder: "optional, e.g. results.txt",
+		value: func(c savedConfig) string { return orDefault(c.Output, "") }},
+	fieldFormat: {label: "Format", kind: textField, placeholder: "text, json, jsonl, csv",
+		value: func(c savedConfig) string { return orDefault(c.Format, "text") }},
+	fieldForce: {label: "Force", kind: toggleField, setting: scan.SettingForce,
+		on: func(c savedConfig) bool { return c.Force }},
+	fieldNoAbort: {label: "No Abort", kind: toggleField,
+		on: func(c savedConfig) bool { return c.NoAbort }},
+}
+
+// settingsWithoutField label the engine settings the form has no field for.
+var settingsWithoutField = map[scan.Setting]string{
+	scan.SettingMaxDuration: "Max Duration",
+}
+
+func orDefault(saved, def string) string {
+	if saved != "" {
+		return saved
+	}
+	return def
+}
+
+func intOrDefault(saved int, def string) string {
+	if saved > 0 {
+		return strconv.Itoa(saved)
+	}
+	return def
+}
 
 var (
 	focusedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
@@ -54,34 +135,10 @@ var (
 	dimmedRow     = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 )
 
-// inputIndex maps field index → inputs slice index (skips toggle-only fields).
-// Fields 2 (Simulate) and 8 (Force) are toggles, not text inputs.
-// Field 3 (HitRate) is a text input but only rendered when simulate=ON.
-var inputForField = [fieldCount]int{
-	0,  // fieldDomain      → inputs[0]
-	1,  // fieldWordlist    → inputs[1]
-	-1, // fieldSimulate    → toggle
-	2,  // fieldHitRate     → inputs[2]
-	3,  // fieldDNSServer   → inputs[3]
-	4,  // fieldConcurrency → inputs[4]
-	5,  // fieldTimeout     → inputs[5]
-	6,  // fieldAttempts    → inputs[6]
-	7,  // fieldTypes       → inputs[7]
-	-1, // fieldRecursive   → toggle
-	8,  // fieldDepth       → inputs[8]
-	9,  // fieldRate        → inputs[9]
-	12, // fieldMaxQueries  → inputs[12]
-	13, // fieldExclude     → inputs[13]
-	10, // fieldOutput      → inputs[10]
-	11, // fieldFormat      → inputs[11]
-	-1, // fieldForce       → toggle
-	-1, // fieldNoAbort     → toggle
-}
-
 // formModel is the configuration form screen.
 type formModel struct {
-	inputs  []textinput.Model
-	toggles [4]bool // [simulate, force, recursive, noAbort]
+	inputs  [fieldCount]textinput.Model // used by text fields
+	toggles [fieldCount]bool            // used by toggle fields
 	focus   int
 	err     string
 	loading bool // wordlist is loading in the background; ctrl+r is ignored
@@ -93,55 +150,24 @@ type formModel struct {
 func newFormModel(saved savedConfig) formModel {
 	m := formModel{}
 
-	str := func(saved, def string) string {
-		if saved != "" {
-			return saved
+	for f, spec := range formFields {
+		switch spec.kind {
+		case textField:
+			ti := textinput.New()
+			ti.Placeholder = spec.placeholder
+			ti.SetValue(spec.value(saved))
+			ti.PromptStyle = blurredStyle
+			ti.TextStyle = blurredStyle
+			m.inputs[f] = ti
+		case toggleField:
+			m.toggles[f] = spec.on(saved)
 		}
-		return def
 	}
-	intStr := func(saved int, def string) string {
-		if saved > 0 {
-			return fmt.Sprintf("%d", saved)
-		}
-		return def
-	}
-
-	newInput := func(placeholder, value string) textinput.Model {
-		ti := textinput.New()
-		ti.Placeholder = placeholder
-		ti.SetValue(value)
-		ti.PromptStyle = blurredStyle
-		ti.TextStyle = blurredStyle
-		return ti
-	}
-
-	// inputs[0..7] correspond to the non-toggle fields.
-	m.inputs = []textinput.Model{
-		newInput("e.g. example.com", str(saved.Domain, "")),                                                // 0 Domain
-		newInput("e.g. examples/sample_wordlist.txt", str(saved.Wordlist, "examples/sample_wordlist.txt")), // 1 Wordlist
-		newInput("1–100", intStr(saved.HitRate, "15")),                                                     // 2 HitRate
-		newInput("e.g. 8.8.8.8:53", str(saved.DNSServer, validate.DefaultDNSServer)),                       // 3 DNSServer
-		newInput("e.g. 100", intStr(saved.Concurrency, "100")),                                             // 4 Concurrency
-		newInput("e.g. 1000", intStr(saved.TimeoutMs, "1000")),                                             // 5 Timeout
-		newInput("e.g. 1", intStr(saved.Attempts, "1")),                                                    // 6 Attempts
-		newInput("e.g. A,AAAA,CNAME", str(saved.Types, "A,AAAA")),                                          // 7 Types
-		newInput("e.g. 2", intStr(saved.Depth, "1")),                                                       // 8 Depth
-		newInput("0 = unlimited", intStr(saved.Rate, "0")),                                                 // 9 Rate
-		newInput("optional, e.g. results.txt", str(saved.Output, "")),                                      // 10 Output file
-		newInput("text, json, jsonl, csv", str(saved.Format, "text")),                                      // 11 Format
-		newInput("0 = unlimited", intStr(saved.MaxQueries, "0")),                                           // 12 Max queries
-		newInput("optional, e.g. vpn.example.com,*.corp.example.com", str(saved.Exclude, "")),              // 13 Exclude
-	}
-
-	m.toggles[0] = saved.Simulate
-	m.toggles[1] = saved.Force
-	m.toggles[2] = saved.Recursive
-	m.toggles[3] = saved.NoAbort
 
 	// Focus domain on start - cursor blink cmd returned from Init.
-	m.inputs[0].Focus()
-	m.inputs[0].PromptStyle = focusedStyle
-	m.inputs[0].TextStyle = focusedStyle
+	m.inputs[fieldDomain].Focus()
+	m.inputs[fieldDomain].PromptStyle = focusedStyle
+	m.inputs[fieldDomain].TextStyle = focusedStyle
 
 	return m
 }
@@ -152,34 +178,23 @@ func (m formModel) initCmd() tea.Cmd {
 }
 
 func (m *formModel) isToggle() bool {
-	return m.focus == fieldSimulate || m.focus == fieldForce || m.focus == fieldRecursive || m.focus == fieldNoAbort
+	return formFields[m.focus].kind == toggleField
 }
 
-func (m *formModel) toggleArrayIndex() int {
-	switch m.focus {
-	case fieldSimulate:
-		return 0
-	case fieldForce:
-		return 1
-	case fieldNoAbort:
-		return 3
-	default: // fieldRecursive
-		return 2
-	}
+// shown reports whether field f is on the form: its gate, if any, is ON.
+func (m *formModel) shown(f int) bool {
+	g := formFields[f].gate
+	return g == 0 || m.toggles[g]
 }
 
-// moveFocus advances focus by delta (+1 or -1), skipping gated fields: HitRate
-// when simulate is OFF and Depth when recursive is OFF.
+// moveFocus advances focus by delta (+1 or -1), skipping gated fields whose
+// toggle is OFF (Hit Rate without Simulate, Depth without Recursive).
 func (m *formModel) moveFocus(delta int) {
 	for {
 		m.focus = (m.focus + delta + fieldCount) % fieldCount
-		if m.focus == fieldHitRate && !m.toggles[0] {
-			continue
+		if m.shown(m.focus) {
+			return
 		}
-		if m.focus == fieldDepth && !m.toggles[2] {
-			continue
-		}
-		break
 	}
 }
 
@@ -191,48 +206,41 @@ func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab", "down":
-			// Blur current text input if any.
-			if idx := inputForField[m.focus]; idx >= 0 {
-				m.inputs[idx].Blur()
-				m.inputs[idx].PromptStyle = blurredStyle
-				m.inputs[idx].TextStyle = blurredStyle
-			}
-			m.moveFocus(+1)
-			if idx := inputForField[m.focus]; idx >= 0 {
-				m.inputs[idx].Focus()
-				m.inputs[idx].PromptStyle = focusedStyle
-				m.inputs[idx].TextStyle = focusedStyle
-				return m, textinput.Blink
-			}
-			return m, nil
+			return m.shiftFocus(+1)
 
 		case "shift+tab", "up":
-			if idx := inputForField[m.focus]; idx >= 0 {
-				m.inputs[idx].Blur()
-				m.inputs[idx].PromptStyle = blurredStyle
-				m.inputs[idx].TextStyle = blurredStyle
-			}
-			m.moveFocus(-1)
-			if idx := inputForField[m.focus]; idx >= 0 {
-				m.inputs[idx].Focus()
-				m.inputs[idx].PromptStyle = focusedStyle
-				m.inputs[idx].TextStyle = focusedStyle
-				return m, textinput.Blink
-			}
-			return m, nil
+			return m.shiftFocus(-1)
 
 		case " ":
 			if m.isToggle() {
-				m.toggles[m.toggleArrayIndex()] = !m.toggles[m.toggleArrayIndex()]
+				m.toggles[m.focus] = !m.toggles[m.focus]
 			}
 		}
 	}
 
 	// Forward events to the focused text input.
-	if idx := inputForField[m.focus]; idx >= 0 {
+	if !m.isToggle() {
 		var cmd tea.Cmd
-		m.inputs[idx], cmd = m.inputs[idx].Update(msg)
+		m.inputs[m.focus], cmd = m.inputs[m.focus].Update(msg)
 		return m, cmd
+	}
+	return m, nil
+}
+
+// shiftFocus moves focus by delta, blurring the text input it leaves and
+// focusing the one it lands on.
+func (m formModel) shiftFocus(delta int) (formModel, tea.Cmd) {
+	if !m.isToggle() {
+		m.inputs[m.focus].Blur()
+		m.inputs[m.focus].PromptStyle = blurredStyle
+		m.inputs[m.focus].TextStyle = blurredStyle
+	}
+	m.moveFocus(delta)
+	if !m.isToggle() {
+		m.inputs[m.focus].Focus()
+		m.inputs[m.focus].PromptStyle = focusedStyle
+		m.inputs[m.focus].TextStyle = focusedStyle
+		return m, textinput.Blink
 	}
 	return m, nil
 }
@@ -243,89 +251,28 @@ func (m formModel) View() string {
 	b.WriteString(logo() + "\n\n")
 	b.WriteString(titleStyle.Render("Configure Scan") + "\n")
 
-	row := func(fieldIdx int, label string, content string) {
-		lbl := labelStyle.Render(label + ":")
-		if m.focus == fieldIdx {
+	for f, spec := range formFields {
+		if !m.shown(f) {
+			gate := formFields[spec.gate].label
+			b.WriteString(dimmedRow.Render(fmt.Sprintf("  %-20s(enable %s)", spec.label+":", gate)) + "\n")
+			continue
+		}
+		var content string
+		if spec.kind == toggleField {
+			content = toggleVal(m.toggles[f])
+			if m.focus == f {
+				content += blurredStyle.Render("  [space to toggle]")
+			}
+		} else {
+			content = m.inputs[f].View()
+		}
+		lbl := labelStyle.Render(spec.label + ":")
+		if m.focus == f {
 			b.WriteString(focusedStyle.Render("▸ ") + lbl + content + "\n")
 		} else {
 			b.WriteString("  " + lbl + content + "\n")
 		}
 	}
-
-	// Domain
-	row(fieldDomain, "Domain*", m.inputs[0].View())
-
-	// Wordlist
-	row(fieldWordlist, "Wordlist*", m.inputs[1].View())
-
-	// Simulate toggle
-	simVal := toggleVal(m.toggles[0])
-	hint := ""
-	if m.focus == fieldSimulate {
-		hint = blurredStyle.Render("  [space to toggle]")
-	}
-	row(fieldSimulate, "Simulate", simVal+hint)
-
-	// Hit Rate - only shown when simulate is ON.
-	if m.toggles[0] {
-		row(fieldHitRate, "Hit Rate (%)", m.inputs[2].View())
-	} else {
-		b.WriteString(dimmedRow.Render("  Hit Rate (%):       (enable Simulate)") + "\n")
-	}
-
-	// DNS Server
-	row(fieldDNSServer, "DNS Server", m.inputs[3].View())
-
-	// Concurrency
-	row(fieldConcurrency, "Concurrency", m.inputs[4].View())
-
-	// Timeout
-	row(fieldTimeout, "Timeout (ms)", m.inputs[5].View())
-
-	// Attempts
-	row(fieldAttempts, "Attempts", m.inputs[6].View())
-
-	// Record types
-	row(fieldTypes, "Record Types", m.inputs[7].View())
-
-	// Recursive toggle
-	recurseVal := toggleVal(m.toggles[2])
-	recurseHint := ""
-	if m.focus == fieldRecursive {
-		recurseHint = blurredStyle.Render("  [space to toggle]")
-	}
-	row(fieldRecursive, "Recursive", recurseVal+recurseHint)
-
-	// Depth - only shown when recursive is ON.
-	if m.toggles[2] {
-		row(fieldDepth, "Depth", m.inputs[8].View())
-	} else {
-		b.WriteString(dimmedRow.Render("  Depth:              (enable Recursive)") + "\n")
-	}
-
-	// Rate and query cap
-	row(fieldRate, "Rate (qps)", m.inputs[9].View())
-	row(fieldMaxQueries, "Max Names", m.inputs[12].View())
-	row(fieldExclude, "Exclude", m.inputs[13].View())
-
-	// Output file (optional) and its format
-	row(fieldOutput, "Output File", m.inputs[10].View())
-	row(fieldFormat, "Format", m.inputs[11].View())
-
-	// Force toggle
-	forceVal := toggleVal(m.toggles[1])
-	forceHint := ""
-	if m.focus == fieldForce {
-		forceHint = blurredStyle.Render("  [space to toggle]")
-	}
-	row(fieldForce, "Force", forceVal+forceHint)
-
-	// No-abort toggle: keep scanning past the reliability guard.
-	noAbortHint := ""
-	if m.focus == fieldNoAbort {
-		noAbortHint = blurredStyle.Render("  [space to toggle]")
-	}
-	row(fieldNoAbort, "No Abort", toggleVal(m.toggles[3])+noAbortHint)
 
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("  ✗ "+m.err) + "\n")
@@ -361,7 +308,9 @@ func expandHome(path string) string {
 
 // validate checks all inputs and returns a scan config or an error string.
 func (m *formModel) validate() (formValues, string) {
-	rawDomain := strings.TrimSpace(m.inputs[0].Value())
+	text := func(f int) string { return m.inputs[f].Value() }
+
+	rawDomain := strings.TrimSpace(text(fieldDomain))
 	if rawDomain == "" {
 		return formValues{}, "Domain is required"
 	}
@@ -371,7 +320,7 @@ func (m *formModel) validate() (formValues, string) {
 	if err != nil {
 		return formValues{}, err.Error()
 	}
-	wl := expandHome(strings.TrimSpace(m.inputs[1].Value()))
+	wl := expandHome(strings.TrimSpace(text(fieldWordlist)))
 	if wl == "" {
 		return formValues{}, "Wordlist path is required"
 	}
@@ -379,41 +328,41 @@ func (m *formModel) validate() (formValues, string) {
 	if wl == wordlist.Stdin {
 		return formValues{}, "Wordlist from standard input (-) is not supported in the TUI; enter a file path"
 	}
-	dnsServer := strings.TrimSpace(m.inputs[3].Value())
+	dnsServer := strings.TrimSpace(text(fieldDNSServer))
 	if dnsServer == "" {
 		dnsServer = validate.DefaultDNSServer
 	}
 
 	// The form only parses its text fields here; ranges and the resolver are
 	// checked by scan.Options.Validate, the same validator the CLI uses (#80).
-	num := func(field int, name string, blank int) int {
-		s := strings.TrimSpace(m.inputs[field].Value())
+	num := func(f int, name string, blank int) int {
+		s := strings.TrimSpace(text(f))
 		if err != nil || s == "" {
 			return blank
 		}
 		n, perr := strconv.Atoi(s)
 		if perr != nil {
-			err = fmt.Errorf("%s must be a whole number, got %q", name, m.inputs[field].Value())
+			err = fmt.Errorf("%s must be a whole number, got %q", name, text(f))
 		}
 		return n
 	}
-	concurrency := num(4, "Concurrency", 0)
-	timeout := num(5, "Timeout", 0)
-	attempts := num(6, "Attempts", 0)
+	concurrency := num(fieldConcurrency, "Concurrency", 0)
+	timeout := num(fieldTimeout, "Timeout", 0)
+	attempts := num(fieldAttempts, "Attempts", 0)
 	// Hit rate only matters in simulation mode, and depth only when
 	// recursive is on; otherwise their fields must not block the scan.
 	hitRate := 15
-	if m.toggles[0] {
-		hitRate = num(2, "Hit rate", 0)
+	if m.shown(fieldHitRate) {
+		hitRate = num(fieldHitRate, "Hit rate", 0)
 	}
 	depth := 1
-	if m.toggles[2] {
-		depth = num(8, "Depth", 1)
+	if m.shown(fieldDepth) {
+		depth = num(fieldDepth, "Depth", 1)
 	}
-	rate := num(9, "Rate", 0)               // blank means unlimited
-	maxQueries := num(12, "Max queries", 0) // blank means unlimited
-	var exclude []string                    // out-of-scope names, never queried (#87)
-	for _, p := range strings.Split(m.inputs[13].Value(), ",") {
+	rate := num(fieldRate, "Rate", 0)                    // blank means unlimited
+	maxQueries := num(fieldMaxQueries, "Max queries", 0) // blank means unlimited
+	var exclude []string                                 // out-of-scope names, never queried (#87)
+	for _, p := range strings.Split(text(fieldExclude), ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			exclude = append(exclude, p)
 		}
@@ -422,15 +371,15 @@ func (m *formModel) validate() (formValues, string) {
 		return formValues{}, err.Error()
 	}
 
-	recordTypes, err := dns.ParseTypes(m.inputs[7].Value())
+	recordTypes, err := dns.ParseTypes(text(fieldTypes))
 	if err != nil {
 		return formValues{}, err.Error()
 	}
 
 	// Output file is optional; the format applies only to that file and is
 	// validated even when no file is set so a typo is caught early.
-	outputFile := expandHome(strings.TrimSpace(m.inputs[10].Value()))
-	formatStr := strings.TrimSpace(m.inputs[11].Value())
+	outputFile := expandHome(strings.TrimSpace(text(fieldOutput)))
+	formatStr := strings.TrimSpace(text(fieldFormat))
 	if formatStr == "" {
 		formatStr = "text"
 	}
@@ -448,17 +397,17 @@ func (m *formModel) validate() (formValues, string) {
 		attempts:    attempts,
 		hitRate:     hitRate,
 		recordTypes: recordTypes,
-		recursive:   m.toggles[2],
+		recursive:   m.toggles[fieldRecursive],
 		depth:       depth,
 		rate:        rate,
 		maxQueries:  maxQueries,
 		exclude:     exclude,
-		noAbort:     m.toggles[3],
+		noAbort:     m.toggles[fieldNoAbort],
 		outputFile:  outputFile,
 		format:      format,
 		formatName:  formatStr,
-		simulate:    m.toggles[0],
-		force:       m.toggles[1],
+		simulate:    m.toggles[fieldSimulate],
+		force:       m.toggles[fieldForce],
 	}
 	if err := v.options(nil, 0).Validate(); err != nil {
 		return formValues{}, scan.Render(err.Error(), settingLabel)
@@ -492,19 +441,12 @@ func (v formValues) options(entries []string, seed uint64) scan.Options {
 
 // settingLabel names an engine setting as its form field (#100).
 func settingLabel(s scan.Setting) string {
-	return map[scan.Setting]string{
-		scan.SettingConcurrency: "Concurrency",
-		scan.SettingTimeout:     "Timeout (ms)",
-		scan.SettingAttempts:    "Attempts",
-		scan.SettingHitRate:     "Hit Rate (%)",
-		scan.SettingDepth:       "Depth",
-		scan.SettingRate:        "Rate (qps)",
-		scan.SettingMaxQueries:  "Max Names",
-		scan.SettingMaxDuration: "Max Duration",
-		scan.SettingExclude:     "Exclude",
-		scan.SettingRecursive:   "Recursive",
-		scan.SettingForce:       "Force",
-	}[s]
+	for _, spec := range formFields {
+		if s != "" && spec.setting == s {
+			return spec.label
+		}
+	}
+	return settingsWithoutField[s]
 }
 
 type formValues struct {

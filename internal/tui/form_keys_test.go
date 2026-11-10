@@ -38,9 +38,9 @@ func TestFormTabOrderWrapsAndSkipsGatedFields(t *testing.T) {
 		var cmd tea.Cmd
 		m, cmd = m.Update(keyTab)
 		order = append(order, m.focus)
-		if inputForField[m.focus] >= 0 {
-			if cmd == nil || !m.inputs[inputForField[m.focus]].Focused() {
-				t.Fatalf("tab onto text field %d: cmd=%v focused=%v", m.focus, cmd != nil, m.inputs[inputForField[m.focus]].Focused())
+		if formFields[m.focus].kind == textField {
+			if cmd == nil || !m.inputs[m.focus].Focused() {
+				t.Fatalf("tab onto text field %d: cmd=%v focused=%v", m.focus, cmd != nil, m.inputs[m.focus].Focused())
 			}
 		} else if cmd != nil {
 			t.Fatalf("tab onto toggle %d returned a command", m.focus)
@@ -62,8 +62,8 @@ func TestFormTabOrderWrapsAndSkipsGatedFields(t *testing.T) {
 	// Backwards from the domain wraps to the last field.
 	m = newFormModel(savedConfig{})
 	m, _ = m.Update(keyShiftTab)
-	if m.focus != fieldNoAbort || m.inputs[0].Focused() {
-		t.Fatalf("shift+tab from the domain: focus=%d domain focused=%v", m.focus, m.inputs[0].Focused())
+	if m.focus != fieldNoAbort || m.inputs[fieldDomain].Focused() {
+		t.Fatalf("shift+tab from the domain: focus=%d domain focused=%v", m.focus, m.inputs[fieldDomain].Focused())
 	}
 	m, _ = m.Update(keyUp)
 	if m.focus != fieldForce {
@@ -88,40 +88,36 @@ func TestFormTabVisitsGatedFieldsWhenEnabled(t *testing.T) {
 }
 
 func TestFormSpaceTogglesFocusedToggle(t *testing.T) {
-	for _, tc := range []struct {
-		field, index int
-	}{
-		{fieldSimulate, 0}, {fieldForce, 1}, {fieldRecursive, 2}, {fieldNoAbort, 3},
-	} {
+	for _, field := range []int{fieldSimulate, fieldForce, fieldRecursive, fieldNoAbort} {
 		m := newFormModel(savedConfig{})
-		m.focus = tc.field
+		m.focus = field
 		m, _ = m.Update(keySpace)
 		for i, on := range m.toggles {
-			if on != (i == tc.index) {
-				t.Fatalf("space on field %d: toggles = %v, want only %d on", tc.field, m.toggles, tc.index)
+			if on != (i == field) {
+				t.Fatalf("space on field %d: toggles = %v, want only it on", field, m.toggles)
 			}
 		}
 		m, _ = m.Update(keySpace)
-		if m.toggles[tc.index] {
-			t.Fatalf("second space on field %d did not toggle back", tc.field)
+		if m.toggles[field] {
+			t.Fatalf("second space on field %d did not toggle back", field)
 		}
 	}
 
 	// On a text field, space is typed rather than toggling anything.
 	m := newFormModel(savedConfig{})
 	m.focus = fieldExclude
-	m.inputs[13].Focus()
+	m.inputs[fieldExclude].Focus()
 	m, _ = m.Update(typeText("a"))
 	m, _ = m.Update(keySpace)
-	if m.inputs[13].Value() != "a " || m.toggles != [4]bool{} {
-		t.Fatalf("space in a text field: value=%q toggles=%v", m.inputs[13].Value(), m.toggles)
+	if m.inputs[fieldExclude].Value() != "a " || m.toggles != [fieldCount]bool{} {
+		t.Fatalf("space in a text field: value=%q toggles=%v", m.inputs[fieldExclude].Value(), m.toggles)
 	}
 }
 
 func TestFormTypingAndResize(t *testing.T) {
 	m := newFormModel(savedConfig{})
 	m, _ = m.Update(typeText("example.com"))
-	if got := m.inputs[0].Value(); got != "example.com" {
+	if got := m.inputs[fieldDomain].Value(); got != "example.com" {
 		t.Fatalf("domain = %q", got)
 	}
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 90, Height: 30})
@@ -131,8 +127,8 @@ func TestFormTypingAndResize(t *testing.T) {
 	// Keys on a toggle are not forwarded to any input.
 	m.focus = fieldForce
 	m, _ = m.Update(typeText("x"))
-	if m.inputs[0].Value() != "example.com" {
-		t.Fatalf("typing on a toggle changed the domain: %q", m.inputs[0].Value())
+	if m.inputs[fieldDomain].Value() != "example.com" {
+		t.Fatalf("typing on a toggle changed the domain: %q", m.inputs[fieldDomain].Value())
 	}
 }
 
@@ -145,7 +141,7 @@ func TestFormViewShowsFocusHintsAndGates(t *testing.T) {
 		}
 	}
 	m.focus = fieldRecursive
-	m.toggles = [4]bool{true, false, true, false}
+	m.toggles[fieldSimulate], m.toggles[fieldRecursive] = true, true
 	v = m.View()
 	if !strings.Contains(v, "[space to toggle]") || strings.Contains(v, "(enable Simulate)") || strings.Contains(v, "(enable Recursive)") {
 		t.Errorf("view with simulate and recursive on:\n%s", v)
@@ -166,7 +162,7 @@ func TestModelFormKeys(t *testing.T) {
 	}
 
 	// ctrl+r with an invalid domain shows an error and starts nothing.
-	m.form.inputs[0].SetValue("not a domain!")
+	m.form.inputs[fieldDomain].SetValue("not a domain!")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
 	nm := next.(Model)
 	if cmd != nil || nm.form.err == "" || nm.form.loading || nm.state != stateForm {

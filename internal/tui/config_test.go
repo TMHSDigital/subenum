@@ -74,8 +74,8 @@ func TestSaveLoadConfigRoundTrip(t *testing.T) {
 		t.Errorf("max-queries/no-abort did not round-trip: %+v", sc)
 	}
 	m := newFormModel(sc)
-	if got := m.inputs[12].Value(); got != "5000" || !m.toggles[3] {
-		t.Errorf("form not seeded from saved max-queries/no-abort: %q, %v", got, m.toggles[3])
+	if got := m.inputs[fieldMaxQueries].Value(); got != "5000" || !m.toggles[fieldNoAbort] {
+		t.Errorf("form not seeded from saved max-queries/no-abort: %q, %v", got, m.toggles[fieldNoAbort])
 	}
 }
 
@@ -100,22 +100,22 @@ func TestSavedConfigSeedsForm(t *testing.T) {
 		Simulate:    true,
 	}
 	m := newFormModel(sc)
-	if got := m.inputs[0].Value(); got != "seed.com" {
+	if got := m.inputs[fieldDomain].Value(); got != "seed.com" {
 		t.Errorf("domain seed = %q", got)
 	}
-	if got := m.inputs[4].Value(); got != "321" {
+	if got := m.inputs[fieldConcurrency].Value(); got != "321" {
 		t.Errorf("concurrency seed = %q", got)
 	}
-	if got := m.inputs[7].Value(); got != "CNAME" {
+	if got := m.inputs[fieldTypes].Value(); got != "CNAME" {
 		t.Errorf("types seed = %q", got)
 	}
-	if got := m.inputs[8].Value(); got != "5" {
+	if got := m.inputs[fieldDepth].Value(); got != "5" {
 		t.Errorf("depth seed = %q", got)
 	}
-	if got := m.inputs[9].Value(); got != "7" {
+	if got := m.inputs[fieldRate].Value(); got != "7" {
 		t.Errorf("rate seed = %q", got)
 	}
-	if !m.toggles[2] {
+	if !m.toggles[fieldRecursive] {
 		t.Error("recursive toggle should be seeded ON")
 	}
 }

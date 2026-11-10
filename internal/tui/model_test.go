@@ -188,8 +188,8 @@ func TestOutputFileFailureSetsExitCode(t *testing.T) {
 // Bubble Tea owns and freeze the UI.
 func TestValidateRejectsStdinWordlist(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[1].SetValue("-")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldWordlist].SetValue("-")
 	if _, errStr := m.validate(); !strings.Contains(errStr, "standard input") {
 		t.Fatalf("validate() error = %q, want a standard-input rejection", errStr)
 	}
@@ -204,10 +204,10 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := Model{state: stateForm, form: newFormModel(savedConfig{})}
-	m.form.inputs[0].SetValue("example.com")
-	m.form.inputs[1].SetValue(wl)
-	m.form.inputs[10].SetValue("") // no output file
-	m.form.toggles[0] = true       // simulate: the started scan sends no DNS traffic
+	m.form.inputs[fieldDomain].SetValue("example.com")
+	m.form.inputs[fieldWordlist].SetValue(wl)
+	m.form.inputs[fieldOutput].SetValue("") // no output file
+	m.form.toggles[fieldSimulate] = true    // simulate: the started scan sends no DNS traffic
 
 	next, cmd := m.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR})
 	nm := next.(Model)

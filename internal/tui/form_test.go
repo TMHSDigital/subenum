@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -11,23 +12,20 @@ import (
 
 func TestNewFormModelDefaults(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	if len(m.inputs) != 14 {
-		t.Fatalf("expected 14 text inputs, got %d", len(m.inputs))
-	}
 	if m.focus != fieldDomain {
 		t.Errorf("expected initial focus on domain, got %d", m.focus)
 	}
-	if got := m.inputs[1].Value(); got != "examples/sample_wordlist.txt" {
+	if got := m.inputs[fieldWordlist].Value(); got != "examples/sample_wordlist.txt" {
 		t.Errorf("default wordlist = %q", got)
 	}
-	if got := m.inputs[4].Value(); got != "100" {
+	if got := m.inputs[fieldConcurrency].Value(); got != "100" {
 		t.Errorf("default concurrency = %q", got)
 	}
 }
 
 func TestValidateMissingDomain(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("")
+	m.inputs[fieldDomain].SetValue("")
 	if _, errStr := m.validate(); errStr == "" {
 		t.Error("expected validation error for missing domain")
 	}
@@ -35,8 +33,8 @@ func TestValidateMissingDomain(t *testing.T) {
 
 func TestValidateNonPositiveConcurrency(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[4].SetValue("0")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldConcurrency].SetValue("0")
 	_, errStr := m.validate()
 	if !strings.Contains(errStr, "concurrency") {
 		t.Errorf("expected concurrency error, got %q", errStr)
@@ -47,9 +45,9 @@ func TestValidateNonPositiveConcurrency(t *testing.T) {
 // and rejected when Simulate is ON.
 func TestValidateHitRateOnlyWhenSimulate(t *testing.T) {
 	live := newFormModel(savedConfig{})
-	live.inputs[0].SetValue("example.com")
-	live.inputs[2].SetValue("") // blank hit rate
-	live.toggles[0] = false
+	live.inputs[fieldDomain].SetValue("example.com")
+	live.inputs[fieldHitRate].SetValue("") // blank hit rate
+	live.toggles[fieldSimulate] = false
 	vals, errStr := live.validate()
 	if errStr != "" {
 		t.Errorf("live mode should ignore hit rate, got error %q", errStr)
@@ -59,14 +57,14 @@ func TestValidateHitRateOnlyWhenSimulate(t *testing.T) {
 	}
 
 	sim := newFormModel(savedConfig{})
-	sim.inputs[0].SetValue("example.com")
-	sim.inputs[2].SetValue("") // blank hit rate
-	sim.toggles[0] = true
+	sim.inputs[fieldDomain].SetValue("example.com")
+	sim.inputs[fieldHitRate].SetValue("") // blank hit rate
+	sim.toggles[fieldSimulate] = true
 	if _, errStr := sim.validate(); errStr == "" {
 		t.Error("simulate mode should reject blank hit rate")
 	}
 
-	sim.inputs[2].SetValue("500") // out of range
+	sim.inputs[fieldHitRate].SetValue("500") // out of range
 	if _, errStr := sim.validate(); errStr == "" {
 		t.Error("simulate mode should reject out-of-range hit rate")
 	}
@@ -76,8 +74,8 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 	m := newFormModel(savedConfig{})
 
 	// Both gates off: HitRate is skipped after Simulate, Depth after Recursive.
-	m.toggles[0] = false
-	m.toggles[2] = false
+	m.toggles[fieldSimulate] = false
+	m.toggles[fieldRecursive] = false
 
 	m.focus = fieldSimulate
 	m.moveFocus(+1)
@@ -92,14 +90,14 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 	}
 
 	// Gates on: the previously skipped fields are now reachable.
-	m.toggles[0] = true
+	m.toggles[fieldSimulate] = true
 	m.focus = fieldSimulate
 	m.moveFocus(+1)
 	if m.focus != fieldHitRate {
 		t.Errorf("simulate ON: expected HitRate after Simulate, got %d", m.focus)
 	}
 
-	m.toggles[2] = true
+	m.toggles[fieldRecursive] = true
 	m.focus = fieldRecursive
 	m.moveFocus(+1)
 	if m.focus != fieldDepth {
@@ -109,8 +107,8 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 
 func TestValidateRejectsBadRecordType(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[7].SetValue("A,MX")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldTypes].SetValue("A,MX")
 	if _, errStr := m.validate(); errStr == "" {
 		t.Error("expected validation error for unsupported record type MX")
 	}
@@ -118,11 +116,11 @@ func TestValidateRejectsBadRecordType(t *testing.T) {
 
 func TestValidateDepthGatedOnRecursive(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[8].SetValue("not-a-number")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldDepth].SetValue("not-a-number")
 
 	// Recursive OFF: bad depth is ignored, defaults to 1.
-	m.toggles[2] = false
+	m.toggles[fieldRecursive] = false
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Errorf("recursive OFF should ignore depth, got %q", errStr)
@@ -132,7 +130,7 @@ func TestValidateDepthGatedOnRecursive(t *testing.T) {
 	}
 
 	// Recursive ON: bad depth is rejected.
-	m.toggles[2] = true
+	m.toggles[fieldRecursive] = true
 	if _, errStr := m.validate(); errStr == "" {
 		t.Error("recursive ON should reject non-numeric depth")
 	}
@@ -143,9 +141,9 @@ func TestValidateDepthGatedOnRecursive(t *testing.T) {
 // disables the wildcard abort).
 func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[12].SetValue("2500")
-	m.toggles[3] = true
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldMaxQueries].SetValue("2500")
+	m.toggles[fieldNoAbort] = true
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
@@ -154,7 +152,7 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 		t.Errorf("got maxQueries=%d noAbort=%v force=%v", vals.maxQueries, vals.noAbort, vals.force)
 	}
 
-	m.inputs[12].SetValue("-1")
+	m.inputs[fieldMaxQueries].SetValue("-1")
 	if _, errStr := m.validate(); !strings.Contains(errStr, "max queries") {
 		t.Errorf("negative max queries: got %q", errStr)
 	}
@@ -162,7 +160,7 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 	// The new toggle is reachable and flips with space.
 	m.focus = fieldForce
 	m.moveFocus(+1)
-	if m.focus != fieldNoAbort || !m.isToggle() || m.toggleArrayIndex() != 3 {
+	if m.focus != fieldNoAbort || !m.isToggle() {
 		t.Errorf("focus after Force = %d, want No Abort toggle", m.focus)
 	}
 }
@@ -172,7 +170,7 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 func TestValidateNormalizesDomain(t *testing.T) {
 	for _, in := range []string{"https://Example.COM/", "Example.COM.", "example.com"} {
 		m := newFormModel(savedConfig{})
-		m.inputs[0].SetValue(in)
+		m.inputs[fieldDomain].SetValue(in)
 		vals, errStr := m.validate()
 		if errStr != "" {
 			t.Fatalf("%q: unexpected error %q", in, errStr)
@@ -188,10 +186,16 @@ func TestValidateNormalizesDomain(t *testing.T) {
 // same Config from the equivalent flags.
 func TestFormBuildsSharedConfig(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	for i, v := range map[int]string{0: "example.com", 1: "wl.txt", 2: "30", 3: "1.1.1.1:53", 4: "50", 5: "800", 6: "2", 7: "A,CNAME", 8: "2", 9: "100", 10: "", 12: "500"} {
-		m.inputs[i].SetValue(v)
+	for f, v := range map[int]string{
+		fieldDomain: "example.com", fieldWordlist: "wl.txt", fieldHitRate: "30", fieldDNSServer: "1.1.1.1:53",
+		fieldConcurrency: "50", fieldTimeout: "800", fieldAttempts: "2", fieldTypes: "A,CNAME", fieldDepth: "2",
+		fieldRate: "100", fieldOutput: "", fieldMaxQueries: "500",
+	} {
+		m.inputs[f].SetValue(v)
 	}
-	m.toggles = [4]bool{true, true, true, true}
+	for _, f := range []int{fieldSimulate, fieldForce, fieldRecursive, fieldNoAbort} {
+		m.toggles[f] = true
+	}
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
@@ -212,8 +216,8 @@ func TestFormBuildsSharedConfig(t *testing.T) {
 // scan config, and an invalid pattern is rejected on the form.
 func TestValidateExclude(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[13].SetValue(" vpn.example.com , *.corp.example.com ")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldExclude].SetValue(" vpn.example.com , *.corp.example.com ")
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
@@ -221,7 +225,7 @@ func TestValidateExclude(t *testing.T) {
 	if got := vals.options(nil, 0).Config().Exclude; !reflect.DeepEqual(got, []string{"vpn.example.com", "*.corp.example.com"}) {
 		t.Errorf("Exclude = %q", got)
 	}
-	m.inputs[13].SetValue("not a domain")
+	m.inputs[fieldExclude].SetValue("not a domain")
 	// The engine's setting token is rendered as the form field (#100).
 	if _, errStr := m.validate(); !strings.Contains(errStr, "invalid Exclude pattern") {
 		t.Errorf("invalid pattern: got %q", errStr)
@@ -235,5 +239,63 @@ func TestSettingLabelsCoverEverySetting(t *testing.T) {
 		if settingLabel(s) == "" {
 			t.Errorf("setting %q has no form label", s)
 		}
+	}
+}
+
+// TestFormFieldSpec covers #161: every formFields entry is complete, and a
+// gate always names a toggle.
+func TestFormFieldSpec(t *testing.T) {
+	for f, spec := range formFields {
+		if spec.label == "" {
+			t.Errorf("field %d has no label", f)
+		}
+		switch spec.kind {
+		case textField:
+			if spec.value == nil || spec.placeholder == "" {
+				t.Errorf("text field %q lacks a value or placeholder", spec.label)
+			}
+		case toggleField:
+			if spec.on == nil || spec.gate != 0 {
+				t.Errorf("toggle %q lacks an initial state or is gated", spec.label)
+			}
+		}
+		if spec.gate != 0 && formFields[spec.gate].kind != toggleField {
+			t.Errorf("field %q is gated on %q, which is not a toggle", spec.label, formFields[spec.gate].label)
+		}
+	}
+}
+
+// TestFormViewRows pins the default form's rows (ANSI stripped), so the
+// table-driven View keeps the order, labels, defaults and gate hints (#161).
+func TestFormViewRows(t *testing.T) {
+	ansi := regexp.MustCompile("\x1b\\[[0-9;?]*[a-zA-Z]")
+	var rows []string
+	for _, line := range strings.Split(ansi.ReplaceAllString(newFormModel(savedConfig{}).View(), ""), "\n") {
+		if line = strings.TrimRight(line, " "); strings.Contains(line, ":") {
+			rows = append(rows, line)
+		}
+	}
+	want := []string{
+		"▸ Domain*:          > e.g. example.com",
+		"  Wordlist*:        > examples/sample_wordlist.txt",
+		"  Simulate:         OFF",
+		"  Hit Rate (%):       (enable Simulate)",
+		"  DNS Server:       > 8.8.8.8:53",
+		"  Concurrency:      > 100",
+		"  Timeout (ms):     > 1000",
+		"  Attempts:         > 1",
+		"  Record Types:     > A,AAAA",
+		"  Recursive:        OFF",
+		"  Depth:              (enable Recursive)",
+		"  Rate (qps):       > 0",
+		"  Max Names:        > 0",
+		"  Exclude:          > optional, e.g. vpn.example.com,*.corp.example.com",
+		"  Output File:      > optional, e.g. results.txt",
+		"  Format:           > text",
+		"  Force:            OFF",
+		"  No Abort:         OFF",
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("form rows:\n got %q\nwant %q", rows, want)
 	}
 }

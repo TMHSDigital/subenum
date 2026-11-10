@@ -85,7 +85,7 @@ func TestSettingsPrefillTheForm(t *testing.T) {
 		t.Errorf("withSettings = %+v", sc)
 	}
 	m := newFormModel(sc)
-	if got := m.inputs[inputForField[fieldDNSServer]].Value(); got != "tls://1.1.1.1" {
+	if got := m.inputs[fieldDNSServer].Value(); got != "tls://1.1.1.1" {
 		t.Errorf("DNS server field = %q", got)
 	}
 }
