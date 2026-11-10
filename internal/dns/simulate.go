@@ -8,17 +8,24 @@ import (
 	"time"
 )
 
-// SimulateResolve returns a synthetic DNS result without performing any network
+// Simulation is a simulated resolver: HitRate percent (0-100) of names
+// resolve, and Seed makes the answers reproducible.
+type Simulation struct {
+	HitRate int
+	Seed    uint64
+}
+
+// Resolve returns a synthetic DNS result without performing any network
 // I/O, along with synthetic records for the requested types when the domain
-// "resolves". Exactly hitRate percent (0-100) of names resolve, whatever their
+// "resolves". Exactly s.HitRate percent of names resolve, whatever their
 // prefix.
 //
-// The outcome, records and reported timing are a pure function of (seed,
+// The outcome, records and reported timing are a pure function of (s.Seed,
 // domain), so the same seed reproduces the same scan regardless of worker
 // scheduling. Callers pick a random seed when the user does not supply one.
-func SimulateResolve(domain string, hitRate int, seed uint64, logf Logf, types []string) ([]Record, bool) {
-	h := simHash(seed, domain)
-	if int(h%100) < hitRate {
+func (s Simulation) Resolve(domain string, logf Logf, types []string) ([]Record, bool) {
+	h := simHash(s.Seed, domain)
+	if int(h%100) < s.HitRate {
 		return synthResolved(domain, types, h, logf)
 	}
 	return synthFailed(domain, h, logf)

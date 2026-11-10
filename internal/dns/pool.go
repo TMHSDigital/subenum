@@ -349,7 +349,7 @@ func (p *Pool) Disagree(a PoolAnswer, trusted Outcome) {
 // checkCanary asks m about a known-existing name when a check is due: always
 // while m is untrusted, else every poolCanaryEvery lookups. An NXDOMAIN
 // answer is a contradiction. Failed checks change nothing.
-func (p *Pool) checkCanary(ctx context.Context, m *PoolResolver, timeout time.Duration, types []string) {
+func (p *Pool) checkCanary(ctx context.Context, m *PoolResolver, l Lookup) {
 	m.mu.Lock()
 	due := !m.canaryBusy && (!m.trusted || m.sinceCanary >= poolCanaryEvery)
 	if due {
@@ -360,13 +360,15 @@ func (p *Pool) checkCanary(ctx context.Context, m *PoolResolver, timeout time.Du
 		return
 	}
 	name := p.canary()
-	if name == "" || p.reserve(ctx, m, len(types)) != nil {
+	if name == "" || p.reserve(ctx, m, len(l.Types)) != nil {
 		m.mu.Lock()
 		m.canaryBusy = false
 		m.mu.Unlock()
 		return
 	}
-	_, o := ResolveDomainWithRetry(ctx, m.resolver, name, timeout, nil, 1, types)
+	quiet := m.lookup(l)
+	quiet.Logf = nil
+	_, o := quiet.Resolve(ctx, name)
 	m.mu.Lock()
 	m.canaryBusy = false
 	if o == OutcomeFound || o == OutcomeNXDomain {
@@ -380,15 +382,17 @@ func (p *Pool) checkCanary(ctx context.Context, m *PoolResolver, timeout time.Du
 	}
 }
 
-// Resolve looks domain up through the pool, up to attempts times, each
-// attempt on a different healthy resolver where possible. An NXDOMAIN from a
+// Resolve looks domain up through the pool, up to l.Attempts times, each
+// attempt on a different healthy resolver where possible. l.Resolver is
+// unused: each attempt is one lookup on a member's own resolver, with
+// l.Timeout, l.Types and l.Logf. An NXDOMAIN from a
 // member that has not passed a canary check is asked of a second member; if
 // that one finds the name, its answer is returned and the first member is
 // recorded as contradicted for the caller's Disagree.
-func (p *Pool) Resolve(ctx context.Context, domain string, timeout time.Duration, logf Logf, attempts int, types []string) PoolAnswer {
+func (p *Pool) Resolve(ctx context.Context, l Lookup, domain string) PoolAnswer {
 	var last *PoolResolver
 	outcome := OutcomeOther
-	for attempt := 0; attempt < max(attempts, 1); attempt++ {
+	for attempt := 0; attempt < max(l.Attempts, 1); attempt++ {
 		if ctx.Err() != nil {
 			return PoolAnswer{Outcome: OutcomeCanceled}
 		}
@@ -397,18 +401,18 @@ func (p *Pool) Resolve(ctx context.Context, domain string, timeout time.Duration
 			return PoolAnswer{Outcome: OutcomeOther, NoResolver: true}
 		}
 		last = m
-		p.checkCanary(ctx, m, timeout, types)
-		if p.reserve(ctx, m, len(types)) != nil {
+		p.checkCanary(ctx, m, l)
+		if p.reserve(ctx, m, len(l.Types)) != nil {
 			return PoolAnswer{Outcome: OutcomeCanceled}
 		}
 		var recs []Record
-		recs, outcome = ResolveDomainWithRetry(ctx, m.resolver, domain, timeout, logf, 1, types)
+		recs, outcome = m.lookup(l).Resolve(ctx, domain)
 		p.report(m, outcome)
 		switch outcome {
 		case OutcomeFound:
 			return PoolAnswer{Records: recs, Outcome: outcome, Addr: m.Addr, member: m}
 		case OutcomeNXDomain:
-			return p.secondOpinion(ctx, m, domain, timeout, logf, types)
+			return p.secondOpinion(ctx, m, l, domain)
 		case OutcomeCanceled:
 			return PoolAnswer{Outcome: outcome, Addr: m.Addr, member: m}
 		}
@@ -417,7 +421,7 @@ func (p *Pool) Resolve(ctx context.Context, domain string, timeout time.Duration
 }
 
 // secondOpinion confirms an untrusted member's NXDOMAIN with another member.
-func (p *Pool) secondOpinion(ctx context.Context, m *PoolResolver, domain string, timeout time.Duration, logf Logf, types []string) PoolAnswer {
+func (p *Pool) secondOpinion(ctx context.Context, m *PoolResolver, l Lookup, domain string) PoolAnswer {
 	nx := PoolAnswer{Outcome: OutcomeNXDomain, Addr: m.Addr, member: m}
 	m.mu.Lock()
 	trusted := m.trusted
@@ -426,15 +430,21 @@ func (p *Pool) secondOpinion(ctx context.Context, m *PoolResolver, domain string
 		return nx
 	}
 	other := p.pickHealthy(m)
-	if other == nil || p.reserve(ctx, other, len(types)) != nil {
+	if other == nil || p.reserve(ctx, other, len(l.Types)) != nil {
 		return nx
 	}
-	recs, o := ResolveDomainWithRetry(ctx, other.resolver, domain, timeout, logf, 1, types)
+	recs, o := other.lookup(l).Resolve(ctx, domain)
 	p.report(other, o)
 	if o == OutcomeFound {
 		return PoolAnswer{Records: recs, Outcome: o, Addr: other.Addr, member: other, contradicted: m}
 	}
 	return nx
+}
+
+// lookup is l as one try on m's resolver.
+func (m *PoolResolver) lookup(l Lookup) Lookup {
+	l.Resolver, l.Attempts = m.resolver, 1
+	return l
 }
 
 // Stats returns a snapshot of every member's accounting, in pool order.

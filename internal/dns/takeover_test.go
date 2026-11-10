@@ -47,8 +47,8 @@ func TestTakeoverHint(t *testing.T) {
 		"cdn.example.com":      "",
 	} {
 		t.Run(name, func(t *testing.T) {
-			recs, _, _ := ResolveTypes(context.Background(), r, name, time.Second, []string{"A", "CNAME"})
-			if got := TakeoverHint(context.Background(), r, recs, time.Second, 1); got != want {
+			recs, _, _ := Lookup{Resolver: r, Timeout: time.Second, Types: []string{"A", "CNAME"}}.ResolveTypes(context.Background(), name)
+			if got := TakeoverHint(context.Background(), Lookup{Resolver: r, Timeout: time.Second, Attempts: 1}, recs); got != want {
 				t.Errorf("TakeoverHint(%v) = %q, want %q", recs, got, want)
 			}
 		})
@@ -73,7 +73,7 @@ func TestTakeoverCache(t *testing.T) {
 		for target, want := range targets {
 			wg.Go(func() {
 				recs := []Record{{Type: "CNAME", Value: target}}
-				if got := c.Hint(context.Background(), r, recs, time.Second, 1); got != want {
+				if got := c.Hint(context.Background(), Lookup{Resolver: r, Timeout: time.Second, Attempts: 1}, recs); got != want {
 					t.Errorf("Hint(%s) = %q, want %q", target, got, want)
 				}
 			})

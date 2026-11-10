@@ -64,7 +64,8 @@ func (s *session) dryRun() int {
 			p.SecondsMax = float64(p.QueriesMax) / float64(f.rate)
 		}
 		if !f.testMode {
-			_, outcome := dns.ResolveDomainWithRetry(context.Background(), resolver, target, timeout, nil, max(s.in.maxAttempts, 1), s.in.recordTypes)
+			lookup := dns.Lookup{Resolver: resolver, Timeout: timeout, Attempts: s.in.maxAttempts, Types: s.in.recordTypes}
+			_, outcome := lookup.Resolve(context.Background(), target)
 			p.Preflight = outcome.String()
 			p.PreflightOK = outcome == dns.OutcomeFound || outcome == dns.OutcomeNXDomain
 			failed = failed || !p.PreflightOK

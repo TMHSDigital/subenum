@@ -9,10 +9,10 @@ import (
 
 func TestSimulateResolve(t *testing.T) {
 	for seed := uint64(0); seed < 200; seed++ {
-		if _, ok := SimulateResolve("zzz-random-prefix.example.com", 0, seed, nil, DefaultTypes); ok {
+		if _, ok := (Simulation{HitRate: 0, Seed: seed}).Resolve("zzz-random-prefix.example.com", nil, DefaultTypes); ok {
 			t.Fatalf("seed %d: 0%% hit rate resolved", seed)
 		}
-		if _, ok := SimulateResolve("zzz-random-prefix.example.com", 100, seed, nil, DefaultTypes); !ok {
+		if _, ok := (Simulation{HitRate: 100, Seed: seed}).Resolve("zzz-random-prefix.example.com", nil, DefaultTypes); !ok {
 			t.Fatalf("seed %d: 100%% hit rate did not resolve", seed)
 		}
 	}
@@ -25,7 +25,7 @@ func TestSimulateHitRateHonored(t *testing.T) {
 	for _, prefix := range []string{"www", "api", "p"} {
 		hits := 0
 		for i := 0; i < n; i++ {
-			if _, ok := SimulateResolve(fmt.Sprintf("%s.example.com", prefix), 10, uint64(i), nil, DefaultTypes); ok {
+			if _, ok := (Simulation{HitRate: 10, Seed: uint64(i)}).Resolve(fmt.Sprintf("%s.example.com", prefix), nil, DefaultTypes); ok {
 				hits++
 			}
 		}
@@ -41,12 +41,12 @@ func TestSimulateDeterministic(t *testing.T) {
 	differs := false
 	for i := 0; i < 100; i++ {
 		name := fmt.Sprintf("h%d.example.com", i)
-		r1, ok1 := SimulateResolve(name, 50, 42, nil, DefaultTypes)
-		r2, ok2 := SimulateResolve(name, 50, 42, nil, DefaultTypes)
+		r1, ok1 := Simulation{HitRate: 50, Seed: 42}.Resolve(name, nil, DefaultTypes)
+		r2, ok2 := Simulation{HitRate: 50, Seed: 42}.Resolve(name, nil, DefaultTypes)
 		if ok1 != ok2 || !reflect.DeepEqual(r1, r2) {
 			t.Fatalf("%s: seed 42 not reproducible: %v/%v vs %v/%v", name, ok1, r1, ok2, r2)
 		}
-		if _, ok3 := SimulateResolve(name, 50, 43, nil, DefaultTypes); ok3 != ok1 {
+		if _, ok3 := (Simulation{HitRate: 50, Seed: 43}).Resolve(name, nil, DefaultTypes); ok3 != ok1 {
 			differs = true
 		}
 	}
@@ -75,7 +75,7 @@ func TestParseTypes(t *testing.T) {
 
 func TestSimulateResolveTypes(t *testing.T) {
 	// Force a resolve with hitRate 100 and request only CNAME.
-	recs, ok := SimulateResolve("zzz.example.com", 100, 1, nil, []string{"CNAME"})
+	recs, ok := Simulation{HitRate: 100, Seed: 1}.Resolve("zzz.example.com", nil, []string{"CNAME"})
 	if !ok {
 		t.Fatal("expected simulate to resolve at hitRate 100")
 	}
@@ -107,7 +107,7 @@ func TestSimulateResolveConcurrent(t *testing.T) {
 	want := make([][]outcome, len(names))
 	for n, c := range names {
 		for i := 0; i < perGoroutine; i++ {
-			recs, ok := SimulateResolve(c.name, c.hitRate, uint64(i), c.logf, DefaultTypes)
+			recs, ok := Simulation{HitRate: c.hitRate, Seed: uint64(i)}.Resolve(c.name, c.logf, DefaultTypes)
 			want[n] = append(want[n], outcome{recs, ok})
 		}
 	}
@@ -121,7 +121,7 @@ func TestSimulateResolveConcurrent(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				for n, c := range names {
-					recs, ok := SimulateResolve(c.name, c.hitRate, uint64(i), c.logf, DefaultTypes)
+					recs, ok := Simulation{HitRate: c.hitRate, Seed: uint64(i)}.Resolve(c.name, c.logf, DefaultTypes)
 					if w := want[n][i]; ok != w.ok || !reflect.DeepEqual(recs, w.recs) {
 						mu.Lock()
 						mismatches = append(mismatches, fmt.Sprintf("%s seed %d: got (%v, %v), want (%v, %v)", c.name, i, recs, ok, w.recs, w.ok))

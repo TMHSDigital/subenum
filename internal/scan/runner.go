@@ -62,7 +62,7 @@ type Config struct {
 	// checks also use Resolver.
 	Pool *dns.Pool
 
-	// resolveHook, if set, replaces SimulateResolve / ResolveDomainWithRetry.
+	// resolveHook, if set, replaces the simulation and live lookups (see resolve).
 	// Tests inject classified outcomes through this field without network I/O.
 	resolveHook func(ctx context.Context, domain string) ([]dns.Record, dns.Outcome)
 
@@ -79,6 +79,40 @@ func (c Config) logf() dns.Logf {
 		return c.Logf
 	}
 	return dns.StderrLogf
+}
+
+// lookup is the trusted resolver's lookup settings, logging through logf.
+func (c Config) lookup(logf dns.Logf) dns.Lookup {
+	return dns.Lookup{Resolver: c.Resolver, Timeout: c.Timeout, Attempts: c.Attempts, Types: c.Types, Logf: logf}
+}
+
+// resolve is the one lookup of a name that the scan workers, Verify and the
+// wildcard near-miss probes share (#163): the test hook when set, else the
+// simulation, else the trusted resolver with retries. The resolver pool is not
+// consulted here; processJob layers it on top for candidate names.
+func (c Config) resolve(ctx context.Context, name string, logf dns.Logf) ([]dns.Record, dns.Outcome) {
+	switch {
+	case c.resolveHook != nil:
+		return c.resolveHook(ctx, name)
+	case c.Simulate:
+		records, ok := dns.Simulation{HitRate: c.HitRate, Seed: c.Seed}.Resolve(name, logf, c.Types)
+		if ok {
+			return records, dns.OutcomeFound
+		}
+		return nil, dns.OutcomeNXDomain
+	default:
+		return c.lookup(logf).Resolve(ctx, name)
+	}
+}
+
+// settle reports a lookup that did not find the name while ctx was cancelled
+// as OutcomeCanceled: a lookup cut short says nothing about the resolver or
+// the name (#42).
+func settle(ctx context.Context, o dns.Outcome) dns.Outcome {
+	if o != dns.OutcomeFound && ctx.Err() != nil {
+		return dns.OutcomeCanceled
+	}
+	return o
 }
 
 // Stats is a snapshot of per-outcome query counters. Populated on EventDone.
@@ -186,7 +220,7 @@ func (c *wildcardCache) isWildcard(ctx context.Context, cfg Config, parent strin
 	}
 	c.mu.Unlock()
 
-	is, _, err := dns.CheckWildcard(ctx, cfg.Resolver, parent, cfg.Timeout, cfg.Types, cfg.Attempts)
+	is, _, err := cfg.lookup(nil).CheckWildcard(ctx, parent)
 	if err != nil {
 		return false, err // never cache an inconclusive check
 	}
@@ -278,7 +312,7 @@ func isWildcardAnswer(ctx context.Context, cfg Config, fp *fingerprint, name str
 		parent = name[i+1:]
 	}
 	for i := 0; i < nearMissProbes; i++ {
-		recs, _ := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, dns.RandomLabel()+"."+parent, cfg.Timeout, nil, cfg.Attempts, cfg.Types)
+		recs, _ := cfg.resolve(ctx, dns.RandomLabel()+"."+parent, nil)
 		fp.add(recs)
 		if covered, _ = fp.match(records); covered {
 			return true
@@ -434,6 +468,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	cfg.Attempts = max(cfg.Attempts, 1)
 
 	var total, processed, found int64
 	var stats counters
@@ -503,13 +538,12 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	if !cfg.Simulate && cfg.resolveHook == nil {
 		// Retried like any other lookup, so one dropped packet cannot abort a
 		// scan that -attempts would otherwise complete (#57).
-		attempts := max(cfg.Attempts, 1)
-		_, outcome := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, nil, attempts, cfg.Types)
+		_, outcome := cfg.resolve(ctx, cfg.Domain, nil)
 		if ctx.Err() != nil {
 			return // interrupted during preflight: not a resolver failure
 		}
 		if outcome != dns.OutcomeFound && outcome != dns.OutcomeNXDomain {
-			msg := fmt.Sprintf("resolver %s failed preflight for %s: %s after %d attempt(s)", cfg.DNSServer, cfg.Domain, outcome, attempts)
+			msg := fmt.Sprintf("resolver %s failed preflight for %s: %s after %d attempt(s)", cfg.DNSServer, cfg.Domain, outcome, cfg.Attempts)
 			events <- Event{Kind: EventError, Message: msg}
 			return
 		}
@@ -525,7 +559,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
-		isWildcard, fp, err := dns.FingerprintWildcard(ctx, cfg.Resolver, cfg.Domain, cfg.Timeout, cfg.Types, cfg.Attempts)
+		isWildcard, fp, err := cfg.lookup(nil).FingerprintWildcard(ctx, cfg.Domain)
 		if ctx.Err() != nil {
 			return // interrupted during wildcard probes
 		}
@@ -678,27 +712,16 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 
 	var outcome dns.Outcome
 	var records []dns.Record
-	switch {
-	case cfg.resolveHook != nil:
-		records, outcome = cfg.resolveHook(ctx, j.domain)
-	case cfg.Simulate:
-		var ok bool
-		records, ok = dns.SimulateResolve(j.domain, cfg.HitRate, cfg.Seed, cfg.logf(), cfg.Types)
-		if ok {
-			outcome = dns.OutcomeFound
-		} else {
-			outcome = dns.OutcomeNXDomain
-		}
-	case cfg.Pool != nil:
+	if cfg.Pool != nil && !cfg.Simulate && cfg.resolveHook == nil {
 		records, outcome = resolveViaPool(ctx, cfg, j.domain, st)
-	default:
-		records, outcome = dns.ResolveDomainWithRetry(ctx, cfg.Resolver, j.domain, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+	} else {
+		records, outcome = cfg.resolve(ctx, j.domain, cfg.logf())
 	}
 
 	// A lookup cut short by cancellation (Ctrl+C, or the reliability guard's own
 	// cancel) says nothing about the resolver. Leave it out of every counter so
 	// an interrupt cannot inflate the failure rate or trip the guard (#42).
-	if outcome == dns.OutcomeCanceled || (outcome != dns.OutcomeFound && ctx.Err() != nil) {
+	if settle(ctx, outcome) == dns.OutcomeCanceled {
 		return false
 	}
 
@@ -722,7 +745,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 	// with the trusted resolver. Simulated records are never checked.
 	takeover := ""
 	if !cfg.Simulate && cfg.resolveHook == nil {
-		takeover = cfg.takeover.Hint(ctx, cfg.Resolver, records, cfg.Timeout, cfg.Attempts)
+		takeover = cfg.takeover.Hint(ctx, cfg.lookup(nil), records)
 	}
 	if takeover != "" {
 		st.takeover.Add(1)
@@ -766,16 +789,17 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 // a member that hid the name or injected it is flagged, and every confirmed
 // name becomes a canary.
 func resolveViaPool(ctx context.Context, cfg Config, name string, st *counters) ([]dns.Record, dns.Outcome) {
-	a := cfg.Pool.Resolve(ctx, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+	trustedLookup := cfg.lookup(cfg.logf())
+	a := cfg.Pool.Resolve(ctx, trustedLookup, name)
 	if a.NoResolver {
 		// Every pool member was caught lying: the trusted resolver answers.
-		return dns.ResolveDomainWithRetry(ctx, cfg.Resolver, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+		return trustedLookup.Resolve(ctx, name)
 	}
 	if a.Outcome != dns.OutcomeFound {
 		return nil, a.Outcome
 	}
 	st.poolHits.Add(1)
-	records, trusted := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, name, cfg.Timeout, cfg.logf(), cfg.Attempts, cfg.Types)
+	records, trusted := trustedLookup.Resolve(ctx, name)
 	switch trusted {
 	case dns.OutcomeFound:
 		st.confirmed.Add(1)

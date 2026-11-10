@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - On Windows, `-simulate-zone` labs and the test DNS server no longer fail to start about a quarter of the time with "no free UDP+TCP port pair": after a failed TCP bind the server retries on random ports instead of the next OS-assigned one, which stayed inside the same reserved port block (#204).
+- A `scan.Config` built directly with `Attempts: 0` now makes one attempt per name instead of passing preflight and then failing every lookup without a query. Scan workers, `scan.Verify` and the wildcard near-miss probes share one resolve path (test hook, simulation, or the trusted resolver), and the `internal/dns` lookup helpers take a `dns.Lookup` value (resolver, timeout, attempts, types, logger) instead of long positional parameter lists, so a swapped attempts/types argument no longer compiles (#163).
 
 ## [0.10.0] - 2026-11-08
 

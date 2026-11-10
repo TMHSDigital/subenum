@@ -2,11 +2,9 @@ package dns
 
 import (
 	"context"
-	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // takeoverProviders maps CNAME target suffixes to services where a dangling
@@ -64,15 +62,22 @@ func TakeoverProvider(target string) string {
 // marker: "dangling" when the CNAME target does not resolve (NXDOMAIN),
 // "provider:<name>" when it points at a takeover-prone service, and
 // "dangling:<name>" when both hold. It returns "" when there is no CNAME or
-// nothing suspicious. The target is resolved with resolver; an inconclusive
-// lookup (timeout, SERVFAIL) is not called dangling.
-func TakeoverHint(ctx context.Context, resolver *net.Resolver, records []Record, timeout time.Duration, attempts int) string {
+// nothing suspicious. The target is resolved with l.Resolver, l.Timeout and
+// l.Attempts for DefaultTypes, without logging (l.Types and l.Logf are
+// unused); an inconclusive lookup (timeout, SERVFAIL) is not called dangling.
+func TakeoverHint(ctx context.Context, l Lookup, records []Record) string {
 	target := cnameTarget(records)
 	if target == "" {
 		return ""
 	}
-	_, outcome := ResolveDomainWithRetry(ctx, resolver, target, timeout, nil, attempts, DefaultTypes)
+	_, outcome := l.forTarget().Resolve(ctx, target)
 	return takeoverMarker(target, outcome)
+}
+
+// forTarget is l as a CNAME target lookup: DefaultTypes, no logging.
+func (l Lookup) forTarget() Lookup {
+	l.Types, l.Logf = DefaultTypes, nil
+	return l
 }
 
 // cnameTarget returns the CNAME target among records, or "".
@@ -120,7 +125,7 @@ type takeoverEntry struct {
 func (c *TakeoverCache) Lookups() int64 { return c.lookups.Load() }
 
 // Hint is TakeoverHint through the cache.
-func (c *TakeoverCache) Hint(ctx context.Context, resolver *net.Resolver, records []Record, timeout time.Duration, attempts int) string {
+func (c *TakeoverCache) Hint(ctx context.Context, l Lookup, records []Record) string {
 	target := cnameTarget(records)
 	if target == "" {
 		return ""
@@ -137,7 +142,7 @@ func (c *TakeoverCache) Hint(ctx context.Context, resolver *net.Resolver, record
 			c.entries[key] = e
 			c.mu.Unlock()
 			c.lookups.Add(1)
-			_, e.outcome = ResolveDomainWithRetry(ctx, resolver, target, timeout, nil, attempts, DefaultTypes)
+			_, e.outcome = l.forTarget().Resolve(ctx, target)
 			if e.outcome != OutcomeFound && e.outcome != OutcomeNXDomain {
 				c.mu.Lock()
 				delete(c.entries, key) // inconclusive: let a later name retry

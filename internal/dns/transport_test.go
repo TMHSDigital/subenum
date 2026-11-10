@@ -69,7 +69,7 @@ func TestTransportsAgree(t *testing.T) {
 			ctx := WithLimiter(context.Background(), lim)
 
 			before := srv.Queries()
-			recs, _, err := ResolveTypes(ctx, r, "www.example.com", 2*time.Second, types)
+			recs, _, err := Lookup{Resolver: r, Timeout: 2 * time.Second, Types: types}.ResolveTypes(ctx, "www.example.com")
 			if err != nil {
 				t.Fatalf("www: %v", err)
 			}
@@ -91,14 +91,14 @@ func TestTransportsAgree(t *testing.T) {
 				}
 			}
 
-			if _, o := ResolveDomainWithRetry(context.Background(), r, "missing.example.com", 2*time.Second, nil, 2, []string{"A"}); o != OutcomeNXDomain {
+			if _, o := (Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 2, Types: []string{"A"}}).Resolve(context.Background(), "missing.example.com"); o != OutcomeNXDomain {
 				t.Errorf("missing name: outcome %v, want NXDOMAIN", o)
 			}
-			if _, _, err := ResolveTypes(context.Background(), r, "refused.example.com", 2*time.Second, []string{"A"}); Classify(err) != OutcomeRefused {
+			if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "refused.example.com"); Classify(err) != OutcomeRefused {
 				t.Errorf("REFUSED: Classify(%v) = %v, want refused", err, Classify(err))
 			}
 			short := NewResolver(300*time.Millisecond, server)
-			if _, o := ResolveDomainWithRetry(context.Background(), short, "dropped.example.com", 300*time.Millisecond, nil, 1, []string{"A"}); o != OutcomeTimeout {
+			if _, o := (Lookup{Resolver: short, Timeout: 300 * time.Millisecond, Attempts: 1, Types: []string{"A"}}).Resolve(context.Background(), "dropped.example.com"); o != OutcomeTimeout {
 				t.Errorf("dropped query: outcome %v, want timeout", o)
 			}
 		})
@@ -112,7 +112,7 @@ func TestDoTReusesConnections(t *testing.T) {
 	r := NewResolver(2*time.Second, servers[TransportTLS])
 	before := srv.Connections()
 	for i := 0; i < 20; i++ {
-		if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+		if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -135,7 +135,7 @@ func TestDoTDiscardsClosedConnections(t *testing.T) {
 	ctx := WithQueryCounter(context.Background(), &sent)
 	before := srv.Connections()
 	for i := 0; i < 10; i++ {
-		if _, _, err := ResolveTypes(ctx, r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+		if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(ctx, "www.example.com"); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(5 * time.Millisecond) // let the server's close arrive
@@ -153,12 +153,12 @@ func TestDoTDiscardsClosedConnections(t *testing.T) {
 func TestCloseIdleConnections(t *testing.T) {
 	srv, servers := startAllTransports(t)
 	r := NewResolver(2*time.Second, servers[TransportTLS])
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
 		t.Fatal(err)
 	}
 	CloseIdleConnections(r)
 	before := srv.Connections()
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
 		t.Fatal(err)
 	}
 	if srv.Connections() == before {
@@ -179,7 +179,7 @@ func TestDoHRefusesRedirects(t *testing.T) {
 	trustOnly(t, redirect)
 
 	r := NewResolver(2*time.Second, redirect.URL+"/dns-query")
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err == nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err == nil {
 		t.Fatal("lookup through a redirecting server succeeded")
 	}
 	if plainHits.Load() != 0 {
@@ -194,7 +194,7 @@ func TestDoHThrottlingIsRefused(t *testing.T) {
 		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
 		trustOnly(t, srv)
 		r := NewResolver(2*time.Second, srv.URL+"/dns-query")
-		_, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"})
+		_, _, err := Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}.ResolveTypes(context.Background(), "www.example.com")
 		srv.Close()
 		if outcome := Classify(err); outcome != OutcomeRefused {
 			t.Errorf("HTTP %d: outcome %v, want refused", status, outcome)
@@ -208,7 +208,7 @@ func TestDoTRejectsUntrustedCertificate(t *testing.T) {
 	_, servers := startAllTransports(t)
 	testRootCAs = x509.NewCertPool() // trusts nothing; startAllTransports restores it
 	r := NewResolver(2*time.Second, servers[TransportTLS])
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err == nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err == nil {
 		t.Fatal("lookup over an untrusted DoT certificate succeeded")
 	}
 }

@@ -37,7 +37,7 @@ func TestPoolResolveWithEveryMemberFlagged(t *testing.T) {
 	for _, m := range p.members {
 		m.stats.Flagged = true
 	}
-	a := p.Resolve(context.Background(), "www.example.com", time.Second, nil, 3, typesA)
+	a := p.Resolve(context.Background(), Lookup{Timeout: time.Second, Attempts: 3, Types: typesA}, "www.example.com")
 	if !a.NoResolver || a.Outcome != OutcomeOther {
 		t.Fatalf("answer = %+v, want NoResolver", a)
 	}
@@ -53,7 +53,7 @@ func TestPoolResolveCanceledContext(t *testing.T) {
 	p := NewPool([]string{addr}, poolTestTimeout)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if a := p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 3, typesA); a.Outcome != OutcomeCanceled {
+	if a := p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 3, Types: typesA}, "www.example.com"); a.Outcome != OutcomeCanceled {
 		t.Fatalf("outcome = %v, want canceled", a.Outcome)
 	}
 	if n := queries.Load(); n != 0 {
@@ -159,7 +159,7 @@ func TestPoolCanaryCheck(t *testing.T) {
 	t.Run("no canaries sends no check", func(t *testing.T) {
 		addr, queries := countingDNS(t, table)
 		p := NewPool([]string{addr}, poolTestTimeout)
-		p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA)
+		p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com")
 		if n := queries.Load(); n != 1 {
 			t.Fatalf("%d queries, want only the lookup", n)
 		}
@@ -172,7 +172,7 @@ func TestPoolCanaryCheck(t *testing.T) {
 		addr, queries := countingDNS(t, table)
 		p := NewPool([]string{addr}, poolTestTimeout)
 		p.AddCanary("canary.example.com")
-		if a := p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA); a.Outcome != OutcomeFound {
+		if a := p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com"); a.Outcome != OutcomeFound {
 			t.Fatalf("outcome = %v", a.Outcome)
 		}
 		if n := queries.Load(); n != 2 {
@@ -183,7 +183,7 @@ func TestPoolCanaryCheck(t *testing.T) {
 			t.Fatalf("after a correct canary: %+v trusted=%v", st, p.members[0].trusted)
 		}
 		// A trusted member is not checked again until poolCanaryEvery lookups.
-		p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA)
+		p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com")
 		if n := queries.Load(); n != 3 {
 			t.Fatalf("%d queries, want no second canary check", n)
 		}
@@ -193,7 +193,7 @@ func TestPoolCanaryCheck(t *testing.T) {
 		addr, _ := countingDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.11"}})
 		p := NewPool([]string{addr}, poolTestTimeout)
 		p.AddCanary("canary.example.com")
-		p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA)
+		p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com")
 		st := p.Stats()[0]
 		if st.Canaries != 1 || st.Contradicted != 1 || p.members[0].trusted {
 			t.Fatalf("after a hidden canary: %+v trusted=%v", st, p.members[0].trusted)
@@ -209,7 +209,7 @@ func TestPoolSecondOpinion(t *testing.T) {
 		liarAddr, _ := countingDNS(t, map[string]testReply{})
 		honestAddr, _ := countingDNS(t, honestTable)
 		p := NewPool([]string{liarAddr, honestAddr}, poolTestTimeout)
-		a := p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA)
+		a := p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com")
 		if a.Outcome != OutcomeFound || a.Addr != honestAddr || a.contradicted != p.members[0] {
 			t.Fatalf("answer = %+v, want the honest member's hit with the liar contradicted", a)
 		}
@@ -227,7 +227,7 @@ func TestPoolSecondOpinion(t *testing.T) {
 		otherAddr, otherQueries := countingDNS(t, honestTable)
 		p := NewPool([]string{nxAddr, otherAddr}, poolTestTimeout)
 		p.members[0].trusted = true
-		if a := p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA); a.Outcome != OutcomeNXDomain || a.Addr != nxAddr {
+		if a := p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com"); a.Outcome != OutcomeNXDomain || a.Addr != nxAddr {
 			t.Fatalf("answer = %+v, want the trusted NXDOMAIN", a)
 		}
 		if n := otherQueries.Load(); n != 0 {
@@ -238,7 +238,7 @@ func TestPoolSecondOpinion(t *testing.T) {
 	t.Run("single member has no second opinion", func(t *testing.T) {
 		addr, queries := countingDNS(t, map[string]testReply{})
 		p := NewPool([]string{addr}, poolTestTimeout)
-		if a := p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA); a.Outcome != OutcomeNXDomain {
+		if a := p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com"); a.Outcome != OutcomeNXDomain {
 			t.Fatalf("outcome = %v", a.Outcome)
 		}
 		if n := queries.Load(); n != 1 {
@@ -250,7 +250,7 @@ func TestPoolSecondOpinion(t *testing.T) {
 		a1, _ := countingDNS(t, map[string]testReply{})
 		a2, _ := countingDNS(t, map[string]testReply{})
 		p := NewPool([]string{a1, a2}, poolTestTimeout)
-		a := p.Resolve(ctx, "www.example.com", poolTestTimeout, nil, 1, typesA)
+		a := p.Resolve(ctx, Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com")
 		if a.Outcome != OutcomeNXDomain || a.Addr != a1 || a.contradicted != nil {
 			t.Fatalf("answer = %+v, want the first NXDOMAIN, nobody contradicted", a)
 		}
@@ -262,7 +262,7 @@ func TestPoolResolveRetriesOnAnotherMember(t *testing.T) {
 	okAddr, _ := countingDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.11"}})
 	p := NewPool([]string{failAddr, okAddr}, poolTestTimeout)
 
-	a := p.Resolve(context.Background(), "www.example.com", poolTestTimeout, nil, 2, typesA)
+	a := p.Resolve(context.Background(), Lookup{Timeout: poolTestTimeout, Attempts: 2, Types: typesA}, "www.example.com")
 	if a.Outcome != OutcomeFound || a.Addr != okAddr {
 		t.Fatalf("answer = %+v, want the second member's hit", a)
 	}
@@ -272,7 +272,7 @@ func TestPoolResolveRetriesOnAnotherMember(t *testing.T) {
 
 	// With one attempt the failure is the answer.
 	p2 := NewPool([]string{failAddr}, poolTestTimeout)
-	if a := p2.Resolve(context.Background(), "www.example.com", poolTestTimeout, nil, 1, typesA); a.Outcome == OutcomeFound || a.Outcome == OutcomeNXDomain {
+	if a := p2.Resolve(context.Background(), Lookup{Timeout: poolTestTimeout, Attempts: 1, Types: typesA}, "www.example.com"); a.Outcome == OutcomeFound || a.Outcome == OutcomeNXDomain {
 		t.Fatalf("outcome = %v, want a failure", a.Outcome)
 	}
 }

@@ -81,7 +81,7 @@ func TestResolverPacesWireQueries(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			recs, _, err := ResolveTypes(ctx, r, "h"+string(rune('a'+i))+".example.com", 500*time.Millisecond, DefaultTypes)
+			recs, _, err := Lookup{Resolver: r, Timeout: 500 * time.Millisecond, Types: DefaultTypes}.ResolveTypes(ctx, "h"+string(rune('a'+i))+".example.com")
 			if len(recs) == 0 {
 				t.Errorf("lookup %d: no records (err %v)", i, err)
 			}
@@ -120,7 +120,7 @@ func TestRateChargesEveryWireQuery(t *testing.T) {
 			lim := NewRateLimiter(1_000_000)
 			ctx := WithLimiter(context.Background(), lim)
 			before := srv.Queries()
-			_, _, _ = ResolveTypes(ctx, srv.Resolver(time.Second), tc.name, time.Second, []string{tc.typ})
+			_, _, _ = Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Types: []string{tc.typ}}.ResolveTypes(ctx, tc.name)
 			wire := srv.Queries() - before
 			lim.mu.Lock()
 			charged := lim.reserved
@@ -138,7 +138,7 @@ func TestRateChargesEveryWireQuery(t *testing.T) {
 // names the configured server.
 func TestRefusedIsClassifiedRefused(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"*": {Refused: true}})
-	_, _, err := ResolveTypes(context.Background(), srv.Resolver(time.Second), "x.example.com", time.Second, []string{"A"})
+	_, _, err := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Types: []string{"A"}}.ResolveTypes(context.Background(), "x.example.com")
 	if got := Classify(err); got != OutcomeRefused {
 		t.Fatalf("Classify(%v) = %v, want refused", err, got)
 	}

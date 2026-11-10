@@ -128,16 +128,16 @@ func TestPooledSocketSkipsStaleReply(t *testing.T) {
 		time.Sleep(50 * time.Millisecond) // let it land in the socket's buffer
 	}
 
-	if _, o := ResolveDomainWithRetry(ctx, r, "www.example.com", 2*time.Second, nil, 1, a); o != OutcomeFound {
+	if _, o := (Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 1, Types: a}).Resolve(ctx, "www.example.com"); o != OutcomeFound {
 		t.Fatalf("warm-up lookup: %v", o)
 	}
 	stale()
-	recs, o := ResolveDomainWithRetry(ctx, r, "www.example.com", 2*time.Second, nil, 1, a)
+	recs, o := Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 1, Types: a}.Resolve(ctx, "www.example.com")
 	if o != OutcomeFound || len(recs) != 1 || recs[0].Value != "192.0.2.1" {
 		t.Fatalf("www after a stale reply: %v %v, want 192.0.2.1", o, recs)
 	}
 	stale()
-	if _, o := ResolveDomainWithRetry(ctx, r, "fail.example.com", 2*time.Second, nil, 1, a); o != OutcomeOther {
+	if _, o := (Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 1, Types: a}).Resolve(ctx, "fail.example.com"); o != OutcomeOther {
 		t.Errorf("SERVFAIL after a stale REFUSED: %v, want other (not refused)", o)
 	}
 }

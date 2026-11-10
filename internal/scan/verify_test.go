@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 )
@@ -71,6 +72,76 @@ func TestVerifyCancelledMidwayReportsEveryName(t *testing.T) {
 	for name, o := range got {
 		if o == dns.OutcomeFound {
 			t.Errorf("%s reported found after cancellation", name)
+		}
+	}
+}
+
+// scanFound runs a scan and returns the names it reported found.
+func scanFound(t *testing.T, cfg Config) map[string]bool {
+	t.Helper()
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+	found := map[string]bool{}
+	var done *Event
+	for ev := range events {
+		switch ev.Kind {
+		case EventResult:
+			found[ev.Result.Subdomain] = true
+		case EventError:
+			t.Errorf("scan error: %s", ev.Message)
+		case EventDone:
+			done = &ev
+		}
+	}
+	if done == nil {
+		t.Fatal("no EventDone")
+	}
+	if done.Stats.Other != 0 || done.Stats.Timeout != 0 || done.Stats.Refused != 0 {
+		t.Errorf("scan lookups failed: %+v", done.Stats)
+	}
+	return found
+}
+
+// TestVerifyResolvesLikeTheScan covers #163: the scan workers and Verify
+// resolve through one entry point, so for every lookup mode Verify confirms
+// exactly the names the scan found. Attempts: 0 means one attempt, not none.
+func TestVerifyResolvesLikeTheScan(t *testing.T) {
+	addr, _ := startUDPDNS(t, func(name string, _ uint16) ([4]byte, bool) {
+		return [4]byte{192, 0, 2, 1}, name == "www.example.com" || name == "api.example.com"
+	})
+	cases := map[string]Config{
+		"simulated": {Simulate: true, HitRate: 40, Seed: 7, Entries: makeEntries(100)},
+		"hooked": {Simulate: true, Entries: makeEntries(100), resolveHook: func(_ context.Context, name string) ([]dns.Record, dns.Outcome) {
+			if len(name)%2 == 0 {
+				return []dns.Record{{Type: "A", Value: "192.0.2.1"}}, dns.OutcomeFound
+			}
+			return nil, dns.OutcomeNXDomain
+		}},
+		"live": {Entries: []string{"www", "mail", "api", "dev"}, Types: []string{"A"}, Resolver: dns.NewResolver(time.Second, addr), DNSServer: addr},
+	}
+	for name, cfg := range cases {
+		for _, attempts := range []int{0, 1, 2} {
+			t.Run(fmt.Sprintf("%s/attempts=%d", name, attempts), func(t *testing.T) {
+				cfg.Domain, cfg.Concurrency, cfg.Timeout, cfg.Attempts = "example.com", 4, time.Second, attempts
+				found := scanFound(t, cfg)
+				if len(found) == 0 || len(found) == len(cfg.Entries) {
+					t.Fatalf("scan found %d of %d names; want some but not all", len(found), len(cfg.Entries))
+				}
+				names := make([]string, len(cfg.Entries))
+				for i, e := range cfg.Entries {
+					names[i] = e + "." + cfg.Domain
+				}
+				got, _ := Verify(context.Background(), cfg, names)
+				for _, n := range names {
+					want := dns.OutcomeNXDomain
+					if found[n] {
+						want = dns.OutcomeFound
+					}
+					if got[n] != want {
+						t.Errorf("%s: Verify says %v, scan says %v", n, got[n], want)
+					}
+				}
+			})
 		}
 	}
 }

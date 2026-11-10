@@ -106,13 +106,13 @@ subenum/
 │   │   ├── ct.go               # Certificate Transparency (crt.sh) client for -ct
 │   │   └── ct_test.go
 │   ├── dns/
-│   │   ├── resolver.go         # NewResolver, ResolveTypes, ResolveDomainWithRetry, Classify,
-│   │   │                       # CheckWildcard, FingerprintWildcard, ParseTypes
+│   │   ├── resolver.go         # NewResolver, Lookup (ResolveTypes, Resolve, CheckWildcard,
+│   │   │                       # FingerprintWildcard), Classify, ParseTypes
 │   │   ├── transport.go        # UDP (TCP fallback), DNS over TLS, DNS over HTTPS dialers
 │   │   ├── pool.go             # Pool: the -r resolver pool (benching, canaries, second opinions)
 │   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
 │   │   ├── takeover.go         # TakeoverProvider, TakeoverHint (dangling CNAMEs)
-│   │   ├── simulate.go         # SimulateResolve (seeded synthetic DNS)
+│   │   ├── simulate.go         # Simulation.Resolve (seeded synthetic DNS)
 │   │   ├── testdns_test.go     # Table-driven wrapper over internal/dnstest
 │   │   └── *_test.go           # Resolver, transport, pool, rate, takeover, simulation tests
 │   ├── dnsserver/              # Scriptable loopback DNS server (UDP, TCP, DoT, DoH)
@@ -254,7 +254,7 @@ func TestGuideResolveOutcomes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, got := ResolveDomainWithRetry(context.Background(), r, tc.domain, timeout, nil, 1, []string{"A"})
+			_, got := Lookup{Resolver: r, Timeout: timeout, Attempts: 1, Types: []string{"A"}}.Resolve(context.Background(), tc.domain)
 			if got != tc.want {
 				t.Errorf("%s: outcome = %v, want %v", tc.domain, got, tc.want)
 			}
