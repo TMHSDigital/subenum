@@ -100,31 +100,108 @@ func TestRefuseAbove(t *testing.T) {
 	}
 }
 
+// TestParseErrors pins the exact message for every directive and record
+// type error, so a refactor of parseLine keeps what lab authors see.
 func TestParseErrors(t *testing.T) {
-	for _, bad := range []string{
-		"",
-		"# only comments\n",
-		"www A 2001:db8::1",
-		"www AAAA 192.0.2.1",
-		"www A",
-		"www MX mail",
-		"www.lab.example. A 192.0.2.1",
-		"www CNAME a\nwww A 192.0.2.1",
-		"www A 192.0.2.1\nwww CNAME a",
-		"www TIMEOUT\nwww A 192.0.2.1",
-		"www A 192.0.2.1\nwww SERVFAIL",
-		"www TIMEOUT now",
-		"$DELAY soon\nwww A 192.0.2.1",
-		"$REFUSE-ABOVE 0\nwww A 192.0.2.1",
-		"$TTL 60\nwww A 192.0.2.1",
-		"a..b A 192.0.2.1",
-		"a.*.b A 192.0.2.1",
-		"shop CNAME *.www",
-		"shop CNAME a..b",
-		"shop CNAME @.www",
+	for _, tc := range []struct{ in, want string }{
+		{"", "no records defined"},
+		{"# only comments\n", "no records defined"},
+		{"www", "line 1: want <name> <type> [value]"},
+		{"www A 2001:db8::1", `line 1: bad A address "2001:db8::1"`},
+		{"www AAAA 192.0.2.1", `line 1: bad AAAA address "192.0.2.1"`},
+		{"www A nope", `line 1: bad A address "nope"`},
+		{"www A", "line 1: want <name> A <value>"},
+		{"www a 192.0.2.1 extra", "line 1: want <name> A <value>"},
+		{"www MX", "line 1: want <name> MX <value>"},
+		{"www MX mail", "line 1: unknown type MX (known: A, AAAA, CNAME, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www mx mail", "line 1: unknown type mx (known: A, AAAA, CNAME, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www.lab.example. A 192.0.2.1", "line 1: www.lab.example.: names are relative to the scanned domain; drop the trailing dot"},
+		{"www CNAME a\nwww A 192.0.2.1", "line 2: www: a CNAME cannot be combined with other records"},
+		{"www CNAME a\nwww AAAA 2001:db8::1", "line 2: www: a CNAME cannot be combined with other records"},
+		{"www A 192.0.2.1\nwww CNAME a", "line 2: www: a CNAME cannot be combined with other records"},
+		{"www CNAME a\nwww CNAME b", "line 2: www: a CNAME cannot be combined with other records"},
+		{"www TIMEOUT\nwww A 192.0.2.1", "line 2: www: already defined as a failure"},
+		{"www TIMEOUT\nwww CNAME a", "line 2: www: already defined as a failure"},
+		{"www TIMEOUT\nwww NXDOMAIN", "line 2: www: a failure cannot be combined with other records for the same name"},
+		{"www A 192.0.2.1\nwww SERVFAIL", "line 2: www: a failure cannot be combined with other records for the same name"},
+		{"www CNAME a\nwww refused", "line 2: www: a failure cannot be combined with other records for the same name"},
+		{"www TIMEOUT now", "line 1: TIMEOUT takes no value"},
+		{"$DELAY", "line 1: want $DELAY <duration>, e.g. $DELAY 20ms"},
+		{"$DELAY 1s 2s", "line 1: want $DELAY <duration>, e.g. $DELAY 20ms"},
+		{"$DELAY soon\nwww A 192.0.2.1", `line 1: bad $DELAY "soon": want a duration up to 10s, e.g. 20ms`},
+		{"$DELAY -1ms", `line 1: bad $DELAY "-1ms": want a duration up to 10s, e.g. 20ms`},
+		{"$DELAY 11s", `line 1: bad $DELAY "11s": want a duration up to 10s, e.g. 20ms`},
+		{"$REFUSE-ABOVE", "line 1: want $REFUSE-ABOVE <queries per second>"},
+		{"$REFUSE-ABOVE 0\nwww A 192.0.2.1", `line 1: bad $REFUSE-ABOVE "0": want a positive number of queries per second`},
+		{"$REFUSE-ABOVE many", `line 1: bad $REFUSE-ABOVE "many": want a positive number of queries per second`},
+		{"$TTL 60\nwww A 192.0.2.1", "line 1: unknown directive $TTL (known: $DELAY, $REFUSE-ABOVE)"},
+		{"$ttl", "line 1: unknown directive $ttl (known: $DELAY, $REFUSE-ABOVE)"},
+		{"a..b A 192.0.2.1", `line 1: bad name "a..b"`},
+		{"a.*.b A 192.0.2.1", `line 1: bad name "a.*.b"`},
+		{"shop CNAME *.www", `line 1: bad CNAME target "*.www"`},
+		{"shop CNAME a..b", `line 1: bad CNAME target "a..b"`},
+		{"shop CNAME @.www", `line 1: bad CNAME target "@.www"`},
 	} {
-		if _, err := Parse(strings.NewReader(bad)); err == nil {
-			t.Errorf("Parse(%q) succeeded, want an error", bad)
+		_, err := Parse(strings.NewReader(tc.in))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("Parse(%q) error = %v, want %q", tc.in, err, tc.want)
+		}
+	}
+}
+
+// TestParseRecords covers every directive and record type that parses,
+// including case folding and how values are normalised.
+func TestParseRecords(t *testing.T) {
+	z := mustParse(t, `
+$delay 20ms
+$refuse-above 7
+WWW  a     192.0.2.10
+www  A     192.0.2.11
+www  aaaa  2001:DB8:0::10
+v4m  AAAA  ::ffff:192.0.2.1
+shop cname WWW.Example.NET.
+home CNAME @
+*.dev A 192.0.2.99
+*    AAAA 2001:db8::99
+t    timeout
+s    servfail
+r    REFUSED
+n    nxdomain
+`)
+	if z.Delay != 20*time.Millisecond || z.RefuseAbove != 7 {
+		t.Errorf("directives: Delay %v RefuseAbove %d, want 20ms and 7", z.Delay, z.RefuseAbove)
+	}
+	for _, tc := range []struct {
+		name string
+		wild bool
+		want entry
+	}{
+		{name: "www", want: entry{a: []string{"192.0.2.10", "192.0.2.11"}, aaaa: []string{"2001:db8::10"}}},
+		{name: "v4m", want: entry{aaaa: []string{"::ffff:192.0.2.1"}}},
+		{name: "shop", want: entry{cname: "www.example.net."}},
+		{name: "home", want: entry{cname: "@"}},
+		{name: "dev", wild: true, want: entry{a: []string{"192.0.2.99"}}},
+		{name: "", wild: true, want: entry{aaaa: []string{"2001:db8::99"}}},
+	} {
+		table := z.entries
+		if tc.wild {
+			table = z.wildcards
+		}
+		e := table[tc.name]
+		if e == nil || !slices.Equal(e.a, tc.want.a) || !slices.Equal(e.aaaa, tc.want.aaaa) || e.cname != tc.want.cname || e.fail != nil {
+			t.Errorf("entry %q (wild %v) = %+v, want %+v", tc.name, tc.wild, e, tc.want)
+		}
+	}
+	for name, want := range map[string]dnsserver.Reply{
+		"t": dnsserver.Dropped, "s": dnsserver.ServFail, "r": dnsserver.Refused, "n": dnsserver.NXDomain,
+	} {
+		if e := z.entries[name]; e == nil || e.fail == nil || e.fail.RCode != want.RCode || e.fail.Drop != want.Drop {
+			t.Errorf("failure %q = %+v, want %+v", name, e, want)
+		}
+	}
+	for _, name := range []string{"", "www", "dev", "t"} {
+		if !z.exists[name] {
+			t.Errorf("exists[%q] = false, want true", name)
 		}
 	}
 }
