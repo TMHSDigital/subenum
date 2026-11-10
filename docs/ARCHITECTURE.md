@@ -44,7 +44,8 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 Files, by role:
 
 ```
-main.go                        - CLI entry point: run/runWith, flag parsing, -dL target loop, exit codes, -tui dispatch
+main.go                        - CLI entry point: run, flag parsing and validation, scanTarget, exit codes
+main_session.go                - runWith and the session: per-run state, the -dL target loop, -tui dispatch
 main_completion.go             - completion and man subcommands
 main_config.go                 - config file and SUBENUM_* environment defaults, -print-config
 main_ct.go                     - -ct: Certificate Transparency names as extra candidates
@@ -96,7 +97,7 @@ tools/wordlist-gen.go          - Standalone wordlist generator
 ### 2.1. Argument Parsing (`main.go`, `internal/validate`)
 
 *   **Purpose**: This component is responsible for processing the command-line arguments provided by the user when `subenum` is executed. It extracts the target domain (or a `-dL` domain list), the wordlist path, and every scan, output, and tuning option.
-*   **Implementation**: `run()` only calls `runWith(runArgs)`, which takes the arguments, stdin, stdout and stderr as injected values so tests can drive the whole CLI in-process. `runWith` first handles the `completion` and `man` subcommands and `-resume`, then builds a `flag.FlagSet` with `parseFlagsWith`, which binds every flag into a `cliFlags` struct and applies config-file and environment defaults (see section 5). The standard `flag` package stops at the first non-flag argument, so `parseInterspersed` re-parses around each positional; flags written after the domain are honored, and everything after a `--` terminator is positional. `runWith` then:
+*   **Implementation**: `run()` only calls `runWith(runArgs)`, which takes the arguments, stdin, stdout and stderr as injected values so tests can drive the whole CLI in-process. Per-run state lives in a `session` (`main_session.go`) whose methods are the run's phases: `parse`, `configure`, `loadInputs`, `openOutputs`, `scanAll` (which calls `scanOneTarget` per target) and `finish`. `cliFlags` holds only parsed flag values; what the run derives from them (attempts, record types, excludes, the resolver pool, the `-max-duration` deadline) is in `runtimeInputs`, and each pass over a target is a `scanPass`. `runWith` first handles the `completion` and `man` subcommands and `-resume`, then builds a `flag.FlagSet` with `parseFlagsWith`, which binds every flag into a `cliFlags` struct and applies config-file and environment defaults (see section 5). The standard `flag` package stops at the first non-flag argument, so `parseInterspersed` re-parses around each positional; flags written after the domain are honored, and everything after a `--` terminator is positional. `runWith` then:
     *   handles `-tui` (launches `tui.Start`, ignoring other flags), `-print-config` and `-version` first;
     *   parses `-format` (`output.ParseFormat`), `-type` (`dns.ParseTypes`), and merges `-attempts` with the deprecated `-retries` (`effectiveAttempts`);
     *   calls `validateFlags`, which checks that `-w` and a target are present, that a positional domain and `-dL` are not both given, and that `-w` and `-dL` do not both read stdin. Numeric ranges and the resolver address are checked by `scan.Options.Validate`, the same validator the TUI uses. The positional domain is canonicalized with `validate.NormalizeDomain`.

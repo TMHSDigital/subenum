@@ -25,24 +25,17 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"os"
-	"os/signal"
 	"runtime/debug"
-	"slices"
 	"strings"
-	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
-	"github.com/TMHSDigital/subenum/internal/tui"
 	"github.com/TMHSDigital/subenum/internal/validate"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
@@ -145,31 +138,47 @@ type cliFlags struct {
 	noAbort      bool
 	maxQueries   int
 	maxDuration  time.Duration // -max-duration: time budget for the whole run (#190)
-	deadline     time.Time     // when maxDuration runs out; set once the scans start
 	statsFile    string
 	sarifFile    string // -sarif: takeover candidates as SARIF (#129)
 	exclude      string
 	excludeFile  string
-	resolvers    string          // -r: file of resolver addresses for a pool
-	diff         string          // -diff: previous results file to compare against
-	diffRecords  bool            // -diff-records: also report names whose records changed (#189)
-	stateFile    string          // where an interrupted run saves its resume state
-	resumeFrom   int             // per target, set while resuming (#73)
-	resumeNames  []string        // per target, names found before the interrupt
-	permute      bool            // -permute: second pass over permutations of found names
-	seedsFile    string          // -seeds: extra permutation seeds (any results format)
-	pool         *dns.Pool       // built from -r; nil means the single -dns-server
-	excludes     []string        // -exclude and -exclude-file patterns, merged
-	defaults     *defaultsLoader // where config-file and env values came from; nil in tests
-	stdin        io.Reader       // read for a "-" path; nil means os.Stdin
+	resolvers    string // -r: file of resolver addresses for a pool
+	diff         string // -diff: previous results file to compare against
+	diffRecords  bool   // -diff-records: also report names whose records changed (#189)
+	stateFile    string // where an interrupted run saves its resume state
+	permute      bool   // -permute: second pass over permutations of found names
+	seedsFile    string // -seeds: extra permutation seeds (any results format)
 }
 
-// readLines reads path, or f.stdin when path is "-".
-func (f cliFlags) readLines(path string) ([]string, error) {
-	if path == wordlist.Stdin && f.stdin != nil {
-		return wordlist.ReadLinesFrom(f.stdin)
+// runtimeInputs is what a run derives from its flags and environment: the
+// values the flags resolve to, the loaded input files and the run-wide
+// deadline. Kept apart from cliFlags, which holds only parsed values (#158).
+type runtimeInputs struct {
+	stdin       io.Reader       // read for a "-" path; nil means os.Stdin
+	defaults    *defaultsLoader // where config-file and env values came from; nil in tests
+	maxAttempts int             // -attempts, or the deprecated -retries
+	recordTypes []string        // parsed -type
+	excludes    []string        // -exclude and -exclude-file patterns, merged
+	pool        *dns.Pool       // built from -r; nil means the single -dns-server
+	deadline    time.Time       // when -max-duration runs out; set once the scans start
+}
+
+// readLines reads path, or in.stdin when path is "-".
+func (in *runtimeInputs) readLines(path string) ([]string, error) {
+	if path == wordlist.Stdin && in.stdin != nil {
+		return wordlist.ReadLinesFrom(in.stdin)
 	}
 	return wordlist.ReadLines(path)
+}
+
+// scanPass is one scan of one target: its main pass or its -permute pass.
+type scanPass struct {
+	domain      string
+	entries     []string
+	maxQueries  int      // this pass's -max-queries budget
+	resumeFrom  int      // set while resuming (#73)
+	resumeNames []string // names found before the interrupt
+	flat        bool     // one level deep: -recursive does not apply (#111)
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
@@ -316,7 +325,7 @@ func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *outpu
 	return true
 }
 
-func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *output.Writer, maxAttempts int) (string, bool) {
+func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag.FlagSet, out *output.Writer) (string, bool) {
 	if !validateArgs(f, positionals, fs, out) {
 		return "", false
 	}
@@ -338,13 +347,13 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 			{"ct", f.ct}, // an HTTPS request to crt.sh
 		} {
 			if c.set || flagSet(fs, c.name) {
-				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with %s", f.defaults.describe(fs, c.name))
+				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with %s", in.defaults.describe(fs, c.name))
 				return "", false
 			}
 		}
 	}
 	// Range and resolver checks are shared with the TUI (#80).
-	if err := scanOptions(f, "", nil, maxAttempts, nil, nil).Validate(); err != nil {
+	if err := scanOptions(f, in, scanPass{maxQueries: f.maxQueries}, nil).Validate(); err != nil {
 		out.Error("%s", scan.Render(err.Error(), scan.FlagName))
 		return "", false
 	}
@@ -376,7 +385,7 @@ func validateFlags(f cliFlags, positionals []string, fs *flag.FlagSet, out *outp
 // loadPool builds the -r resolver pool (#69). It reports its own errors and
 // returns the exit code for them: an unreadable file is a failure like any
 // other input file, a malformed one a usage error (#120).
-func loadPool(f cliFlags, out *output.Writer) (*dns.Pool, int) {
+func loadPool(f cliFlags, in *runtimeInputs, out *output.Writer) (*dns.Pool, int) {
 	if f.resolvers == "" {
 		return nil, exitOK
 	}
@@ -384,7 +393,7 @@ func loadPool(f cliFlags, out *output.Writer) (*dns.Pool, int) {
 		out.Info("Note: -r is ignored in simulation mode, which sends no DNS queries")
 		return nil, exitOK
 	}
-	lines, err := f.readLines(f.resolvers)
+	lines, err := in.readLines(f.resolvers)
 	if err != nil {
 		out.Error("reading -r resolver list: %v", err)
 		return nil, exitFailure
@@ -419,7 +428,7 @@ func logPoolHealth(pool *dns.Pool, out *output.Writer) {
 
 // loadExcludes merges the -exclude list and the -exclude-file lines (#87).
 // Patterns are validated with the other options.
-func loadExcludes(f cliFlags) ([]string, error) {
+func loadExcludes(f cliFlags, in *runtimeInputs) ([]string, error) {
 	var patterns []string
 	for _, p := range strings.Split(f.exclude, ",") {
 		if p = strings.TrimSpace(p); p != "" {
@@ -429,7 +438,7 @@ func loadExcludes(f cliFlags) ([]string, error) {
 	if f.excludeFile == "" {
 		return patterns, nil
 	}
-	lines, err := f.readLines(f.excludeFile)
+	lines, err := in.readLines(f.excludeFile)
 	if err != nil {
 		return nil, err
 	}
@@ -444,11 +453,11 @@ func loadExcludes(f cliFlags) ([]string, error) {
 // loadTargets returns the apex domains to scan: the single positional domain,
 // or the entries of the -dL file ("-" for stdin). Blank lines, # comments and
 // duplicates are skipped; invalid domains are reported and skipped.
-func loadTargets(f cliFlags, domain string, out *output.Writer) ([]string, bool) {
+func loadTargets(f cliFlags, in *runtimeInputs, domain string, out *output.Writer) ([]string, bool) {
 	if f.domainList == "" {
 		return []string{domain}, true
 	}
-	lines, err := f.readLines(f.domainList)
+	lines, err := in.readLines(f.domainList)
 	if err != nil {
 		out.Error("reading domain list: %v", err)
 		return nil, false
@@ -580,559 +589,6 @@ func run() int {
 	return runWith(runArgs{args: os.Args[1:], stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr})
 }
 
-func runWith(a runArgs) (code int) {
-	// completion, man (#88): handled before flag parsing.
-	if code, ok := runSubcommand(a.args, a.stdout, a.stderr); ok {
-		return code
-	}
-
-	args, resume, resumeErr := resumeArgs(a.args)
-	if resumeErr != nil {
-		_, _ = fmt.Fprintf(a.stderr, "Error: %v\n", resumeErr)
-		return exitUsage
-	}
-	defaults := newDefaultsLoader()
-	f, positionals, fs, parseErr := parseFlagsWith(args, defaults.apply, a.stderr)
-	f.defaults = defaults
-	f.stdin = a.stdin
-	if errors.Is(parseErr, errConfig) {
-		// -version, -print-config and -tui stay usable with a broken config,
-		// so the bad value can be found and fixed (#116).
-		if !f.showVersion && !f.printConfig && !f.tui {
-			_, _ = fmt.Fprintf(a.stderr, "Error: %v\n", parseErr)
-			return exitUsage
-		}
-		_, _ = fmt.Fprintf(a.stderr, "Warning: %v\n", parseErr)
-		parseErr = nil
-	}
-	if parseErr != nil {
-		// The FlagSet has already printed the error and usage.
-		if errors.Is(parseErr, flag.ErrHelp) {
-			return exitOK
-		}
-		return exitUsage
-	}
-
-	// -tui counts only as a real flag, not as the value of another flag
-	// (-o -tui) or an argument after "--" (#58).
-	if f.tui {
-		if fs.NFlag() > 1 || len(positionals) > 0 {
-			_, _ = fmt.Fprintln(a.stderr, "Warning: -tui ignores every other flag and argument; set them in the form instead")
-		}
-		return tui.Start(tui.Options{Version: resolveVersion(), Settings: defaults.settings(fs)})
-	}
-
-	if f.printConfig {
-		defaults.printConfig(a.stdout, fs)
-		return exitOK
-	}
-
-	// -version answers before anything else prints, banners included (#58).
-	if f.showVersion {
-		_, _ = fmt.Fprintln(a.stdout, formatVersion())
-		return exitOK
-	}
-
-	format, formatErr := output.ParseFormat(f.format)
-	recordTypes, typesErr := dns.ParseTypes(f.recordTypes)
-	maxAttempts, fromRetries, err := effectiveAttempts(f.attempts, f.retries, defaults.source(fs, "attempts"), defaults.source(fs, "retries"))
-	// Every writer of the run uses the injected streams.
-	wire := func(w *output.Writer) *output.Writer {
-		w.SetStdout(a.stdout)
-		w.SetStderr(a.stderr)
-		return w
-	}
-	out := wire(output.New(nil, f.testMode, format))
-	out.SetQuiet(f.silent)
-	if fromRetries {
-		out.Info("Warning: -retries is deprecated, use -attempts instead") // quiet under -silent (#166)
-	}
-	if formatErr != nil {
-		out.Error("%v", formatErr)
-		return exitUsage
-	}
-	if typesErr != nil {
-		out.Error("%v", typesErr)
-		return exitUsage
-	}
-	if f.sarifFile != "" && !slices.Contains(recordTypes, "CNAME") {
-		out.Info("Note: -sarif lists takeover candidates, which need CNAME lookups; add -type A,AAAA,CNAME")
-	}
-	if err != nil {
-		out.Error("%v", err)
-		return exitUsage
-	}
-
-	if !validateArgs(f, positionals, fs, out) {
-		return exitUsage
-	}
-	excludes, err := loadExcludes(f)
-	if err != nil {
-		out.Error("reading -exclude-file: %v", err)
-		return exitFailure
-	}
-	f.excludes = excludes
-
-	// Arguments are checked before any banner is printed or the resolver list
-	// is read, so a usage error is the first thing a user sees (#120).
-	domain, ok := validateFlags(f, positionals, fs, out, maxAttempts)
-	if !ok {
-		return exitUsage
-	}
-
-	if f.testMode {
-		if f.seed == 0 {
-			f.seed = rand.Uint64()
-		}
-		if f.silent {
-			out.Notice("SIMULATION MODE: results are artificially generated (seed %d)", f.seed)
-		}
-		out.Info("")
-		out.Info("╔════════════════════════════════════════════════════════════════════╗")
-		out.Info("║  SIMULATION MODE ACTIVE - NO ACTUAL DNS QUERIES WILL BE PERFORMED  ║")
-		out.Info("║  Results are artificially generated for educational purposes only  ║")
-		out.Info("╚════════════════════════════════════════════════════════════════════╝")
-		out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
-		out.Info("")
-		if f.ct {
-			// -ct is an HTTPS request to crt.sh: it would send the target
-			// off the machine despite the banner above (#150).
-			out.Info("Note: -ct is ignored in simulation mode, which sends nothing off the machine")
-			f.ct = false
-		}
-	}
-
-	pool, poolCode := loadPool(f, out)
-	if poolCode != exitOK {
-		return poolCode
-	}
-	f.pool = pool
-
-	targets, ok := loadTargets(f, domain, out)
-	if !ok {
-		return exitFailure
-	}
-	if f.simZone != "" {
-		stop, ok := startLabZone(&f, targets, out)
-		if !ok {
-			return exitFailure
-		}
-		defer stop()
-	}
-	targetDesc := targets[0]
-	if len(targets) > 1 {
-		targetDesc = fmt.Sprintf("%d domains from %s", len(targets), f.domainList)
-	}
-	if f.verbose {
-		logVerboseStart(f, targetDesc, maxAttempts, out)
-	}
-
-	// Read the wordlist before creating the output file so a bad -w path does
-	// not truncate an existing -o target. It is read once (stdin can only be
-	// read once) and normalized per target, since the name-length limit
-	// depends on the domain.
-	if f.wordlistFile == "" {
-		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", bundledWordlistName)
-	}
-	settings := effectiveSettings(fs)
-	if resume != nil {
-		if err := resume.checkInputs(f); err != nil {
-			out.Error("cannot resume: %v", err)
-			return exitFailure
-		}
-		if err := resume.checkSettings(fs, defaults); err != nil {
-			out.Error("cannot resume: %v", err)
-			return exitFailure
-		}
-		out.Info("Resuming the interrupted run of: subenum %s", strings.Join(args, " "))
-	}
-	wordLines, err := readWordlist(f)
-	if err != nil {
-		out.Error("reading wordlist file: %v", err)
-		return exitFailure
-	}
-	// Normalized once for every target; per target only the name-length
-	// limit differs (#182).
-	words := wordlist.Prepare(wordLines)
-	if probe, _, _ := words.For(""); len(probe) == 0 {
-		out.Error("wordlist %s has no valid entries", f.wordlistFile)
-		return exitFailure
-	}
-	if resume != nil {
-		// The bundled wordlist changes with the binary, so the file digests
-		// alone cannot tell that a saved position still means the same entry.
-		for _, target := range targets {
-			if t := resume.target(target); t != nil && !t.Done && t.Entries != "" {
-				if entries, _, _ := words.For(target); entryDigest(entries) != t.Entries {
-					out.Error("cannot resume: the wordlist for %s changed since the interrupted run (a different -w file or subenum version); start a new scan instead", target)
-					return exitFailure
-				}
-			}
-		}
-	}
-
-	var diff *differ
-	if f.diff != "" {
-		previous, err := loadBaseline(f.diff)
-		if err != nil {
-			out.Error("reading -diff file: %v", err)
-			return exitFailure
-		}
-		diff = &differ{previous: previous.names, current: map[string]struct{}{}}
-		if f.diffRecords && !diff.withRecords(previous, recordTypes) {
-			out.Info("Note: -diff-records: %s has no records (text format), so only names are compared; save results with -format jsonl, json or csv", f.diff)
-		}
-	}
-
-	combined, outFile, ok := openOutputFile(f.outputFile, f.testMode, format, out)
-	if !ok {
-		return exitFailure
-	}
-	wire(combined)
-	var outWriter *bufio.Writer
-	if outFile != nil {
-		outWriter = outFile.Writer
-	}
-	// In -diff mode stdout carries only the changes while the -o file keeps
-	// the full current results, ready to be the next run's -diff input (#84).
-	var fileOut *output.Writer
-	if diff != nil && outFile != nil {
-		fileOut = wire(output.NewFile(outFile.Writer, f.testMode, format))
-	} else {
-		out = combined
-	}
-	out.SetDiff(diff != nil)
-	for _, w := range []*output.Writer{out, fileOut} {
-		if w == nil {
-			continue
-		}
-		// Bare names when piped or -silent (no "Found:" banner), human-friendly
-		// on a terminal.
-		w.SetPlain(f.silent || !isTerminal(a.stdout))
-		w.SetQuiet(f.silent)
-		w.SetShowRecords(f.showRecords)
-		w.SetSeed(f.seed)
-		w.SetTakeoverColumn(slices.Contains(recordTypes, "CNAME"))
-	}
-	var targetResults []output.Result // the current target's results: -permute seeds, saved on interrupt
-	var takeovers []output.Result     // every target's takeover candidates, for -sarif
-	restored := map[string]bool{}     // names re-emitted from a -resume state
-	refound := 0                      // restored names a resumed pass found again (#156)
-	emitResult := func(ev scan.Event, permutation bool) {
-		if restored[ev.Domain] {
-			refound++
-			return
-		}
-		res := output.Result{Subdomain: ev.Domain, Records: ev.Records, Takeover: ev.Takeover, Permutation: permutation}
-		targetResults = append(targetResults, res)
-		if res.Takeover != "" {
-			takeovers = append(takeovers, res)
-		}
-		if diff == nil {
-			out.Emit(res)
-			return
-		}
-		if fileOut != nil {
-			fileOut.Emit(res)
-		}
-		if change, previous := diff.observe(ev.Domain, ev.Records); change != "" {
-			res.Change, res.PreviousRecords = change, previous
-			out.Emit(res)
-		}
-	}
-	emit := func(ev scan.Event) { emitResult(ev, false) }
-	emitPermutation := func(ev scan.Event) { emitResult(ev, true) }
-
-	var seeds map[string]struct{}
-	if f.seedsFile != "" {
-		f.permute = true
-		if seeds, err = loadPrevious(f.seedsFile); err != nil {
-			out.Error("reading -seeds file: %v", err)
-			return exitFailure
-		}
-	}
-	// A carriage-return progress line only makes sense on a terminal. When
-	// stderr is a pipe or file (2>&1, tee, CI logs) progress is off unless
-	// -progress was given explicitly, and then printed as whole lines (#78).
-	// SUBENUM_PROGRESS or a config value counts as explicit too (#116).
-	if f.silent {
-		f.showProgress = false
-	}
-	if !isTerminal(a.stderr) {
-		if defaults.source(fs, "progress") != sourceDefault {
-			out.SetProgressLines(true)
-		} else {
-			f.showProgress = false
-		}
-	}
-	fileErrReported := false
-	anyDone, anyFailed := false, false
-	if outFile != nil {
-		// Runs after the final return value is chosen. The results file
-		// replaces an existing one only if a scan finished (#52); a failed
-		// flush, close or rename means it is incomplete, so it must turn a
-		// successful exit into a failure (#30). bufio errors are sticky, so a
-		// failure already reported by Finish is not printed twice.
-		defer func() {
-			if err := outFile.Close(anyDone); err != nil {
-				if !fileErrReported {
-					out.Error("writing output file: %v", err)
-				}
-				if code == 0 {
-					code = 1
-				}
-			}
-		}()
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	if testSignals != nil {
-		sigCh = testSignals // tests deliver an interrupt on any OS
-	}
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-	if signalReady != nil {
-		close(signalReady)
-	}
-	var signalCode atomic.Int32 // 128+signum once a signal arrives
-	go func() {
-		select {
-		case sig := <-sigCh:
-			// Restore default handling so a second Ctrl+C force-quits a run
-			// that is stuck draining (for example on a blocked stdout pipe).
-			signal.Stop(sigCh)
-			if sig == syscall.SIGTERM {
-				out.Info("SIGTERM received, shutting down gracefully...")
-				signalCode.Store(143)
-			} else {
-				out.Info("Interrupt received, shutting down gracefully (Ctrl+C again to force quit)...")
-				signalCode.Store(130)
-			}
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-
-	// Each target is an independent scan: its own preflight, wildcard check,
-	// -max-queries budget, -rate limiter and reliability guard. Results share
-	// one writer, so -format json is a single array and CSV has a single
-	// header. A reliability abort means the resolver is overloaded, so the
-	// remaining targets are skipped rather than sent to it too (#82).
-	status := make([]string, len(targets))
-	results := make([]targetResult, len(targets))
-	targetRuns := make([][]output.Result, len(targets)) // results per target, for -resume state
-	entryDigests := make([]string, len(targets))        // per target, for -resume state
-	failedTargets := 0
-	started := time.Now()
-	if f.maxDuration > 0 {
-		// One budget for the whole run: under -dL, later targets get what
-		// earlier ones left, and report what they skipped (#190).
-		f.deadline = started.Add(f.maxDuration)
-	}
-	for i, target := range targets {
-		if ctx.Err() != nil {
-			break
-		}
-		if len(targets) > 1 {
-			out.Info("=== [%d/%d] %s ===", i+1, len(targets), target)
-		}
-		entries, duplicates, skipped := words.For(target)
-		if skipped > 0 {
-			out.Info("Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)
-		}
-		if f.verbose {
-			out.Info("Total wordlist entries: %d", len(entries))
-			if duplicates > 0 {
-				out.Info("Removed %d duplicate wordlist entries", duplicates)
-			}
-		}
-		if len(entries) == 0 {
-			out.Error("no valid wordlist entries for %s", target)
-			anyFailed = true
-			status[i] = "failed"
-			results[i] = targetResult{failed: true, err: "no valid wordlist entries"}
-			failedTargets++
-			continue
-		}
-		targetResults = nil
-		entryDigests[i] = entryDigest(entries)
-		saved := resume.target(target)
-		var ctInfo targetCT
-		targetSeeds := seeds
-		if f.ct {
-			ctInfo = certificateTransparency(ctx, target, saved, out)
-			var added int
-			entries, added = withCTEntries(entries, ctInfo.names, target)
-			targetSeeds = withCTSeeds(seeds, ctInfo.names, target)
-			if ctInfo.fetched {
-				out.Info("Certificate Transparency: %d names under %s, %d of them new candidates", len(ctInfo.names), target, added)
-			}
-		}
-		mainF := f // this target's main pass
-		var res targetResult
-		var mainSaved *resumePass
-		restoredHits := 0 // permutation results restored from the state
-		if saved != nil {
-			// Re-emit what was found before the interrupt, so -o and the
-			// structured output hold the whole result set.
-			for _, r := range saved.Results {
-				emitResult(scan.Event{Domain: r.Subdomain, Records: r.Records, Takeover: r.Takeover}, r.Permutation)
-				restored[r.Subdomain] = true
-				if r.Permutation {
-					restoredHits++
-				}
-			}
-			mainSaved = &resumePass{RootDone: saved.RootDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results) - restoredHits)}
-			if saved.Done {
-				out.Info("%s was finished before the interrupt; %d results restored", target, len(saved.Results))
-				results[i] = targetResult{done: true, final: mainSaved.event()}
-				targetRuns[i] = targetResults
-				anyDone = true
-				status[i] = "ok"
-				continue
-			}
-			mainF.resumeFrom, mainF.resumeNames = saved.RootDone, mainPassNames(targetResults)
-			out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
-		}
-		left, budgetLeft := 0, true
-		if mainSaved != nil {
-			left, budgetLeft = remainingBudget(f.maxQueries, mainSaved.Processed)
-			mainF.maxQueries = left
-		}
-		if budgetLeft {
-			refound = 0
-			res = scanTarget(ctx, mainF, target, entries, maxAttempts, recordTypes, out, outWriter, emit)
-			if mainSaved != nil && res.done {
-				res.final = mainSaved.merge(withoutRefound(res.final, refound))
-			}
-		} else {
-			out.Info("%s: the -max-queries budget of %d was spent before the interrupt", target, f.maxQueries)
-			res = targetResult{done: true, final: mainSaved.event()}
-		}
-		// -permute: a second pass over permutations of what was found (#72),
-		// skipped after an interrupt or a resolver abort. Its seeds are the
-		// main pass's names only, so a resumed pass rebuilds the same
-		// candidate list, and it resumes from its own position (#107).
-		if f.permute && res.done && !res.resolverAbort && signalCode.Load() == 0 {
-			var prevPass *resumePass
-			if saved != nil {
-				prevPass = saved.Permute
-			}
-			refound = 0
-			res.permutation = runPermutationPass(ctx, f, target, entries, mainPassNames(targetResults), targetSeeds, prevPass, restoredHits,
-				maxAttempts, recordTypes, out, outWriter, emitPermutation)
-			if p := res.permutation; p != nil && refound > 0 {
-				p.found -= refound
-				if p.pass.done {
-					p.pass.final = withoutRefound(p.pass.final, refound)
-				}
-			}
-			if p := res.permutation; p != nil && p.pass.failed {
-				res.failed = true
-			}
-		}
-		res.ct = ctInfo
-		results[i] = res
-		targetRuns[i] = targetResults
-		anyDone = anyDone || res.done
-		anyFailed = anyFailed || res.failed
-		status[i] = "ok"
-		switch {
-		case res.failed:
-			status[i] = "failed"
-			failedTargets++
-		case signalCode.Load() != 0:
-			status[i] = "interrupted"
-		}
-		if res.resolverAbort && i < len(targets)-1 {
-			out.Error("resolver %s looks overloaded; skipping the %d remaining targets (use -no-abort to continue)", f.dnsServer, len(targets)-1-i)
-			for j := i + 1; j < len(targets); j++ {
-				status[j] = "skipped"
-				failedTargets++
-			}
-			break
-		}
-	}
-	if len(targets) > 1 {
-		out.Info("Targets:")
-		for i, target := range targets {
-			st := status[i]
-			if st == "" {
-				st = "not run"
-			}
-			out.Info("  %-8s %s", st, target)
-		}
-	}
-
-	// Finalize structured output only if at least one scan finished, so an
-	// early error (such as wildcard detection without -force) does not emit an
-	// empty JSON array or a bare CSV header. The deferred file flush/close
-	// registered above runs after this. Reliability abort still emits
-	// EventDone with partial results, so Finish runs there.
-	logPoolHealth(f.pool, out)
-
-	if signalCode.Load() != 0 {
-		saveResumeState(f, args, settings, resume, targets, status, entryDigests, results, targetRuns, out)
-	} else if resume != nil && !anyFailed {
-		// The resumed run finished: its state file is spent (#109).
-		if err := os.Remove(resume.path); err == nil {
-			out.Info("Removed the finished run's resume state %s", resume.path)
-		}
-	}
-
-	// The run-quality report (#70): the last jsonl line, and the -stats file.
-	summary := buildSummary(f, targets, status, results, started, time.Since(started))
-	if diff != nil {
-		summary.Diff = &output.DiffSummary{Previous: f.diff, Added: diff.added, Changed: diff.changed}
-		summary.QueriesSent += emitRemoved(ctx, diff, targets, f, maxAttempts, recordTypes, summary.Diff, summary.Verdict, summary.Reason, out)
-		if fileOut != nil {
-			fileOut.Summary(summary)
-		}
-	}
-	out.Summary(summary)
-	if f.statsFile != "" {
-		if err := output.WriteSummaryFile(f.statsFile, summary); err != nil {
-			out.Error("writing -stats file: %v", err)
-			fileErrReported = true
-		}
-	}
-	if f.sarifFile != "" && anyDone {
-		if err := output.WriteSARIF(f.sarifFile, resolveVersion(), takeovers); err != nil {
-			out.Error("writing -sarif file: %v", err)
-			fileErrReported = true
-		}
-	}
-	// -format json streams its array (#181): results already written, such
-	// as ones restored by -resume before the target failed, are closed into
-	// a valid document even when no scan finished.
-	if anyDone || out.Started() || (fileOut != nil && fileOut.Started()) {
-		if fileOut != nil {
-			if err := fileOut.Finish(); err != nil {
-				out.Error("writing output file: %v", err)
-				fileErrReported = true
-			}
-		}
-		if err := out.Finish(); err != nil {
-			out.Error("writing output file: %v", err)
-			fileErrReported = true
-		}
-		if f.testMode && !f.verbose {
-			out.Info("NOTE: these results are SIMULATED; no DNS queries were sent (seed %d).", f.seed)
-		}
-	}
-	ending := runEnding{
-		signal: signalCode.Load(), fileErr: fileErrReported,
-		targets: len(targets), failedTargets: failedTargets, anyFailed: anyFailed,
-	}
-	if diff != nil {
-		ending.changes = diff.added + diff.removed + diff.changed
-	}
-	return ending.exitCode()
-}
-
 // runEnding is what decides a finished run's exit code.
 type runEnding struct {
 	signal        int32 // 128+signum once a signal arrived, else 0
@@ -1165,29 +621,33 @@ func (e runEnding) exitCode() int {
 
 // scanOptions maps the CLI flags onto the scan options the TUI also builds,
 // so both front ends share one validator and one Config builder (#80).
-func scanOptions(f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, logf dns.Logf) scan.Options {
+func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.Options {
+	recursive, depth := f.recursive, f.depth
+	if p.flat {
+		recursive, depth = false, 1
+	}
 	return scan.Options{
-		Domain:      domain,
-		Entries:     entries,
+		Domain:      p.domain,
+		Entries:     p.entries,
 		Concurrency: f.concurrency,
 		TimeoutMs:   f.timeoutMs,
 		DNSServer:   f.dnsServer,
 		Simulate:    f.testMode,
 		HitRate:     f.testHitRate,
 		Seed:        f.seed,
-		Attempts:    maxAttempts,
+		Attempts:    in.maxAttempts,
 		Force:       f.force,
-		Types:       recordTypes,
-		Recursive:   f.recursive,
-		Depth:       f.depth,
+		Types:       in.recordTypes,
+		Recursive:   recursive,
+		Depth:       depth,
 		Rate:        f.rate,
-		MaxQueries:  f.maxQueries,
-		Deadline:    f.deadline,
-		Exclude:     f.excludes,
-		ResumeFrom:  f.resumeFrom,
+		MaxQueries:  p.maxQueries,
+		Deadline:    in.deadline,
+		Exclude:     in.excludes,
+		ResumeFrom:  p.resumeFrom,
 		// Names found before an interrupt still need their children expanded.
-		ResumeParents: f.resumeNames,
-		Pool:          f.pool,
+		ResumeParents: p.resumeNames,
+		Pool:          in.pool,
 		NoAbort:       f.noAbort,
 		Verbose:       f.verbose,
 		Logf:          logf,
@@ -1205,10 +665,12 @@ type targetResult struct {
 	ct            targetCT // -ct names, kept for the report and resume state
 }
 
-// scanTarget runs one domain's scan and streams its events to out.
-func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer, emit func(scan.Event)) (res targetResult) {
+// scanTarget runs one pass over a domain and streams its events to the
+// session's writer, and each result to emit.
+func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Event)) (res targetResult) {
+	f, out := s.f, s.out
 	// Logf is serialized with the progress line (#36).
-	cfg := scanOptions(f, domain, entries, maxAttempts, recordTypes, out.Info).Config()
+	cfg := scanOptions(f, &s.in, p, out.Info).Config()
 
 	events := make(chan scan.Event, 64)
 	go scan.Run(ctx, cfg, events)
@@ -1253,9 +715,9 @@ func scanTarget(ctx context.Context, f cliFlags, domain string, entries []string
 			}
 			res.done = true
 			res.final = ev
-			logScanBreakdown(domain, ev, out)
+			logScanBreakdown(p.domain, ev, out)
 			if f.verbose {
-				logVerboseDone(ev, f, outWriter, out)
+				logVerboseDone(ev, f, s.outWriter, out)
 			}
 		}
 	}

@@ -305,8 +305,8 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 // state this run resumed from, if any: a target interrupted again before its
 // scan reported progress keeps the earlier resume point (#109), and one this
 // run never reached keeps its saved state unchanged.
-func saveResumeState(f cliFlags, args []string, settings map[string]string, prev *resumeState, targets, status, entryDigests []string,
-	results []targetResult, runs [][]output.Result, out *output.Writer) {
+func saveResumeState(s *session) {
+	f, out, prev := s.f, s.out, s.resume
 	if f.wordlistFile == "-" || f.domainList == "-" {
 		out.Info("Not saving resume state: the wordlist or domain list came from stdin")
 		return
@@ -316,15 +316,15 @@ func saveResumeState(f cliFlags, args []string, settings map[string]string, prev
 		out.Error("saving resume state: %v", err)
 		return
 	}
-	st := resumeState{Version: resumeStateVersion, Args: withSeed(args, f), Inputs: inputs, Settings: settings}
-	for i, domain := range targets {
+	st := resumeState{Version: resumeStateVersion, Args: withSeed(s.args, f), Inputs: inputs, Settings: s.settings}
+	for i, domain := range s.targets {
 		saved := prev.target(domain)
-		if status[i] == "" && saved != nil {
+		if s.status[i] == "" && saved != nil {
 			st.Targets = append(st.Targets, *saved)
 			continue
 		}
-		res := results[i]
-		t := resumeTarget{Domain: domain, Results: runs[i], Entries: entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched}
+		res := s.results[i]
+		t := resumeTarget{Domain: domain, Results: s.runs[i], Entries: s.entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total
@@ -341,7 +341,7 @@ func saveResumeState(f cliFlags, args []string, settings map[string]string, prev
 		}
 		// A target is finished only if its scan (and any -permute pass)
 		// completed before the interrupt.
-		t.Done = status[i] == "ok" && res.done && (res.permutation == nil || res.permutation.pass.done || res.permutation.candidates == 0)
+		t.Done = s.status[i] == "ok" && res.done && (res.permutation == nil || res.permutation.pass.done || res.permutation.candidates == 0)
 		st.Targets = append(st.Targets, t)
 	}
 	if err := writeResumeState(f.stateFile, st); err != nil {

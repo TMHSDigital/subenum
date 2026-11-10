@@ -60,12 +60,12 @@ func TestLoadTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := output.New(nil, false, output.FormatText)
-	got, ok := loadTargets(cliFlags{domainList: p}, "", out)
+	got, ok := loadTargets(cliFlags{domainList: p}, &runtimeInputs{}, "", out)
 	if !ok || !reflect.DeepEqual(got, []string{"a.example", "b.example"}) {
 		t.Fatalf("loadTargets = %q, %v", got, ok)
 	}
 
-	if got, ok := loadTargets(cliFlags{}, "example.com", out); !ok || !reflect.DeepEqual(got, []string{"example.com"}) {
+	if got, ok := loadTargets(cliFlags{}, &runtimeInputs{}, "example.com", out); !ok || !reflect.DeepEqual(got, []string{"example.com"}) {
 		t.Fatalf("single domain: %q, %v", got, ok)
 	}
 
@@ -73,7 +73,7 @@ func TestLoadTargets(t *testing.T) {
 	if err := os.WriteFile(empty, []byte("# nothing\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loadTargets(cliFlags{domainList: empty}, "", out); ok {
+	if _, ok := loadTargets(cliFlags{domainList: empty}, &runtimeInputs{}, "", out); ok {
 		t.Error("a list with no valid domains should fail")
 	}
 }
@@ -92,16 +92,16 @@ func TestValidateFlagsDomainListConflicts(t *testing.T) {
 
 	f := base()
 	f.domainList = "d.txt"
-	if _, ok := validateFlags(f, []string{"example.com"}, fs, out, 1); ok {
+	if _, ok := validateFlags(f, &runtimeInputs{maxAttempts: 1}, []string{"example.com"}, fs, out); ok {
 		t.Error("domain argument plus -dL should be rejected")
 	}
 	f.wordlistFile, f.domainList = "-", "-"
-	if _, ok := validateFlags(f, nil, fs, out, 1); ok {
+	if _, ok := validateFlags(f, &runtimeInputs{maxAttempts: 1}, nil, fs, out); ok {
 		t.Error("-w - with -dL - should be rejected")
 	}
 	f = base()
 	f.domainList = "d.txt"
-	if d, ok := validateFlags(f, nil, fs, out, 1); !ok || d != "" {
+	if d, ok := validateFlags(f, &runtimeInputs{maxAttempts: 1}, nil, fs, out); !ok || d != "" {
 		t.Errorf("-dL alone: got %q, %v", d, ok)
 	}
 }
@@ -233,7 +233,8 @@ func TestCLIBuildsSharedConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := scanOptions(f, pos[0], []string{"www", "mail"}, f.attempts, types, nil).Config()
+	in := &runtimeInputs{maxAttempts: f.attempts, recordTypes: types}
+	got := scanOptions(f, in, scanPass{domain: pos[0], entries: []string{"www", "mail"}, maxQueries: f.maxQueries}, nil).Config()
 	want := scan.Config{
 		Domain: "example.com", Entries: []string{"www", "mail"}, Concurrency: 50,
 		Timeout: 800 * time.Millisecond, DNSServer: "1.1.1.1:53", Simulate: true, HitRate: 30,

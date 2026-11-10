@@ -220,19 +220,20 @@ func (d *differ) withRecords(b baseline, types []string) bool {
 // a candidate (a different wordlist, no -recursive or -permute), or its own
 // lookup may have failed under a run that is still "complete". So each
 // missing name is looked up again with the trusted resolver, and only an
-// NXDOMAIN is reported as removed (#110). It returns the DNS queries sent.
-func emitRemoved(ctx context.Context, d *differ, targets []string, f cliFlags, maxAttempts int, recordTypes []string,
-	diffSummary *output.DiffSummary, verdict, reason string, out *output.Writer) int64 {
-	if verdict != scan.VerdictComplete {
-		out.Info("Note: -diff is not reporting removed names because the run was %s (%s)", verdict, reason)
+// NXDOMAIN is reported as removed (#110). The counts go to summary.Diff; it
+// returns the DNS queries sent.
+func emitRemoved(ctx context.Context, s *session, summary *output.Summary) int64 {
+	d, out, diffSummary := s.diff, s.out, summary.Diff
+	if summary.Verdict != scan.VerdictComplete {
+		out.Info("Note: -diff is not reporting removed names because the run was %s (%s)", summary.Verdict, summary.Reason)
 		return 0
 	}
-	missing := d.missingNames(targets, f.excludes)
+	missing := d.missingNames(s.targets, s.in.excludes)
 	if len(missing) == 0 {
 		return 0
 	}
 	out.Info("Checking %d previous names this run did not find", len(missing))
-	cfg := scanOptions(f, "", nil, maxAttempts, recordTypes, nil).Config()
+	cfg := scanOptions(s.f, &s.in, scanPass{maxQueries: s.f.maxQueries}, nil).Config()
 	cfg.Pool = nil // the trusted resolver decides
 	outcomes, sent := scan.Verify(ctx, cfg, missing)
 	for _, name := range missing {

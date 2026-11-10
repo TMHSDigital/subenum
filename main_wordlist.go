@@ -12,9 +12,9 @@ const bundledWordlistName = "bundled top-5000 list (SecLists)"
 
 // readWordlist returns the wordlist lines from -w, or the bundled list when
 // -w is not set.
-func readWordlist(f cliFlags) ([]string, error) {
+func readWordlist(f cliFlags, in *runtimeInputs) ([]string, error) {
 	if f.wordlistFile == "" {
 		return wordlist.ReadLinesFrom(strings.NewReader(data.Subdomains5k))
 	}
-	return f.readLines(f.wordlistFile)
+	return in.readLines(f.wordlistFile)
 }

@@ -160,7 +160,8 @@ subenum/
 ├── .gitignore
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
 ├── .goreleaser.yaml            # Release archives, completions, man page
-├── main.go                     # CLI entry point: run/runWith, flag parsing, -dL loop, exit codes
+├── main.go                     # CLI entry point: run, flag parsing and validation, exit codes
+├── main_session.go             # runWith and the per-run session: the -dL target loop
 ├── main_completion.go          # completion and man subcommands
 ├── main_config.go              # Config file and SUBENUM_* environment defaults, -print-config
 ├── main_ct.go                  # -ct: Certificate Transparency names as candidates

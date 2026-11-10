@@ -10,25 +10,26 @@ import (
 
 // buildSummary assembles the run-quality report (#70) from each target's
 // status and result. The overall verdict is the worst target verdict.
-func buildSummary(f cliFlags, targets, status []string, results []targetResult, started time.Time, elapsed time.Duration) output.Summary {
-	s := report.New(report.Run{
+func buildSummary(s *session, elapsed time.Duration) output.Summary {
+	f := s.f
+	sum := report.New(report.Run{
 		Version:   resolveVersion(),
-		Started:   started,
+		Started:   s.started,
 		Simulated: f.testMode,
 		Seed:      f.seed,
 		Resolver:  f.dnsServer,
 		Zone:      f.simZone,
 		RateLimit: f.rate,
 	})
-	summaries := make([]output.TargetSummary, 0, len(targets))
-	for i, domain := range targets {
-		summaries = append(summaries, targetSummary(domain, status[i], results[i]))
+	summaries := make([]output.TargetSummary, 0, len(s.targets))
+	for i, domain := range s.targets {
+		summaries = append(summaries, targetSummary(domain, s.status[i], s.results[i]))
 	}
-	report.Finish(&s, summaries, elapsed)
-	if f.pool != nil {
-		s.Resolvers = f.pool.Stats()
+	report.Finish(&sum, summaries, elapsed)
+	if s.in.pool != nil {
+		sum.Resolvers = s.in.pool.Stats()
 	}
-	return s
+	return sum
 }
 
 func targetSummary(domain, status string, res targetResult) output.TargetSummary {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"sort"
 	"strings"
@@ -18,6 +17,16 @@ type permutationResult struct {
 	candidates int
 	found      int
 	pass       targetResult
+}
+
+// permuteInput is what a target's -permute pass starts from.
+type permuteInput struct {
+	target       string
+	entries      []string            // the target's wordlist entries, not permuted again
+	found        []string            // the main pass's names
+	seeds        map[string]struct{} // -seeds names, and -ct names under target
+	prev         *resumePass         // the pass's state from an interrupted run, if it had started
+	restoredHits int                 // permutation results that run already found
 }
 
 // relativeSeeds returns the names under target, relative to it ("api" for
@@ -80,17 +89,15 @@ func permutationCandidates(target string, entries, rel []string) (candidates []s
 // nothing to permute.
 //
 // found must be the main pass's names only: they decide the candidate list,
-// which a resumed pass has to rebuild identically. prev is the pass's state
-// from an interrupted run, if it had started; restoredHits counts the
-// permutation results that run already found.
-func runPermutationPass(ctx context.Context, f cliFlags, target string, entries []string, found []string, seeds map[string]struct{},
-	prev *resumePass, restoredHits int, maxAttempts int, recordTypes []string, out *output.Writer, outWriter *bufio.Writer, emit func(scan.Event)) *permutationResult {
-	rel := relativeSeeds(target, found, seeds)
+// which a resumed pass has to rebuild identically.
+func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permutationResult {
+	out, target := s.out, p.target
+	rel := relativeSeeds(target, p.found, p.seeds)
 	if len(rel) == 0 {
 		return nil
 	}
-	candidates, tooLong := permutationCandidates(target, entries, rel)
-	res := &permutationResult{seeds: len(rel), candidates: len(candidates), found: restoredHits}
+	candidates, tooLong := permutationCandidates(target, p.entries, rel)
+	res := &permutationResult{seeds: len(rel), candidates: len(candidates), found: p.restoredHits}
 	if len(candidates) == 0 {
 		return res
 	}
@@ -102,27 +109,25 @@ func runPermutationPass(ctx context.Context, f cliFlags, target string, entries 
 	// permutation would otherwise be built from the candidate list itself,
 	// giving names such as <candidate>.api-dev.<target>, and multiply the
 	// pass past the recursion ceiling (#111).
-	pf := f
-	pf.recursive, pf.depth = false, 1
-	pf.resumeFrom, pf.resumeNames = 0, nil
-	if prev != nil {
-		left, ok := remainingBudget(f.maxQueries, prev.Processed)
+	pass := scanPass{domain: target, entries: candidates, maxQueries: s.f.maxQueries, flat: true}
+	if prev := p.prev; prev != nil {
+		left, ok := remainingBudget(s.f.maxQueries, prev.Processed)
 		if !ok {
-			out.Info("Permutation pass for %s: the -max-queries budget of %d was spent before the interrupt", target, f.maxQueries)
+			out.Info("Permutation pass for %s: the -max-queries budget of %d was spent before the interrupt", target, s.f.maxQueries)
 			res.pass = targetResult{done: true, final: prev.event()}
 			return res
 		}
-		pf.resumeFrom, pf.maxQueries = prev.RootDone, left
+		pass.resumeFrom, pass.maxQueries = prev.RootDone, left
 		out.Info("Resuming the permutation pass for %s at candidate %d of %d", target, prev.RootDone, len(candidates))
 	} else {
 		out.Info("Permutation pass for %s: %d candidates from %d seed names", target, len(candidates), len(rel))
 	}
-	res.pass = scanTarget(ctx, pf, target, candidates, maxAttempts, recordTypes, out, outWriter, func(ev scan.Event) {
+	res.pass = scanTarget(ctx, s, pass, func(ev scan.Event) {
 		res.found++
-		emit(ev)
+		s.emitPermutation(ev)
 	})
-	if prev != nil && res.pass.done {
-		res.pass.final = prev.merge(res.pass.final)
+	if p.prev != nil && res.pass.done {
+		res.pass.final = p.prev.merge(res.pass.final)
 	}
 	return res
 }
