@@ -15,6 +15,7 @@
 | `-force` | - | Continue scanning even if wildcard DNS is detected |
 | `-format <string>` | text | Output format: text, json, jsonl, or csv |
 | `-hit-rate <int>` | 15 | In simulation mode, percentage of names that resolve (1-100) |
+| `-log-format <string>` | text | Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged |
 | `-max-duration <duration>` | 0s | Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report and a degraded verdict |
 | `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt |
 | `-no-abort` | - | Do not abort when the resolver failure rate exceeds 20% (warning is still emitted) |

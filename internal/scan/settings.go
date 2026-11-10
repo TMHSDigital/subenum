@@ -2,6 +2,7 @@ package scan
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -91,6 +92,21 @@ func Render(msg string, name func(Setting) string) string {
 		}
 		return tok
 	})
+}
+
+// SettingsIn lists the known settings msg refers to as tokens, in order of
+// first appearance and without repeats, so structured output can carry them
+// as codes beside the rendered text (#198).
+func SettingsIn(msg string) []Setting {
+	var out []Setting
+	for _, m := range settingToken.FindAllStringSubmatch(msg, -1) {
+		s := Setting(m[1])
+		if s.Names().Flag == "" || slices.Contains(out, s) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // FlagName names a setting as the command-line flag that sets it, or ""

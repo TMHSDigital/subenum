@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -35,6 +36,8 @@ type session struct {
 	positionals []string
 	in          runtimeInputs
 	format      output.Format
+	logFormat   output.LogFormat  // -log-format (#198)
+	logErr      error             // an invalid -log-format, reported by configure
 	settings    map[string]string // effective settings, saved for -resume
 	targets     []string
 	words       *wordlist.Prepared
@@ -144,23 +147,37 @@ func (s *session) parse() (code int, done bool) {
 		return exitUsage, true
 	}
 	defaults := newDefaultsLoader()
-	f, positionals, fs, parseErr := parseFlagsWith(args, defaults.apply, a.stderr)
+	// The FlagSet's own messages are held back until -log-format is known:
+	// under json a parse error becomes one JSON line instead (#198).
+	var flagOut bytes.Buffer
+	f, positionals, fs, parseErr := parseFlagsWith(args, defaults.apply, &flagOut)
+	fs.SetOutput(a.stderr)
 	s.args, s.resume, s.f, s.fs, s.positionals = args, resume, f, fs, positionals
 	s.in = runtimeInputs{stdin: a.stdin, defaults: defaults}
+	s.logFormat, s.logErr = output.ParseLogFormat(f.logFormat)
+	diag := s.wire(output.New(nil, false, output.FormatText))
+	logJSON := diag.LogJSON()
+	if !logJSON || errors.Is(parseErr, flag.ErrHelp) {
+		_, _ = flagOut.WriteTo(a.stderr) // -h output is help text, not a diagnostic
+	}
 	if errors.Is(parseErr, errConfig) {
 		// -version, -print-config and -tui stay usable with a broken config,
 		// so the bad value can be found and fixed (#116).
 		if !f.showVersion && !f.printConfig && !f.tui {
-			_, _ = fmt.Fprintf(a.stderr, "Error: %v\n", parseErr)
+			diag.Error("%v", parseErr)
 			return exitUsage, true
 		}
-		_, _ = fmt.Fprintf(a.stderr, "Warning: %v\n", parseErr)
+		diag.Notice("Warning: %v", parseErr)
 		parseErr = nil
 	}
 	if parseErr != nil {
-		// The FlagSet has already printed the error and usage.
+		// The FlagSet has already printed the error and usage, unless the
+		// diagnostics are JSON.
 		if errors.Is(parseErr, flag.ErrHelp) {
 			return exitOK, true
+		}
+		if logJSON {
+			diag.Error("%v", parseErr)
 		}
 		return exitUsage, true
 	}
@@ -225,6 +242,7 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 func (s *session) wire(w *output.Writer) *output.Writer {
 	w.SetStdout(s.a.stdout)
 	w.SetStderr(s.a.stderr)
+	w.SetLogFormat(s.logFormat)
 	return w
 }
 
@@ -245,6 +263,10 @@ func (s *session) configure() (domain string, code int, ok bool) {
 	}
 	if formatErr != nil {
 		out.Error("%v", formatErr)
+		return "", exitUsage, false
+	}
+	if s.logErr != nil {
+		out.Error("%v", s.logErr)
 		return "", exitUsage, false
 	}
 	if typesErr != nil {
@@ -293,16 +315,19 @@ func (s *session) announceSimulation() {
 	if f.seed == 0 {
 		f.seed = rand.Uint64()
 	}
-	if f.silent {
-		out.Notice("SIMULATION MODE: results are artificially generated (seed %d)", f.seed)
+	if f.silent || out.LogJSON() {
+		// JSON diagnostics get this one event in place of the banner (#198).
+		out.NoticeOf("simulation", "SIMULATION MODE: results are artificially generated (seed %d)", f.seed)
 	}
-	out.Info("")
-	out.Info("╔════════════════════════════════════════════════════════════════════╗")
-	out.Info("║  SIMULATION MODE ACTIVE - NO ACTUAL DNS QUERIES WILL BE PERFORMED  ║")
-	out.Info("║  Results are artificially generated for educational purposes only  ║")
-	out.Info("╚════════════════════════════════════════════════════════════════════╝")
-	out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
-	out.Info("")
+	if !out.LogJSON() {
+		out.Info("")
+		out.Info("╔════════════════════════════════════════════════════════════════════╗")
+		out.Info("║  SIMULATION MODE ACTIVE - NO ACTUAL DNS QUERIES WILL BE PERFORMED  ║")
+		out.Info("║  Results are artificially generated for educational purposes only  ║")
+		out.Info("╚════════════════════════════════════════════════════════════════════╝")
+		out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
+		out.Info("")
+	}
 	if f.ct {
 		// -ct is an HTTPS request to crt.sh: it would send the target
 		// off the machine despite the banner above (#150).
@@ -431,7 +456,9 @@ func (s *session) setProgress() {
 	if s.f.silent {
 		s.f.showProgress = false
 	}
-	if !isTerminal(s.a.stderr) {
+	// JSON diagnostics are for machines, like a piped stderr: progress events
+	// only when -progress is given explicitly (#198).
+	if !isTerminal(s.a.stderr) || s.out.LogJSON() {
 		if s.in.defaults.source(s.fs, "progress") != sourceDefault {
 			s.out.SetProgressLines(true)
 		} else {
@@ -540,6 +567,8 @@ func (s *session) scanAll(ctx context.Context) {
 // targets are skipped rather than sent to it too (#82).
 func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next bool) {
 	out := s.out
+	out.SetTarget(target) // JSON diagnostics name it (#198)
+	defer out.SetTarget("")
 	if len(s.targets) > 1 {
 		out.Info("=== [%d/%d] %s ===", i+1, len(s.targets), target)
 	}

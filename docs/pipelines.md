@@ -78,6 +78,30 @@ subenum -silent -dL scope.txt -exclude-file out-of-scope.txt -stats run.json \
   | httpx -silent
 ```
 
+## Machine-readable diagnostics
+
+`-log-format json` turns stderr into JSON Lines, so CI can act on a warning
+without matching `Note:` or `Warning:` text. Each line has `time`, `level`
+(`error`, `warn`, `notice`, `info`, `debug`), `kind`, `target` (the domain
+being scanned, when there is one) and `message`; engine notices also list the
+settings they name as codes in `settings`. Results on stdout are unchanged:
+
+```bash
+subenum -log-format json -stats run.json example.com 2> log.jsonl > names.txt
+jq -r 'select(.level == "warn" or .level == "error") | "\(.kind): \(.message)"' log.jsonl
+```
+
+```json
+{"time":"2026-11-09T12:00:00.000Z","level":"warn","kind":"cap","target":"example.com","message":"query cap reached (-max-queries 3); skipped 3 additional jobs","settings":["max_queries"]}
+```
+
+Progress is an event (`"kind":"progress"` with a `progress` object of
+`percent`, `processed`, `total`, `found` and `eta_seconds`) and, as on a piped
+stderr, appears only when `-progress` is given explicitly. Errors in the
+command line itself are JSON lines too, once `-log-format json` has been read
+(from the command line before the error, `SUBENUM_LOG_FORMAT` or the config
+file); `-h` help stays text.
+
 ## Tips
 
 - Pace the scan with `-rate` when the next tool shares the same resolver or

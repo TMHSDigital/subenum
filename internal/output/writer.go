@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -85,6 +86,9 @@ type Writer struct {
 	lineMode    bool      // progress as whole lines, never carriage-return overwrites (#78)
 	quiet       bool      // -silent: Info and Progress print nothing (#128)
 	eta         ETA       // time left, appended to the progress line (#191)
+	logJSON     bool      // -log-format json: diagnostics as JSON lines (#198)
+	target      string    // the domain being scanned, for JSON diagnostics
+	now         func() time.Time
 
 	seed           uint64 // simulation seed, named in the text file header
 	takeoverColumn bool   // CSV carries a takeover_candidate column
@@ -258,7 +262,7 @@ func (w *Writer) writeJSONElement(res Result) {
 		w.jsonBuf.WriteString("[\n  ")
 	}
 	if err := w.jsonEnc.Encode(res); err != nil {
-		_, _ = fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
+		w.diagLocked(LevelError, KindMessage, "Error: encoding JSON output: "+err.Error(), nil)
 		return
 	}
 	w.jsonOpen = true
@@ -286,7 +290,7 @@ func (w *Writer) writeJSONL(res Result) {
 	}
 	data, err := json.Marshal(res)
 	if err != nil {
-		_, _ = fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
+		w.diagLocked(LevelError, KindMessage, "Error: encoding JSON output: "+err.Error(), nil)
 		return
 	}
 	if w.stdout {
@@ -416,8 +420,13 @@ func (w *Writer) Progress(pct float64, processed, total, found int64) {
 		return
 	}
 	line := fmt.Sprintf("Progress: %.1f%% (%d/%d) | Found: %d ", pct, processed, total, found)
-	if left, ok := w.eta.Update(processed, total); ok {
+	left, etaOK := w.eta.Update(processed, total)
+	if etaOK {
 		line += "| ETA " + FormatETA(left) + " "
+	}
+	if w.logJSON {
+		w.progressJSONLocked(line, pct, processed, total, found, left, etaOK)
+		return
 	}
 	if w.lineMode {
 		_, _ = fmt.Fprintln(w.errOut(), strings.TrimSpace(line))
@@ -455,22 +464,20 @@ func (w *Writer) Info(format string, a ...any) {
 	if w.quiet {
 		return
 	}
-	w.Notice(format, a...)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.diagLocked(LevelInfo, KindMessage, fmt.Sprintf(format, a...), nil)
 }
 
 // Notice writes a line to stderr like Info, even under SetQuiet: for what a
 // user must not miss, such as results being simulated.
 func (w *Writer) Notice(format string, a ...any) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.clearProgressLocked()
-	_, _ = fmt.Fprintf(w.errOut(), format+"\n", a...)
+	w.NoticeOf(KindMessage, format, a...)
 }
 
 // Error writes an error line to stderr, serialized like Info.
 func (w *Writer) Error(format string, a ...any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.clearProgressLocked()
-	_, _ = fmt.Fprintf(w.errOut(), "Error: "+format+"\n", a...)
+	w.diagLocked(LevelError, KindMessage, "Error: "+fmt.Sprintf(format, a...), nil)
 }

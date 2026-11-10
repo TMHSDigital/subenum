@@ -132,6 +132,7 @@ type cliFlags struct {
 	retries      int
 	force        bool
 	format       string
+	logFormat    string // -log-format: text or json diagnostics on stderr (#198)
 	showRecords  bool
 	rate         int
 	recordTypes  string
@@ -221,6 +222,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
 	fs.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
 	fs.StringVar(&f.format, "format", "text", "Output format: text, json, jsonl, or csv")
+	fs.StringVar(&f.logFormat, "log-format", "text", "Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged")
 	fs.BoolVar(&f.showRecords, "show-records", false, "In text format, append each result's records (TYPE=value)")
 	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited)")
 	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME")
@@ -268,7 +270,9 @@ func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *outpu
 	if len(positionals) == 0 && f.domainList == "" {
 		// Say what is missing before the full flag list (#58).
 		out.Error("missing <domain> (or -dL <domains_file>)")
-		fs.Usage()
+		if !out.LogJSON() { // the usage text is not a JSON line
+			fs.Usage()
+		}
 		return false
 	}
 	if f.domainList != "" && len(positionals) > 0 {
@@ -315,7 +319,7 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 	}
 	// Range and resolver checks are shared with the TUI (#80).
 	if err := scanOptions(f, in, scanPass{maxQueries: f.maxQueries}, nil).Validate(); err != nil {
-		out.Error("%s", scan.Render(err.Error(), scan.FlagName))
+		out.ScanError(err.Error())
 		return "", false
 	}
 	if f.maxDuration < 0 {
@@ -637,7 +641,7 @@ type targetResult struct {
 func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Event)) (res targetResult) {
 	f, out := s.f, s.out
 	// Logf is serialized with the progress line (#36).
-	cfg := scanOptions(f, &s.in, p, out.Info).Config()
+	cfg := scanOptions(f, &s.in, p, out.Verbose).Config()
 
 	events := make(chan scan.Event, 64)
 	go scan.Run(ctx, cfg, events)
@@ -661,10 +665,9 @@ func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Even
 				out.Progress(pct, ev.Processed, ev.Total, ev.Found)
 			}
 		case scan.EventNotice:
-			out.Info("%s", scan.Render(ev.Message, scan.FlagName))
+			out.ScanNotice(ev.Notice.String(), ev.Message)
 		case scan.EventError:
-			msg := scan.Render(ev.Message, scan.FlagName)
-			out.Error("%s", msg)
+			msg := out.ScanError(ev.Message)
 			if !sawError {
 				res.err = msg
 			}

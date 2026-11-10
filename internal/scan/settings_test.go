@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,19 @@ func TestRender(t *testing.T) {
 
 // TestSettingTable covers #160: every setting has a flag, a Config field and
 // a form label, and no two settings share one.
+// TestSettingsIn covers #198: the codes of the known settings a message
+// names, in order and once each.
+func TestSettingsIn(t *testing.T) {
+	got := SettingsIn("set {max_queries} or {force}; {unknown} {max_queries} {depth}")
+	want := []Setting{SettingMaxQueries, SettingForce, SettingDepth}
+	if !slices.Equal(got, want) {
+		t.Errorf("SettingsIn = %v, want %v", got, want)
+	}
+	if got := SettingsIn("no tokens"); got != nil {
+		t.Errorf("SettingsIn(no tokens) = %v, want nil", got)
+	}
+}
+
 func TestSettingTable(t *testing.T) {
 	seen := map[string]Setting{}
 	for _, s := range Settings {
