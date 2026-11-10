@@ -300,7 +300,7 @@ func TestPrintConfigEffectiveAttempts(t *testing.T) {
 // offer, so a command-line, SUBENUM_* or config file value for them never
 // seeds the form (-tui warns about one given on the command line).
 var tuiOmittedFlags = map[string]bool{
-	"tui": true, "print-config": true, "version": true, "v": true, "progress": true, "silent": true,
+	"tui": true, "print-config": true, "dry-run": true, "version": true, "v": true, "progress": true, "silent": true,
 	"simulate-zone": true, "retries": true, "show-records": true, "max-duration": true, "stats": true,
 	"sarif": true, "exclude-file": true, "permute": true, "ct": true, "seeds": true, "state": true,
 	"diff": true, "diff-records": true, "dL": true, "seed": true, "resume": true,

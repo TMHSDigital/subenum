@@ -36,7 +36,7 @@ const (
 
 // noDefaultFlags are never taken from the config file or environment: they
 // select a mode or an action rather than a setting.
-var noDefaultFlags = map[string]bool{"tui": true, "version": true, "print-config": true, "resume": true, "h": true, "help": true}
+var noDefaultFlags = map[string]bool{"tui": true, "version": true, "print-config": true, "dry-run": true, "resume": true, "h": true, "help": true}
 
 // listFlags take comma-separated values, so the config file may also give
 // them as a JSON array of strings.

@@ -9,6 +9,7 @@
 | `-diff <string>` | - | Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes |
 | `-diff-records` | - | With -diff, also report names whose records changed (a re-pointed CNAME, moved addresses), compared over the -type record types; needs a json, jsonl or csv -diff file |
 | `-dns-server <string>` | 8.8.8.8:53 | DNS server: ip:port (UDP, TCP fallback), tls://host[:853] (DNS over TLS) or https://host/path (DNS over HTTPS) |
+| `-dry-run` | - | Print the plan without scanning: candidates after dedupe and -exclude, query and duration estimates, and the resolver preflight (its only DNS query); then exit |
 | `-exclude <string>` | - | Comma-separated out-of-scope names and \*.parent patterns; never queried or expanded |
 | `-exclude-file <string>` | - | File of out-of-scope names and \*.parent patterns, one per line (# comments allowed) |
 | `-force` | - | Continue scanning even if wildcard DNS is detected |

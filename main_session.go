@@ -96,7 +96,14 @@ func runWith(a runArgs) (code int) {
 	// Seeds are read before the -o file is opened: a failure after opening
 	// would return before its deferred Close is registered and leave the
 	// temporary file behind (#212).
-	if !s.loadInputs() || !s.loadSeeds() || !s.openOutputs() {
+	if !s.loadInputs() || !s.loadSeeds() {
+		return exitFailure
+	}
+	// Before the -o file is opened: a dry run writes no results (#192).
+	if s.f.dryRun {
+		return s.dryRun()
+	}
+	if !s.openOutputs() {
 		return exitFailure
 	}
 	s.setProgress()

@@ -293,6 +293,7 @@ make help           # list all targets
 | `-sarif <file>` | n/a | Write takeover candidates as SARIF 2.1.0 for GitHub code scanning; needs CNAME in `-type` |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-print-config` | `false` | Print every setting's effective value and source (`flag`, env, config or default), then exit |
+| `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query), then exit; JSON with `-format json` or `jsonl` |
 | `-version` | n/a | Print version and exit |
 | `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
 | `-resume <file>` | n/a | Resume an interrupted run from its state file; takes no other arguments |
