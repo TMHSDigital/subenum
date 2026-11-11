@@ -137,6 +137,7 @@ type Stats struct {
 	Confirmed   int64 // pool hits the trusted resolver confirmed
 	Unconfirmed int64 // pool hits the trusted resolver said do not exist
 	Takeover    int64 // results flagged as subdomain-takeover candidates
+	Internal    int64 // results with a non-public address (Result.Internal, #218)
 	// RootDone is the resume point: every wordlist entry before this index
 	// has been fully looked up (#73). Entries at or after it may also be
 	// done; resuming repeats at most a worker pool's worth of lookups.
@@ -180,6 +181,7 @@ type counters struct {
 	confirmed        atomic.Int64
 	unconfirmed      atomic.Int64
 	takeover         atomic.Int64
+	internal         atomic.Int64
 	rootDone         atomic.Int64
 	retried          atomic.Int64
 	recovered        atomic.Int64
@@ -264,6 +266,7 @@ func (c *counters) snapshot() Stats {
 		Confirmed:        c.confirmed.Load(),
 		Unconfirmed:      c.unconfirmed.Load(),
 		Takeover:         c.takeover.Load(),
+		Internal:         c.internal.Load(),
 		RootDone:         c.rootDone.Load(),
 		Retried:          c.retried.Load(),
 		Recovered:        c.recovered.Load(),
@@ -506,6 +509,11 @@ type Result struct {
 	// "provider:<name>" or "dangling:<name>"), see dns.TakeoverHint;
 	// verify it by hand (#71).
 	Takeover string `json:"takeover_candidate,omitempty"`
+	// Internal is the most notable non-public scope among the name's
+	// addresses ("loopback", "unspecified", "link-local", "private" or
+	// "cgnat"), see dns.InternalScope; empty when every address is public.
+	// A public name that answers with one leaks internal addressing (#218).
+	Internal string `json:"internal_address,omitempty"`
 }
 
 // Event is emitted on the events channel during a scan.
@@ -854,7 +862,15 @@ func (s *scanState) report(ctx context.Context, name string, records []dns.Recor
 	if takeover != "" {
 		s.stats.takeover.Add(1)
 	}
-	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: name, Records: records, Simulated: cfg.Simulate, Takeover: takeover}}
+	// Simulated addresses are invented (in 10.0.0.0/8), so they say nothing.
+	internal := ""
+	if !cfg.Simulate {
+		internal = dns.InternalScope(records)
+	}
+	if internal != "" {
+		s.stats.internal.Add(1)
+	}
+	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: name, Records: records, Simulated: cfg.Simulate, Takeover: takeover, Internal: internal}}
 }
 
 // retryPending is the RetryInconclusive pass (#217): once every candidate

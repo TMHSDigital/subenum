@@ -71,6 +71,9 @@ type TargetSummary struct {
 	// (-max-queries) or "duration" (-max-duration, #190). Empty when none did.
 	StoppedBy string `json:"stopped_by,omitempty"`
 	Takeover  int64  `json:"takeover_candidates,omitempty"` // results with a takeover hint
+	// Internal counts results with a loopback, private, link-local,
+	// unspecified or CGNAT address (#218).
+	Internal int64 `json:"internal_addresses,omitempty"`
 	// Retried counts the inconclusive names -retry-inconclusive looked up
 	// again, and Recovered the ones that then got an answer (#217); the
 	// outcomes already count those under their new outcome.

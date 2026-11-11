@@ -162,6 +162,9 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 		if ev.Result.Takeover != "" {
 			line += wildcardStyle.Render("  ⚠ takeover? " + ev.Result.Takeover)
 		}
+		if ev.Result.Internal != "" {
+			line += wildcardStyle.Render("  internal: " + ev.Result.Internal)
+		}
 		m.results = append(m.results, line)
 		if len(m.results) > maxResultLines {
 			// Evict in chunks so the copy cost is amortized across results.

@@ -179,6 +179,13 @@ type Result struct {
 	// (both). It is derived only from DNS, so it is a lead to verify by
 	// hand, not a finding. Empty unless Types includes "CNAME".
 	Takeover string
+
+	// Internal names the most notable non-public scope among the
+	// addresses: "loopback", "unspecified", "link-local", "private"
+	// (RFC 1918 or fc00::/7) or "cgnat" (100.64.0.0/10). A public name
+	// that answers with one leaks internal addressing. Empty when every
+	// address is public, and always empty in a simulated scan.
+	Internal string
 }
 
 // Stats accounts for every candidate name a finished scan looked up.
@@ -195,6 +202,7 @@ type Stats struct {
 	Skipped     int64 // candidates left untested because MaxQueries or MaxDuration was reached
 	Excluded    int64 // candidates left untested because Exclude covered them
 	Takeover    int64 // results carrying a Takeover hint
+	Internal    int64 // results with an Internal address scope
 
 	PoolHits    int64 // names a ResolverPool member reported
 	Confirmed   int64 // of those, the ones Resolver confirmed
@@ -657,7 +665,7 @@ func translate(ev scan.Event) Event {
 	switch ev.Kind {
 	case scan.EventResult:
 		out.Kind = KindResult
-		out.Result = Result{Name: ev.Result.Subdomain, Records: records(ev.Result.Records), Takeover: ev.Result.Takeover}
+		out.Result = Result{Name: ev.Result.Subdomain, Records: records(ev.Result.Records), Takeover: ev.Result.Takeover, Internal: ev.Result.Internal}
 	case scan.EventProgress:
 		out.Kind = KindProgress
 	case scan.EventNotice:
@@ -711,6 +719,7 @@ func stats(s scan.Stats) Stats {
 		Skipped:     s.Skipped,
 		Excluded:    s.Excluded,
 		Takeover:    s.Takeover,
+		Internal:    s.Internal,
 
 		PoolHits:    s.PoolHits,
 		Confirmed:   s.Confirmed,

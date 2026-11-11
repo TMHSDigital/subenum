@@ -30,7 +30,7 @@ if err != nil {
     // stats still hold what was gathered.
 }
 for _, r := range results {
-    fmt.Println(r.Name, r.Records, r.Takeover)
+    fmt.Println(r.Name, r.Records, r.Takeover, r.Internal)
 }
 ```
 

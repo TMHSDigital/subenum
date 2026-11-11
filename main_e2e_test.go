@@ -679,6 +679,68 @@ func TestE2EInconclusive(t *testing.T) {
 	}
 }
 
+// TestE2EInternalAddresses covers #218: results whose addresses are private
+// or loopback carry internal_address in JSONL and an INTERNAL= marker with
+// -show-records, public ones carry neither, and the report counts them.
+func TestE2EInternalAddresses(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Type != dnsmessage.TypeA {
+			return dnstest.Reply{}
+		}
+		switch q.Name {
+		case "example.com", "www.example.com":
+			return dnstest.Reply{A: []string{"192.0.2.10"}}
+		case "intranet.example.com":
+			return dnstest.Reply{A: []string{"192.0.2.11", "10.1.2.3"}}
+		case "lo.example.com":
+			return dnstest.Reply{A: []string{"127.0.0.1"}}
+		}
+		return dnstest.NXDomain
+	})
+	wl := writeFile(t, "wl.txt", "www\nintranet\nlo\nnope\n")
+	stats := filepath.Join(t.TempDir(), "run.json")
+	code, out := runCLI(t, "", "-dns-server", srv.Addr, "-type", "A", "-progress=false",
+		"-format", "jsonl", "-stats", stats, "-w", wl, "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var r struct {
+			Type      string `json:"type"`
+			Subdomain string `json:"subdomain"`
+			Internal  string `json:"internal_address"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("bad line %q: %v", line, err)
+		}
+		if r.Type != "summary" {
+			got[r.Subdomain] = r.Internal
+		}
+	}
+	want := map[string]string{"www.example.com": "", "intranet.example.com": "private", "lo.example.com": "loopback"}
+	if !maps.Equal(got, want) {
+		t.Errorf("internal_address by name = %v, want %v", got, want)
+	}
+	var sum struct {
+		Targets []struct {
+			Internal int64 `json:"internal_addresses"`
+		} `json:"targets"`
+	}
+	raw, _ := os.ReadFile(stats)
+	if err := json.Unmarshal(raw, &sum); err != nil || len(sum.Targets) != 1 || sum.Targets[0].Internal != 2 {
+		t.Errorf("report internal_addresses: %s (err %v), want 2", raw, err)
+	}
+
+	_, text := runCLI(t, "", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-show-records", "-w", wl, "example.com")
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		hasMarker := strings.Contains(line, " INTERNAL=")
+		if strings.HasPrefix(line, "www.") == hasMarker {
+			t.Errorf("text line %q: INTERNAL= marker present = %v", line, hasMarker)
+		}
+	}
+}
+
 // TestE2EResume is #73's done-when: interrupting a simulated scan partway
 // and running `subenum -resume <state>` gives the same final result set as
 // an uninterrupted run with the same seed.

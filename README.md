@@ -478,6 +478,20 @@ The marker is a `takeover_candidate` field in JSON and JSONL, a `takeover_candid
 > [!IMPORTANT]
 > Takeover markers are DNS-only hints. subenum makes no HTTP requests; a `provider:` match is often a perfectly healthy service. Verify every candidate by hand, and only against targets you are authorized to test.
 
+### Internal addresses
+
+A public name that answers with an internal address leaks how the network behind it is laid out (and a loopback answer is a DNS rebinding building block). Every real result is checked: when one of its A or AAAA addresses is not public, the result carries the most notable scope:
+
+| Scope | Addresses |
+|-------|-----------|
+| `loopback` | `127.0.0.0/8`, `::1` |
+| `unspecified` | `0.0.0.0`, `::` |
+| `link-local` | `169.254.0.0/16`, `fe80::/10` |
+| `private` | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |
+| `cgnat` | `100.64.0.0/10` |
+
+The scope is an `internal_address` field in JSON and JSONL, `INTERNAL=<scope>` in text with `-show-records`, and a count in the breakdown and the run-quality report (`internal_addresses`). CSV is unchanged: each row already holds one address in its `value` column. Simulated results are never marked, since their addresses are invented.
+
 ### Run-quality report
 
 Every lookup is accounted for, and subenum says how far the results can be trusted. `-stats run.json` writes a report in any format, and `-format jsonl` ends with the same object as its last line (`"type": "summary"`):

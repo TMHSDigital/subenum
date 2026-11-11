@@ -204,6 +204,9 @@ func (w *Writer) writeText(res Result) {
 		if res.Takeover != "" {
 			line += " TAKEOVER?=" + res.Takeover
 		}
+		if res.Internal != "" {
+			line += " INTERNAL=" + res.Internal
+		}
 		if len(res.PreviousRecords) > 0 {
 			line += " (was" + formatRecords(res.PreviousRecords) + ")"
 		}
