@@ -56,10 +56,16 @@ surprises:
 
 Constraints to keep in mind when changing the code.
 
-- **The test DNS server (`internal/dnstest`) models A, AAAA and CNAME
-  answers,** any RCODE, NODATA with SOA, delays, drops and truncation. Other
-  record types and EDNS are not modelled; extend its `Reply` before testing
-  them.
+- **The test DNS server (`internal/dnstest`) models A, AAAA, CNAME, NS, MX
+  and TXT answers,** any RCODE, NODATA with SOA, delays, drops and
+  truncation. Other record types, referrals and EDNS are not modelled; extend
+  its `Reply` before testing them.
+- **The dangling-NS hint needs the NS records.** A recursive resolver asked
+  about a subzone whose every name server is gone usually answers SERVFAIL
+  rather than the delegation, so such a name ends up inconclusive (listed by
+  `-inconclusive`) instead of flagged. A delegation with at least one live
+  name server, or a scan against the parent zone's authoritative server, is
+  flagged.
 - **DNS goes through Go's stdlib resolver.** Its internal retries depend on the
   host's resolver configuration. `-rate` charges every query it dials, but the
   number of queries per lookup is not fully under subenum's control.

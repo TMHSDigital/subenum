@@ -181,6 +181,9 @@ www      AAAA     2001:db8::10
 shop     CNAME    www                   # relative target
 blog     CNAME    ghost.example.net.    # absolute target (trailing dot)
 *.dev    A        192.0.2.99            # wildcard under dev
+mail     MX       10 mx1                # preference and host (relative or absolute)
+@        TXT      "v=spf1 -all"         # the rest of the line; quotes optional
+sub      NS       ns1.gone.example.     # a delegated subzone (scan with -type NS)
 slow     TIMEOUT                        # never answered
 broken   SERVFAIL                       # also: REFUSED, NXDOMAIN
 ```

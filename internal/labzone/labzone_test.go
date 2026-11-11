@@ -68,6 +68,28 @@ func TestAnswer(t *testing.T) {
 	}
 }
 
+// TestAnswerNSMXTXT covers #194: NS and MX hosts resolve against the scanned
+// domain like CNAME targets, and a TXT value is the rest of the line.
+func TestAnswerNSMXTXT(t *testing.T) {
+	z := mustParse(t, strings.Join([]string{
+		"@     TXT \"v=spf1 include:_spf.example.net -all\"",
+		"@     MX  10 mx1",
+		"@     MX  20 mx.example.net.",
+		"sub   NS  ns1.sub",
+		"sub   NS  ns1.gone.example.net.",
+	}, "\n"))
+	apex := z.Answer("", "lab.example")
+	if want := []string{"v=spf1 include:_spf.example.net -all"}; !slices.Equal(apex.TXT, want) {
+		t.Errorf("TXT = %q, want %q", apex.TXT, want)
+	}
+	if want := []string{"10 mx1.lab.example", "20 mx.example.net"}; !slices.Equal(apex.MX, want) {
+		t.Errorf("MX = %q, want %q", apex.MX, want)
+	}
+	if want := []string{"ns1.sub.lab.example", "ns1.gone.example.net"}; !slices.Equal(z.Answer("sub", "lab.example").NS, want) {
+		t.Errorf("NS = %q, want %q", z.Answer("sub", "lab.example").NS, want)
+	}
+}
+
 func TestHandler(t *testing.T) {
 	z := mustParse(t, scenario)
 	h := z.Handler([]string{"lab.example", "other.test"})
@@ -113,8 +135,13 @@ func TestParseErrors(t *testing.T) {
 		{"www A", "line 1: want <name> A <value>"},
 		{"www a 192.0.2.1 extra", "line 1: want <name> A <value>"},
 		{"www MX", "line 1: want <name> MX <value>"},
-		{"www MX mail", "line 1: unknown type MX (known: A, AAAA, CNAME, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
-		{"www mx mail", "line 1: unknown type mx (known: A, AAAA, CNAME, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www SRV x", "line 1: unknown type SRV (known: A, AAAA, CNAME, NS, MX, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www srv x", "line 1: unknown type srv (known: A, AAAA, CNAME, NS, MX, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www MX mail", "line 1: want <name> MX <preference> <host>"},
+		{"www MX x mail", "line 1: bad MX preference \"x\""},
+		{"www NS @", "line 1: bad NS host \"@\""},
+		{"www CNAME a\nwww TXT hello", "line 2: www: a CNAME cannot be combined with other records"},
+		{"www NS ns1\nwww CNAME a", "line 2: www: a CNAME cannot be combined with other records"},
 		{"www.lab.example. A 192.0.2.1", "line 1: www.lab.example.: names are relative to the scanned domain; drop the trailing dot"},
 		{"www CNAME a\nwww A 192.0.2.1", "line 2: www: a CNAME cannot be combined with other records"},
 		{"www CNAME a\nwww AAAA 2001:db8::1", "line 2: www: a CNAME cannot be combined with other records"},

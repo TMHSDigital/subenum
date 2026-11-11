@@ -17,7 +17,8 @@ import (
 )
 
 // Record is a single resolved DNS record. Type is "A", "AAAA", "CNAME", etc.
-// Value is the IP address (for A/AAAA) or target name (for CNAME).
+// Value is the IP address (A/AAAA), the target name (CNAME), the name server
+// (NS), "<preference> <host>" (MX) or the text (TXT).
 type Record struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
@@ -31,7 +32,10 @@ func RecordKey(r Record) string { return r.Type + "\x00" + r.Value }
 // the historical LookupHost behavior (A and AAAA).
 var DefaultTypes = []string{"A", "AAAA"}
 
-var supportedTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true}
+var supportedTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true, "NS": true, "MX": true, "TXT": true}
+
+// SupportedTypes names the record types -type accepts, for messages.
+const SupportedTypes = "A, AAAA, CNAME, NS, MX, TXT"
 
 // Outcome is a coarse classification of one resolver attempt so callers can
 // tell a definitive negative (NXDOMAIN) apart from an infrastructure failure.
@@ -108,7 +112,7 @@ func ParseTypes(s string) ([]string, error) {
 			continue
 		}
 		if !supportedTypes[t] {
-			return nil, fmt.Errorf("unsupported record type %q (want A, AAAA, or CNAME)", part)
+			return nil, fmt.Errorf("unsupported record type %q (want %s)", part, SupportedTypes)
 		}
 		if !seen[t] {
 			seen[t] = true
@@ -268,7 +272,7 @@ func fqdn(domain string) string {
 // and CNAME queries. These slots are reserved before the lookup's timeout
 // starts; anything Go sends beyond them (its own retries) is charged as it is
 // dialed (see NewResolver).
-var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 3}
+var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 3, "NS": 1, "MX": 1, "TXT": 1}
 
 // Lookup is how one name is looked up: the resolver, the per-type timeout,
 // how many attempts a retried lookup makes, the record types, and the verbose
@@ -362,6 +366,37 @@ func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t str
 		if cname != "" && !strings.EqualFold(strings.TrimSuffix(cname, "."), strings.TrimSuffix(domain, ".")) {
 			return []Record{{Type: "CNAME", Value: strings.TrimSuffix(cname, ".")}}, nil
 		}
+	case "NS":
+		// NS records exist only where a zone is delegated (#194).
+		nss, err := resolver.LookupNS(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(nss))
+		for _, ns := range nss {
+			recs = append(recs, Record{Type: "NS", Value: strings.ToLower(strings.TrimSuffix(ns.Host, "."))})
+		}
+		return recs, nil
+	case "MX":
+		mxs, err := resolver.LookupMX(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(mxs))
+		for _, mx := range mxs {
+			recs = append(recs, Record{Type: "MX", Value: fmt.Sprintf("%d %s", mx.Pref, strings.ToLower(strings.TrimSuffix(mx.Host, ".")))})
+		}
+		return recs, nil
+	case "TXT":
+		txts, err := resolver.LookupTXT(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(txts))
+		for _, txt := range txts {
+			recs = append(recs, Record{Type: "TXT", Value: txt})
+		}
+		return recs, nil
 	}
 	return nil, nil
 }

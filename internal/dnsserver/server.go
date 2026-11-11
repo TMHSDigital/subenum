@@ -45,7 +45,10 @@ type Query struct {
 type Reply struct {
 	A     []string // IPv4 answers for A queries
 	AAAA  []string // IPv6 answers for AAAA queries
-	CNAME string   // alias answered for every qtype; A/AAAA above are then owned by the target
+	CNAME string   // alias answered for every qtype; the records here are then owned by the target
+	NS    []string // name servers for NS queries
+	MX    []string // "<preference> <host>" (or just "<host>", preference 10) for MX queries
+	TXT   []string // texts for TXT queries, one record each
 
 	RCode    dnsmessage.RCode // e.g. RCodeNameError (NXDOMAIN), RCodeServerFailure, RCodeRefused
 	Drop     bool             // send nothing; the client times out
@@ -481,6 +484,9 @@ type answerBuilder func(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (
 var answerBuilders = map[dnsmessage.Type]answerBuilder{
 	dnsmessage.TypeA:    addA,
 	dnsmessage.TypeAAAA: addAAAA,
+	dnsmessage.TypeNS:   addNS,
+	dnsmessage.TypeMX:   addMX,
+	dnsmessage.TypeTXT:  addTXT,
 }
 
 // rrHeader is the header every answer record carries.
@@ -538,6 +544,63 @@ func addAAAA(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error)
 	return addAddrs(r.AAAA, isV6, func(ip netip.Addr) error {
 		return b.AAAAResource(rrHeader(owner, dnsmessage.TypeAAAA), dnsmessage.AAAAResource{AAAA: ip.As16()})
 	})
+}
+
+// addNS adds one NS record per host that is a valid name.
+func addNS(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, h := range r.NS {
+		host, err := dnsmessage.NewName(fqdn(h))
+		if err != nil {
+			continue
+		}
+		if err := b.NSResource(rrHeader(owner, dnsmessage.TypeNS), dnsmessage.NSResource{NS: host}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// addMX adds one MX record per "<preference> <host>" or "<host>" value.
+func addMX(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, v := range r.MX {
+		pref, hostStr := uint16(10), v
+		if p, h, ok := strings.Cut(v, " "); ok {
+			pv, err := strconv.ParseUint(p, 10, 16)
+			if err != nil {
+				continue
+			}
+			pref, hostStr = uint16(pv), strings.TrimSpace(h)
+		}
+		host, err := dnsmessage.NewName(fqdn(hostStr))
+		if err != nil {
+			continue
+		}
+		if err := b.MXResource(rrHeader(owner, dnsmessage.TypeMX), dnsmessage.MXResource{Pref: pref, MX: host}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// addTXT adds one TXT record per text, split into 255-byte strings.
+func addTXT(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, v := range r.TXT {
+		var parts []string
+		for len(v) > 255 {
+			parts, v = append(parts, v[:255]), v[255:]
+		}
+		parts = append(parts, v)
+		if err := b.TXTResource(rrHeader(owner, dnsmessage.TypeTXT), dnsmessage.TXTResource{TXT: parts}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // addSOA adds the authority section holding the SOA of name's zone.

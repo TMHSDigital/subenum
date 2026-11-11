@@ -273,8 +273,8 @@ func (s *session) configure() (domain string, code int, ok bool) {
 		out.Error("%v", typesErr)
 		return "", exitUsage, false
 	}
-	if f.sarifFile != "" && !slices.Contains(recordTypes, "CNAME") {
-		out.Info("Note: -sarif lists takeover candidates, which need CNAME lookups; add -type A,AAAA,CNAME")
+	if f.sarifFile != "" && !dns.HintsTakeover(recordTypes) {
+		out.Info("Note: -sarif lists takeover candidates, which need CNAME (or NS) lookups; add -type A,AAAA,CNAME")
 	}
 	if err != nil {
 		out.Error("%v", err)
@@ -436,7 +436,7 @@ func (s *session) openOutputs() bool {
 		w.SetQuiet(f.silent)
 		w.SetShowRecords(f.showRecords)
 		w.SetSeed(f.seed)
-		w.SetTakeoverColumn(slices.Contains(s.in.recordTypes, "CNAME"))
+		w.SetTakeoverColumn(dns.HintsTakeover(s.in.recordTypes))
 	}
 	return true
 }

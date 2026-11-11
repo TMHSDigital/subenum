@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -260,6 +261,58 @@ func TestE2ELabTakeoverHint(t *testing.T) {
 		if want := map[bool]string{true: "dangling"}[r.Subdomain == "blog.lab.example"]; r.Takeover != want {
 			t.Errorf("%s: takeover %q, want %q", r.Subdomain, r.Takeover, want)
 		}
+	}
+}
+
+// TestE2ELabDanglingNS covers #194: in a lab zone, -type NS reports a
+// delegated subzone, flags the one whose name server does not exist as
+// dangling-ns, and -sarif writes it; MX and TXT records come back too.
+func TestE2ELabDanglingNS(t *testing.T) {
+	zone := writeFile(t, "ns.zone", strings.Join([]string{
+		"@      A    192.0.2.1",
+		"mail   MX   10 mx1",
+		"mail   TXT  \"v=spf1 -all\"",
+		"mx1    A    192.0.2.25",
+		"ns1    A    192.0.2.53",
+		"ok     NS   ns1",
+		"old    NS   ns1.gone-dns.example.",
+		"www    A    192.0.2.10",
+	}, "\n"))
+	words := writeFile(t, "words.txt", "ok\nold\nwww\nmail\n")
+	sarif := filepath.Join(t.TempDir(), "takeovers.sarif")
+	args := append([]string{"-progress=false", "-format", "jsonl", "-w", words, "-type", "NS,MX,TXT", "-sarif", sarif}, labTimingArgs...)
+	code, out := runCLI(t, "", append(args, "-simulate-zone", zone, "lab.example")...)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	takeover := map[string]string{}
+	var mail []dns.Record
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var r struct {
+			Type      string       `json:"type"`
+			Subdomain string       `json:"subdomain"`
+			Records   []dns.Record `json:"records"`
+			Takeover  string       `json:"takeover_candidate"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("%v: %s", err, line)
+		}
+		if r.Type != "summary" {
+			takeover[r.Subdomain] = r.Takeover
+		}
+		if r.Subdomain == "mail.lab.example" {
+			mail = r.Records
+		}
+	}
+	if want := []dns.Record{{Type: "MX", Value: "10 mx1.lab.example"}, {Type: "TXT", Value: "v=spf1 -all"}}; !slices.Equal(mail, want) {
+		t.Errorf("mail records = %v, want %v", mail, want)
+	}
+	if want := map[string]string{"ok.lab.example": "", "old.lab.example": "dangling-ns", "mail.lab.example": ""}; !maps.Equal(takeover, want) {
+		t.Errorf("results = %v, want %v (www has no NS, MX or TXT)", takeover, want)
+	}
+	data, err := os.ReadFile(sarif)
+	if err != nil || !strings.Contains(string(data), `"ruleId": "subenum/dangling-ns"`) {
+		t.Errorf("SARIF lacks the dangling-ns result (err %v):\n%s", err, data)
 	}
 }
 

@@ -153,6 +153,7 @@ func TestWriteSARIFTakeovers(t *testing.T) {
 		{Result: scan.Result{Subdomain: "b.example.com", Takeover: "dangling"}},
 		{Result: scan.Result{Subdomain: "c.example.com", Records: cname, Takeover: "dangling:heroku"}},
 		{Result: scan.Result{Subdomain: "www.example.com"}},
+		{Result: scan.Result{Subdomain: "sub.example.com", Records: []dns.Record{{Type: "NS", Value: "ns1.gone.example"}}, Takeover: "dangling-ns"}},
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "out.sarif")
@@ -161,14 +162,17 @@ func TestWriteSARIFTakeovers(t *testing.T) {
 	}
 	doc, first := readSARIF(t, path)
 	run := doc.Runs[0]
-	if len(run.Results) != 4 {
-		t.Fatalf("%d results, want the 4 takeover candidates", len(run.Results))
+	if len(run.Results) != 5 {
+		t.Fatalf("%d results, want the 5 takeover candidates", len(run.Results))
+	}
+	if msg := run.Results[4].Message.Text; run.Results[4].RuleID != "subenum/dangling-ns" || !strings.Contains(msg, "sub.example.com is delegated to ns1.gone.example") || run.Results[4].Level != "error" {
+		t.Errorf("dangling-ns result = %+v", run.Results[4])
 	}
 	var ruleIDs []string
 	for _, r := range run.Tool.Driver.Rules {
 		ruleIDs = append(ruleIDs, r.ID)
 	}
-	wantRules := []string{"subenum/dangling-cname", "subenum/dangling-cname/heroku", "subenum/takeover-prone-provider/heroku"}
+	wantRules := []string{"subenum/dangling-cname", "subenum/dangling-cname/heroku", "subenum/dangling-ns", "subenum/takeover-prone-provider/heroku"}
 	if strings.Join(ruleIDs, ",") != strings.Join(wantRules, ",") {
 		t.Fatalf("rules = %v, want each once, sorted: %v", ruleIDs, wantRules)
 	}

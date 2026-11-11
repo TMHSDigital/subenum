@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
-	"slices"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -221,7 +220,7 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 		m.out.SetSeed(seed)
 		// Same file shape as the CLI's: a takeover column when CNAME
 		// records are requested (#118).
-		m.out.SetTakeoverColumn(slices.Contains(vals.recordTypes, "CNAME"))
+		m.out.SetTakeoverColumn(dns.HintsTakeover(vals.recordTypes))
 	}
 	m.vals, m.seed, m.started = vals, seed, time.Now()
 

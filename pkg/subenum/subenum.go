@@ -90,8 +90,9 @@ type Config struct {
 	// unlimited. Pace scans of resolvers you do not own.
 	Rate int
 
-	// Types are the record types to look up: "A", "AAAA" and "CNAME". Nil
-	// looks up A and AAAA. CNAME is what populates Result.Takeover.
+	// Types are the record types to look up: "A", "AAAA", "CNAME", "NS",
+	// "MX" and "TXT". Nil looks up A and AAAA. CNAME and NS are what
+	// populate Result.Takeover.
 	Types []string
 
 	// Recursive enumerates Words again under every name that is found,
@@ -178,8 +179,8 @@ type TakeoverProvider struct {
 
 // Record is one DNS record behind a result.
 type Record struct {
-	Type  string // "A", "AAAA" or "CNAME"
-	Value string // an address, or the target of a CNAME
+	Type  string // "A", "AAAA", "CNAME", "NS", "MX" or "TXT"
+	Value string // an address, a CNAME target, a name server, "<preference> <host>" (MX) or a text (TXT)
 }
 
 // Result is a subdomain that resolved.
@@ -194,8 +195,10 @@ type Result struct {
 	// Takeover is a hint that a CNAME points somewhere unclaimed:
 	// "dangling" (the target does not resolve), "provider:<name>" (the
 	// target belongs to a known hosting provider) or "dangling:<name>"
-	// (both). It is derived only from DNS, so it is a lead to verify by
-	// hand, not a finding. Empty unless Types includes "CNAME".
+	// (both); or "dangling-ns" when the name is delegated to a name server
+	// that does not resolve. It is derived only from DNS, so it is a lead
+	// to verify by hand, not a finding. Empty unless Types includes "CNAME"
+	// or "NS".
 	Takeover string
 
 	// Internal names the most notable non-public scope among the

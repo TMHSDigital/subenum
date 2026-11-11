@@ -45,7 +45,7 @@
 | `-takeover-providers-only` {% include unreleased.html flag="takeover-providers-only" %} | - | Use only the -takeover-providers file, not the built-in provider list |
 | `-timeout <int>` | 1000 | DNS lookup timeout in milliseconds |
 | `-tui` | - | Launch the interactive terminal UI, its form pre-filled from the other flags and the domain argument |
-| `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME |
+| `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT (CNAME and NS also check for takeovers) |
 | `-v` | - | Enable verbose output |
 | `-version` | - | Show version information |
 | `-w <file>` | - | Path to a wordlist file (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list |

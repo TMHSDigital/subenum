@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -117,6 +118,53 @@ func TestTakeoverHint(t *testing.T) {
 				t.Errorf("TakeoverHint(%v) = %q, want %q", recs, got, want)
 			}
 		})
+	}
+}
+
+// TestResolveNSMXTXT covers #194: -type NS, MX and TXT look the records up,
+// a name without them is a negative, and a delegation whose name server does
+// not exist gets the dangling-ns hint while a healthy one gets none.
+func TestResolveNSMXTXT(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch q.Name {
+		case "example.com":
+			return dnstest.Reply{MX: []string{"10 mx1.example.com"}, TXT: []string{"v=spf1 -all"}}
+		case "ok.example.com":
+			return dnstest.Reply{NS: []string{"ns1.example.net"}}
+		case "gone.example.com":
+			return dnstest.Reply{NS: []string{"ns1.example.net", "ns.unregistered.example"}}
+		case "ns1.example.net":
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.53"}}
+			}
+			return dnstest.Reply{}
+		case "www.example.com":
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.1"}}
+			}
+			return dnstest.Reply{}
+		}
+		return dnstest.NXDomain
+	})
+	l := Lookup{Resolver: NewResolver(time.Second, srv.Addr), Timeout: time.Second, Attempts: 1, Types: []string{"NS", "MX", "TXT"}}
+	ctx := context.Background()
+
+	recs, outcome := l.Resolve(ctx, "example.com")
+	want := []Record{{Type: "MX", Value: "10 mx1.example.com"}, {Type: "TXT", Value: "v=spf1 -all"}}
+	if outcome != OutcomeFound || !slices.Equal(recs, want) {
+		t.Errorf("example.com = %v %v, want %v", recs, outcome, want)
+	}
+	if _, outcome := l.Resolve(ctx, "www.example.com"); outcome != OutcomeNXDomain {
+		t.Errorf("www.example.com (A only) = %v, want a negative", outcome)
+	}
+	for name, hint := range map[string]string{"ok.example.com": "", "gone.example.com": DanglingNS} {
+		recs, outcome := l.Resolve(ctx, name)
+		if outcome != OutcomeFound || len(recs) == 0 || recs[0].Type != "NS" {
+			t.Fatalf("%s = %v %v, want NS records", name, recs, outcome)
+		}
+		if got := TakeoverHint(ctx, l, recs); got != hint {
+			t.Errorf("TakeoverHint(%s) = %q, want %q", name, got, hint)
+		}
 	}
 }
 

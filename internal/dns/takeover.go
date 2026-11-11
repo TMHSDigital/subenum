@@ -136,20 +136,27 @@ func ParseTakeoverProviders(lines []string, only bool) (TakeoverProviders, error
 	return out, nil
 }
 
-// TakeoverHint inspects a result's CNAME records and returns a takeover
-// marker: "dangling" when the CNAME target does not resolve (NXDOMAIN),
-// "provider:<name>" when it points at a takeover-prone service, and
-// "dangling:<name>" when both hold. It returns "" when there is no CNAME or
-// nothing suspicious. The target is resolved with l.Resolver, l.Timeout and
+// HintsTakeover reports whether a scan of these record types can produce
+// takeover hints: CNAME targets and NS delegations are what gets checked.
+func HintsTakeover(types []string) bool {
+	return slices.Contains(types, "CNAME") || slices.Contains(types, "NS")
+}
+
+// DanglingNS is the takeover marker of a delegated name whose name server
+// does not exist (#194).
+const DanglingNS = "dangling-ns"
+
+// TakeoverHint inspects a result's CNAME and NS records and returns a
+// takeover marker: "dangling" when the CNAME target does not resolve
+// (NXDOMAIN), "provider:<name>" when it points at a takeover-prone service,
+// "dangling:<name>" when both hold, and "dangling-ns" when the name is
+// delegated to a name server that does not resolve. It returns "" when there
+// is nothing suspicious. Targets are resolved with l.Resolver, l.Timeout and
 // l.Attempts for DefaultTypes, without logging (l.Types and l.Logf are
 // unused); an inconclusive lookup (timeout, SERVFAIL) is not called dangling.
+// It matches the built-in provider list and caches nothing.
 func TakeoverHint(ctx context.Context, l Lookup, records []Record) string {
-	target := cnameTarget(records)
-	if target == "" {
-		return ""
-	}
-	_, outcome := l.forTarget().Resolve(ctx, target)
-	return TakeoverProviders(nil).marker(target, outcome)
+	return (&TakeoverCache{}).Hint(ctx, l, records)
 }
 
 // forTarget is l as a CNAME target lookup: DefaultTypes, no logging.
@@ -208,10 +215,21 @@ func (c *TakeoverCache) Lookups() int64 { return c.lookups.Load() }
 
 // Hint is TakeoverHint through the cache.
 func (c *TakeoverCache) Hint(ctx context.Context, l Lookup, records []Record) string {
-	target := cnameTarget(records)
-	if target == "" {
-		return ""
+	if target := cnameTarget(records); target != "" {
+		return c.Providers.marker(target, c.outcome(ctx, l, target))
 	}
+	// A delegated name (#194): whoever registers a name server that does
+	// not exist answers for the whole subzone.
+	for _, r := range records {
+		if r.Type == "NS" && c.outcome(ctx, l, r.Value) == OutcomeNXDomain {
+			return DanglingNS
+		}
+	}
+	return ""
+}
+
+// outcome resolves target (A and AAAA) once for the life of the cache.
+func (c *TakeoverCache) outcome(ctx context.Context, l Lookup, target string) Outcome {
 	key := strings.ToLower(strings.TrimSuffix(target, "."))
 	for {
 		c.mu.Lock()
@@ -231,20 +249,20 @@ func (c *TakeoverCache) Hint(ctx context.Context, l Lookup, records []Record) st
 				c.mu.Unlock()
 			}
 			close(e.done)
-			return c.Providers.marker(target, e.outcome)
+			return e.outcome
 		}
 		c.mu.Unlock()
 		select {
 		case <-e.done:
 		case <-ctx.Done():
-			return c.Providers.marker(target, OutcomeCanceled)
+			return OutcomeCanceled
 		}
 		if e.outcome == OutcomeFound || e.outcome == OutcomeNXDomain {
-			return c.Providers.marker(target, e.outcome)
+			return e.outcome
 		}
 		// The shared lookup was inconclusive and dropped; try again.
 		if ctx.Err() != nil {
-			return c.Providers.marker(target, OutcomeCanceled)
+			return OutcomeCanceled
 		}
 	}
 }

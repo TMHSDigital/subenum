@@ -306,7 +306,7 @@ func TestConfigErrors(t *testing.T) {
 		{"negative max queries", subenum.Config{Domain: "example.com", MaxQueries: -5}, "MaxQueries"},
 		{"negative depth", subenum.Config{Domain: "example.com", Depth: -1}, "Depth"},
 		{"hit rate too high", subenum.Config{Domain: "example.com", Simulate: true, HitRate: 101}, "HitRate"},
-		{"unknown record type", subenum.Config{Domain: "example.com", Types: []string{"MX"}}, "Types"},
+		{"unknown record type", subenum.Config{Domain: "example.com", Types: []string{"SRV"}}, "Types"},
 		{"bad resolver", subenum.Config{Domain: "example.com", Resolver: "not-an-address"}, "Resolver"},
 		{"bad exclude", subenum.Config{Domain: "example.com", Exclude: []string{"*"}}, "Exclude"},
 		{"pool with simulate", subenum.Config{Domain: "example.com", Simulate: true, ResolverPool: []string{"192.0.2.1"}}, "ResolverPool"},

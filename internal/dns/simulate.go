@@ -61,6 +61,11 @@ func synthResolved(domain string, types []string, h uint64, logf Logf) ([]Record
 			records = append(records, Record{Type: "AAAA", Value: fmt.Sprintf("2001:db8::%x", (h>>32)&0xffff)})
 		case "CNAME":
 			records = append(records, Record{Type: "CNAME", Value: "target." + domain})
+		case "MX":
+			records = append(records, Record{Type: "MX", Value: "10 mail." + domain})
+		case "TXT":
+			records = append(records, Record{Type: "TXT", Value: "v=spf1 -all"})
+			// NS is left out: a simulated name is never a delegated zone.
 		}
 	}
 	if len(records) == 0 {

@@ -68,8 +68,8 @@ func TestParseTypes(t *testing.T) {
 		t.Errorf("empty should default to A,AAAA, got %v", d)
 	}
 
-	if _, err := ParseTypes("MX"); err == nil {
-		t.Error("expected error for unsupported type MX")
+	if _, err := ParseTypes("SRV"); err == nil {
+		t.Error("expected error for unsupported type SRV")
 	}
 }
 

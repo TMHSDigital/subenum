@@ -374,6 +374,6 @@ The following capabilities are implemented and available today:
 
 See `docs/ROADMAP.md` for the next-pass list. Areas still open:
 
-*   **Additional record types**: extend `dns.ResolveTypes` beyond A/AAAA/CNAME (for example MX, TXT, NS).
+*   **Additional record types**: `dns.ResolveTypes` covers A, AAAA, CNAME, NS, MX and TXT; a new type is a case in `lookupType`, an entry in `supportedTypes` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 

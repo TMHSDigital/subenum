@@ -37,7 +37,7 @@ type Config struct {
 	Verbose     bool     // log every lookup; through Logf when set, else unsynchronized to stderr
 	Logf        dns.Logf // receives verbose lines when Verbose is set
 	Rate        int      // max DNS messages per second on the wire, all workers combined (0 = unlimited)
-	Types       []string // record types to look up (A, AAAA, CNAME); empty = A,AAAA
+	Types       []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT); empty = A,AAAA
 	Recursive   bool     // enumerate subdomains of discovered subdomains
 	Depth       int      // max recursion depth (1 = no recursion)
 	NoAbort     bool     // keep scanning after the reliability guard fires
@@ -504,7 +504,7 @@ func (k NoticeKind) String() string {
 // structured output formats: change them only together with those formats.
 type Result struct {
 	Subdomain string       `json:"subdomain"`
-	Records   []dns.Record `json:"records"` // A/AAAA/CNAME
+	Records   []dns.Record `json:"records"` // of the looked-up types
 	// Simulated is set on every result of a simulated scan, so invented
 	// names can never pass for real recon output once saved or piped (#53).
 	Simulated bool `json:"simulated,omitempty"`

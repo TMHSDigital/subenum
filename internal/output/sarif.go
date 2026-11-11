@@ -87,6 +87,11 @@ func takeoverRule(marker string) sarifRule {
 	kind, provider, _ := strings.Cut(marker, ":")
 	r := sarifRule{HelpURI: sarifHelp + "cli.html", Properties: sarifRuleProps{Tags: []string{"security", "subdomain-takeover", "dns"}}}
 	switch {
+	case kind == "dangling-ns":
+		r.ID, r.Name = "subenum/dangling-ns", "DanglingNS"
+		r.ShortDescription.Text = "Subzone is delegated to a name server that does not exist"
+		r.FullDescription.Text = "The subdomain is delegated (NS records) to a name server whose name returns NXDOMAIN. Whoever registers that name answers for the whole subzone. Remove the delegation or point it at name servers you control."
+		r.DefaultConfiguration.Level, r.Properties.SecuritySeverity = "error", "8.6"
 	case kind == "dangling" && provider == "":
 		r.ID, r.Name = "subenum/dangling-cname", "DanglingCNAME"
 		r.ShortDescription.Text = "CNAME points at a name that does not exist"
@@ -118,14 +123,21 @@ func WriteSARIF(path, version string, results []Result) error {
 		rule := takeoverRule(r.Takeover)
 		rules[rule.ID] = rule
 		target := ""
+		var servers []string
 		for _, rec := range r.Records {
-			if rec.Type == "CNAME" {
+			switch rec.Type {
+			case "CNAME":
 				target = strings.TrimSuffix(rec.Value, ".")
+			case "NS":
+				servers = append(servers, strings.TrimSuffix(rec.Value, "."))
 			}
 		}
 		msg := fmt.Sprintf("%s: %s", r.Subdomain, rule.ShortDescription.Text)
-		if target != "" {
+		switch {
+		case target != "":
 			msg = fmt.Sprintf("%s is a CNAME for %s. %s.", r.Subdomain, target, rule.ShortDescription.Text)
+		case len(servers) > 0:
+			msg = fmt.Sprintf("%s is delegated to %s. %s.", r.Subdomain, strings.Join(servers, ", "), rule.ShortDescription.Text)
 		}
 		sum := sha256.Sum256([]byte(r.Subdomain + "\x00" + r.Takeover))
 		out = append(out, sarifResult{

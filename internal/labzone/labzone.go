@@ -16,6 +16,9 @@
 //	shop     CNAME    www                    # relative target
 //	blog     CNAME    ghost.example.net.     # absolute target (trailing dot)
 //	*.dev    A        192.0.2.99
+//	mail     MX       10 mx1                 # preference and host (relative or absolute)
+//	@        TXT      "v=spf1 -all"          # the rest of the line, quotes optional
+//	sub      NS       ns1.gone.example.net.  # a delegated subzone
 //	slow     TIMEOUT                         # never answered
 //	broken   SERVFAIL                        # also REFUSED, NXDOMAIN
 //
@@ -52,7 +55,14 @@ type Zone struct {
 type entry struct {
 	a, aaaa []string
 	cname   string
+	ns, mx  []string // hosts as written (relative or absolute); MX keeps "<pref> <host>"
+	txt     []string
 	fail    *dnsserver.Reply // TIMEOUT, SERVFAIL, REFUSED or NXDOMAIN
+}
+
+// hasRecords reports whether e holds any record other than a CNAME.
+func (e *entry) hasRecords() bool {
+	return len(e.a)+len(e.aaaa)+len(e.ns)+len(e.mx)+len(e.txt) > 0
 }
 
 // failure is a type that makes a name fail instead of holding records; a
@@ -163,16 +173,19 @@ var directives = []directive{
 
 // recordType is a record a name can hold, with a value; a new type is one
 // entry in recordTypes. owner is the name as written, for error messages.
+// With rest set, the value is the rest of the line (MX's "10 mail", a TXT
+// text with spaces); otherwise it is one field.
 type recordType struct {
 	name string // upper case
 	add  func(e *entry, owner, value string) error
+	rest bool
 }
 
 var recordTypes = []recordType{
-	{"A", addrRecord("A", netip.Addr.Is4, func(e *entry) *[]string { return &e.a })},
-	{"AAAA", addrRecord("AAAA", func(ip netip.Addr) bool { return !ip.Is4() }, func(e *entry) *[]string { return &e.aaaa })},
-	{"CNAME", func(e *entry, owner, value string) error {
-		if e.cname != "" || len(e.a)+len(e.aaaa) > 0 {
+	{name: "A", add: addrRecord("A", netip.Addr.Is4, func(e *entry) *[]string { return &e.a })},
+	{name: "AAAA", add: addrRecord("AAAA", func(ip netip.Addr) bool { return !ip.Is4() }, func(e *entry) *[]string { return &e.aaaa })},
+	{name: "CNAME", add: func(e *entry, owner, value string) error {
+		if e.cname != "" || e.hasRecords() {
 			return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
 		}
 		target, err := cnameTarget(value)
@@ -182,6 +195,45 @@ var recordTypes = []recordType{
 		e.cname = target
 		return nil
 	}},
+	// A delegation (#194): the name servers of a subzone.
+	{name: "NS", add: func(e *entry, owner, value string) error {
+		return addHost(e, owner, "NS", value, "", &e.ns)
+	}},
+	{name: "MX", rest: true, add: func(e *entry, owner, value string) error {
+		pref, host, ok := strings.Cut(value, " ")
+		if !ok {
+			return fmt.Errorf("want <name> MX <preference> <host>")
+		}
+		if _, err := strconv.ParseUint(pref, 10, 16); err != nil {
+			return fmt.Errorf("bad MX preference %q", pref)
+		}
+		return addHost(e, owner, "MX", strings.TrimSpace(host), pref+" ", &e.mx)
+	}},
+	{name: "TXT", rest: true, add: func(e *entry, owner, value string) error {
+		if e.cname != "" {
+			return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
+		}
+		if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+			value = value[1 : len(value)-1]
+		}
+		e.txt = append(e.txt, value)
+		return nil
+	}},
+}
+
+// addHost appends a record whose value is a host name, relative to the
+// scanned domain or absolute with a trailing dot, to list; prefix (MX's
+// preference) is kept in front of it.
+func addHost(e *entry, owner, typ, value, prefix string, list *[]string) error {
+	if e.cname != "" {
+		return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
+	}
+	host, err := cnameTarget(value)
+	if err != nil || host == "@" {
+		return fmt.Errorf("bad %s host %q", typ, value)
+	}
+	*list = append(*list, prefix+host)
+	return nil
 }
 
 // addrRecord returns the parser for an address record of type typ whose
@@ -233,23 +285,23 @@ func (z *Zone) parseRecord(fields []string) error {
 		if len(fields) != 2 {
 			return fmt.Errorf("%s takes no value", typ)
 		}
-		if e.fail != nil || e.cname != "" || len(e.a)+len(e.aaaa) > 0 {
+		if e.fail != nil || e.cname != "" || e.hasRecords() {
 			return fmt.Errorf("%s: a failure cannot be combined with other records for the same name", fields[0])
 		}
 		e.fail = &f.reply
 		return nil
 	}
-	if len(fields) != 3 {
+	rt, ok := lookup(recordTypes, typ)
+	if !ok {
+		return fmt.Errorf("unknown type %s (known: %s, %s)", fields[1], known(recordTypes), known(failures))
+	}
+	if len(fields) < 3 || (len(fields) > 3 && !rt.rest) {
 		return fmt.Errorf("want <name> %s <value>", typ)
 	}
 	if e.fail != nil {
 		return fmt.Errorf("%s: already defined as a failure", fields[0])
 	}
-	rt, ok := lookup(recordTypes, typ)
-	if !ok {
-		return fmt.Errorf("unknown type %s (known: %s, %s)", fields[1], known(recordTypes), known(failures))
-	}
-	return rt.add(e, fields[0], fields[2])
+	return rt.add(e, fields[0], strings.Join(fields[2:], " "))
 }
 
 // entryFor returns the entry for the name as written in the file, creating
@@ -351,16 +403,17 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 		return *e.fail
 	}
 	if e.cname == "" {
-		return dnsserver.Reply{A: e.a, AAAA: e.aaaa}
+		r := dnsserver.Reply{A: e.a, AAAA: e.aaaa, TXT: e.txt}
+		for _, h := range e.ns {
+			r.NS = append(r.NS, absolute(h, origin))
+		}
+		for _, v := range e.mx {
+			pref, h, _ := strings.Cut(v, " ")
+			r.MX = append(r.MX, pref+" "+absolute(h, origin))
+		}
+		return r
 	}
-	target := e.cname
-	switch {
-	case target == "@":
-		target = origin
-	case !strings.HasSuffix(target, "."):
-		target += "." + origin
-	}
-	target = strings.TrimSuffix(target, ".")
+	target := absolute(e.cname, origin)
 	r := dnsserver.Reply{CNAME: target}
 	// Follow an in-zone target one step, as an authoritative server includes
 	// the target's addresses when it holds them.
@@ -370,6 +423,19 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 		}
 	}
 	return r
+}
+
+// absolute resolves a target as written in the file (a CNAME target, an NS
+// or MX host) against origin: "@" is origin, a name ending in a dot is
+// absolute, any other is relative to origin. The result has no trailing dot.
+func absolute(target, origin string) string {
+	switch {
+	case target == "@":
+		target = origin
+	case !strings.HasSuffix(target, "."):
+		target += "." + origin
+	}
+	return strings.TrimSuffix(target, ".")
 }
 
 // relative returns name relative to origin, if name is origin or under it.
