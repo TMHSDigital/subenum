@@ -48,6 +48,11 @@ type Config struct {
 	// target of a -dL run. Zero means no limit.
 	Deadline time.Time
 	Exclude  []string // out-of-scope names and *.parent patterns; never queried (#87)
+	// RetryInconclusive looks up once more, after every candidate has been
+	// tried, each name whose lookup timed out, was refused or failed (#217).
+	// The retry goes to the trusted resolver, never the pool. A name it
+	// resolves is reported like any other, but not expanded by Recursive.
+	RetryInconclusive bool
 
 	// Resuming an interrupted scan (#73): ResumeFrom skips the wordlist
 	// entries before it (Stats.RootDone of the interrupted run), and
@@ -140,6 +145,16 @@ type Stats struct {
 	Expired     bool         // Deadline (-max-duration) stopped admission; Skipped counts what it left
 	Wildcard    bool         // the root domain is a wildcard (scanned under -force)
 	Fingerprint []dns.Record // final wildcard fingerprint, empty when none
+
+	// Inconclusive lookups (#217). Retried counts the names the
+	// RetryInconclusive pass looked up again, and Recovered the ones that
+	// then got an answer: their first outcome (timeout, refused, other)
+	// moves to the new one, so the outcome counters still add up to the
+	// names tested. Inconclusive lists, sorted, the names whose lookup is
+	// still a timeout, refusal or failure at the end of the scan.
+	Retried      int64
+	Recovered    int64
+	Inconclusive []string
 }
 
 // Sum returns the number of classified queries (found + negatives + failures +
@@ -166,25 +181,73 @@ type counters struct {
 	unconfirmed      atomic.Int64
 	takeover         atomic.Int64
 	rootDone         atomic.Int64
+	retried          atomic.Int64
+	recovered        atomic.Int64
 	aborted          atomic.Bool
 	expired          atomic.Bool
 }
 
-func (c *counters) add(o dns.Outcome) {
+func (c *counters) add(o dns.Outcome) { c.counter(o).Add(1) }
+
+// counter is the outcome's counter; an unknown outcome counts as other.
+func (c *counters) counter(o dns.Outcome) *atomic.Int64 {
 	switch o {
 	case dns.OutcomeFound:
-		c.found.Add(1)
+		return &c.found
 	case dns.OutcomeNXDomain:
-		c.nxdomain.Add(1)
+		return &c.nxdomain
 	case dns.OutcomeTimeout:
-		c.timeout.Add(1)
+		return &c.timeout
 	case dns.OutcomeRefused:
-		c.refused.Add(1)
-	case dns.OutcomeOther:
-		c.other.Add(1)
-	default:
-		c.other.Add(1)
+		return &c.refused
 	}
+	return &c.other
+}
+
+// inconclusive reports whether a lookup outcome leaves the name's existence
+// unknown: a timeout, a refusal or another failure (#217).
+func inconclusive(o dns.Outcome) bool {
+	return o == dns.OutcomeTimeout || o == dns.OutcomeRefused || o == dns.OutcomeOther
+}
+
+// pendingLookup is a job whose lookup was inconclusive, and that outcome.
+type pendingLookup struct {
+	j       job
+	outcome dns.Outcome
+}
+
+// pendingList collects the inconclusive lookups of a scan, for the retry
+// pass and Stats.Inconclusive (#217). Workers add to it concurrently.
+type pendingList struct {
+	mu    sync.Mutex
+	items []pendingLookup
+}
+
+func (l *pendingList) add(j job, o dns.Outcome) {
+	l.mu.Lock()
+	l.items = append(l.items, pendingLookup{j: j, outcome: o})
+	l.mu.Unlock()
+}
+
+// take empties the list and returns what it held.
+func (l *pendingList) take() []pendingLookup {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	items := l.items
+	l.items = nil
+	return items
+}
+
+// names returns the listed names, sorted.
+func (l *pendingList) names() []string {
+	l.mu.Lock()
+	out := make([]string, 0, len(l.items))
+	for _, it := range l.items {
+		out = append(out, it.j.domain)
+	}
+	l.mu.Unlock()
+	sort.Strings(out)
+	return out
 }
 
 func (c *counters) snapshot() Stats {
@@ -202,6 +265,8 @@ func (c *counters) snapshot() Stats {
 		Unconfirmed:      c.unconfirmed.Load(),
 		Takeover:         c.takeover.Load(),
 		RootDone:         c.rootDone.Load(),
+		Retried:          c.retried.Load(),
+		Recovered:        c.recovered.Load(),
 		Aborted:          c.aborted.Load(),
 		Expired:          c.expired.Load(),
 	}
@@ -632,7 +697,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	st := &scanState{
 		cfg: cfg, maxDepth: maxDepth, limiter: jobLimiter, events: events, enqueue: enqueue,
 		processed: &processed, found: &found, stats: &stats, cancel: cancel, guardOnce: &guardOnce,
-		fp: fingerprint, wc: wc,
+		fp: fingerprint, wc: wc, pending: &pendingList{},
 	}
 	workers := workerCount(cfg, maxDepth)
 	for i := 0; i < workers; i++ {
@@ -659,6 +724,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	}
 
 	wg.Wait()
+	if cfg.RetryInconclusive {
+		st.retryPending(ctx, workers)
+	}
 	// Stop the ticker goroutine and wait for it to fully exit before emitting
 	// EventDone, so the deferred close(events) can never race an in-flight
 	// ticker send.
@@ -669,6 +737,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	snap.QueriesSent = queriesSent.Load()
 	snap.Wildcard = wildcardRoot
 	snap.Fingerprint = fingerprint.records()
+	snap.Inconclusive = st.pending.names()
 	// EventDone is the abort/finish signal. CLI Finish and TUI aborted=true both
 	// wait for it after cancel, so this send must not be select-guarded on
 	// ctx.Done(): once ctx is cancelled that select is a coin-flip drop.
@@ -697,6 +766,7 @@ type scanState struct {
 	guardOnce *sync.Once
 	fp        *fingerprint
 	wc        *wildcardCache
+	pending   *pendingList // inconclusive lookups (#217)
 }
 
 // processJob resolves a single job and, on success, optionally enqueues
@@ -732,25 +802,16 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 	}
 
 	st.add(outcome)
+	if inconclusive(outcome) {
+		s.pending.add(j, outcome)
+	}
 	s.checkReliability(atomic.AddInt64(s.processed, 1))
 
 	if outcome != dns.OutcomeFound {
 		return true
 	}
 
-	atomic.AddInt64(s.found, 1)
-	// Unguarded: CLI and TUI drain until close. A ctx.Done() guard here would
-	// only matter for a consumer that stops reading with a full buffer.
-	// A CNAME result gets a DNS-only takeover hint; its target is resolved
-	// with the trusted resolver. Simulated records are never checked.
-	takeover := ""
-	if !cfg.Simulate && cfg.resolveHook == nil {
-		takeover = cfg.takeover.Hint(ctx, cfg.lookup(nil), records)
-	}
-	if takeover != "" {
-		st.takeover.Add(1)
-	}
-	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: j.domain, Records: records, Simulated: cfg.Simulate, Takeover: takeover}}
+	s.report(ctx, j.domain, records)
 
 	if cfg.Recursive && j.depth < maxDepth {
 		// The wildcard probe would query inside the branch, so an out-of-scope
@@ -776,6 +837,90 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 		}
 	}
 	return true
+}
+
+// report counts a found name and sends it as a result.
+func (s *scanState) report(ctx context.Context, name string, records []dns.Record) {
+	cfg := s.cfg
+	atomic.AddInt64(s.found, 1)
+	// Unguarded: CLI and TUI drain until close. A ctx.Done() guard here would
+	// only matter for a consumer that stops reading with a full buffer.
+	// A CNAME result gets a DNS-only takeover hint; its target is resolved
+	// with the trusted resolver. Simulated records are never checked.
+	takeover := ""
+	if !cfg.Simulate && cfg.resolveHook == nil {
+		takeover = cfg.takeover.Hint(ctx, cfg.lookup(nil), records)
+	}
+	if takeover != "" {
+		s.stats.takeover.Add(1)
+	}
+	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: name, Records: records, Simulated: cfg.Simulate, Takeover: takeover}}
+}
+
+// retryPending is the RetryInconclusive pass (#217): once every candidate
+// has been tried, each inconclusive lookup is tried once more against the
+// trusted resolver by up to workers goroutines. It does not run after the
+// reliability guard aborted the scan, after an interrupt or once the
+// Deadline has passed; names it does not get to stay inconclusive.
+func (s *scanState) retryPending(ctx context.Context, workers int) {
+	if ctx.Err() != nil || s.stats.aborted.Load() || s.cfg.pastDeadline() {
+		return
+	}
+	items := s.pending.take()
+	ch := make(chan pendingLookup)
+	var wg sync.WaitGroup
+	for range min(workers, len(items)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for it := range ch {
+				s.retry(ctx, it)
+			}
+		}()
+	}
+	for i, it := range items {
+		if ctx.Err() != nil || s.cfg.pastDeadline() {
+			for _, rest := range items[i:] {
+				s.pending.add(rest.j, rest.outcome)
+			}
+			break
+		}
+		ch <- it
+	}
+	close(ch)
+	wg.Wait()
+}
+
+// retry looks an inconclusive name up once more. An answer, positive or
+// negative, replaces the first outcome in the counters; a name found is
+// reported (unless it is a wildcard answer) but not expanded. A name still
+// without an answer keeps its first outcome and stays pending.
+func (s *scanState) retry(ctx context.Context, it pendingLookup) {
+	cfg, st := s.cfg, s.stats
+	if err := s.limiter.Wait(ctx); err != nil {
+		s.pending.add(it.j, it.outcome)
+		return
+	}
+	records, outcome := cfg.resolve(ctx, it.j.domain, cfg.logf())
+	if outcome = settle(ctx, outcome); outcome == dns.OutcomeCanceled {
+		s.pending.add(it.j, it.outcome)
+		return
+	}
+	st.retried.Add(1)
+	if inconclusive(outcome) {
+		s.pending.add(it.j, it.outcome)
+		return
+	}
+	st.recovered.Add(1)
+	st.counter(it.outcome).Add(-1)
+	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, s.fp, it.j.domain, records) {
+		st.wildcardFiltered.Add(1)
+		return
+	}
+	st.add(outcome)
+	if outcome == dns.OutcomeFound {
+		s.report(ctx, it.j.domain, records)
+	}
 }
 
 // resolveViaPool looks name up through the resolver pool and re-validates a

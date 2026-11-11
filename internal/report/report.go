@@ -95,6 +95,7 @@ func target(domain, status, errMsg string, done bool, final scan.Event) output.T
 		t.StoppedBy = "queries"
 	}
 	t.Takeover = st.Takeover
+	t.Retried, t.Recovered = st.Retried, st.Recovered
 	t.PoolHits, t.Confirmed, t.Unconfirmed = st.PoolHits, st.Confirmed, st.Unconfirmed
 	t.Wildcard = st.Wildcard
 	if st.Wildcard {

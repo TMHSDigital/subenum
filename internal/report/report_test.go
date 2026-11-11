@@ -14,6 +14,9 @@ import (
 func TestTargetReportsEveryStatsField(t *testing.T) {
 	unreported := map[string]bool{
 		"RootDone": true, // the -resume point, kept in the state file
+		// The names themselves go to the -inconclusive file (#217); the
+		// outcomes already count them.
+		"Inconclusive": true,
 	}
 	// Skipped and Wildcard are set so Expired and Fingerprint show.
 	base := scan.Stats{Skipped: 1, Wildcard: true}

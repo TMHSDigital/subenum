@@ -15,6 +15,7 @@
 | `-force` | - | Continue scanning even if wildcard DNS is detected |
 | `-format <string>` | text | Output format: text, json, jsonl, or csv |
 | `-hit-rate <int>` | 15 | In simulation mode, percentage of names that resolve (1-100) |
+| `-inconclusive <string>` {% include unreleased.html flag="inconclusive" %} | - | Write the names still without an answer (timeout, refused, other) to this file, one per line, to rescan with -w |
 | `-log-format <string>` {% include unreleased.html flag="log-format" %} | text | Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged |
 | `-max-duration <duration>` {% include unreleased.html flag="max-duration" %} | 0s | Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report and a degraded verdict |
 | `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt |
@@ -29,6 +30,7 @@
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
 | `-resume <string>` | - | Resume an interrupted run from its state file (no other arguments) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
+| `-retry-inconclusive` {% include unreleased.html flag="retry-inconclusive" %} | - | After each scan, look up once more (against -dns-server) every name that timed out, was refused or failed; names it resolves are reported, but not expanded by -recursive |
 | `-sarif <string>` | - | Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME in -type) |
 | `-seed <uint>` | - | In simulation mode, seed for reproducible results (0 = random; the seed used is printed) |
 | `-seeds <string>` | - | Results file (any -format) whose names also seed -permute; implies -permute |

@@ -29,7 +29,9 @@ type Options struct {
 	MaxQueries  int
 	Deadline    time.Time // -max-duration budget's end; zero = none (#190)
 	Exclude     []string
-	Pool        *dns.Pool // -r resolver pool; DNSServer is then the trusted resolver
+	// RetryInconclusive retries inconclusive lookups once at the end (#217).
+	RetryInconclusive bool
+	Pool              *dns.Pool // -r resolver pool; DNSServer is then the trusted resolver
 	// Resume point of an interrupted scan (#73); see Config.
 	ResumeFrom    int
 	ResumeParents []string
@@ -90,6 +92,8 @@ func (o Options) Config() Config {
 		Deadline:    o.Deadline,
 		Exclude:     o.Exclude,
 		Pool:        o.Pool,
+
+		RetryInconclusive: o.RetryInconclusive,
 
 		ResumeFrom:    o.ResumeFrom,
 		ResumeParents: o.ResumeParents,

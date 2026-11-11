@@ -620,6 +620,65 @@ func TestE2EPermute(t *testing.T) {
 	}
 }
 
+// TestE2EInconclusive covers #217: a name whose lookup keeps failing is
+// written to the -inconclusive file, -retry-inconclusive looks it up again
+// after the scan (and the report counts the retry), and without it the name
+// is listed but not retried.
+func TestE2EInconclusive(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch q.Name {
+		case "example.com", "api.example.com":
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.10"}}
+			}
+			return dnstest.Reply{}
+		case "down.example.com":
+			return dnstest.ServFail
+		}
+		return dnstest.NXDomain
+	})
+	wl := writeFile(t, "wl.txt", "api\nwww\ndown\n")
+	run := func(retry bool) (queries int64, names string, retried int64) {
+		dir := t.TempDir()
+		incon, stats := filepath.Join(dir, "incon.txt"), filepath.Join(dir, "run.json")
+		before := srv.QueriesFor("down.example.com", dnsmessage.TypeA)
+		args := []string{"-dns-server", srv.Addr, "-type", "A", "-progress=false", "-no-abort",
+			"-inconclusive", incon, "-stats", stats, "-w", wl, "example.com"}
+		if retry {
+			args = append([]string{"-retry-inconclusive"}, args...)
+		}
+		if code, _ := runCLI(t, "", args...); code != 0 {
+			t.Fatalf("retry=%v: exit %d", retry, code)
+		}
+		data, err := os.ReadFile(incon)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sum struct {
+			Targets []struct {
+				Retried int64 `json:"retried"`
+			} `json:"targets"`
+		}
+		raw, _ := os.ReadFile(stats)
+		if err := json.Unmarshal(raw, &sum); err != nil || len(sum.Targets) != 1 {
+			t.Fatalf("bad -stats file (%v): %s", err, raw)
+		}
+		return srv.QueriesFor("down.example.com", dnsmessage.TypeA) - before, string(data), sum.Targets[0].Retried
+	}
+
+	plain, names, retried := run(false)
+	if names != "down.example.com\n" || retried != 0 {
+		t.Errorf("without retry: -inconclusive file %q, retried %d; want down.example.com, 0", names, retried)
+	}
+	again, names, retried := run(true)
+	if names != "down.example.com\n" || retried != 1 {
+		t.Errorf("with retry: -inconclusive file %q, retried %d; want down.example.com, 1", names, retried)
+	}
+	if again <= plain {
+		t.Errorf("down.example.com got %d queries with -retry-inconclusive, %d without; want more", again, plain)
+	}
+}
+
 // TestE2EResume is #73's done-when: interrupting a simulated scan partway
 // and running `subenum -resume <state>` gives the same final result set as
 // an uninterrupted run with the same seed.

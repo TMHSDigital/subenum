@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -364,6 +367,113 @@ func TestRunStatsSumToProcessed(t *testing.T) {
 	}
 	if done.Stats.NXDomain == 0 {
 		t.Error("expected some nxdomain outcomes from the hook")
+	}
+}
+
+// retryHook answers by name and by how often the name was asked: "ok" names
+// resolve, "gone" names do not exist, and "flaky-*" names time out first and
+// then answer as their suffix says ("flaky-ok", "flaky-gone", "flaky-down"
+// never answers). It counts every call.
+func retryHook(calls *sync.Map) func(context.Context, string) ([]dns.Record, dns.Outcome) {
+	return func(_ context.Context, name string) ([]dns.Record, dns.Outcome) {
+		n, _ := calls.LoadOrStore(name, new(atomic.Int64))
+		call := n.(*atomic.Int64).Add(1)
+		label, _, _ := strings.Cut(name, ".")
+		label = strings.TrimRight(label, "0123456789")
+		if rest, ok := strings.CutPrefix(label, "flaky-"); ok {
+			if call == 1 || rest == "down" {
+				return nil, dns.OutcomeTimeout
+			}
+			label = rest
+		}
+		if label == "ok" {
+			return []dns.Record{{Type: "A", Value: "192.0.2.1"}}, dns.OutcomeFound
+		}
+		return nil, dns.OutcomeNXDomain
+	}
+}
+
+// TestRunRetryInconclusive covers #217: with RetryInconclusive, names whose
+// lookup timed out are looked up once more after the main pass; an answer
+// moves them out of the timeout count, a found name is reported, and the
+// names still unanswered are listed in Stats.Inconclusive. Without it the
+// names are listed but not retried.
+func TestRunRetryInconclusive(t *testing.T) {
+	entries := []string{"ok1", "gone1", "flaky-ok1", "flaky-ok2", "flaky-gone1", "flaky-down1", "flaky-down2"}
+	run := func(retry bool) (*Event, []string, *sync.Map) {
+		calls := &sync.Map{}
+		cfg := Config{
+			Domain: "example.com", Entries: entries, Concurrency: 3, Timeout: time.Second,
+			Simulate: true, Attempts: 1, RetryInconclusive: retry, resolveHook: retryHook(calls),
+		}
+		events := make(chan Event, 64)
+		go Run(context.Background(), cfg, events)
+		var done *Event
+		var found []string
+		for ev := range events {
+			switch ev.Kind {
+			case EventResult:
+				found = append(found, ev.Result.Subdomain)
+			case EventError:
+				t.Errorf("unexpected error: %s", ev.Message)
+			case EventDone:
+				e := ev
+				done = &e
+			}
+		}
+		if done == nil {
+			t.Fatal("no EventDone received")
+		}
+		sort.Strings(found)
+		return done, found, calls
+	}
+
+	done, found, calls := run(true)
+	st := done.Stats
+	if want := []string{"flaky-ok1.example.com", "flaky-ok2.example.com", "ok1.example.com"}; !slices.Equal(found, want) {
+		t.Errorf("results = %v, want %v", found, want)
+	}
+	if st.Found != 3 || st.NXDomain != 2 || st.Timeout != 2 || st.Retried != 5 || st.Recovered != 3 {
+		t.Errorf("stats = found %d nxdomain %d timeout %d retried %d recovered %d, want 3 2 2 5 3",
+			st.Found, st.NXDomain, st.Timeout, st.Retried, st.Recovered)
+	}
+	if done.Found != 3 || st.Sum() != done.Processed || done.Processed != int64(len(entries)) {
+		t.Errorf("found %d, sum %d, processed %d: counts must still add up to the names tested", done.Found, st.Sum(), done.Processed)
+	}
+	if want := []string{"flaky-down1.example.com", "flaky-down2.example.com"}; !slices.Equal(st.Inconclusive, want) {
+		t.Errorf("Inconclusive = %v, want %v", st.Inconclusive, want)
+	}
+	if n, _ := calls.Load("ok1.example.com"); n.(*atomic.Int64).Load() != 1 {
+		t.Error("a name that answered the first time was looked up again")
+	}
+
+	done, found, _ = run(false)
+	st = done.Stats
+	if len(found) != 1 || st.Timeout != 5 || st.Retried != 0 || st.Recovered != 0 || len(st.Inconclusive) != 5 {
+		t.Errorf("without RetryInconclusive: results %v, timeout %d, retried %d, recovered %d, inconclusive %v",
+			found, st.Timeout, st.Retried, st.Recovered, st.Inconclusive)
+	}
+}
+
+// TestRunRetryInconclusiveSkippedAfterAbort: the retry pass does not run once
+// the reliability guard has aborted the scan; the resolver is failing.
+func TestRunRetryInconclusiveSkippedAfterAbort(t *testing.T) {
+	cfg := Config{
+		Domain: "example.com", Entries: makeEntries(reliabilityMinJobs + 50), Concurrency: 4,
+		Timeout: time.Second, Simulate: true, Attempts: 1, RetryInconclusive: true,
+		resolveHook: hookOutcome(dns.OutcomeTimeout),
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+	done, errs, _ := collect(events)
+	if len(errs) == 0 || done == nil || !done.Stats.Aborted {
+		t.Fatalf("expected a reliability abort, got errs %d done %+v", len(errs), done)
+	}
+	if done.Stats.Retried != 0 {
+		t.Errorf("Retried = %d after an abort, want 0", done.Stats.Retried)
+	}
+	if int64(len(done.Stats.Inconclusive)) != done.Stats.Timeout {
+		t.Errorf("Inconclusive lists %d names, want the %d timeouts", len(done.Stats.Inconclusive), done.Stats.Timeout)
 	}
 }
 

@@ -3,6 +3,7 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
@@ -70,6 +71,11 @@ type TargetSummary struct {
 	// (-max-queries) or "duration" (-max-duration, #190). Empty when none did.
 	StoppedBy string `json:"stopped_by,omitempty"`
 	Takeover  int64  `json:"takeover_candidates,omitempty"` // results with a takeover hint
+	// Retried counts the inconclusive names -retry-inconclusive looked up
+	// again, and Recovered the ones that then got an answer (#217); the
+	// outcomes already count those under their new outcome.
+	Retried   int64 `json:"retried,omitempty"`
+	Recovered int64 `json:"recovered,omitempty"`
 	// Permutation is the -permute pass, when one ran (#72).
 	Permutation *PermutationSummary `json:"permutation,omitempty"`
 	// CTNames counts the Certificate Transparency names -ct added as
@@ -125,6 +131,25 @@ func (w *Writer) Summary(s Summary) {
 	if w.outWriter != nil {
 		_, _ = fmt.Fprintf(w.outWriter, "%s\n", data)
 	}
+}
+
+// WriteNamesFile writes names to path, one per line, atomically
+// (-inconclusive, #217).
+func WriteNamesFile(path string, names []string) error {
+	f, err := CreateFile(path)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	for _, n := range names {
+		b.WriteString(n)
+		b.WriteByte('\n')
+	}
+	_, werr := f.Write([]byte(b.String()))
+	if cerr := f.Close(werr == nil); werr == nil {
+		werr = cerr
+	}
+	return werr
 }
 
 // WriteSummaryFile writes s as indented JSON to path, atomically.

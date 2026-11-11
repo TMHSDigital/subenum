@@ -384,7 +384,11 @@ func TestMergeStatsCoversEveryField(t *testing.T) {
 			case reflect.Bool:
 				v.SetBool(true)
 			case reflect.Slice:
-				v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+				if v.Type().Elem().Kind() == reflect.String {
+					v.Set(reflect.ValueOf([]string{"a.example.com"}))
+				} else {
+					v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+				}
 			default:
 				t.Fatalf("scan.Stats.%s: unhandled kind %s", name, v.Kind())
 			}

@@ -23,7 +23,11 @@ func bump(t *testing.T, v reflect.Value) {
 	case reflect.Bool:
 		v.SetBool(!v.Bool())
 	case reflect.Slice:
-		v.Set(reflect.Append(v, reflect.ValueOf(dns.Record{Type: "A", Value: "192.0.2.1"})))
+		if v.Type().Elem().Kind() == reflect.String {
+			v.Set(reflect.Append(v, reflect.ValueOf("a.example.com")))
+		} else {
+			v.Set(reflect.Append(v, reflect.ValueOf(dns.Record{Type: "A", Value: "192.0.2.1"})))
+		}
 	default:
 		t.Fatalf("no way to bump a %s field; extend bump", v.Type())
 	}

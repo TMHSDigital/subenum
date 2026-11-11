@@ -6,9 +6,11 @@
 flags:
   - diff-records
   - dry-run
+  - inconclusive
   - log-format
   - max-duration
   - rate-per-resolver
+  - retry-inconclusive
 # action.yml inputs and outputs
 action:
   - max-duration
@@ -17,3 +19,4 @@ action:
 library:
   - MaxDuration
   - Permutations
+  - RetryInconclusive

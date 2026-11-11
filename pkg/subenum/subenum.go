@@ -112,6 +112,14 @@ type Config struct {
 	// set. 0 is unlimited.
 	MaxDuration time.Duration
 
+	// RetryInconclusive looks up once more, after every candidate has been
+	// tried, each name whose lookup timed out, was refused or failed. The
+	// retry goes to Resolver. A name that then resolves is reported like any
+	// other, but not expanded by Recursive. Stats.Retried and
+	// Stats.Recovered count the pass; Stats.Inconclusive lists the names
+	// still without an answer, with or without it.
+	RetryInconclusive bool
+
 	// Exclude lists names that are out of scope and are never queried.
 	// "mail.example.com" excludes one name; "*.corp.example.com" excludes
 	// a whole branch.
@@ -207,6 +215,17 @@ type Stats struct {
 	// WildcardFingerprint is the answer the wildcard gives, learned from
 	// random probes. Empty when there is no wildcard.
 	WildcardFingerprint []Record
+
+	// Retried counts the names Config.RetryInconclusive looked up again,
+	// and Recovered the ones that then got an answer; the outcome counters
+	// above already count those under their new outcome.
+	Retried   int64
+	Recovered int64
+
+	// Inconclusive lists, sorted, the names whose lookup still timed out,
+	// was refused or failed when the scan ended: their existence is
+	// unknown. Feed them to another scan to try again.
+	Inconclusive []string
 }
 
 // Total returns the number of candidate names that were looked up and
@@ -552,6 +571,8 @@ func (c Config) options() (scan.Options, error) {
 		NoAbort:     c.NoAbort,
 		Verbose:     c.Verbose,
 		Logf:        dns.Logf(c.Logf),
+
+		RetryInconclusive: c.RetryInconclusive,
 	}
 	if c.MaxDuration > 0 {
 		opts.Deadline = time.Now().Add(c.MaxDuration)
@@ -699,5 +720,9 @@ func stats(s scan.Stats) Stats {
 		Expired:             s.Expired,
 		Wildcard:            s.Wildcard,
 		WildcardFingerprint: records(s.Fingerprint),
+
+		Retried:      s.Retried,
+		Recovered:    s.Recovered,
+		Inconclusive: s.Inconclusive,
 	}
 }

@@ -89,6 +89,7 @@ The result is sorted and duplicate-free, and names that are not valid in DNS are
 | `Recursive`, `Depth` | off, `1` | Enumerate again under each name found. |
 | `MaxQueries` | unlimited | Cap on candidate names tested. |
 | `MaxDuration`{% include unreleased.html library="MaxDuration" %} | unlimited | Time budget from the start of `Run`. Then no new names are tested and the rest are counted in `Stats.Skipped`, with `Stats.Expired` set. |
+| `RetryInconclusive`{% include unreleased.html library="RetryInconclusive" %} | false | Once every candidate is tried, look up each name that timed out, was refused or failed once more against `Resolver`. Names it resolves are reported but not expanded by `Recursive`. `Stats.Retried` and `Stats.Recovered` count the pass; `Stats.Inconclusive` lists the names still without an answer. |
 | `Exclude` | none | Out-of-scope names and `*.parent` branches, never queried. |
 | `Force` | off | Scan a wildcard zone, dropping answers that match its fingerprint. |
 | `NoAbort` | off | Keep going when more than a fifth of lookups fail. `Run` still sends the warning as a `KindError` event; `Scan` returns no error for a scan that finished. |

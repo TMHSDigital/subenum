@@ -706,6 +706,22 @@ func (s *session) recordTarget(i int, res targetResult) (next bool) {
 	return true
 }
 
+// inconclusiveNames returns every finished pass's names whose lookup is
+// still a timeout, refusal or failure, sorted and deduplicated (#217).
+func (s *session) inconclusiveNames() []string {
+	var names []string
+	for _, res := range s.results {
+		if res.done {
+			names = append(names, res.final.Stats.Inconclusive...)
+		}
+		if p := res.permutation; p != nil && p.pass.done {
+			names = append(names, p.pass.final.Stats.Inconclusive...)
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
 // finish saves or removes the resume state, writes the run-quality report
 // and the -stats and -sarif files, closes the structured output and returns
 // the exit code. The deferred -o file close in runWith runs after it.
@@ -736,6 +752,12 @@ func (s *session) finish(ctx context.Context) int {
 	if f.statsFile != "" {
 		if err := output.WriteSummaryFile(f.statsFile, summary); err != nil {
 			out.Error("writing -stats file: %v", err)
+			s.fileErr = true
+		}
+	}
+	if f.inconFile != "" && s.anyDone {
+		if err := output.WriteNamesFile(f.inconFile, s.inconclusiveNames()); err != nil {
+			out.Error("writing -inconclusive file: %v", err)
 			s.fileErr = true
 		}
 	}
