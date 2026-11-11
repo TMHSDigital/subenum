@@ -62,6 +62,52 @@ func TestScanViewFillsTerminalExactly(t *testing.T) {
 	}
 }
 
+// TestScanViewFilter covers #221: / types a name filter (q and r included),
+// t shows takeover candidates only, esc clears, the hint counts what is
+// shown, and ctrl+c is never swallowed by the filter.
+func TestScanViewFilter(t *testing.T) {
+	m := newScanViewModel(120, 24, false)
+	for _, r := range []scan.Result{
+		{Subdomain: "api.example.com"},
+		{Subdomain: "qr-api.example.com", Takeover: "dangling"},
+		{Subdomain: "www.example.com"},
+	} {
+		m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventResult, Result: r}})
+	}
+	content := func() string { return m.viewport.View() }
+	key := m.handleFilterKey // bound to &m, so it sees every change
+
+	if !key(typeText("/")) || !m.typing {
+		t.Fatal("/ did not start the filter")
+	}
+	for _, k := range []tea.KeyMsg{typeText("q"), typeText("r"), {Type: tea.KeyBackspace}, typeText("r-")} {
+		if !key(k) {
+			t.Fatalf("key %v not taken while typing", k)
+		}
+	}
+	if m.filter != "qr-" || !strings.Contains(content(), "qr-api.example.com") || strings.Contains(content(), "www.example.com") {
+		t.Fatalf("filter %q shows:\n%s", m.filter, content())
+	}
+	if key(tea.KeyMsg{Type: tea.KeyCtrlC}) {
+		t.Error("ctrl+c was swallowed by the filter")
+	}
+	key(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.typing || m.filter != "qr-" || !strings.Contains(m.View(), "showing 1 of 3") {
+		t.Errorf("after enter: typing %v filter %q, hint:\n%s", m.typing, m.filter, m.View())
+	}
+	key(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.filtered() || !strings.Contains(content(), "www.example.com") {
+		t.Errorf("esc did not clear the filter:\n%s", content())
+	}
+	key(typeText("t"))
+	if !m.takeoverOnly || strings.Contains(content(), "www.example.com") || !strings.Contains(content(), "qr-api.example.com") {
+		t.Errorf("t did not narrow to takeover candidates:\n%s", content())
+	}
+	if key(typeText("x")) {
+		t.Error("a plain key was taken while not typing")
+	}
+}
+
 // TestScanViewLargeResultSetBounded covers the #43 render-cost fix: the
 // buffer is capped and content is refreshed lazily past the live limit.
 func TestScanViewLargeResultSetBounded(t *testing.T) {

@@ -257,6 +257,11 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// The result filter (#221) takes its keys first; while it is being
+		// typed it takes every key but ctrl+c, so q and r can be typed.
+		if m.scanView.handleFilterKey(msg) {
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			// Once the scan has finished there is nothing to abort; quit

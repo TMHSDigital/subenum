@@ -39,28 +39,42 @@ const (
 	liveRefreshLimit = 200
 )
 
+// resultLine is one result in the viewport buffer: its rendered line, and
+// what the filter matches on (#221).
+type resultLine struct {
+	name     string
+	takeover bool
+	line     string
+}
+
 // scanViewModel is the live-results screen.
 type scanViewModel struct {
-	viewport  viewport.Model
-	progress  progress.Model
-	results   []string
-	dropped   int      // results evicted from the viewport buffer
-	dirty     bool     // results changed since the last SetContent
-	messages  []string // wildcard / error messages
-	processed int64
-	total     int64
-	found     int64
-	stats     scan.Stats
-	done      bool
-	aborted   bool   // the user pressed ctrl+c
-	stopped   bool   // the scan stopped before testing candidates (preflight, wildcard abort, #99)
-	errText   string // first scan error; the reason shown for a failed scan
-	noAbort   bool   // -no-abort: an error with a finished scan is only a warning
-	outputErr bool   // the results file could not be written in full (#155)
-	width     int
-	height    int
-	simMode   bool
-	seed      uint64 // simulation seed, shown so a TUI run can be reproduced
+	viewport viewport.Model
+	progress progress.Model
+	results  []resultLine
+	dropped  int // results evicted from the viewport buffer
+	// The result filter (#221): / starts typing a name filter, enter keeps
+	// it, esc clears it; t shows takeover candidates only.
+	filter       string
+	typing       bool
+	takeoverOnly bool
+	shown        int      // results the filter lets through, for the status line
+	dirty        bool     // results changed since the last SetContent
+	messages     []string // wildcard / error messages
+	processed    int64
+	total        int64
+	found        int64
+	stats        scan.Stats
+	done         bool
+	aborted      bool   // the user pressed ctrl+c
+	stopped      bool   // the scan stopped before testing candidates (preflight, wildcard abort, #99)
+	errText      string // first scan error; the reason shown for a failed scan
+	noAbort      bool   // -no-abort: an error with a finished scan is only a warning
+	outputErr    bool   // the results file could not be written in full (#155)
+	width        int
+	height       int
+	simMode      bool
+	seed         uint64 // simulation seed, shown so a TUI run can be reproduced
 
 	eta     *output.ETA // time-left estimator, as on the CLI progress line (#191)
 	etaText string      // "" until the estimate has warmed up
@@ -118,18 +132,98 @@ func (m *scanViewModel) addMessage(msg string) {
 	m.layout()
 }
 
-// refresh pushes buffered results into the viewport if they changed.
+// filtered reports whether a filter is narrowing the results.
+func (m *scanViewModel) filtered() bool { return m.filter != "" || m.takeoverOnly }
+
+// refresh pushes buffered results into the viewport if they changed. While a
+// filter is on, only matching results are shown and the view stays where the
+// user scrolled it instead of following new results.
 func (m *scanViewModel) refresh() {
 	if !m.dirty {
 		return
 	}
-	content := strings.Join(m.results, "\n")
+	lines := make([]string, 0, len(m.results))
+	needle := strings.ToLower(m.filter)
+	for _, r := range m.results {
+		if (m.takeoverOnly && !r.takeover) || !strings.Contains(r.name, needle) {
+			continue
+		}
+		lines = append(lines, r.line)
+	}
+	m.shown = len(lines)
+	content := strings.Join(lines, "\n")
 	if m.dropped > 0 {
 		content = dimStyle.Render(fmt.Sprintf("(%d earlier results not shown)", m.dropped)) + "\n" + content
 	}
 	m.viewport.SetContent(content)
-	m.viewport.GotoBottom()
+	if !m.filtered() {
+		m.viewport.GotoBottom()
+	}
 	m.dirty = false
+}
+
+// handleFilterKey applies a key to the result filter and reports whether it
+// used it. While typing, every key but ctrl+c edits the filter.
+func (m *scanViewModel) handleFilterKey(msg tea.KeyMsg) bool {
+	if m.typing {
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.typing = false
+		case tea.KeyEsc:
+			m.typing, m.filter = false, ""
+		case tea.KeyBackspace:
+			if r := []rune(m.filter); len(r) > 0 {
+				m.filter = string(r[:len(r)-1])
+			}
+		case tea.KeyRunes, tea.KeySpace:
+			m.filter += strings.ToLower(string(msg.Runes))
+		default:
+			return msg.Type != tea.KeyCtrlC
+		}
+		m.dirty = true
+		m.refresh()
+		return true
+	}
+	switch msg.String() {
+	case "/":
+		m.typing = true
+	case "t":
+		m.takeoverOnly = !m.takeoverOnly
+	case "esc":
+		if !m.filtered() {
+			return false
+		}
+		m.filter, m.takeoverOnly = "", false
+	default:
+		return false
+	}
+	m.dirty = true
+	m.refresh()
+	return true
+}
+
+// hint renders the key hint line cut to the terminal width, so a long
+// filter cannot wrap it and push the layout past chromeLines.
+func (m scanViewModel) hint(s string) string {
+	return hintStyle.MaxWidth(max(1, m.width)).Render(s)
+}
+
+// filterHint is the key hint line's filter part.
+func (m scanViewModel) filterHint() string {
+	switch {
+	case m.typing:
+		return "filter: " + m.filter + "█  (enter keep  •  esc clear)"
+	case m.filtered():
+		desc := []string{}
+		if m.filter != "" {
+			desc = append(desc, fmt.Sprintf("%q", m.filter))
+		}
+		if m.takeoverOnly {
+			desc = append(desc, "takeovers")
+		}
+		return fmt.Sprintf("showing %d of %d (%s)  •  esc clear", m.shown, len(m.results), strings.Join(desc, ", "))
+	}
+	return "/ filter  •  t takeovers"
 }
 
 func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
@@ -165,12 +259,12 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 		if ev.Result.Internal != "" {
 			line += wildcardStyle.Render("  internal: " + ev.Result.Internal)
 		}
-		m.results = append(m.results, line)
+		m.results = append(m.results, resultLine{name: strings.ToLower(ev.Result.Subdomain), takeover: ev.Result.Takeover != "", line: line})
 		if len(m.results) > maxResultLines {
 			// Evict in chunks so the copy cost is amortized across results.
 			n := len(m.results) - maxResultLines + maxResultLines/10
 			m.dropped += n
-			m.results = append([]string(nil), m.results[n:]...)
+			m.results = append([]resultLine(nil), m.results[n:]...)
 		}
 		m.dirty = true
 		if len(m.results)+m.dropped <= liveRefreshLimit {
@@ -248,26 +342,26 @@ func (m scanViewModel) View() string {
 			"processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)) + "\n")
-		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
+		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
 	case m.done && (m.aborted || m.stopped):
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
 			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)) + "\n")
-		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
+		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
 	case m.done:
 		b.WriteString(summaryStyle.Render(fmt.Sprintf(
 			"Done - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)) + "\n")
-		b.WriteString(hintStyle.Render("  r new scan  •  q quit"))
+		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
 	default:
 		status := fmt.Sprintf("  %d/%d processed  •  %d found", m.processed, m.total, m.found)
 		if m.etaText != "" {
 			status += "  •  ETA " + m.etaText
 		}
 		b.WriteString(dimStyle.Render(status) + "\n")
-		b.WriteString(hintStyle.Render("  ctrl+c to abort"))
+		b.WriteString(m.hint("  ctrl+c to abort  •  " + m.filterHint()))
 	}
 
 	return b.String()

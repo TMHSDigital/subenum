@@ -135,6 +135,29 @@ func TestCtrlCAfterDoneQuits(t *testing.T) {
 	}
 }
 
+// TestFilterTypingDoesNotQuit covers #221: while the result filter is being
+// typed, q is a letter, not quit; after enter, q quits a finished scan again.
+func TestFilterTypingDoesNotQuit(t *testing.T) {
+	var m tea.Model = Model{state: stateScan, scanView: newScanViewModel(80, 24, false)}
+	sv := m.(Model).scanView
+	sv.done = true
+	m = Model{state: stateScan, scanView: sv}
+	for _, k := range []string{"/", "q"} {
+		var cmd tea.Cmd
+		m, cmd = m.(Model).updateScan(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		if cmd != nil {
+			t.Fatalf("key %q returned a command while typing the filter", k)
+		}
+	}
+	if f := m.(Model).scanView.filter; f != "q" {
+		t.Fatalf("filter = %q, want q", f)
+	}
+	m, _ = m.(Model).updateScan(tea.KeyMsg{Type: tea.KeyEnter})
+	if _, cmd := m.(Model).updateScan(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}); cmd == nil {
+		t.Error("q after enter did not quit the finished scan")
+	}
+}
+
 // TestFinalizeOutputReportsCloseError covers #30 for the TUI: a failure to
 // complete the results file is returned instead of being discarded.
 func TestFinalizeOutputReportsCloseError(t *testing.T) {

@@ -603,6 +603,9 @@ API reference and runnable examples: [pkg.go.dev/github.com/TMHSDigital/subenum/
 | `ctrl+c` | Abort a running scan; quit the form or a finished scan |
 | `r` | New scan - restores last-used values |
 | `q` | Quit after scan completes |
+| `/` | Filter the results by name (during or after a scan); `enter` keeps the filter, `esc` clears it. While typing, every key but `ctrl+c` goes to the filter |
+| `t` | Show takeover candidates only (toggle) |
+| `esc` | Clear the filter |
 
 </details>
 
