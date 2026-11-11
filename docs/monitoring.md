@@ -133,6 +133,7 @@ It runs with `issues: write`, so it pins everything it runs: subenum is a
 release archive checked against the release's `checksums.txt` (`-diff` first
 shipped in v0.9.0), and each action is pinned to a commit.
 
+{% raw %}
 ```yaml
 name: Subdomain monitor
 
@@ -221,6 +222,7 @@ jobs:
             run.json
           retention-days: 90
 ```
+{% endraw %}
 
 A failed, degraded or unreliable scan uploads nothing, so the next run still
 compares against the last complete baseline. To keep a baseline longer than 90 days,
