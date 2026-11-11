@@ -28,6 +28,9 @@ func zone(t *testing.T) string {
 			return dnstest.Reply{A: []string{"192.0.2.20"}}
 		case "blog":
 			return dnstest.Reply{CNAME: "gone.example.net"}
+		case "intranet":
+			// A private address: the name is public, the answer is not.
+			return dnstest.Reply{A: []string{"10.0.0.10"}}
 		case "lab.example":
 			return dnstest.Reply{A: []string{"192.0.2.1"}}
 		}
@@ -109,6 +112,34 @@ func TestScanReportsTakeoverHint(t *testing.T) {
 	}
 	if stats.Takeover != 1 {
 		t.Errorf("Stats.Takeover = %d, want 1", stats.Takeover)
+	}
+}
+
+// TestScanReportsInternalAddress covers #218: the library reports the scope
+// of an address that is not publicly routable and counts the results.
+func TestScanReportsInternalAddress(t *testing.T) {
+	results, stats, err := subenum.Scan(context.Background(), subenum.Config{
+		Domain:   "lab.example",
+		Words:    []string{"www", "intranet"},
+		Types:    []string{"A"},
+		Resolver: zone(t),
+		Timeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := map[string]string{}
+	for _, r := range results {
+		scopes[r.Name] = r.InternalAddress
+	}
+	if scopes["intranet.lab.example"] != "private" {
+		t.Errorf("intranet scope = %q, want %q", scopes["intranet.lab.example"], "private")
+	}
+	if scopes["www.lab.example"] != "" {
+		t.Errorf("www scope = %q, want empty", scopes["www.lab.example"])
+	}
+	if stats.Internal != 1 {
+		t.Errorf("Stats.Internal = %d, want 1", stats.Internal)
 	}
 }
 

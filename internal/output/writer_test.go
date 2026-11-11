@@ -24,7 +24,7 @@ func found(name string, records []dns.Record) Result {
 func TestResultJSONFieldOrder(t *testing.T) {
 	recs := []dns.Record{{Type: "CNAME", Value: "x.example.net"}}
 	res := Result{
-		Result:          scan.Result{Subdomain: "a.example.com", Records: recs, Simulated: true, Takeover: "dangling"},
+		Result:          scan.Result{Subdomain: "a.example.com", Records: recs, Simulated: true, Takeover: "dangling", InternalAddress: "private"},
 		Change:          "changed",
 		PreviousRecords: recs,
 		Permutation:     true,
@@ -34,7 +34,7 @@ func TestResultJSONFieldOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	const want = `{"subdomain":"a.example.com","records":[{"type":"CNAME","value":"x.example.net"}],"simulated":true,` +
-		`"takeover_candidate":"dangling","change":"changed","previous_records":[{"type":"CNAME","value":"x.example.net"}],"permutation":true}`
+		`"takeover_candidate":"dangling","internal_address":"private","change":"changed","previous_records":[{"type":"CNAME","value":"x.example.net"}],"permutation":true}`
 	if string(got) != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

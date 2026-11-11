@@ -92,6 +92,7 @@ type Writer struct {
 
 	seed           uint64 // simulation seed, named in the text file header
 	takeoverColumn bool   // CSV carries a takeover_candidate column
+	internalColumn bool   // CSV carries an internal_address column
 	diff           bool   // -diff output: +/- prefixes and a CSV change column
 	headerDone     bool   // text file header written
 
@@ -160,6 +161,11 @@ func diffPrefix(change string) string {
 // sets it when CNAME records are requested, the only case that yields hints.
 func (w *Writer) SetTakeoverColumn(on bool) { w.takeoverColumn = on }
 
+// SetInternalColumn adds an internal_address column to CSV output. The CLI
+// sets it when A or AAAA records are requested, the only case that yields
+// addresses (#218).
+func (w *Writer) SetInternalColumn(on bool) { w.internalColumn = on }
+
 // SetSeed records the simulation seed for the simulated-results file header.
 func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
 
@@ -203,6 +209,9 @@ func (w *Writer) writeText(res Result) {
 		line += formatRecords(res.Records)
 		if res.Takeover != "" {
 			line += " TAKEOVER?=" + res.Takeover
+		}
+		if res.InternalAddress != "" {
+			line += " INTERNAL=" + res.InternalAddress
 		}
 		if len(res.PreviousRecords) > 0 {
 			line += " (was" + formatRecords(res.PreviousRecords) + ")"
@@ -313,6 +322,9 @@ func (w *Writer) ensureCSV() {
 	if w.takeoverColumn {
 		header = append(header, "takeover_candidate")
 	}
+	if w.internalColumn {
+		header = append(header, "internal_address")
+	}
 	if w.diff {
 		header = append(header, "change")
 	}
@@ -339,6 +351,9 @@ func (w *Writer) writeCSVRows(res Result) {
 		}
 		if w.takeoverColumn {
 			row = append(row, res.Takeover)
+		}
+		if w.internalColumn {
+			row = append(row, res.InternalAddress)
 		}
 		if w.diff {
 			row = append(row, res.Change)

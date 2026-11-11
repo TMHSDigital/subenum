@@ -292,6 +292,7 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 	a.Confirmed += b.Confirmed
 	a.Unconfirmed += b.Unconfirmed
 	a.Takeover += b.Takeover
+	a.Internal += b.Internal
 	a.Retried += b.Retried
 	a.Recovered += b.Recovered
 	a.Inconclusive = append(append([]string(nil), a.Inconclusive...), b.Inconclusive...)

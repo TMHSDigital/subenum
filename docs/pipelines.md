@@ -68,6 +68,19 @@ subenum -silent -format jsonl -type A,AAAA,CNAME example.com \
   | jq -r 'select(.takeover_candidate) | "\(.subdomain)\t\(.takeover_candidate)"'
 ```
 
+## Names that resolve to an internal address
+
+A public name that resolves to a private, loopback, link-local or CGNAT
+address leaks the internal network layout, and a loopback answer can matter
+for DNS rebinding. Those names carry an `internal_address` with the scope:
+
+```bash
+subenum -silent -format jsonl example.com \
+  | jq -r 'select(.internal_address) | "\(.subdomain)\t\(.internal_address)"'
+```
+
+The run summary counts them (`internal_addresses` in the `-stats` report).
+
 ## Many targets
 
 `-dL` scans a list of apex domains with one combined output; each target gets

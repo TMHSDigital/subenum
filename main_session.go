@@ -428,6 +428,7 @@ func (s *session) openOutputs() bool {
 		w.SetShowRecords(f.showRecords)
 		w.SetSeed(f.seed)
 		w.SetTakeoverColumn(slices.Contains(s.in.recordTypes, "CNAME"))
+		w.SetInternalColumn(slices.Contains(s.in.recordTypes, "A") || slices.Contains(s.in.recordTypes, "AAAA"))
 	}
 	return true
 }

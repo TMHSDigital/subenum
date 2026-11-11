@@ -28,7 +28,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | Package | Purpose |
 | --- | --- |
 | `internal/scan` | Runs a scan: validates options, dispatches candidates to a worker pool, filters wildcard answers, grades the run |
-| `internal/dns` | Resolves candidate names, classifies lookup outcomes, detects wildcards; transports, resolver pool, rate limiting, takeover hints, simulation |
+| `internal/dns` | Resolves candidate names, classifies lookup outcomes, detects wildcards; transports, resolver pool, rate limiting, takeover hints, address scopes, simulation |
 | `internal/output` | Renders results (text, JSON, JSONL, CSV) to stdout and the `-o` file; run-quality summary, SARIF, ETA |
 | `internal/report` | Builds the run-quality report from finished scans, shared by the CLI and the TUI |
 | `internal/wordlist` | Reads wordlist files and normalizes their entries into candidate prefixes |
@@ -69,6 +69,7 @@ internal/dns/transport.go      - UDP (TCP fallback), DNS over TLS and DNS over H
 internal/dns/pool.go           - Pool: the -r resolver pool (health benching, canaries, second opinions)
 internal/dns/ratelimit.go      - RateLimiter, WithLimiter (per-wire-query pacing)
 internal/dns/takeover.go       - TakeoverProvider, TakeoverHint (dangling or takeover-prone CNAMEs)
+internal/dns/scope.go          - AddressScope, InternalScope (addresses that are not publicly routable)
 internal/dns/simulate.go       - Simulation.Resolve (seeded synthetic DNS)
 internal/output/writer.go      - Thread-safe Writer (results to stdout, diagnostics to stderr)
 internal/output/file.go        - File: atomically replaced -o results file

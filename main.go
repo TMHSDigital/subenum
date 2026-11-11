@@ -548,6 +548,9 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	if s.Takeover > 0 {
 		out.Info("  takeover candidates: %d (DNS-only hints; verify each by hand)", s.Takeover)
 	}
+	if s.Internal > 0 {
+		out.Info("  internal addresses: %d (names resolving to a private, loopback, link-local or CGNAT address)", s.Internal)
+	}
 	if s.Retried > 0 {
 		out.Info("  retried inconclusive: %d (answered on retry: %d)", s.Retried, s.Recovered)
 	}

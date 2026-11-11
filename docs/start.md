@@ -50,7 +50,7 @@ Resolved names stream to **stdout**, one per line, so they pipe cleanly into oth
 subenum -w big-wordlist.txt -type A,AAAA,CNAME -show-records yourdomain.com
 ```
 
-With `-show-records`, each line carries its records, and CNAMEs that dangle or point at takeover-prone services get a `TAKEOVER?=` hint to verify by hand.
+With `-show-records`, each line carries its records, and CNAMEs that dangle or point at takeover-prone services get a `TAKEOVER?=` hint to verify by hand. A name that resolves to an address that is not publicly routable gets an `INTERNAL=` marker with its scope: `private`, `loopback`, `link-local` or `cgnat`.
 
 ## Read the verdict
 
