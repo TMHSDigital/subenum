@@ -19,8 +19,9 @@ type dryRunTarget struct {
 	Duplicates int    `json:"duplicates"` // wordlist duplicates removed
 	Skipped    int    `json:"skipped"`    // invalid wordlist entries
 	Excluded   int    `json:"excluded"`   // candidates out of scope under -exclude
-	// Queries is one query per candidate and record type; QueriesMax also
-	// counts every retry -attempts allows. Both respect -max-queries.
+	// Queries counts the resolver's expected wire queries for each candidate
+	// and record type; QueriesMax also counts every retry -attempts allows.
+	// Both respect -max-queries.
 	Queries    int64 `json:"queries"`
 	QueriesMax int64 `json:"queries_max"`
 	// Seconds and SecondsMax are the time those queries take at -rate; 0
@@ -57,7 +58,7 @@ func (s *session) dryRun() int {
 		if f.maxQueries > 0 {
 			names = min(names, int64(f.maxQueries))
 		}
-		p.Queries = names * int64(len(s.in.recordTypes))
+		p.Queries = names * dns.QueriesPerName(s.in.recordTypes)
 		p.QueriesMax = p.Queries * int64(max(s.in.maxAttempts, 1))
 		if f.rate > 0 {
 			p.Seconds = float64(p.Queries) / float64(f.rate)

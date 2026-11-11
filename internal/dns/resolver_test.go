@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+func TestQueriesPerName(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		types []string
+		want  int64
+	}{
+		{"default types", nil, 2},
+		{"CNAME", []string{"CNAME"}, 3},
+		{"all types", []string{"A", "AAAA", "CNAME", "NS", "MX", "TXT"}, 8},
+		{"same types as the resolver receives", []string{"A", "AAAA", "CNAME", "CNAME"}, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := QueriesPerName(tc.types); got != tc.want {
+				t.Errorf("QueriesPerName(%v) = %d, want %d", tc.types, got, tc.want)
+			}
+		})
+	}
+}
+
 // resolveDomain reports whether one lookup of domain (DefaultTypes, no
 // retry) returns records.
 func resolveDomain(ctx context.Context, r *net.Resolver, domain string, timeout time.Duration) bool {

@@ -56,6 +56,22 @@ func TestDryRunMaxQueriesCapsEstimate(t *testing.T) {
 	}
 }
 
+func TestDryRunCountsCNAMEQueriesAndRetries(t *testing.T) {
+	wl := writeFile(t, "wl.txt", "www\napi\n")
+	code, plans := dryRunPlans(t, "-simulate", "-w", wl, "-type", "A,AAAA,CNAME",
+		"-attempts", "2", "-rate", "10", "example.com")
+	if code != exitOK {
+		t.Fatalf("exit %d, want %d", code, exitOK)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("got %d plans, want 1", len(plans))
+	}
+	want := dryRunTarget{Domain: "example.com", Candidates: 2, Queries: 10, QueriesMax: 20, Seconds: 1, SecondsMax: 2, PreflightOK: true}
+	if plans[0] != want {
+		t.Errorf("plan = %+v\nwant = %+v", plans[0], want)
+	}
+}
+
 // TestDryRunPreflight: the preflight is a dry run's only DNS traffic, and a
 // resolver that fails it fails the run.
 func TestDryRunPreflight(t *testing.T) {

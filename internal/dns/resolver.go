@@ -274,6 +274,19 @@ func fqdn(domain string) string {
 // dialed (see NewResolver).
 var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 3, "NS": 1, "MX": 1, "TXT": 1}
 
+// QueriesPerName returns the DNS queries reserved for one name across types.
+// An empty type list uses DefaultTypes, as Lookup.ResolveTypes does.
+func QueriesPerName(types []string) int64 {
+	if len(types) == 0 {
+		types = DefaultTypes
+	}
+	var total int64
+	for _, typ := range types {
+		total += int64(queriesPerType[typ])
+	}
+	return total
+}
+
 // Lookup is how one name is looked up: the resolver, the per-type timeout,
 // how many attempts a retried lookup makes, the record types, and the verbose
 // logger. Naming the fields keeps a swapped attempts/types argument from
