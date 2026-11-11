@@ -147,7 +147,8 @@ type Stats struct {
 	Internal    int64 // results with a non-public address (Result.Internal, #218)
 	// RootDone is the resume point: every wordlist entry before this index
 	// has been fully looked up (#73). Entries at or after it may also be
-	// done; resuming repeats at most a worker pool's worth of lookups.
+	// done; resuming repeats at most one chunk (maxChunk jobs) per worker,
+	// since workers report their jobs a chunk at a time (#184).
 	RootDone    int64
 	Aborted     bool         // the reliability guard cancelled the scan
 	Expired     bool         // Deadline (-max-duration) stopped admission; Skipped counts what it left
@@ -683,9 +684,13 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// outstanding work and closes jobs only once every dispatched job has
 	// completed. Workers send found parents on enqueue (before signalling
 	// completed) and the dispatcher expands them into depth-capped children.
-	jobs := make(chan job)
+	// Jobs go out in small chunks and both hand-off channels are buffered,
+	// so workers and the dispatcher rarely block on each other (#184); each
+	// job still reports its own completion as soon as it is done.
+	workers := workerCount(cfg, maxDepth)
+	jobs := make(chan []job, handoffPerWorker*workers)
 	enqueue := make(chan job)
-	completed := make(chan completion)
+	completed := make(chan []completion, handoffPerWorker*workers)
 
 	// Progress ticker - fires every second.
 	// tickerDone signals the goroutine to stop; tickerStopped confirms it has
@@ -718,7 +723,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	// The dispatcher hands out candidates and closes jobs once every
 	// dispatched job has completed, or ctx is cancelled (see dispatcher).
-	go newDispatcher(cfg, maxDepth).run(ctx, jobs, enqueue, completed, &total, &stats, events)
+	go newDispatcher(cfg, maxDepth).run(ctx, workers, jobs, enqueue, completed, &total, &stats, events)
 
 	// Worker pool.
 	st := &scanState{
@@ -734,25 +739,31 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		}
 		st.auto = newAutoRate(limiter, sent)
 	}
-	workers := workerCount(cfg, maxDepth)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := range jobs {
-				if cfg.pastDeadline() {
-					// Taken after the budget ran out: skip it, like the
+			for chunk := range jobs {
+				done := make([]completion, 0, len(chunk))
+				for _, j := range chunk {
+					c := completion{root: j.root, skipped: true}
+					// One taken after the budget ran out is skipped, like the
 					// candidates the dispatcher never handed out (#190).
+					if !cfg.pastDeadline() {
+						c = completion{root: j.root, finished: st.processJob(ctx, j)}
+					}
+					done = append(done, c)
+				}
+				// The buffer holds several reports per worker, so this send
+				// rarely waits, and after an interrupt a finished chunk is
+				// still reported when there is room, for the resume point.
+				select {
+				case completed <- done:
+				default:
 					select {
-					case completed <- completion{root: j.root, skipped: true}:
+					case completed <- done:
 					case <-ctx.Done():
 					}
-					continue
-				}
-				finished := st.processJob(ctx, j)
-				select {
-				case completed <- completion{root: j.root, finished: finished}:
-				case <-ctx.Done():
 				}
 			}
 		}()
@@ -807,6 +818,9 @@ type scanState struct {
 	pending   *pendingList // inconclusive lookups (#217)
 	auto      *autoRate    // the AutoRate controller; nil without AutoRate (#220)
 }
+
+// handoffPerWorker sizes the jobs and completed buffers, per worker (#184).
+const handoffPerWorker = 4
 
 // observe feeds one lookup to the AutoRate controller and reports a rate
 // change as a notice.

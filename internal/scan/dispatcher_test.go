@@ -17,6 +17,28 @@ func testDispatcher(cfg Config, maxDepth int) *dispatcher {
 	return newDispatcher(cfg, maxDepth)
 }
 
+// TestNextChunkSize covers #184: chunks are at most maxChunk jobs, and a
+// short wordlist goes out one job at a time so every worker gets some.
+func TestNextChunkSize(t *testing.T) {
+	big := testDispatcher(Config{Entries: makeEntries(10000)}, 1)
+	if got := len(big.nextChunk(50)); got != maxChunk {
+		t.Errorf("10000 entries, 50 workers: chunk of %d, want %d", got, maxChunk)
+	}
+	small := testDispatcher(Config{Entries: makeEntries(20)}, 1)
+	for i := 0; i < 20; i++ {
+		if got := len(small.nextChunk(100)); got != 1 {
+			t.Fatalf("20 entries, 100 workers: chunk %d has %d jobs, want 1", i, got)
+		}
+	}
+	if got := small.nextChunk(100); got != nil {
+		t.Errorf("exhausted dispatcher returned %v", got)
+	}
+	mid := testDispatcher(Config{Entries: makeEntries(30)}, 1)
+	if got := len(mid.nextChunk(10)); got != 3 {
+		t.Errorf("30 entries, 10 workers: chunk of %d, want 3", got)
+	}
+}
+
 // drain takes every job next will give, without completing any.
 func drain(d *dispatcher) []string {
 	var names []string
@@ -144,7 +166,7 @@ func TestDispatcherDeadline(t *testing.T) {
 	if _, ok := d.next(); !ok {
 		t.Fatal("no job")
 	}
-	d.expire(true)
+	d.expire(1)
 	if !d.expired || d.skipped != 4 || d.admitted != 0 || d.total() != 0 {
 		t.Errorf("expired %v skipped %d admitted %d total %d, want true 4 0 0", d.expired, d.skipped, d.admitted, d.total())
 	}

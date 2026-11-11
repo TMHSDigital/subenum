@@ -173,18 +173,36 @@ func (d *dispatcher) expand(parent job) {
 	}
 }
 
-// expire applies the deadline when its timer fires (#190). held reports
-// whether a job was admitted but not yet handed to a worker; it is skipped.
-func (d *dispatcher) expire(held bool) {
+// expire applies the deadline when its timer fires (#190). held is how many
+// jobs were admitted but not yet handed to a worker; they are skipped.
+func (d *dispatcher) expire(held int) {
 	if d.capped {
 		return
 	}
 	d.expired = true
-	if held {
-		d.admitted--
-		d.skipped++
-	}
+	d.admitted -= held
+	d.skipped += held
 	d.stopAdmitting()
+}
+
+// maxChunk caps how many jobs a worker takes at once (#184).
+const maxChunk = 8
+
+// nextChunk admits up to one job per worker's share of what is left, at
+// most maxChunk: handing jobs out in chunks cuts the channel traffic per
+// job, and sizing the chunk by what is left keeps a short wordlist spread
+// over every worker.
+func (d *dispatcher) nextChunk(workers int) []job {
+	size := min(maxChunk, max(1, d.remaining/max(1, workers)))
+	var chunk []job
+	for len(chunk) < size {
+		j, ok := d.next()
+		if !ok {
+			break
+		}
+		chunk = append(chunk, j)
+	}
+	return chunk
 }
 
 // complete records a worker's report on a dispatched job.
@@ -201,6 +219,13 @@ func (d *dispatcher) complete(c completion) {
 	}
 	if c.finished {
 		d.settle(c.root)
+	}
+}
+
+// completeAll records one worker's report on a chunk.
+func (d *dispatcher) completeAll(batch []completion) {
+	for _, c := range batch {
+		d.complete(c)
 	}
 }
 
@@ -226,11 +251,12 @@ func (d *dispatcher) finish(ctx context.Context, stats *counters, events chan<- 
 	}
 }
 
-// run hands jobs to workers until no candidate is left and every dispatched
-// job has completed, or ctx is cancelled; then it closes jobs. Workers send
-// found parents on enqueue (before reporting on completed), and run expands
-// them. total receives the progress total as it changes.
-func (d *dispatcher) run(ctx context.Context, jobs chan<- job, enqueue <-chan job, completed <-chan completion,
+// run hands jobs to workers, in chunks (see nextChunk), until no candidate
+// is left and every dispatched job has completed, or ctx is cancelled; then
+// it closes jobs. Workers send found parents on enqueue (before reporting on
+// completed), and run expands them. total receives the progress total as it
+// changes.
+func (d *dispatcher) run(ctx context.Context, workers int, jobs chan<- []job, enqueue <-chan job, completed <-chan []completion,
 	total *int64, stats *counters, events chan<- Event) {
 	defer close(jobs)
 	// The deadline timer wakes the dispatcher while it waits on a busy
@@ -243,38 +269,47 @@ func (d *dispatcher) run(ctx context.Context, jobs chan<- job, enqueue <-chan jo
 	}
 	publish := func() { atomic.StoreInt64(total, d.total()) }
 
-	var ready job
-	haveReady := false
+	var ready []job
 	for {
-		if !haveReady {
-			ready, haveReady = d.next()
+		if len(ready) == 0 {
+			ready = d.nextChunk(workers)
 			publish()
 		}
-		if !haveReady && d.pending == 0 {
+		if len(ready) == 0 && d.pending == 0 {
 			d.finish(ctx, stats, events)
 			return
 		}
-		var out chan<- job
-		if haveReady {
+		var out chan<- []job
+		if len(ready) > 0 {
 			out = jobs
 		}
 		select {
 		case <-ctx.Done():
+			// Count the reports already buffered, so an interrupt keeps
+			// the resume point as far as the finished jobs allow.
+			for drained := false; !drained; {
+				select {
+				case batch := <-completed:
+					d.completeAll(batch)
+				default:
+					drained = true
+				}
+			}
 			d.finish(ctx, stats, events)
 			return
 		case parent := <-enqueue:
 			d.expand(parent)
 			publish()
 		case out <- ready:
-			haveReady = false
-			d.pending++
+			d.pending += len(ready)
+			ready = nil
 		case <-deadline:
 			deadline = nil
-			d.expire(haveReady)
-			haveReady = false
+			d.expire(len(ready))
+			ready = nil
 			publish()
-		case c := <-completed:
-			d.complete(c)
+		case batch := <-completed:
+			d.completeAll(batch)
 			publish()
 		}
 	}
