@@ -113,6 +113,14 @@ type Config struct {
 	// set. 0 is unlimited.
 	MaxDuration time.Duration
 
+	// AutoRate keeps a scan going when its resolver starts failing: when
+	// more than a fifth of the last 200 lookups failed, the query rate is
+	// halved (from the rate reached so far when Rate is 0), up to six times
+	// and down to 5 per second, and raised again once lookups succeed. A
+	// KindNotice event with NoticeRate reports each change. Only when it
+	// can slow down no further does the reliability guard apply.
+	AutoRate bool
+
 	// RetryInconclusive looks up once more, after every candidate has been
 	// tried, each name whose lookup timed out, was refused or failed. The
 	// retry goes to Resolver. A name that then resolves is reported like any
@@ -255,6 +263,12 @@ type Stats struct {
 	// was refused or failed when the scan ended: their existence is
 	// unknown. Feed them to another scan to try again.
 	Inconclusive []string
+
+	// RateBackoffs counts how often AutoRate halved the rate, and
+	// FinalRate is the rate in queries per second when the scan ended
+	// (0 = unlimited). Both are 0 without AutoRate.
+	RateBackoffs int64
+	FinalRate    int64
 }
 
 // Total returns the number of candidate names that were looked up and
@@ -325,6 +339,8 @@ const (
 	NoticeCeiling
 	// NoticeSkip means one recursive branch was not expanded.
 	NoticeSkip
+	// NoticeRate means AutoRate changed the query rate.
+	NoticeRate
 )
 
 // String names a notice category.
@@ -338,6 +354,8 @@ func (n Notice) String() string {
 		return "ceiling"
 	case NoticeSkip:
 		return "skip"
+	case NoticeRate:
+		return "rate"
 	}
 	return "none"
 }
@@ -595,6 +613,7 @@ func (c Config) options() (scan.Options, error) {
 		Recursive:   c.Recursive,
 		Depth:       orDefault(c.Depth, 1),
 		Rate:        c.Rate,
+		AutoRate:    c.AutoRate,
 		MaxQueries:  c.MaxQueries,
 		Exclude:     c.Exclude,
 		NoAbort:     c.NoAbort,
@@ -737,6 +756,8 @@ func notice(n scan.NoticeKind) Notice {
 		return NoticeCeiling
 	case scan.NoticeSkip:
 		return NoticeSkip
+	case scan.NoticeRate:
+		return NoticeRate
 	}
 	return NoticeNone
 }
@@ -768,5 +789,7 @@ func stats(s scan.Stats) Stats {
 		Retried:      s.Retried,
 		Recovered:    s.Recovered,
 		Inconclusive: s.Inconclusive,
+		RateBackoffs: s.RateBackoffs,
+		FinalRate:    s.FinalRate,
 	}
 }

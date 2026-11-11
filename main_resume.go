@@ -296,6 +296,10 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 	a.Retried += b.Retried
 	a.Recovered += b.Recovered
 	a.Inconclusive = append(append([]string(nil), a.Inconclusive...), b.Inconclusive...)
+	a.RateBackoffs += b.RateBackoffs
+	if b.RateBackoffs > 0 || b.FinalRate > 0 {
+		a.FinalRate = b.FinalRate // where the resumed run ended
+	}
 	a.Aborted = a.Aborted || b.Aborted
 	a.Expired = a.Expired || b.Expired
 	a.Wildcard = a.Wildcard || b.Wildcard

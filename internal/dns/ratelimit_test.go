@@ -9,6 +9,27 @@ import (
 	"time"
 )
 
+// TestSetRate covers #220: an adjustable limiter starts at its rate (or
+// unlimited), and SetRate changes what Rate reports.
+func TestSetRate(t *testing.T) {
+	l := NewAdjustableRateLimiter(0)
+	if l == nil || l.Rate() != 0 {
+		t.Fatalf("NewAdjustableRateLimiter(0) = %v, want an unlimited limiter", l)
+	}
+	if err := l.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []int{100, 7, 1000, 0} {
+		l.SetRate(r)
+		if got := l.Rate(); got != r {
+			t.Errorf("SetRate(%d): Rate() = %d", r, got)
+		}
+	}
+	if NewAdjustableRateLimiter(50).Rate() != 50 || (*RateLimiter)(nil).Rate() != 0 {
+		t.Error("Rate of a 50/s limiter or a nil one is wrong")
+	}
+}
+
 func TestNewRateLimiterUnlimited(t *testing.T) {
 	if l := NewRateLimiter(0); l != nil {
 		t.Fatalf("NewRateLimiter(0) = %v, want nil", l)

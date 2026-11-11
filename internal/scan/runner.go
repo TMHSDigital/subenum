@@ -37,11 +37,15 @@ type Config struct {
 	Verbose     bool     // log every lookup; through Logf when set, else unsynchronized to stderr
 	Logf        dns.Logf // receives verbose lines when Verbose is set
 	Rate        int      // max DNS messages per second on the wire, all workers combined (0 = unlimited)
-	Types       []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT); empty = A,AAAA
-	Recursive   bool     // enumerate subdomains of discovered subdomains
-	Depth       int      // max recursion depth (1 = no recursion)
-	NoAbort     bool     // keep scanning after the reliability guard fires
-	MaxQueries  int      // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
+	// AutoRate halves the rate when most recent lookups fail, and raises
+	// it again once they succeed, instead of letting the reliability guard
+	// abort at the first sign of rate-limiting (#220).
+	AutoRate   bool
+	Types      []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT); empty = A,AAAA
+	Recursive  bool     // enumerate subdomains of discovered subdomains
+	Depth      int      // max recursion depth (1 = no recursion)
+	NoAbort    bool     // keep scanning after the reliability guard fires
+	MaxQueries int      // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
 	// Deadline stops admitting candidates at this instant (-max-duration,
 	// #190); lookups in flight finish and the rest are counted as skipped.
 	// It is an instant rather than a duration so one budget can span every
@@ -159,6 +163,12 @@ type Stats struct {
 	Retried      int64
 	Recovered    int64
 	Inconclusive []string
+
+	// AutoRate (#220): how many times the rate was halved, and the rate in
+	// queries per second when the scan ended (0 = unlimited). Both are 0
+	// without AutoRate.
+	RateBackoffs int64
+	FinalRate    int64
 }
 
 // Sum returns the number of classified queries (found + negatives + failures +
@@ -481,6 +491,7 @@ const (
 	NoticeCap                 // -max-queries or -max-duration reached; candidates skipped
 	NoticeCeiling             // recursive scan may generate very many queries
 	NoticeSkip                // a recursive branch was not expanded
+	NoticeRate                // AutoRate changed the query rate (#220)
 )
 
 // String names a notice kind for structured output.
@@ -494,6 +505,8 @@ func (k NoticeKind) String() string {
 		return "ceiling"
 	case NoticeSkip:
 		return "skip"
+	case NoticeRate:
+		return "rate"
 	}
 	return "notice"
 }
@@ -561,6 +574,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// probes and the preflight), so -rate bounds wire queries, not names (#32).
 	// Simulated and hooked lookups have no wire traffic and take one slot per job.
 	limiter := dns.NewRateLimiter(cfg.Rate)
+	if cfg.AutoRate {
+		limiter = dns.NewAdjustableRateLimiter(cfg.Rate)
+	}
 	if cfg.Resolver == nil {
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
 	}
@@ -710,6 +726,14 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		processed: &processed, found: &found, stats: &stats, cancel: cancel, guardOnce: &guardOnce,
 		fp: fingerprint, wc: wc, pending: &pendingList{},
 	}
+	if cfg.AutoRate {
+		sent := queriesSent.Load
+		if jobLimiter != nil {
+			// Simulated and hooked jobs send nothing; one job is one slot.
+			sent = func() int64 { return atomic.LoadInt64(&processed) }
+		}
+		st.auto = newAutoRate(limiter, sent)
+	}
 	workers := workerCount(cfg, maxDepth)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -749,6 +773,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	snap.Wildcard = wildcardRoot
 	snap.Fingerprint = fingerprint.records()
 	snap.Inconclusive = st.pending.names()
+	if st.auto != nil {
+		snap.RateBackoffs, snap.FinalRate = st.auto.result()
+	}
 	// EventDone is the abort/finish signal. CLI Finish and TUI aborted=true both
 	// wait for it after cancel, so this send must not be select-guarded on
 	// ctx.Done(): once ctx is cancelled that select is a coin-flip drop.
@@ -778,6 +805,18 @@ type scanState struct {
 	fp        *fingerprint
 	wc        *wildcardCache
 	pending   *pendingList // inconclusive lookups (#217)
+	auto      *autoRate    // the AutoRate controller; nil without AutoRate (#220)
+}
+
+// observe feeds one lookup to the AutoRate controller and reports a rate
+// change as a notice.
+func (s *scanState) observe(failed bool) {
+	if s.auto == nil {
+		return
+	}
+	if msg := s.auto.observe(failed); msg != "" {
+		s.events <- Event{Kind: EventNotice, Notice: NoticeRate, Message: msg}
+	}
 }
 
 // processJob resolves a single job and, on success, optionally enqueues
@@ -808,6 +847,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 
 	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, s.fp, j.domain, records) {
 		st.wildcardFiltered.Add(1)
+		s.observe(false)
 		s.checkReliability(atomic.AddInt64(s.processed, 1))
 		return true
 	}
@@ -816,6 +856,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 	if inconclusive(outcome) {
 		s.pending.add(j, outcome)
 	}
+	s.observe(inconclusive(outcome))
 	s.checkReliability(atomic.AddInt64(s.processed, 1))
 
 	if outcome != dns.OutcomeFound {
@@ -982,6 +1023,9 @@ func (s *scanState) checkReliability(processed int64) {
 	cfg, st := s.cfg, s.stats
 	if processed < reliabilityMinJobs {
 		return
+	}
+	if s.auto != nil && !s.auto.gaveUp() {
+		return // AutoRate slows down instead, until it runs out of room (#220)
 	}
 	snap := st.snapshot()
 	failures := snap.failures()

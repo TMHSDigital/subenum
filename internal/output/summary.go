@@ -79,6 +79,10 @@ type TargetSummary struct {
 	// outcomes already count those under their new outcome.
 	Retried   int64 `json:"retried,omitempty"`
 	Recovered int64 `json:"recovered,omitempty"`
+	// RateBackoffs counts how often -auto-rate halved the rate, and
+	// FinalRate is the rate it ended at in queries per second (#220).
+	RateBackoffs int64 `json:"rate_backoffs,omitempty"`
+	FinalRate    int64 `json:"final_rate,omitempty"`
 	// Permutation is the -permute pass, when one ran (#72).
 	Permutation *PermutationSummary `json:"permutation,omitempty"`
 	// CTNames counts the Certificate Transparency names -ct added as

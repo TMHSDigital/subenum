@@ -304,7 +304,7 @@ var tuiOmittedFlags = map[string]bool{
 	"simulate-zone": true, "retries": true, "show-records": true, "max-duration": true, "stats": true,
 	"sarif": true, "exclude-file": true, "permute": true, "ct": true, "seeds": true, "state": true,
 	"diff": true, "diff-records": true, "dL": true, "seed": true, "resume": true, "log-format": true,
-	"retry-inconclusive": true, "inconclusive": true, "takeover-providers": true, "takeover-providers-only": true,
+	"retry-inconclusive": true, "inconclusive": true, "takeover-providers": true, "takeover-providers-only": true, "auto-rate": true,
 }
 
 // TestSettingNamesAgreeAcrossFrontEnds covers #160: every flag is either wired

@@ -97,6 +97,7 @@ func target(domain, status, errMsg string, done bool, final scan.Event) output.T
 	t.Takeover = st.Takeover
 	t.Internal = st.Internal
 	t.Retried, t.Recovered = st.Retried, st.Recovered
+	t.RateBackoffs, t.FinalRate = st.RateBackoffs, st.FinalRate
 	t.PoolHits, t.Confirmed, t.Unconfirmed = st.PoolHits, st.Confirmed, st.Unconfirmed
 	t.Wildcard = st.Wildcard
 	if st.Wildcard {

@@ -142,6 +142,7 @@ type cliFlags struct {
 	noAbort      bool
 	maxQueries   int
 	maxDuration  time.Duration // -max-duration: time budget for the whole run (#190)
+	autoRate     bool          // -auto-rate: back off instead of aborting (#220)
 	retryIncon   bool          // -retry-inconclusive: look inconclusive names up once more (#217)
 	inconFile    string        // -inconclusive: write the names still without an answer (#217)
 	statsFile    string
@@ -234,6 +235,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.showRecords, "show-records", false, "In text format, append each result's records (TYPE=value)")
 	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited)")
 	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT (CNAME and NS also check for takeovers)")
+	fs.BoolVar(&f.autoRate, "auto-rate", false, "When over 20% of the last 200 lookups fail, halve the query rate and keep going (up to 6 times, down to 5 queries/s) instead of aborting; speed back up once lookups succeed")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
@@ -579,6 +581,9 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	if s.Internal > 0 {
 		out.Info("  internal addresses: %d (public names answering with loopback, private, link-local or CGNAT addresses)", s.Internal)
 	}
+	if s.RateBackoffs > 0 {
+		out.Info("  rate back-offs: %d (ended at %d queries/s)", s.RateBackoffs, s.FinalRate)
+	}
 	if s.Retried > 0 {
 		out.Info("  retried inconclusive: %d (answered on retry: %d)", s.Retried, s.Recovered)
 	}
@@ -650,6 +655,7 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		Recursive:   recursive,
 		Depth:       depth,
 		Rate:        f.rate,
+		AutoRate:    f.autoRate,
 		MaxQueries:  p.maxQueries,
 		Deadline:    in.deadline,
 		Exclude:     in.excludes,

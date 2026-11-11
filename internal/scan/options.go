@@ -26,6 +26,7 @@ type Options struct {
 	Recursive   bool
 	Depth       int
 	Rate        int
+	AutoRate    bool // back off instead of aborting when lookups fail (#220)
 	MaxQueries  int
 	Deadline    time.Time // -max-duration budget's end; zero = none (#190)
 	Exclude     []string
@@ -87,6 +88,7 @@ func (o Options) Config() Config {
 		Verbose:     o.Verbose,
 		Logf:        o.Logf,
 		Rate:        o.Rate,
+		AutoRate:    o.AutoRate,
 		Types:       o.Types,
 		Recursive:   o.Recursive,
 		Depth:       o.Depth,

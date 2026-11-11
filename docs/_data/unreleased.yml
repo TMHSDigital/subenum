@@ -4,6 +4,7 @@
 #
 # In the release commit, empty these lists and run `make docs-flags`.
 flags:
+  - auto-rate
   - diff-records
   - dry-run
   - inconclusive
@@ -19,6 +20,7 @@ action:
   - changed
 # pkg/subenum identifiers
 library:
+  - AutoRate
   - MaxDuration
   - Permutations
   - RetryInconclusive
