@@ -31,6 +31,9 @@ type Options struct {
 	Exclude     []string
 	// RetryInconclusive retries inconclusive lookups once at the end (#217).
 	RetryInconclusive bool
+	// TakeoverProviders replaces the built-in takeover provider list when
+	// non-nil (#219).
+	TakeoverProviders dns.TakeoverProviders
 	Pool              *dns.Pool // -r resolver pool; DNSServer is then the trusted resolver
 	// Resume point of an interrupted scan (#73); see Config.
 	ResumeFrom    int
@@ -94,6 +97,7 @@ func (o Options) Config() Config {
 		Pool:        o.Pool,
 
 		RetryInconclusive: o.RetryInconclusive,
+		TakeoverProviders: o.TakeoverProviders,
 
 		ResumeFrom:    o.ResumeFrom,
 		ResumeParents: o.ResumeParents,

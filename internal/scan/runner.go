@@ -53,6 +53,9 @@ type Config struct {
 	// The retry goes to the trusted resolver, never the pool. A name it
 	// resolves is reported like any other, but not expanded by Recursive.
 	RetryInconclusive bool
+	// TakeoverProviders are the takeover-prone services CNAME targets are
+	// matched against; nil is the built-in list (#219).
+	TakeoverProviders dns.TakeoverProviders
 
 	// Resuming an interrupted scan (#73): ResumeFrom skips the wordlist
 	// entries before it (Stats.RootDone of the interrupted run), and
@@ -585,7 +588,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// out of scope, or whose every candidate would be, is refused outright.
 	sc := newScope(cfg.Exclude)
 	cfg.scope = sc
-	cfg.takeover = &dns.TakeoverCache{}
+	cfg.takeover = &dns.TakeoverCache{Providers: cfg.TakeoverProviders}
 	if sc.excluded(cfg.Domain) || sc.subtreeExcluded(cfg.Domain) {
 		events <- Event{Kind: EventError, Message: "refusing to scan " + cfg.Domain + ": it is out of scope ({exclude})"}
 		return

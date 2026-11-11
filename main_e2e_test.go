@@ -741,6 +741,49 @@ func TestE2EInternalAddresses(t *testing.T) {
 	}
 }
 
+// TestE2ETakeoverProviders covers #219: a -takeover-providers file turns a
+// CNAME to an unlisted host into a provider: hint, and a bad file or
+// -takeover-providers-only without a file is a usage error.
+func TestE2ETakeoverProviders(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch q.Name {
+		case "example.com":
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.10"}}
+			}
+			return dnstest.Reply{}
+		case "docs.example.com":
+			return dnstest.Reply{CNAME: "acme.pages.example-cdn.net"}
+		case "acme.pages.example-cdn.net":
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.20"}}
+			}
+			return dnstest.Reply{}
+		}
+		return dnstest.NXDomain
+	})
+	wl := writeFile(t, "wl.txt", "docs\nwww\n")
+	scan := func(extra ...string) (int, string) {
+		args := append([]string{"-dns-server", srv.Addr, "-type", "A,CNAME", "-progress=false", "-show-records", "-w", wl}, extra...)
+		return runCLI(t, "", append(args, "example.com")...)
+	}
+	if _, out := scan(); strings.Contains(out, "TAKEOVER?") {
+		t.Errorf("built-in list flagged an unlisted host: %q", out)
+	}
+	providers := writeFile(t, "providers.txt", "# in-house\n.pages.example-cdn.net example-cdn\n")
+	code, out := scan("-takeover-providers", providers)
+	if code != 0 || !strings.Contains(out, "TAKEOVER?=provider:example-cdn") {
+		t.Errorf("with -takeover-providers: exit %d, out %q; want a provider:example-cdn hint", code, out)
+	}
+	bad := writeFile(t, "bad.txt", ".pages.example-cdn.net\n")
+	if code, _ := scan("-takeover-providers", bad); code != exitUsage {
+		t.Errorf("bad provider file: exit %d, want %d", code, exitUsage)
+	}
+	if code, _ := scan("-takeover-providers-only"); code != exitUsage {
+		t.Errorf("-takeover-providers-only without a file: exit %d, want %d", code, exitUsage)
+	}
+}
+
 // TestE2EResume is #73's done-when: interrupting a simulated scan partway
 // and running `subenum -resume <state>` gives the same final result set as
 // an uninterrupted run with the same seed.

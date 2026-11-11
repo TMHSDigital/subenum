@@ -41,6 +41,8 @@
 | `-state <string>` | subenum-resume.json | Where an interrupted run saves its state for -resume |
 | `-stats <string>` | - | Write a JSON run-quality report (outcomes, queries sent, verdict) to this file |
 | `-t <int>` | 100 | Number of concurrent workers |
+| `-takeover-providers <string>` {% include unreleased.html flag="takeover-providers" %} | - | File of takeover-prone services, one "&lt;suffix&gt; &lt;name&gt;" per line (.example-cdn.net example-cdn; # comments allowed; name - removes a suffix), added to the built-in list for takeover hints |
+| `-takeover-providers-only` {% include unreleased.html flag="takeover-providers-only" %} | - | Use only the -takeover-providers file, not the built-in provider list |
 | `-timeout <int>` | 1000 | DNS lookup timeout in milliseconds |
 | `-tui` | - | Launch the interactive terminal UI, its form pre-filled from the other flags and the domain argument |
 | `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME |

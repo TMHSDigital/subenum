@@ -290,6 +290,15 @@ func (s *session) configure() (domain string, code int, ok bool) {
 		return "", exitFailure, false
 	}
 	s.in.excludes = excludes
+	providers, err := loadTakeoverProviders(*f, &s.in)
+	if err != nil {
+		out.Error("%v", err)
+		return "", exitUsage, false
+	}
+	s.in.providers = providers
+	if f.providersFile != "" && !slices.Contains(recordTypes, "CNAME") {
+		out.Info("Note: -takeover-providers matches CNAME targets; add -type A,AAAA,CNAME")
+	}
 
 	// Arguments are checked before any banner is printed or the resolver list
 	// is read, so a usage error is the first thing a user sees (#120).

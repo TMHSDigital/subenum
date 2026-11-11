@@ -120,6 +120,16 @@ type Config struct {
 	// still without an answer, with or without it.
 	RetryInconclusive bool
 
+	// TakeoverProviders adds takeover-prone services to the built-in list
+	// that Result.Takeover's "provider:<name>" hints come from. An entry for
+	// a suffix already listed replaces it, and a Name of "-" removes the
+	// suffix. The longest matching suffix wins.
+	TakeoverProviders []TakeoverProvider
+
+	// TakeoverProvidersOnly uses TakeoverProviders alone, without the
+	// built-in list.
+	TakeoverProvidersOnly bool
+
 	// Exclude lists names that are out of scope and are never queried.
 	// "mail.example.com" excludes one name; "*.corp.example.com" excludes
 	// a whole branch.
@@ -156,6 +166,14 @@ type Config struct {
 	// Logf receives verbose lines when Verbose is set. Nil writes them to
 	// standard error.
 	Logf func(format string, args ...any)
+}
+
+// TakeoverProvider is a takeover-prone service for Config.TakeoverProviders:
+// CNAME targets under Suffix (".example-cdn.net", the leading dot optional)
+// belong to Name ("example-cdn": lowercase letters, digits and hyphens).
+type TakeoverProvider struct {
+	Suffix string
+	Name   string
 }
 
 // Record is one DNS record behind a result.
@@ -584,6 +602,20 @@ func (c Config) options() (scan.Options, error) {
 	}
 	if c.MaxDuration > 0 {
 		opts.Deadline = time.Now().Add(c.MaxDuration)
+	}
+	if len(c.TakeoverProviders) > 0 || c.TakeoverProvidersOnly {
+		lines := make([]string, 0, len(c.TakeoverProviders))
+		for _, p := range c.TakeoverProviders {
+			if strings.ContainsAny(p.Suffix+p.Name, " \t\r\n") || p.Suffix == "" || p.Name == "" {
+				return scan.Options{}, fmt.Errorf("subenum: TakeoverProviders: invalid entry %+v", p)
+			}
+			lines = append(lines, p.Suffix+" "+p.Name)
+		}
+		providers, err := dns.ParseTakeoverProviders(lines, c.TakeoverProvidersOnly)
+		if err != nil {
+			return scan.Options{}, fmt.Errorf("subenum: TakeoverProviders: %w", err)
+		}
+		opts.TakeoverProviders = providers
 	}
 
 	if len(c.ResolverPool) > 0 {

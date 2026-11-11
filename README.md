@@ -294,6 +294,8 @@ make help           # list all targets
 | `-exclude-file <file>` | n/a | Same patterns, one per line (`#` comments allowed), e.g. a bug-bounty program's out-of-scope list |
 | `-stats <file>` | n/a | Write a JSON run-quality report (outcomes, queries sent, verdict); see [Run-quality report](#run-quality-report) |
 | `-sarif <file>` | n/a | Write takeover candidates as SARIF 2.1.0 for GitHub code scanning; needs CNAME in `-type` |
+| `-takeover-providers <file>` | n/a | Extra takeover-prone services for the `provider:` hint, one `<suffix> <name>` per line (`.example-cdn.net example-cdn`; `#` comments allowed). They are added to the built-in list; an entry for a listed suffix replaces it, and a name of `-` removes the suffix. The longest matching suffix wins. See [Subdomain takeover hints](#subdomain-takeover-hints) |
+| `-takeover-providers-only` | `false` | Use only the `-takeover-providers` file, without the built-in list |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-print-config` | `false` | Print every setting's effective value and source (`flag`, env, config or default), then exit |
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query), then exit; JSON with `-format json` or `jsonl` |
@@ -472,6 +474,16 @@ When a result has a CNAME record, subenum resolves the CNAME target with the tru
 | `dangling:<name>` | Both: a takeover-prone service and a target that does not exist |
 
 The marker is a `takeover_candidate` field in JSON and JSONL, a `takeover_candidate` column in CSV, `TAKEOVER?=<marker>` in text with `-show-records`, and a count in the breakdown and the run-quality report. A dangling CNAME makes A/AAAA lookups fail, so scan with CNAME records included to find them: `-type A,AAAA,CNAME`.
+
+The provider list is built in, and `-takeover-providers <file>` extends it without waiting for a release, for example with an in-house or regional hosting service, or drops one that is noisy for you:
+
+```text
+# suffix               name
+.pages.example-cdn.net  example-cdn
+.cloudfront.net         -
+```
+
+`-takeover-providers-only` uses the file alone.
 
 `-sarif takeovers.sarif` also writes the candidates as a SARIF 2.1.0 log, one rule per kind of finding and a stable fingerprint per name, so GitHub code scanning can track, triage and dismiss them in the Security tab. Upload it from a scheduled workflow (see [Monitoring](docs/monitoring.md)) with `github/codeql-action/upload-sarif` and `security-events: write`.
 

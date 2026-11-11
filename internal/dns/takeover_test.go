@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,66 @@ func TestTakeoverProvider(t *testing.T) {
 	} {
 		if got := TakeoverProvider(target); got != want {
 			t.Errorf("TakeoverProvider(%q) = %q, want %q", target, got, want)
+		}
+	}
+}
+
+// TestParseTakeoverProviders covers #219: a file extends the built-in list,
+// replaces or removes a listed suffix, can be used alone, and bad lines are
+// reported with their line number.
+func TestParseTakeoverProviders(t *testing.T) {
+	lines := []string{
+		"# in-house hosting",
+		"",
+		".pages.example-cdn.net  example-cdn",
+		"special.cloudfront.net cf-special",
+		".herokuapp.com my-heroku",
+		".github.io -",
+		"bücher.example buecher",
+	}
+	p, err := ParseTakeoverProviders(lines, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for target, want := range map[string]string{
+		"site.pages.example-cdn.net": "example-cdn",
+		"x.special.cloudfront.net":   "cf-special",     // longest suffix wins
+		"x.cloudfront.net":           "aws-cloudfront", // built-in kept
+		"acme.herokuapp.com":         "my-heroku",      // replaced
+		"acme.github.io":             "",               // removed
+		"x.xn--bcher-kva.example":    "buecher",        // IDN suffix in punycode
+		"example-cdn.net":            "",
+	} {
+		if got := p.Match(target); got != want {
+			t.Errorf("Match(%q) = %q, want %q", target, got, want)
+		}
+	}
+	if TakeoverProvider("acme.github.io") != "github-pages" {
+		t.Error("parsing a file changed the built-in list")
+	}
+
+	only, err := ParseTakeoverProviders([]string{".pages.example-cdn.net example-cdn"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if only.Match("x.cloudfront.net") != "" || only.Match("a.pages.example-cdn.net") != "example-cdn" {
+		t.Errorf("only list = %v", only)
+	}
+	if empty, err := ParseTakeoverProviders(nil, true); err != nil || empty == nil || empty.Match("a.github.io") != "" {
+		t.Errorf("an empty only list must match nothing, got %v (err %v)", empty, err)
+	}
+
+	for _, tc := range []struct{ line, want string }{
+		{".example.net", "line 2: want"},
+		{".example.net a b", "line 2: want"},
+		{"https://example.net/x name", "line 2: "},
+		{".example.net Bad_Name", "line 2: provider name"},
+		{".example.net -name", "line 2: provider name"},
+		{"com tld-only", "line 2: "},
+	} {
+		_, err := ParseTakeoverProviders([]string{"# ok", tc.line}, false)
+		if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			t.Errorf("%q: err = %v, want prefix %q", tc.line, err, tc.want)
 		}
 	}
 }

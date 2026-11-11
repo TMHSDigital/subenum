@@ -11,6 +11,8 @@ flags:
   - max-duration
   - rate-per-resolver
   - retry-inconclusive
+  - takeover-providers
+  - takeover-providers-only
 # action.yml inputs and outputs
 action:
   - max-duration
@@ -20,3 +22,4 @@ library:
   - MaxDuration
   - Permutations
   - RetryInconclusive
+  - TakeoverProviders

@@ -112,6 +112,32 @@ func TestScanReportsTakeoverHint(t *testing.T) {
 	}
 }
 
+// TestScanTakeoverProviders covers #219: Config.TakeoverProviders makes a
+// CNAME target the built-in list does not know a provider: hint, and
+// TakeoverProvidersOnly with no entries matches nothing.
+func TestScanTakeoverProviders(t *testing.T) {
+	scan := func(c subenum.Config) (map[string]string, error) {
+		c.Domain, c.Words, c.Types = "lab.example", []string{"www", "blog"}, []string{"A", "AAAA", "CNAME"}
+		c.Resolver, c.Timeout = zone(t), 2*time.Second
+		results, _, err := subenum.Scan(context.Background(), c)
+		hints := map[string]string{}
+		for _, r := range results {
+			hints[r.Name] = r.Takeover
+		}
+		return hints, err
+	}
+	hints, err := scan(subenum.Config{TakeoverProviders: []subenum.TakeoverProvider{{Suffix: "example.net", Name: "example-host"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hints["blog.lab.example"]; got != "dangling:example-host" {
+		t.Errorf("blog takeover = %q, want dangling:example-host", got)
+	}
+	if _, err := scan(subenum.Config{TakeoverProviders: []subenum.TakeoverProvider{{Suffix: "example.net", Name: "Bad Name"}}}); err == nil {
+		t.Error("an invalid provider name was accepted")
+	}
+}
+
 func TestRunEndsWithExactlyOneDone(t *testing.T) {
 	events, err := subenum.Run(context.Background(), subenum.Config{
 		Domain:   "lab.example",

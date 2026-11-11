@@ -25,6 +25,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -147,26 +148,31 @@ type cliFlags struct {
 	sarifFile    string // -sarif: takeover candidates as SARIF (#129)
 	exclude      string
 	excludeFile  string
-	resolvers    string // -r: file of resolver addresses for a pool
-	ratePerRes   int    // -rate-per-resolver: per-member cap for the -r pool (#196)
-	diff         string // -diff: previous results file to compare against
-	diffRecords  bool   // -diff-records: also report names whose records changed (#189)
-	stateFile    string // where an interrupted run saves its resume state
-	permute      bool   // -permute: second pass over permutations of found names
-	seedsFile    string // -seeds: extra permutation seeds (any results format)
+	// -takeover-providers and -takeover-providers-only: extend or replace
+	// the takeover-prone provider list (#219).
+	providersFile string
+	providersOnly bool
+	resolvers     string // -r: file of resolver addresses for a pool
+	ratePerRes    int    // -rate-per-resolver: per-member cap for the -r pool (#196)
+	diff          string // -diff: previous results file to compare against
+	diffRecords   bool   // -diff-records: also report names whose records changed (#189)
+	stateFile     string // where an interrupted run saves its resume state
+	permute       bool   // -permute: second pass over permutations of found names
+	seedsFile     string // -seeds: extra permutation seeds (any results format)
 }
 
 // runtimeInputs is what a run derives from its flags and environment: the
 // values the flags resolve to, the loaded input files and the run-wide
 // deadline. Kept apart from cliFlags, which holds only parsed values (#158).
 type runtimeInputs struct {
-	stdin       io.Reader       // read for a "-" path; nil means os.Stdin
-	defaults    *defaultsLoader // where config-file and env values came from; nil in tests
-	maxAttempts int             // -attempts, or the deprecated -retries
-	recordTypes []string        // parsed -type
-	excludes    []string        // -exclude and -exclude-file patterns, merged
-	pool        *dns.Pool       // built from -r; nil means the single -dns-server
-	deadline    time.Time       // when -max-duration runs out; set once the scans start
+	stdin       io.Reader             // read for a "-" path; nil means os.Stdin
+	defaults    *defaultsLoader       // where config-file and env values came from; nil in tests
+	maxAttempts int                   // -attempts, or the deprecated -retries
+	recordTypes []string              // parsed -type
+	excludes    []string              // -exclude and -exclude-file patterns, merged
+	pool        *dns.Pool             // built from -r; nil means the single -dns-server
+	providers   dns.TakeoverProviders // from -takeover-providers; nil means the built-in list
+	deadline    time.Time             // when -max-duration runs out; set once the scans start
 }
 
 // readLines reads path, or in.stdin when path is "-".
@@ -239,6 +245,8 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.StringVar(&f.sarifFile, "sarif", "", "Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME in -type)")
 	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
+	fs.StringVar(&f.providersFile, "takeover-providers", "", "File of takeover-prone services, one \"<suffix> <name>\" per line (.example-cdn.net example-cdn; # comments allowed; name - removes a suffix), added to the built-in list for takeover hints")
+	fs.BoolVar(&f.providersOnly, "takeover-providers-only", false, "Use only the -takeover-providers file, not the built-in provider list")
 	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
 	fs.BoolVar(&f.ct, "ct", false, "Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds")
 	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
@@ -423,6 +431,26 @@ func loadExcludes(f cliFlags, in *runtimeInputs) ([]string, error) {
 		}
 	}
 	return patterns, nil
+}
+
+// loadTakeoverProviders reads the -takeover-providers file (#219). Without
+// one it returns nil, the built-in list.
+func loadTakeoverProviders(f cliFlags, in *runtimeInputs) (dns.TakeoverProviders, error) {
+	if f.providersFile == "" {
+		if f.providersOnly {
+			return nil, errors.New("-takeover-providers-only needs a -takeover-providers file")
+		}
+		return nil, nil
+	}
+	lines, err := in.readLines(f.providersFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading -takeover-providers file: %w", err)
+	}
+	providers, err := dns.ParseTakeoverProviders(lines, f.providersOnly)
+	if err != nil {
+		return nil, fmt.Errorf("-takeover-providers %s: %w", f.providersFile, err)
+	}
+	return providers, nil
 }
 
 // loadTargets returns the apex domains to scan: the single positional domain,
@@ -628,6 +656,7 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		ResumeFrom:  p.resumeFrom,
 		// The retry pass belongs to the scan, so a resumed scan runs it too.
 		RetryInconclusive: f.retryIncon,
+		TakeoverProviders: in.providers,
 		// Names found before an interrupt still need their children expanded.
 		ResumeParents: p.resumeNames,
 		Pool:          in.pool,
