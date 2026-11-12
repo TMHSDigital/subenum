@@ -15,20 +15,21 @@ LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
 # Default run parameters. Live targets (run, run-verbose, run-custom,
 # docker-run) have no default DOMAIN: they send real DNS queries, so you must
 # name a domain you own or are authorized to test, e.g. make run DOMAIN=...
-WORDLIST=examples/sample_wordlist.txt
-CONCURRENCY=100
-TIMEOUT=1000
-DNS_SERVER=8.8.8.8:53
+# Parameters use ?= so both `make VAR=x target` and `VAR=x make target` work.
+WORDLIST ?= examples/sample_wordlist.txt
+CONCURRENCY ?= 100
+TIMEOUT ?= 1000
+DNS_SERVER ?= 8.8.8.8:53
 
 # Simulation parameters. Simulated targets send no DNS traffic, so they fall
 # back to example.com when DOMAIN is not set.
-HIT_RATE=15
+HIT_RATE ?= 15
 SIM_DOMAIN=$(or $(DOMAIN),example.com)
 
 # Wordlist generator parameters
 WL_DOMAIN ?= $(SIM_DOMAIN)
-WL_COMBINE=dev,staging,test,api
-WL_OUTPUT=custom-wordlist.txt
+WL_COMBINE ?= dev,staging,test,api
+WL_OUTPUT ?= custom-wordlist.txt
 
 all: build
 
@@ -124,9 +125,11 @@ docker-simulate:
 # Help command
 help:
 	@echo "Available commands:"
-	@echo "  make build            - Build the binary"
-	@echo "  make test             - Run all tests"
+	@echo "  make build            - Build the binary (also: make all)"
+	@echo "  make test             - Run all tests (CI also uses -race -shuffle=on)"
 	@echo "  make test-short       - Run short tests"
+	@echo "  make bench            - Dispatcher benchmark on a 1M-entry simulated scan"
+	@echo "  make docs-flags       - Regenerate docs/_includes/flags.md from the CLI flags"
 	@echo "  make clean            - Clean build artifacts"
 	@echo "  make lint             - Run linter"
 	@echo "  make tidy             - go mod tidy (keeps go 1.26.0)"
@@ -166,7 +169,8 @@ help:
 	@echo "  WL_COMBINE=$(WL_COMBINE)"
 	@echo "  WL_OUTPUT=$(WL_OUTPUT)"
 	@echo ""
-	@echo "Customize parameters by setting environment variables, e.g.:"
+	@echo "Customize parameters on the command line or as environment variables, e.g.:"
+	@echo "  make run DOMAIN=yourdomain.com WORDLIST=path/to/wordlist.txt"
 	@echo "  DOMAIN=yourdomain.com WORDLIST=path/to/wordlist.txt make run"
 	@echo "  WL_DOMAIN=yourdomain.com WL_COMBINE=dev,api,v1 make wordlist"
 	@echo "  HIT_RATE=30 make simulate-verbose" 
