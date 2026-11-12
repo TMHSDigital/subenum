@@ -207,6 +207,12 @@ per command:
 GOTOOLCHAIN=go1.26.3 go test -race ./...
 ```
 
+In PowerShell:
+
+```powershell
+$env:GOTOOLCHAIN = "go1.26.3"; go test -race ./...; Remove-Item Env:GOTOOLCHAIN
+```
+
 Default `go test ./...` is hermetic (in-process DNS responder, no outbound
 network). The optional live resolver smoke test is gated on an env var:
 

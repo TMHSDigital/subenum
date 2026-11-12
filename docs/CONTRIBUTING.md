@@ -7,7 +7,7 @@ title: Contributing
 
 We welcome contributions! Please read this guide to understand how you can contribute.
 
-See the [Code of Conduct](CODE_OF_CONDUCT.html).
+See the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development Environment Setup
 
@@ -77,8 +77,11 @@ You can use Docker for development to ensure a consistent environment:
 # Build the Docker image
 make docker-build
 
-# Run the tool in a Docker container
-make docker-run
+# Simulated scan in a container (no DNS traffic)
+make docker-simulate
+
+# Live scan in a container: name a domain you own or may test
+make docker-run DOMAIN=yourdomain.com
 ```
 
 ## Pull Request Process
@@ -166,6 +169,12 @@ per command:
 
 ```bash
 GOTOOLCHAIN=go1.26.3 go test -race ./...
+```
+
+In PowerShell:
+
+```powershell
+$env:GOTOOLCHAIN = "go1.26.3"; go test -race ./...; Remove-Item Env:GOTOOLCHAIN
 ```
 
 New features should include tests. New flags must be covered by at least one test case.
