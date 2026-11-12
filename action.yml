@@ -34,7 +34,7 @@ inputs:
     required: false
     default: ""
   sarif:
-    description: Write takeover candidates to this SARIF file, for github/codeql-action/upload-sarif. Needs CNAME in -type.
+    description: Write takeover candidates to this SARIF file, for github/codeql-action/upload-sarif. Needs CNAME or NS in -type.
     required: false
     default: ""
   max-duration:

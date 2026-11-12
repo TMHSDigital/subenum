@@ -97,6 +97,8 @@ docker run --rm -v $(pwd)/data:/data subenum \
   example.com
 ```
 
+The image runs as the unprivileged `nonroot` user (uid 65532). If it cannot write to the mounted directory, add `--user $(id -u):$(id -g)` (see [File Permission Problems](#file-permission-problems)).
+
 ### Using Multiple Attempts for Unreliable Networks
 
 The `-attempts` flag sets the total DNS resolution attempts per subdomain:

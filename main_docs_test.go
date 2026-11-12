@@ -52,6 +52,11 @@ func flagsMarkdown(fs *flag.FlagSet, unreleased map[string]bool) string {
 		switch def {
 		case "", "0", "false":
 			def = "-"
+			// A 0 sentinel whose real default is resolved later (-attempts)
+			// names it in the usage text as "(default N)".
+			if i := strings.LastIndex(usage, "(default "); i >= 0 && strings.HasSuffix(usage, ")") {
+				def = usage[i+len("(default ") : len(usage)-1]
+			}
 		}
 		code := func(s string) string { return strings.ReplaceAll(s, "|", `\|`) }
 		// Description cells are Markdown: keep <domain> and *.parent literal.

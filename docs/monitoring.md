@@ -68,7 +68,7 @@ subenum -w wordlist.txt -format jsonl -type A,AAAA,CNAME -diff previous.jsonl -d
 ## The subenum GitHub Action
 
 The repository is also a GitHub Action. It installs a release (checked against
-its `checksums.txt`), diffs against the previous complete run's results kept as
+its `checksums.txt` and its build provenance attestation), diffs against the previous complete run's results kept as
 an artifact, writes a summary table to the job, and fails the job when the
 verdict is not good enough:
 
@@ -230,8 +230,9 @@ commit `previous.jsonl` to a branch or store it in object storage instead.
 
 ## Takeover candidates in code scanning
 
-Add `-type A,AAAA,CNAME -sarif takeovers.sarif` to the scan and upload the file
-after it, and every dangling or takeover-prone CNAME becomes an alert in the
+Add `-type A,AAAA,CNAME,NS -sarif takeovers.sarif` to the scan and upload the file
+after it, and every dangling or takeover-prone CNAME, and every delegation to a
+name server that does not exist (`dangling-ns`), becomes an alert in the
 repository's Security tab, where it can be triaged and dismissed. Alerts are
 fingerprinted per name, so a candidate seen every week stays one alert. The
 job needs `security-events: write`:

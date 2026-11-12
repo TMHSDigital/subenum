@@ -187,6 +187,12 @@ Find only subdomains that are CNAMEs (useful for spotting potential takeovers):
 ./subenum -w wordlist.txt -type CNAME -format json example.com
 ```
 
+`NS`, `MX` and `TXT` work the same way. An `MX` value reads `<preference> <host>`. With `NS`, a delegated subzone whose name server does not exist is marked `dangling-ns`, a takeover that CNAME-only scans miss:
+
+```bash
+./subenum -w wordlist.txt -type A,CNAME,NS -show-records example.com
+```
+
 The record type is captured per result, so JSON and CSV output carry it in the `records` field / `type` column.
 
 ## Rate Limiting
@@ -212,6 +218,15 @@ Pass `-no-abort` to keep the warning but finish the wordlist:
 
 ```bash
 ./subenum -w wordlist.txt -no-abort example.com
+```
+
+Or pass `-auto-rate` to slow down instead: when more than 20% of the last 200
+lookups failed, the query rate is halved (with a `rate` notice) and raised
+again once lookups succeed. The guard aborts only after six back-offs, or at 5
+queries per second:
+
+```bash
+./subenum -w wordlist.txt -rate 200 -auto-rate example.com
 ```
 
 ## Query Cap and Recursion Ceiling

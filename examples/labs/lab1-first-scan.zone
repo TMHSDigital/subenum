@@ -1,5 +1,5 @@
 # Lab 1: first scan. Run:
-#   subenum -simulate-zone examples/labs/lab1-first-scan.zone -show-records lab.example
+#   subenum -w examples/labs/words.txt -simulate-zone examples/labs/lab1-first-scan.zone -show-records lab.example
 @         A      192.0.2.1
 www       A      192.0.2.10
 www       AAAA   2001:db8::10

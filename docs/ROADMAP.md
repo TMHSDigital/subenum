@@ -59,7 +59,8 @@ Constraints to keep in mind when changing the code.
 - **The test DNS server (`internal/dnstest`) models A, AAAA, CNAME, NS, MX
   and TXT answers,** any RCODE, NODATA with SOA, delays, drops and
   truncation. Other record types, referrals and EDNS are not modelled; extend
-  its `Reply` before testing them.
+  `Reply` in `internal/dnsserver` (which `internal/dnstest` re-exports) before
+  testing them.
 - **The dangling-NS hint needs the NS records.** A recursive resolver asked
   about a subzone whose every name server is gone usually answers SERVFAIL
   rather than the delegation, so such a name ends up inconclusive (listed by

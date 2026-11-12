@@ -66,7 +66,7 @@ The report ends in a verdict:
 |---|---|
 | `complete` | Under 1% of lookups failed. A name that isn't listed was asked about and doesn't exist. |
 | `degraded` | 1% or more failed, the run was interrupted, or `-max-queries` or `-max-duration`{% include unreleased.html flag="max-duration" %} stopped it early. The result is usable, but some names are unknown. |
-| `unreliable` | More than 20% failed. subenum stops the scan rather than return a quietly incomplete list. |
+| `unreliable` | More than 20% failed. subenum stops the scan rather than return a quietly incomplete list, unless `-no-abort` is set; `-auto-rate` slows down first and stops only when it cannot slow down further. |
 
 The `reason` field says why, for example `12 of 5000 lookups failed (timeout 9, refused 3, other 0), under 1%`. Gate a pipeline on it:
 

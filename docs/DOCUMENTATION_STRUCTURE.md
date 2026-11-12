@@ -1,113 +1,42 @@
-# Project Documentation Structure
+# Documentation map
 
-This document outlines a recommended structure for comprehensive project documentation. While tailored for a Go-based CLI tool like `subenum`, the principles are broadly applicable.
+Where each piece of subenum's documentation lives and who it is for. The files under `docs/` are also the [project site](https://tmhsdigital.github.io/subenum/); this page is left out of the site build.
 
-## 1. Core Documentation (`README.md`)
+## For users
 
-This is the gateway to your project. It should be concise, informative, and guide users to other relevant documentation.
+| Document | What it covers |
+|---|---|
+| [`README.md`](../README.md) | What subenum is, install, quick start, every flag, output formats, the TUI, completions and the man page |
+| [`docs/start.md`](start.md) | First scan, the run-quality verdict, what to read next |
+| [`docs/cli.md`](cli.md) | CLI reference: flags (generated from the code into [`_includes/flags.md`](_includes/flags.md)), exit codes, config file and `SUBENUM_*` defaults |
+| [`docs/pipelines.md`](pipelines.md) | Chaining with dnsx, httpx and nuclei; JSON logs; takeover candidates first |
+| [`docs/monitoring.md`](monitoring.md) | Scheduled scans with `-diff`, the GitHub Action ([`action.yml`](../action.yml)) and SARIF alerts |
+| [`docs/docker.md`](docker.md) | The container image: volumes, output files, permissions |
+| [`docs/labs.md`](labs.md) | Offline exercises against [`examples/labs/`](../examples/labs/) zones with `-simulate-zone` |
+| [`docs/library.md`](library.md) | The Go library `pkg/subenum`; the full API reference is on pkg.go.dev |
+| [`examples/advanced_usage.md`](../examples/advanced_usage.md) | Longer recipes: wildcards, record types, rate limiting, the reliability guard, CSV |
+| [`tools/README.md`](../tools/README.md) | The `wordlist-gen` tool |
 
-*   **Project Title & Tagline:** Clear and descriptive.
-*   **Badges (Optional but Recommended):**
-    *   Build status (e.g., GitHub Actions)
-    *   Code coverage
-    *   Go Report Card
-    *   License
-    *   Version/Release
-*   **Brief Description:** What the project does in a few sentences.
-*   **Cybersecurity Context / Educational Goals (If applicable):** Why this tool/project is important, especially from a learning or security perspective.
-*   **Features:** Bulleted list of key capabilities.
-*   **Prerequisites:** What users need to have installed/configured.
-*   **Installation / Setup:**
-    *   From source (e.g., `go build`, `go install`)
-    *   Pre-compiled binaries (if provided)
-    *   Docker (if applicable)
-*   **Usage:**
-    *   Basic command-line syntax.
-    *   Explanation of all flags and arguments.
-    *   Clear examples of common use cases.
-*   **Output Explanation:** Describe what the output means.
-*   **Contributing:** Guidelines for developers who want to contribute (link to `CONTRIBUTING.md`).
-*   **License:** Link to `LICENSE.md`.
-*   **Contact / Support (Optional):** How to get help or report issues.
+## For contributors
 
-## 2. Architecture Documentation (`ARCHITECTURE.md` or `/docs/architecture.md`)
+| Document | What it covers |
+|---|---|
+| [`docs/CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, tests, lint, pull requests |
+| [`docs/DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) | Project tree, hermetic testing, previewing the site, extension points |
+| [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) | How the engine works: packages, resolution, dispatch, output, error handling |
+| [`docs/ROADMAP.md`](ROADMAP.md) | Where the project is heading and known constraints |
+| [`docs/CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Community expectations |
 
-This describes the "how" of your project. It's crucial for maintainers and contributors.
+## Project files
 
-*   **Overview:** High-level diagram and explanation of the system's components and their interactions.
-*   **Key Components / Modules:**
-    *   For each major component (e.g., in `subenum`: argument parsing, wordlist processing, DNS resolution, concurrency management, output formatting):
-        *   Purpose and responsibilities.
-        *   Key functions/structs.
-        *   Interactions with other components.
-*   **Data Flow:** How data moves through the system (e.g., from wordlist to DNS resolver to output).
-*   **Concurrency Model (If applicable):**
-    *   Explanation of how concurrency is achieved (e.g., goroutines, channels, worker pools).
-    *   Rationale for design choices.
-    *   Potential bottlenecks or considerations.
-*   **Error Handling Strategy:** How errors are propagated, logged, and handled.
-*   **External Dependencies:** List of external libraries and why they were chosen.
-*   **Design Decisions & Rationale:** Important architectural choices made and the reasons behind them. This can include alternatives considered and why they were not chosen.
-*   **Future Considerations / Potential Improvements:** Areas for future development or refactoring.
+| File | What it covers |
+|---|---|
+| [`CHANGELOG.md`](../CHANGELOG.md) | Changes per release (Keep a Changelog); each release's notes come from its section |
+| [`SECURITY.md`](../SECURITY.md) | Supported versions and how to report a vulnerability |
+| [`LICENSE`](../LICENSE) | GPL-3.0 |
+| [`CITATION.cff`](../CITATION.cff) | How to cite subenum |
 
-## 3. Developer Guide (`DEVELOPER_GUIDE.md` or `/docs/developer_guide.md`)
+## Keeping docs current
 
-Information for those who want to build, test, or contribute to the project.
-
-*   **Getting Started:**
-    *   Cloning the repository.
-    *   Setting up the development environment (Go version, tools, environment variables).
-    *   Building the project from source.
-*   **Running Tests:**
-    *   How to execute unit tests, integration tests, etc.
-    *   Test coverage tools.
-*   **Coding Style / Conventions:** Link to any style guides or linters used.
-*   **Debugging Tips:** Common issues and how to troubleshoot them.
-*   **Making Changes:**
-    *   Branching strategy.
-    *   Commit message conventions.
-    *   Pull Request process.
-*   **Dependencies Management:** How to add or update dependencies (e.g., `go get`, `go mod tidy`).
-
-## 4. Contribution Guidelines (`CONTRIBUTING.md`)
-
-How others can contribute to the project.
-
-*   **Code of Conduct:** Link to `CODE_OF_CONDUCT.md`.
-*   **How to Contribute:**
-    *   Reporting bugs (issue tracker, templates).
-    *   Suggesting enhancements.
-    *   Submitting pull requests.
-*   **What to Work On:** (Optional) Links to "good first issues" or a project board.
-
-## 5. Code of Conduct (`CODE_OF_CONDUCT.md`)
-
-Sets expectations for community interaction. Adopt a standard one like the Contributor Covenant.
-
-## 6. License (`LICENSE` or `LICENSE.md`)
-
-Specifies how the software can be used, modified, and distributed (e.g., MIT, Apache 2.0, GPL).
-
-## 7. Changelog (`CHANGELOG.md`)
-
-A chronological list of notable changes for each version/release.
-
-*   Follows Keep a Changelog format (Added, Changed, Deprecated, Removed, Fixed, Security).
-
-## 8. Examples (`/examples` directory)
-
-*   Provide more extensive or varied examples of how to use the tool.
-*   Sample wordlists, configuration files, or scripts.
-
-## 9. API Documentation (If applicable - for libraries or tools with an API)
-
-*   For Go projects, this is often generated using `godoc`.
-*   Ensure public functions and types are well-commented.
-
-## 10. `/docs` Directory (Optional - for larger projects)
-
-For more complex projects, you might move `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md`, and other detailed documents into a dedicated `/docs` directory to keep the root directory cleaner.
-
----
-
-This structure provides a solid foundation. Adapt it to the specific needs and complexity of your project. 
+- Regenerate the site's flag table with `make docs-flags`; `go test .` fails when it or the README flag table drifts from the CLI.
+- List anything on `main` but not yet released in [`_data/unreleased.yml`](_data/unreleased.yml) so the site tags it, and empty the lists in the release commit.
