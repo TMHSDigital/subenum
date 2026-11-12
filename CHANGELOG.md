@@ -29,11 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The scan dispatcher hands jobs to workers in small chunks (up to 8, fewer when there are few names per worker) over buffered channels, and each worker reports a chunk's jobs at once, instead of two unbuffered hand-offs per job. A 1M-name simulated scan at 50 workers (`make bench`) takes about 0.4 s instead of 1.6 s. A resumed scan may repeat up to one chunk per worker instead of one lookup per worker (#184).
 - Live UDP scans reuse sockets instead of opening and closing one per query, which capped throughput near 10k queries per second with nearly all CPU in socket teardown. A 100k-name scan against a loopback server now takes about 2 s instead of 12 s at `-t 200`. A late answer to an earlier query on a reused socket is ignored, as before, and cannot make a lookup count as refused (#180).
 - `-format json` streams its array instead of holding every result and then encoding the whole document, so its peak memory matches `-format jsonl` (a 300k-result run: about 200 MB instead of 420 MB). The output is byte for byte the same (#181).
+- The wordlist is normalized once per run instead of once per `-dL` target: `wordlist.Prepare` normalizes the lines and `Prepared.For` applies only each target's 253-character limit. On a 1M-line list, normalizing takes about 0.5 s instead of 0.8 s with almost no allocations, and each further target about 0.5 ms. Results and counts are unchanged (#182).
 - Tests no longer flake under load: lab end-to-end runs use a 5 s timeout with 3 attempts and fail with a clear message if the lab 2 wildcard probe times out, the resolver-pool spread test counts lookups per member instead of timing the scan (the timing view is now `BenchmarkPoolSpreadsLoad`), and CI runs tests in shuffled order (#167).
 
 ### Fixed
+- On Windows, `-o NUL`, `-stats NUL` and `-sarif NUL` no longer fail with "Incorrect function" and exit 1: device and pipe targets are opened without truncation (#208, thanks @bfs2021).
+- An unreadable `-seeds` file no longer leaves a hidden `.<name>.tmp` file beside the `-o` path (kept locked on Windows until exit): seeds are read before the output file is opened (#212).
 - On Windows, `-simulate-zone` labs and the test DNS server no longer fail to start about a quarter of the time with "no free UDP+TCP port pair": after a failed TCP bind the server retries on random ports instead of the next OS-assigned one, which stayed inside the same reserved port block (#204).
 - A `scan.Config` built directly with `Attempts: 0` now makes one attempt per name instead of passing preflight and then failing every lookup without a query. Scan workers, `scan.Verify` and the wildcard near-miss probes share one resolve path (test hook, simulation, or the trusted resolver), and the `internal/dns` lookup helpers take a `dns.Lookup` value (resolver, timeout, attempts, types, logger) instead of long positional parameter lists, so a swapped attempts/types argument no longer compiles (#163).
+
+### Security
+- The GitHub Action checks the downloaded release archive's build provenance with `gh attestation verify` as well as its `checksums.txt`, since an archive and its checksums file could be replaced together. The Pages workflow grants `pages: write` and `id-token: write` only to the job that deploys, not to the whole workflow (#210).
 
 ## [0.10.0] - 2026-11-08
 
@@ -330,3 +336,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent subdomain enumeration using goroutines
 - DNS resolution with configurable timeout
 - Command-line flags for wordlist, concurrency, and timeout
+
+[Unreleased]: https://github.com/TMHSDigital/subenum/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/TMHSDigital/subenum/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/TMHSDigital/subenum/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/TMHSDigital/subenum/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/TMHSDigital/subenum/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/TMHSDigital/subenum/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/TMHSDigital/subenum/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/TMHSDigital/subenum/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/TMHSDigital/subenum/releases/tag/v0.4.0
