@@ -32,7 +32,7 @@
 | `-resume <string>` | - | Resume an interrupted run from its state file (no other arguments) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
 | `-retry-inconclusive` {% include unreleased.html flag="retry-inconclusive" %} | - | After each scan, look up once more (against -dns-server) every name that timed out, was refused or failed; names it resolves are reported, but not expanded by -recursive |
-| `-sarif <string>` | - | Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME in -type) |
+| `-sarif <string>` | - | Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME or NS in -type) |
 | `-seed <uint>` | - | In simulation mode, seed for reproducible results (0 = random; the seed used is printed) |
 | `-seeds <string>` | - | Results file (any -format) whose names also seed -permute; implies -permute |
 | `-show-records` | - | In text format, append each result's records (TYPE=value) |

@@ -244,7 +244,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.retryIncon, "retry-inconclusive", false, "After each scan, look up once more (against -dns-server) every name that timed out, was refused or failed; names it resolves are reported, but not expanded by -recursive")
 	fs.StringVar(&f.inconFile, "inconclusive", "", "Write the names still without an answer (timeout, refused, other) to this file, one per line, to rescan with -w")
 	fs.StringVar(&f.statsFile, "stats", "", "Write a JSON run-quality report (outcomes, queries sent, verdict) to this file")
-	fs.StringVar(&f.sarifFile, "sarif", "", "Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME in -type)")
+	fs.StringVar(&f.sarifFile, "sarif", "", "Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME or NS in -type)")
 	fs.StringVar(&f.exclude, "exclude", "", "Comma-separated out-of-scope names and *.parent patterns; never queried or expanded")
 	fs.StringVar(&f.excludeFile, "exclude-file", "", "File of out-of-scope names and *.parent patterns, one per line (# comments allowed)")
 	fs.StringVar(&f.providersFile, "takeover-providers", "", "File of takeover-prone services, one \"<suffix> <name>\" per line (.example-cdn.net example-cdn; # comments allowed; name - removes a suffix), added to the built-in list for takeover hints")

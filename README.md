@@ -94,8 +94,8 @@ Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://
 | :--- | :--- |
 | Worker Pool | Spawn N goroutines for parallel DNS resolution with a configurable concurrency ceiling |
 | DNS Engine | Resolve subdomains against any DNS server with per-query timeouts and retry backoff |
-| Wildcard Detection | Double-probe check before scanning; aborts early unless `-force` is set. With `-force`, answers that match the wildcard fingerprint are dropped |
-| Scan Accounting | Every query is counted as resolved, nxdomain, timeout, refused, or other. After 200 queries a >20% infrastructure failure rate aborts unless `-no-abort` is set |
+| Wildcard Detection | Multi-probe fingerprint before scanning (5 probes, up to 128 for rotating pools); aborts early unless `-force` is set. With `-force`, answers that match the wildcard fingerprint are dropped |
+| Scan Accounting | Every query is counted as resolved, nxdomain, timeout, refused, or other. After 200 queries a >20% infrastructure failure rate aborts unless `-no-abort` is set; `-auto-rate` slows down instead, until it cannot slow down further |
 | Query Cap | `-max-queries` stops admitting work. Recursive scans warn about the theoretical ceiling and refuse to start above 1e7 jobs unless `-max-queries` or `-force` is set |
 | Graceful Shutdown | Trap SIGINT/SIGTERM, drain in-flight workers, flush partial results |
 | Input Validation | RFC-compliant domain syntax and strict `ip:port` format enforcement |
@@ -104,7 +104,7 @@ Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
 | Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), streaming `jsonl`, or `csv` via `-format`; `-show-records` adds record values to text output |
 | Rate Limiting | Cap DNS queries per second on the wire with `-rate`: every record type, retry and wildcard probe takes a slot, and queueing never eats into `-timeout` |
-| Record Types | Look up and filter by `A`, `AAAA`, or `CNAME` records with `-type` |
+| Record Types | Look up and filter by `A`, `AAAA`, `CNAME`, `NS`, `MX` or `TXT` records with `-type` |
 | Recursive Enumeration | Enumerate subdomains of discovered subdomains with `-recursive` and a `-depth` cap, with loop and duplicate protection |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
 | Go library | `pkg/subenum` embeds the same engine in other programs: `Scan` for a finished run, `Run` to stream events |
@@ -267,7 +267,7 @@ make help           # list all targets
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
 | `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
 | `-auto-rate` | `false` | When more than 20% of the last 200 lookups failed, halve the query rate (from the rate reached so far when `-rate` is 0) and keep going, with a `rate` notice; speed back up by a quarter at a time, to the rate it started from, once a window of lookups is healthy. Only after 6 back-offs, or at 5 queries/s, does the reliability guard abort. The report counts `rate_backoffs` and the `final_rate`. Pairs well with `-retry-inconclusive`, which retries the names that failed while the resolver was overloaded |
-| `-max-queries <n>` | `0` | Max candidate names to test (0 = unlimited). Each name sends one query per record type per attempt (`CNAME` costs two) |
+| `-max-queries <n>` | `0` | Max candidate names to test (0 = unlimited). Each name sends one query per record type per attempt (`CNAME` costs three) |
 | `-max-duration <d>` | `0` | Time budget for the whole run, e.g. `20m` (0 = unlimited). Then no new names are tested, lookups already under way finish, and the run ends normally with its results, report (`stopped_by: "duration"`) and a `degraded` verdict. Under `-dL` it covers all targets |
 | `-retry-inconclusive` | `false` | After each scan, look up once more (against `-dns-server`, never the `-r` pool) every name that timed out, was refused or failed. An answer replaces the first outcome in the counts; a name that resolves is reported, but not expanded by `-recursive`. Skipped after an abort, an interrupt or once `-max-duration` runs out. The report counts `retried` and `recovered` |
 | `-inconclusive <file>` | n/a | Write the names still without an answer (timeout, refused, other) to this file, one per line, sorted, so a later run can retry them with `-w <file>` |
@@ -294,7 +294,7 @@ make help           # list all targets
 | `-exclude <list>` | n/a | Comma-separated out-of-scope names: exact (`vpn.example.com`) or `*.parent` (every name below `parent`, not `parent` itself). Excluded names are never queried, probed or expanded, and are counted as `excluded` |
 | `-exclude-file <file>` | n/a | Same patterns, one per line (`#` comments allowed), e.g. a bug-bounty program's out-of-scope list |
 | `-stats <file>` | n/a | Write a JSON run-quality report (outcomes, queries sent, verdict); see [Run-quality report](#run-quality-report) |
-| `-sarif <file>` | n/a | Write takeover candidates as SARIF 2.1.0 for GitHub code scanning; needs CNAME in `-type` |
+| `-sarif <file>` | n/a | Write takeover candidates as SARIF 2.1.0 for GitHub code scanning; needs CNAME or NS in `-type` |
 | `-takeover-providers <file>` | n/a | Extra takeover-prone services for the `provider:` hint, one `<suffix> <name>` per line (`.example-cdn.net example-cdn`; `#` comments allowed). They are added to the built-in list; an entry for a listed suffix replaces it, and a name of `-` removes the suffix. The longest matching suffix wins. See [Subdomain takeover hints](#subdomain-takeover-hints) |
 | `-takeover-providers-only` | `false` | Use only the `-takeover-providers` file, without the built-in list |
 | `-tui` | `false` | Launch the interactive Terminal UI |
@@ -411,7 +411,7 @@ Settings you repeat on every run can live in a config file or the environment. P
 ```
 
 - The config file is `config.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows), or the path in `SUBENUM_CONFIG`. Keys are flag names; values are strings, numbers or booleans, and `exclude` and `type` also take a list of strings.
-- Each flag also reads `SUBENUM_<FLAG>`, upper-cased with dashes as underscores: `SUBENUM_DNS_SERVER`, `SUBENUM_RATE`, `SUBENUM_T`.
+- Each flag also reads `SUBENUM_<FLAG>`, upper-cased with dashes as underscores: `SUBENUM_DNS_SERVER`, `SUBENUM_RATE`, `SUBENUM_T`. Mode flags (`tui`, `version`, `print-config`, `dry-run`, `resume`) are command-line only.
 - The TUI (`-tui`) starts its form from these values too, and from flags and the domain given with `-tui` on the command line, over the values it remembers from its last session.
 - `subenum -print-config` shows every effective setting and where it came from (`flag`, `env`, `config` or `default`). It, `-h` and `-version` still work when a value is bad, so you can find it; a scan refuses to start and names every bad value.
 
@@ -492,7 +492,7 @@ The provider list is built in, and `-takeover-providers <file>` extends it witho
 `-sarif takeovers.sarif` also writes the candidates as a SARIF 2.1.0 log, one rule per kind of finding and a stable fingerprint per name, so GitHub code scanning can track, triage and dismiss them in the Security tab. Upload it from a scheduled workflow (see [Monitoring](docs/monitoring.md)) with `github/codeql-action/upload-sarif` and `security-events: write`.
 
 > [!IMPORTANT]
-> Takeover markers are DNS-only hints. subenum makes no HTTP requests; a `provider:` match is often a perfectly healthy service. Verify every candidate by hand, and only against targets you are authorized to test.
+> Takeover markers are DNS-only hints. subenum sends no HTTP requests to the candidates; a `provider:` match is often a perfectly healthy service. Verify every candidate by hand, and only against targets you are authorized to test.
 
 ### Internal addresses
 
@@ -666,6 +666,7 @@ subenum/
 │   ├── advanced_usage.md
 │   └── demo.sh
 ├── internal/
+│   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/                     # Certificate Transparency (crt.sh) client for -ct
 │   ├── dns/                    # Resolution, transports (UDP/TCP, DoT, DoH), resolver pool, wildcard checks
 │   ├── dnsserver/              # Scriptable local DNS server (labs, tests)
