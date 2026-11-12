@@ -157,7 +157,8 @@ func diffPrefix(change string) string {
 }
 
 // SetTakeoverColumn adds a takeover_candidate column to CSV output. The CLI
-// sets it when CNAME records are requested, the only case that yields hints.
+// sets it when CNAME or NS records are requested, the only cases that yield
+// hints (see dns.HintsTakeover).
 func (w *Writer) SetTakeoverColumn(on bool) { w.takeoverColumn = on }
 
 // SetSeed records the simulation seed for the simulated-results file header.

@@ -685,8 +685,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// completed. Workers send found parents on enqueue (before signalling
 	// completed) and the dispatcher expands them into depth-capped children.
 	// Jobs go out in small chunks and both hand-off channels are buffered,
-	// so workers and the dispatcher rarely block on each other (#184); each
-	// job still reports its own completion as soon as it is done.
+	// so workers and the dispatcher rarely block on each other (#184); a
+	// worker reports the completions of a whole chunk in one send once the
+	// chunk is done.
 	workers := workerCount(cfg, maxDepth)
 	jobs := make(chan []job, handoffPerWorker*workers)
 	enqueue := make(chan job)
