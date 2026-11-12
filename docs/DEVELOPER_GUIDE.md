@@ -102,6 +102,7 @@ subenum/
 │   ├── demo.sh                 # Quick demo script
 │   └── labs/                   # -simulate-zone scenarios and wordlist for docs/labs.md
 ├── internal/
+│   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/
 │   │   ├── ct.go               # Certificate Transparency (crt.sh) client for -ct
 │   │   └── ct_test.go
@@ -111,7 +112,8 @@ subenum/
 │   │   ├── transport.go        # UDP (TCP fallback), DNS over TLS, DNS over HTTPS dialers
 │   │   ├── pool.go             # Pool: the -r resolver pool (benching, canaries, second opinions)
 │   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
-│   │   ├── takeover.go         # TakeoverProvider, TakeoverHint (dangling CNAMEs)
+│   │   ├── takeover.go         # TakeoverProvider, TakeoverHint (dangling CNAMEs and NS delegations)
+│   │   ├── scope.go            # AddressScope, InternalScope: non-public address scopes
 │   │   ├── simulate.go         # Simulation.Resolve (seeded synthetic DNS)
 │   │   ├── testdns_test.go     # Table-driven wrapper over internal/dnstest
 │   │   └── *_test.go           # Resolver, transport, pool, rate, takeover, simulation tests
@@ -124,13 +126,15 @@ subenum/
 │   │   ├── summary.go          # Run-quality summary: JSONL summary line, -stats file
 │   │   ├── sarif.go            # -sarif: takeover candidates as SARIF 2.1.0
 │   │   ├── eta.go              # Progress ETA estimate
+│   │   ├── log.go              # -log-format: text or JSON diagnostics on stderr
 │   │   └── *_test.go           # Writer, file, ETA tests
 │   ├── permute/                # -permute candidate generation
 │   ├── report/                 # Run-quality report built from finished scans
 │   ├── scan/
 │   │   ├── options.go          # Options: settings shared by CLI and TUI (Validate, Config)
 │   │   ├── runner.go           # Scan engine: Config, Event/NoticeKind, Stats, Run
-│   │   ├── dispatcher.go       # Lazy candidate generation, budgets, resume watermark
+│   │   ├── dispatcher.go       # Lazy candidate generation in chunks, budgets, resume watermark
+│   │   ├── autorate.go         # -auto-rate back-off controller
 │   │   ├── scope.go            # -exclude patterns (ValidateExcludes, IsExcluded)
 │   │   ├── settings.go         # Setting tokens in engine messages, rendered per front end
 │   │   ├── verdict.go          # Run-quality verdicts: complete, degraded, unreliable
@@ -148,7 +152,7 @@ subenum/
 │   │   ├── punycode.go         # IDN → punycode (A-label) conversion
 │   │   └── *_test.go           # Validator and punycode tests
 │   └── wordlist/
-│       ├── reader.go           # ReadLines, Normalize, Build, LoadWordlist
+│       ├── reader.go           # ReadLines, ReadLinesFrom, Normalize, Build, Prepare/For, LoadWordlist
 │       └── *_test.go           # Wordlist reading, normalization and dedup tests
 ├── pkg/
 │   └── subenum/                # Public Go library API: Config, Scan, Run, Event, Stats
@@ -166,6 +170,7 @@ subenum/
 ├── main_config.go              # Config file and SUBENUM_* environment defaults, -print-config
 ├── main_ct.go                  # -ct: Certificate Transparency names as candidates
 ├── main_diff.go                # -diff / -diff-records against a previous results file
+├── main_dryrun.go              # -dry-run: the scan plan and its cost, no queries sent
 ├── main_lab.go                 # -simulate-zone: serve a lab scenario locally
 ├── main_permute.go             # -permute / -seeds: the permutation pass
 ├── main_resume.go              # -resume / -state: save and replay an interrupted run
@@ -371,7 +376,7 @@ The following capabilities are implemented and available today:
 
 *   **Terminal UI** (`-tui`): a Bubble Tea form-based config screen and live-scrolling results view, no arguments required to launch. Last-used values persist across sessions in `last.json` in the user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows).
 *   **Output Formats** (`-format text|json|jsonl|csv`): on stdout and in the atomically replaced output file (`-o`); `jsonl` streams one object per line.
-*   **Record Types** (`-type A,AAAA,CNAME`): per-type lookups filtered to the requested types.
+*   **Record Types** (`-type A,AAAA,CNAME,NS,MX,TXT`): per-type lookups filtered to the requested types.
 *   **Recursive Enumeration** (`-recursive` with `-depth`): enumerate subdomains of discovered subdomains, with loop and duplicate protection and per-branch wildcard checks.
 *   **Rate Limiting** (`-rate`): cap DNS queries per second on the wire across the worker pool, counting every record type, retry and wildcard probe.
 *   **Multiple Targets** (`-dL`): scan a list of apex domains, each as an independent scan, with exit code 3 when only some targets fail.
@@ -380,6 +385,6 @@ The following capabilities are implemented and available today:
 
 See `docs/ROADMAP.md` for the next-pass list. Areas still open:
 
-*   **Additional record types**: `dns.ResolveTypes` covers A, AAAA, CNAME, NS, MX and TXT; a new type is a case in `lookupType`, an entry in `supportedTypes` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
+*   **Additional record types**: `Lookup.ResolveTypes` covers A, AAAA, CNAME, NS, MX and TXT; a new type is a case in `lookupType`, an entry in `supportedTypes` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 
