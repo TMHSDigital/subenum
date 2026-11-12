@@ -30,9 +30,11 @@ if err != nil {
     // stats still hold what was gathered.
 }
 for _, r := range results {
-    fmt.Println(r.Name, r.Records, r.Takeover, r.Internal)
+    fmt.Println(r.Name, r.Records, r.Takeover)
 }
 ```
+
+`Takeover` is a lead to check by hand: `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, or `dangling-ns` for a delegation to a name server that does not resolve. `Internal`{% include unreleased.html library="Internal" %} names the non-public scope (`private`, `loopback`, `link-local`, `cgnat`, `unspecified`) of an address a public name answers with, and is empty when every address is public.
 
 Every zero value in `Config` takes the same default as the CLI, so `Config{Domain: "example.com"}` is a complete configuration that uses the bundled 5,000-word list.
 
@@ -81,15 +83,16 @@ The result is sorted and duplicate-free, and names that are not valid in DNS are
 | `Words` | `DefaultWords()` | Labels to try, or dotted paths such as `api.eu`. |
 | `Resolver` | `8.8.8.8:53` | Trusted server: `ip:port`, `tls://host`, or `https://host/path`. |
 | `ResolverPool` | none | Extra plain-UDP resolvers. Every hit is re-checked against `Resolver`. |
+| `RatePerResolver`{% include unreleased.html library="RatePerResolver" %} | unlimited | Queries per second to each `ResolverPool` member. `Rate` still caps the total, so the stricter limit wins. |
 | `Concurrency` | `100` | Workers looking up names at once. |
 | `Timeout` | `1s` | Bound on one lookup of one record type. |
 | `Attempts` | `1` | Tries per name. Only failures are retried, never NXDOMAIN. |
 | `Rate` | unlimited | Queries per second on the wire, counting every type, retry and probe. |
-| `Types` | `A`, `AAAA` | Record types. `CNAME` populates `Result.Takeover`. |
+| `Types` | `A`, `AAAA` | Record types: `A`, `AAAA`, `CNAME`, and on main also `NS`, `MX` and `TXT`. `CNAME` and `NS` populate `Result.Takeover`. |
 | `Recursive`, `Depth` | off, `1` | Enumerate again under each name found. |
 | `MaxQueries` | unlimited | Cap on candidate names tested. |
 | `MaxDuration`{% include unreleased.html library="MaxDuration" %} | unlimited | Time budget from the start of `Run`. Then no new names are tested and the rest are counted in `Stats.Skipped`, with `Stats.Expired` set. |
-| `AutoRate`{% include unreleased.html library="AutoRate" %} | false | When over a fifth of the last 200 lookups fail, halve the rate and keep going (a `NoticeRate` event says so), and raise it again once lookups succeed, instead of letting the reliability guard abort. `Stats.RateBackoffs` and `Stats.FinalRate` report it. |
+| `AutoRate`{% include unreleased.html library="AutoRate" %} | false | When over a fifth of the last 200 lookups fail, halve the rate and keep going (a `NoticeRate` event says so), and raise it again once lookups succeed. It halves up to six times and not below 5 per second; only when it can slow down no further does the reliability guard apply. `Stats.RateBackoffs` and `Stats.FinalRate` report it. |
 | `TakeoverProviders`{% include unreleased.html library="TakeoverProviders" %} | built-in list | Extra takeover-prone services (`{Suffix: ".example-cdn.net", Name: "example-cdn"}`) for `provider:` hints, added to the built-in list; a `Name` of `-` removes a suffix. `TakeoverProvidersOnly` uses them alone. |
 | `RetryInconclusive`{% include unreleased.html library="RetryInconclusive" %} | false | Once every candidate is tried, look up each name that timed out, was refused or failed once more against `Resolver`. Names it resolves are reported but not expanded by `Recursive`. `Stats.Retried` and `Stats.Recovered` count the pass; `Stats.Inconclusive` lists the names still without an answer. |
 | `Exclude` | none | Out-of-scope names and `*.parent` branches, never queried. |
@@ -100,7 +103,7 @@ The result is sorted and duplicate-free, and names that are not valid in DNS are
 
 ## Accounting
 
-`Stats` puts each candidate name into exactly one outcome: `Found`, `NXDomain`, `Timeout`, `Refused`, `Other` or `WildcardFiltered`. Alongside are `QueriesSent`, `Skipped` (left untested by `MaxQueries`), `Excluded`, and the resolver-pool counters `PoolHits`, `Confirmed` and `Unconfirmed`. `Aborted` means the reliability guard stopped the scan, so the negatives mean nothing.
+`Stats` puts each candidate name into exactly one outcome: `Found`, `NXDomain`, `Timeout`, `Refused`, `Other` or `WildcardFiltered`. Alongside are `QueriesSent`, `Skipped` (left untested by `MaxQueries` or `MaxDuration`, with `Expired` set for the latter), `Excluded`, the result counters `Takeover` and `Internal`, and the resolver-pool counters `PoolHits`, `Confirmed` and `Unconfirmed`. `Aborted` means the reliability guard stopped the scan, so the negatives mean nothing. `Wildcard` and `WildcardFingerprint` describe a wildcard zone. `RetryInconclusive` fills `Retried`, `Recovered` and `Inconclusive` (the names still without an answer), and `AutoRate` fills `RateBackoffs` and `FinalRate`. `Total()` sums the outcomes.
 
 ## Testing your integration
 

@@ -21,7 +21,9 @@ action:
 # pkg/subenum identifiers
 library:
   - AutoRate
+  - Internal
   - MaxDuration
   - Permutations
+  - RatePerResolver
   - RetryInconclusive
   - TakeoverProviders
