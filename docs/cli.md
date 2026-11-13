@@ -11,11 +11,12 @@ subenum [flags] <domain>
 subenum [flags] -dL domains.txt
 subenum completion bash|zsh|fish|powershell
 subenum man
+subenum mcp [-allow domains] [flags]
 ```
 
 Flags may appear before or after the domain. The domain is normalized to its host name before scanning: a URL's scheme and path, a `:port` and a leading `*.` are removed and an internationalized name becomes punycode, so `https://app.example.com/login` scans `app.example.com`, not `example.com`.
 
-`completion` prints a shell completion script and `man` prints the man page, both generated from the same flags; release archives ship them under `completions/` and `man/`.
+`completion` prints a shell completion script and `man` prints the man page, both generated from the same flags; release archives ship them under `completions/` and `man/`. `mcp` serves subenum to AI agents over the Model Context Protocol, within the domains, resolver and budgets you give it; see [AI agents (MCP)](mcp.html) for its flags.
 
 ## Flags
 

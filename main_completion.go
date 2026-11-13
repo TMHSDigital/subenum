@@ -32,7 +32,7 @@ var valueChoices = map[string][]string{
 }
 
 // subcommands are the non-scan words subenum accepts as its first argument.
-var subcommands = []string{"completion", "man"}
+var subcommands = []string{"completion", "man", "mcp"}
 
 type flagInfo struct {
 	name, arg, usage string

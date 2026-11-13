@@ -123,6 +123,7 @@ subenum/
 │   ├── dnsserver/              # Scriptable loopback DNS server (UDP, TCP, DoT, DoH)
 │   ├── dnstest/                # dnsserver for tests: stops on cleanup, fails the test on error
 │   ├── labzone/                # -simulate-zone scenario parser and answer logic
+│   ├── mcp/                    # MCP server over stdio (JSON-RPC, tools only) for subenum mcp
 │   ├── output/
 │   │   ├── writer.go           # Thread-safe output (results→stdout, rest→stderr)
 │   │   ├── file.go             # File: atomically replaced -o results file
@@ -177,6 +178,7 @@ subenum/
 ├── main_diff.go                # -diff / -diff-records against a previous results file
 ├── main_dryrun.go              # -dry-run: the scan plan and its cost, no queries sent
 ├── main_lab.go                 # -simulate-zone: serve a lab scenario locally
+├── main_mcp.go                 # subenum mcp: MCP tools, allow-list and caps
 ├── main_permute.go             # -permute / -seeds: the permutation pass
 ├── main_resume.go              # -resume / -state: save and replay an interrupted run
 ├── main_summary.go             # Run-quality report assembly (-stats, JSONL summary line)

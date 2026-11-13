@@ -39,6 +39,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/ct` | Looks up subdomain names in Certificate Transparency logs through crt.sh |
 | `internal/passive` | The `Source` interface behind `-sources`, the source registry, and the Wayback Machine source |
 | `internal/labzone` | Parses `-simulate-zone` scenario files for lab mode |
+| `internal/mcp` | Minimal Model Context Protocol server (JSON-RPC over stdio, tools only) behind `subenum mcp` |
 | `internal/dnsserver` | Scriptable local DNS server backing lab mode and the hermetic tests |
 | `internal/dnstest` | Runs `internal/dnsserver` for tests: stopped on cleanup, listen failures fail or skip the test |
 | `internal/tui` | Bubble Tea terminal UI |
@@ -56,6 +57,7 @@ main_axfr.go                   - -axfr: zone transfer names as extra candidates
 main_diff.go                   - -diff / -diff-records: compare against a previous results file
 main_dryrun.go                 - -dry-run: print the scan plan and its cost without sending queries
 main_lab.go                    - -simulate-zone: serve a lab scenario on a loopback DNS server
+main_mcp.go                    - subenum mcp: the lab_scan, scan and explain_stats tools, the allow-list and caps
 main_permute.go                - -permute / -seeds: the permutation pass
 main_resume.go                 - -resume / -state: save and replay an interrupted run
 main_summary.go                - assemble the run-quality report (-stats, JSONL summary line)
@@ -90,6 +92,7 @@ internal/diff/diff.go          - Name, RecordsChanged: the comparison behind -di
 internal/ct/ct.go              - Client.Names: crt.sh lookup
 internal/passive/passive.go    - Source, Known, ParseList, New: the -sources registry
 internal/passive/wayback.go    - Wayback.Names: hostnames from the Wayback Machine's CDX index
+internal/mcp/mcp.go            - Server.Serve: MCP over stdio (initialize, ping, tools/list, tools/call, cancellation)
 pkg/subenum/sources.go         - Source, CertificateTransparency, WaybackMachine: Config.Sources
 internal/labzone/labzone.go    - Load, Parse: lab scenario files
 internal/dnsserver/server.go   - Listen: scriptable loopback DNS server

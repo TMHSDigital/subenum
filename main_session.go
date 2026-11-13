@@ -68,7 +68,10 @@ type session struct {
 }
 
 func runWith(a runArgs) (code int) {
-	// completion, man (#88): handled before flag parsing.
+	// completion, man (#88) and mcp (#131): handled before flag parsing.
+	if len(a.args) > 0 && a.args[0] == "mcp" {
+		return runMCP(a.args[1:], a.stdin, a.stdout, a.stderr)
+	}
 	if code, ok := runSubcommand(a.args, a.stdout, a.stderr); ok {
 		return code
 	}

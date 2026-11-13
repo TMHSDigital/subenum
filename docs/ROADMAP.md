@@ -32,8 +32,7 @@ Planned features that make results more trustworthy and the tool easier to get.
 Ideas we want, with no date attached.
 
 - Walk NSEC-signed zones (`-nsec-walk`). `-axfr` already tries zone transfers ([#85](https://github.com/TMHSDigital/subenum/issues/85)) and reports walkable zones ([#234](https://github.com/TMHSDigital/subenum/issues/234)).
-- Discoverability: demo GIF and launch posts ([#74](https://github.com/TMHSDigital/subenum/issues/74)).
-- An MCP server mode for budgeted scans by AI agents ([#131](https://github.com/TMHSDigital/subenum/issues/131)).
+- Discoverability: demo GIF and launch posts ([#74](https://github.com/TMHSDigital/subenum/issues/74)), and MCP registry listings for `subenum mcp`.
 
 ## What 1.0 means
 

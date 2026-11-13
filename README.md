@@ -613,6 +613,16 @@ Every zero value in `Config` takes the same default as the CLI, so `Config{Domai
 
 API reference and runnable examples: [pkg.go.dev/github.com/TMHSDigital/subenum/pkg/subenum](https://pkg.go.dev/github.com/TMHSDigital/subenum/pkg/subenum). The package follows semantic versioning from v1.0.0; until then it may change between minor releases, while the CLI stays stable.
 
+### AI agents (MCP)
+
+`subenum mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio, for AI agents and assistants:
+
+```bash
+claude mcp add subenum -- subenum mcp -allow example.com
+```
+
+It offers `lab_scan` (the lab scenarios, on a local DNS server, always safe), `scan` (only for domains in `-allow` and their subdomains) and `explain_stats` (reads a `-stats` report back in plain language). The operator sets the resolver, rate and budgets; the model can ask for a smaller `max_queries`, never a larger one, and can never pick a resolver. Every scan returns a verdict that tells the agent whether a missing name can be trusted to be absent. See the [MCP page](https://tmhsdigital.github.io/subenum/mcp.html).
+
 <br>
 
 <details>
