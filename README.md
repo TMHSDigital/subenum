@@ -265,6 +265,7 @@ make help           # list all targets
 | `-dns-server <addr>` | `8.8.8.8:53` | DNS server: `ip:port` (UDP, TCP fallback), `tls://host[:853]` (DNS over TLS) or `https://host/path` (DNS over HTTPS); validated on startup |
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
 | `-axfr` | `false` | Try a zone transfer (AXFR) from each of the target's name servers first; names it gives become candidates and `-permute` seeds. Also reports a zone that DNSSEC NSEC lets anyone walk |
+| `-sources <list>` | n/a | Keyless passive sources whose names become candidates and `-permute` seeds: `ct` (crt.sh), `wayback` (Wayback Machine). One HTTPS request per source and target |
 | `-ct` | `false` | Add names from Certificate Transparency logs (crt.sh; one HTTPS request per target, no API key) as candidates and `-permute` seeds |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
 | `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
@@ -447,6 +448,14 @@ subenum -ct -permute example.com
 ```
 
 The run-quality report counts them per target (`ct_names`). If crt.sh is down or slow, the scan warns, records `ct_error` and carries on with the wordlist. The CT request goes to crt.sh, not to the target and not through `-rate`; lab mode (`-simulate-zone`) refuses `-ct`, and a resumed scan reuses the names the interrupted run fetched.
+
+`-ct` is one of several keyless passive sources, chosen with `-sources`: `ct` (as `-ct`) and `wayback`, the hostnames in the Wayback Machine's index of archived URLs, which often remembers hosts long gone from DNS and certificates. Each is one HTTPS request per target, and each name is still looked up.
+
+```bash
+subenum -sources ct,wayback example.com
+```
+
+The report has one `sources` entry per source, with the names it added or the `error` it hit; a failed source is a warning, and the scan goes on with the others. Simulation ignores `-sources`, lab mode refuses it, and a resumed scan reuses what each source returned.
 
 ### Zone transfers: the whole zone in one query
 
@@ -688,6 +697,7 @@ subenum/
 │   ├── dnstest/                # Runs dnsserver for hermetic tests
 │   ├── labzone/                # Lab scenario file parser
 │   ├── output/                 # Thread-safe Writer, results file, SARIF and summary writers
+│   ├── passive/                # -sources: keyless passive name sources (Wayback Machine; crt.sh is in ct/)
 │   ├── permute/                # -permute candidate generation
 │   ├── report/                 # Run-quality report built from finished scans
 │   ├── scan/                   # Scan engine: Config, Event types, Run()

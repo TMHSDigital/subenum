@@ -19,6 +19,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/tui"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -299,6 +300,15 @@ func (s *session) configure() (domain string, code int, ok bool) {
 	if f.providersFile != "" && !slices.Contains(recordTypes, "CNAME") {
 		out.Info("Note: -takeover-providers matches CNAME targets; add -type A,AAAA,CNAME")
 	}
+	sources, err := passive.ParseList(f.sources)
+	if err != nil {
+		out.Error("-sources: %v", err)
+		return "", exitUsage, false
+	}
+	if f.ct && !slices.Contains(sources, "ct") {
+		sources = append([]string{"ct"}, sources...) // -ct is -sources ct; ct runs first
+	}
+	s.in.sources = sources
 
 	// Arguments are checked before any banner is printed or the resolver list
 	// is read, so a usage error is the first thing a user sees (#120).
@@ -337,11 +347,19 @@ func (s *session) announceSimulation() {
 		out.Info("Simulation seed: %d (pass -seed %d to reproduce these results)", f.seed, f.seed)
 		out.Info("")
 	}
-	if f.ct {
-		// -ct is an HTTPS request to crt.sh: it would send the target
-		// off the machine despite the banner above (#150).
-		out.Info("Note: -ct is ignored in simulation mode, which sends nothing off the machine")
-		f.ct = false
+	if len(s.in.sources) > 0 {
+		// Passive sources are HTTPS requests (crt.sh, the Wayback Machine):
+		// they would send the target off the machine despite the banner
+		// above (#150, #193).
+		which := "-sources is"
+		switch {
+		case f.ct && f.sources == "":
+			which = "-ct is"
+		case f.ct:
+			which = "-ct and -sources are"
+		}
+		out.Info("Note: %s ignored in simulation mode, which sends nothing off the machine", which)
+		f.ct, s.in.sources = false, nil
 	}
 	if f.axfr {
 		out.Info("Note: -axfr is ignored in simulation mode, which sends no DNS queries")
@@ -608,15 +626,16 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil}
 	s.entryDigests[i] = entryDigest(entries)
 	saved := s.resume.target(target)
-	var ctInfo targetCT
 	seeds := s.seeds
-	if s.f.ct {
-		ctInfo = certificateTransparency(ctx, target, saved, out)
+	// Passive sources (-ct, -sources) propose names; each is still looked up
+	// like a wordlist entry (#130, #193).
+	sourceInfo := passiveNames(ctx, s.in.sources, target, saved, out)
+	for _, src := range sourceInfo {
 		var added int
-		entries, added = withCTEntries(entries, ctInfo.names, target)
-		seeds = withCTSeeds(s.seeds, ctInfo.names, target)
-		if ctInfo.fetched {
-			out.Info("Certificate Transparency: %d names under %s, %d of them new candidates", len(ctInfo.names), target, added)
+		entries, added = withCTEntries(entries, src.names, target)
+		seeds = withCTSeeds(seeds, src.names, target)
+		if src.fetched {
+			out.Info("%s: %d names under %s, %d of them new candidates", passive.Labels[src.source], len(src.names), target, added)
 		}
 	}
 	var axfrInfo targetAXFR
@@ -669,7 +688,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			res.failed = true
 		}
 	}
-	res.ct = ctInfo
+	res.sources = sourceInfo
 	res.axfr = axfrInfo
 	return s.recordTarget(i, res)
 }

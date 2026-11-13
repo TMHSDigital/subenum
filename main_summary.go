@@ -34,7 +34,11 @@ func buildSummary(s *session, elapsed time.Duration) output.Summary {
 
 func targetSummary(domain, status string, res targetResult) output.TargetSummary {
 	t := report.Target(domain, status, res.err, res.done, res.final, scan.FlagName)
-	t.CTNames, t.CTError = len(res.ct.names), res.ct.err
+	ct := sourceByName(res.sources, "ct")
+	t.CTNames, t.CTError = len(ct.names), ct.err
+	for _, src := range res.sources {
+		t.Sources = append(t.Sources, output.SourceSummary{Name: src.source, Names: len(src.names), Error: src.err})
+	}
 	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
 	t.ZoneDenial = string(res.axfr.denial)
 	t.QueriesSent += res.axfr.queries // the NS and address lookups and the transfers (#85)

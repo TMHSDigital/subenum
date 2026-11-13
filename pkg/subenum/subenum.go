@@ -129,6 +129,14 @@ type Config struct {
 	// still without an answer, with or without it.
 	RetryInconclusive bool
 
+	// Sources propose extra candidates before the scan, such as
+	// CertificateTransparency() and WaybackMachine(): their names are added
+	// after Words and looked up like any other, so a stale name is never
+	// reported. Each is asked once; one that fails sends a KindNotice event
+	// with NoticeSource and the scan goes on without it. Ignored when
+	// Simulate is set.
+	Sources []Source
+
 	// TakeoverProviders adds takeover-prone services to the built-in list
 	// that Result.Takeover's "provider:<name>" hints come from. An entry for
 	// a suffix already listed replaces it, and a Name of "-" removes the
@@ -341,6 +349,9 @@ const (
 	NoticeSkip
 	// NoticeRate means AutoRate changed the query rate.
 	NoticeRate
+	// NoticeSource means a Config.Sources lookup failed; the scan went on
+	// without that source's names.
+	NoticeSource
 )
 
 // String names a notice category.
@@ -356,6 +367,8 @@ func (n Notice) String() string {
 		return "skip"
 	case NoticeRate:
 		return "rate"
+	case NoticeSource:
+		return "source"
 	}
 	return "none"
 }
@@ -453,12 +466,14 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	in := make(chan scan.Event, 64)
-	go scan.Run(ctx, internal.Config(), in)
-
 	out := make(chan Event, 64)
 	go func() {
 		defer close(out)
+		if len(cfg.Sources) > 0 && !cfg.Simulate {
+			internal.Entries = withSourceNames(ctx, out, cfg.Sources, internal.Domain, internal.Entries)
+		}
+		in := make(chan scan.Event, 64)
+		go scan.Run(ctx, internal.Config(), in)
 		// scan.Run always ends with exactly one EventDone (#99), so the
 		// channel ends with exactly one KindDone too.
 		for ev := range in {

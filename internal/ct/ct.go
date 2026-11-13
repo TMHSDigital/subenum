@@ -34,6 +34,9 @@ type Client struct {
 	Timeout   time.Duration // per lookup; 0 means 60s
 }
 
+// Name is the source's -sources name.
+func (Client) Name() string { return "ct" }
+
 type entry struct {
 	NameValue string `json:"name_value"`
 }

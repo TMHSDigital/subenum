@@ -9,6 +9,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
@@ -93,7 +94,7 @@ func (s *session) dryRun() int {
 	default:
 		s.printDryRun(plans)
 	}
-	if notes := dryRunNotes(f); len(notes) > 0 {
+	if notes := dryRunNotes(f, s.in.sources); len(notes) > 0 {
 		s.out.Info("Not included in the estimate: %s", strings.Join(notes, "; "))
 	}
 	if failed {
@@ -131,10 +132,10 @@ func dryRunDuration(seconds float64) string {
 
 // dryRunNotes names the work a scan may add that a dry run cannot count
 // without sending queries.
-func dryRunNotes(f cliFlags) []string {
+func dryRunNotes(f cliFlags, sources []string) []string {
 	var notes []string
-	if f.ct {
-		notes = append(notes, "-ct names (fetched from crt.sh at scan time)")
+	for _, src := range sources {
+		notes = append(notes, fmt.Sprintf("%s names (fetched at scan time)", passive.Labels[src]))
 	}
 	if f.axfr {
 		notes = append(notes, "-axfr names (a zone transfer from each name server at scan time)")

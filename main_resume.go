@@ -54,6 +54,10 @@ type resumeTarget struct {
 	// so the candidate list is the same (#130).
 	CT        []string `json:"ct,omitempty"`
 	CTFetched bool     `json:"ct_fetched,omitempty"`
+	// Sources holds the names each passive source returned, by -sources
+	// name, for every source whose lookup succeeded (#193). CT is also kept
+	// in CT/CTFetched, as older runs wrote it.
+	Sources map[string][]string `json:"sources,omitempty"`
 	// AXFR holds the names an -axfr zone transfer gave, and AXFRServers the
 	// name servers that allowed it, reused on resume like CT (#85).
 	AXFR        []string `json:"axfr,omitempty"`
@@ -340,8 +344,17 @@ func saveResumeState(s *session) {
 			continue
 		}
 		res := s.results[i]
-		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched,
+		ct := sourceByName(res.sources, "ct")
+		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: ct.names, CTFetched: ct.fetched,
 			AXFR: res.axfr.names, AXFRServers: res.axfr.allowed, AXFRDone: res.axfr.done, Denial: string(res.axfr.denial)}
+		for _, src := range res.sources {
+			if src.fetched {
+				if t.Sources == nil {
+					t.Sources = map[string][]string{}
+				}
+				t.Sources[src.source] = src.names
+			}
+		}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total

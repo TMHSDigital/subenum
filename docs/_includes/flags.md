@@ -40,6 +40,7 @@
 | `-silent` | - | Pipeline mode: bare result names on stdout, and only errors (and a simulation warning) on stderr |
 | `-simulate` | - | Run in simulation mode without actual DNS queries (for testing) |
 | `-simulate-zone <string>` | - | Lab mode: answer every query from this scenario file via a local DNS server, so no traffic leaves the machine (see the Labs page) |
+| `-sources <string>` {% include unreleased.html flag="sources" %} | - | Comma-separated keyless passive sources whose names become candidates and -permute seeds: ct (Certificate Transparency, crt.sh), wayback (Wayback Machine); one HTTPS request per source and target |
 | `-state <string>` | subenum-resume.json | Where an interrupted run saves its state for -resume |
 | `-stats <string>` | - | Write a JSON run-quality report (outcomes, queries sent, verdict) to this file |
 | `-t <int>` | 100 | Number of concurrent workers |

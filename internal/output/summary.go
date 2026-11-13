@@ -89,6 +89,10 @@ type TargetSummary struct {
 	// candidates and seeds; CTError says why the lookup failed (#130).
 	CTNames int    `json:"ct_names,omitempty"`
 	CTError string `json:"ct_error,omitempty"`
+	// Sources has one entry per passive source asked (-ct, -sources): the
+	// names it added as candidates and seeds, or why its lookup failed
+	// (#193). ct_names and ct_error repeat the ct entry.
+	Sources []SourceSummary `json:"sources,omitempty"`
 	// AXFRAllowed lists the name servers that allowed an -axfr zone
 	// transfer (a misconfiguration), AXFRNames counts the names it added as
 	// candidates and seeds, and AXFRError says why no transfer could be
@@ -107,6 +111,13 @@ type TargetSummary struct {
 	Fingerprint []dns.Record `json:"wildcard_fingerprint,omitempty"`
 	Verdict     string       `json:"verdict"`
 	Reason      string       `json:"reason"`
+}
+
+// SourceSummary is one passive source's contribution to a target (#193).
+type SourceSummary struct {
+	Name  string `json:"name"`            // -sources name: ct, wayback
+	Names int    `json:"names"`           // names it added as candidates and seeds
+	Error string `json:"error,omitempty"` // why the lookup failed; the scan went on without it
 }
 
 // PermutationSummary counts a target's -permute pass.

@@ -302,7 +302,7 @@ func TestPrintConfigEffectiveAttempts(t *testing.T) {
 var tuiOmittedFlags = map[string]bool{
 	"tui": true, "print-config": true, "dry-run": true, "version": true, "v": true, "progress": true, "silent": true,
 	"simulate-zone": true, "retries": true, "show-records": true, "max-duration": true, "stats": true,
-	"sarif": true, "exclude-file": true, "permute": true, "ct": true, "axfr": true, "seeds": true, "state": true,
+	"sarif": true, "exclude-file": true, "permute": true, "ct": true, "sources": true, "axfr": true, "seeds": true, "state": true,
 	"diff": true, "diff-records": true, "dL": true, "seed": true, "resume": true, "log-format": true,
 	"retry-inconclusive": true, "inconclusive": true, "takeover-providers": true, "takeover-providers-only": true, "auto-rate": true,
 }

@@ -131,6 +131,7 @@ subenum/
 │   │   ├── eta.go              # Progress ETA estimate
 │   │   ├── log.go              # -log-format: text or JSON diagnostics on stderr
 │   │   └── *_test.go           # Writer, file, ETA tests
+│   ├── passive/                # -sources: Source interface, registry, Wayback Machine source
 │   ├── permute/                # -permute candidate generation
 │   ├── report/                 # Run-quality report built from finished scans
 │   ├── scan/
@@ -171,7 +172,7 @@ subenum/
 ├── main_session.go             # runWith and the per-run session: the -dL target loop
 ├── main_completion.go          # completion and man subcommands
 ├── main_config.go              # Config file and SUBENUM_* environment defaults, -print-config
-├── main_ct.go                  # -ct: Certificate Transparency names as candidates
+├── main_ct.go                  # -ct / -sources: passive source names as candidates
 ├── main_axfr.go                # -axfr: zone transfer names as candidates
 ├── main_diff.go                # -diff / -diff-records against a previous results file
 ├── main_dryrun.go              # -dry-run: the scan plan and its cost, no queries sent

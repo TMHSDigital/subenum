@@ -37,6 +37,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/diff` | Compares two runs' results: new and missing names, changed records (shared by `-diff` and `pkg/subenum`'s `Diff`) |
 | `internal/cliargs` | Parses command lines whose flags may follow positional arguments, shared by subenum and wordlist-gen |
 | `internal/ct` | Looks up subdomain names in Certificate Transparency logs through crt.sh |
+| `internal/passive` | The `Source` interface behind `-sources`, the source registry, and the Wayback Machine source |
 | `internal/labzone` | Parses `-simulate-zone` scenario files for lab mode |
 | `internal/dnsserver` | Scriptable local DNS server backing lab mode and the hermetic tests |
 | `internal/dnstest` | Runs `internal/dnsserver` for tests: stopped on cleanup, listen failures fail or skip the test |
@@ -50,7 +51,7 @@ main.go                        - CLI entry point: run, flag parsing and validati
 main_session.go                - runWith and the session: per-run state, the -dL target loop, -tui dispatch
 main_completion.go             - completion and man subcommands
 main_config.go                 - config file and SUBENUM_* environment defaults, -print-config
-main_ct.go                     - -ct: Certificate Transparency names as extra candidates
+main_ct.go                     - -ct / -sources: passive source names as extra candidates
 main_axfr.go                   - -axfr: zone transfer names as extra candidates
 main_diff.go                   - -diff / -diff-records: compare against a previous results file
 main_dryrun.go                 - -dry-run: print the scan plan and its cost without sending queries
@@ -87,6 +88,9 @@ internal/report/report.go      - New, Target, Finish: the run-quality report
 internal/permute/permute.go    - Generate: permutations of found names
 internal/diff/diff.go          - Name, RecordsChanged: the comparison behind -diff-records and subenum.Diff
 internal/ct/ct.go              - Client.Names: crt.sh lookup
+internal/passive/passive.go    - Source, Known, ParseList, New: the -sources registry
+internal/passive/wayback.go    - Wayback.Names: hostnames from the Wayback Machine's CDX index
+pkg/subenum/sources.go         - Source, CertificateTransparency, WaybackMachine: Config.Sources
 internal/labzone/labzone.go    - Load, Parse: lab scenario files
 internal/dnsserver/server.go   - Listen: scriptable loopback DNS server
 internal/dnstest/dnstest.go    - Start, StartWith, StartTLS: test helpers around dnsserver
