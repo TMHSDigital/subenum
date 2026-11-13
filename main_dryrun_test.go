@@ -76,7 +76,10 @@ func TestDryRunPreflight(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer srv.Close()
-			code, plans := dryRunPlans(t, "-dns-server", srv.Addr, "-timeout", "200", "-attempts", "1",
+			// The server answers at once; the timeout only has to cover the
+			// stub resolver's own SERVFAIL retry, even on a loaded machine
+			// (#235).
+			code, plans := dryRunPlans(t, "-dns-server", srv.Addr, "-timeout", "2000", "-attempts", "1",
 				"-type", "A", "-w", wl, "example.com")
 			if code != tc.code {
 				t.Errorf("exit %d, want %d", code, tc.code)
