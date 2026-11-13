@@ -25,7 +25,10 @@ func serve(t *testing.T, s *Server) (send func(string), recv func() map[string]a
 	t.Cleanup(func() {
 		_ = inW.Close()
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil {
+				t.Errorf("Serve: %v", err)
+			}
 		case <-time.After(5 * time.Second):
 			t.Error("Serve did not return after its input closed")
 		}

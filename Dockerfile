@@ -22,8 +22,12 @@ RUN go mod download
 # main_summary.go, ...); _test.go files are ignored by go build.
 COPY *.go ./
 COPY internal/ ./internal/
-# The default wordlist is embedded in the binary (#63).
+# subenum mcp runs scans through the public library (#131).
+COPY pkg/ ./pkg/
+# The default wordlist is embedded in the binary (#63), and so are the lab
+# scenarios that subenum mcp's lab_scan serves (#131).
 COPY data/subdomains-5k.txt data/data.go ./data/
+COPY examples/labs/*.zone examples/labs/words.txt ./examples/labs/
 
 # Build the binary with optimizations
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o subenum -ldflags="-w -s -X main.Version=${VERSION}" .
