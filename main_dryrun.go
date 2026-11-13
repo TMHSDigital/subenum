@@ -136,6 +136,9 @@ func dryRunNotes(f cliFlags) []string {
 	if f.ct {
 		notes = append(notes, "-ct names (fetched from crt.sh at scan time)")
 	}
+	if f.axfr {
+		notes = append(notes, "-axfr names (a zone transfer from each name server at scan time)")
+	}
 	if f.permute || f.seedsFile != "" {
 		notes = append(notes, "the -permute pass (built from what the scan finds)")
 	}

@@ -104,6 +104,7 @@ Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://
 | Output Pipeline | Resolved domains to stdout (pipe-clean); progress and diagnostics to stderr |
 | Output Formats | Emit results as `text`, `json` (array of subdomain plus typed records), streaming `jsonl`, or `csv` via `-format`; `-show-records` adds record values to text output |
 | Rate Limiting | Cap DNS queries per second on the wire with `-rate`: every record type, retry and wildcard probe takes a slot, and queueing never eats into `-timeout` |
+| Zone Transfer | `-axfr` asks each of the target's name servers for a zone transfer first, reports any that allow it, and adds the zone's names as candidates |
 | Record Types | Look up and filter by `A`, `AAAA`, `CNAME`, `NS`, `MX` or `TXT` records with `-type` |
 | Recursive Enumeration | Enumerate subdomains of discovered subdomains with `-recursive` and a `-depth` cap, with loop and duplicate protection |
 | Interactive TUI | Form-based config and live-scrolling results via `-tui`; session values persisted |
@@ -263,6 +264,7 @@ make help           # list all targets
 | `-timeout <ms>` | `1000` | DNS timeout in milliseconds, applied to each record-type lookup separately |
 | `-dns-server <addr>` | `8.8.8.8:53` | DNS server: `ip:port` (UDP, TCP fallback), `tls://host[:853]` (DNS over TLS) or `https://host/path` (DNS over HTTPS); validated on startup |
 | `-attempts <n>` | `1` | DNS resolution attempts per subdomain (1 = no retry) |
+| `-axfr` | `false` | Try a zone transfer (AXFR) from each of the target's name servers first; names it gives become candidates and `-permute` seeds |
 | `-ct` | `false` | Add names from Certificate Transparency logs (crt.sh; one HTTPS request per target, no API key) as candidates and `-permute` seeds |
 | `-force` | `false` | Continue scanning even if wildcard DNS is detected |
 | `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
@@ -445,6 +447,16 @@ subenum -ct -permute example.com
 ```
 
 The run-quality report counts them per target (`ct_names`). If crt.sh is down or slow, the scan warns, records `ct_error` and carries on with the wordlist. The CT request goes to crt.sh, not to the target and not through `-rate`; lab mode (`-simulate-zone`) refuses `-ct`, and a resumed scan reuses the names the interrupted run fetched.
+
+### Zone transfers: the whole zone in one query
+
+A name server that allows anyone a zone transfer (AXFR) lists every name in the zone, and finding one is a misconfiguration worth reporting in itself. `-axfr` looks up the target's name servers through `-dns-server` and asks each of them for a transfer over TCP before the scan. Most refuse, which is correct and stays quiet (`-v` shows each refusal). When one allows it, subenum says so on stderr, names the server in the report (`axfr_allowed`, with `axfr_names`), and adds the names as candidates after the wordlist and as `-permute` seeds. Like `-ct` names they are only candidates: each is still looked up, so a stale entry is never reported.
+
+```bash
+subenum -axfr -type A,AAAA,CNAME example.com
+```
+
+The transfers go straight to the target's name servers, not through `-dns-server`: at most 8 servers and 2 addresses each, one query per address, plus the NS and address lookups, all counted in the report's `queries_sent` but not paced by `-rate`. Simulation ignores `-axfr`, lab mode refuses it, and a resumed scan reuses the names the interrupted run got.
 
 ### Permutations: a second pass
 

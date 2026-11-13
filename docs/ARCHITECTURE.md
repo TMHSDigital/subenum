@@ -51,6 +51,7 @@ main_session.go                - runWith and the session: per-run state, the -dL
 main_completion.go             - completion and man subcommands
 main_config.go                 - config file and SUBENUM_* environment defaults, -print-config
 main_ct.go                     - -ct: Certificate Transparency names as extra candidates
+main_axfr.go                   - -axfr: zone transfer names as extra candidates
 main_diff.go                   - -diff / -diff-records: compare against a previous results file
 main_dryrun.go                 - -dry-run: print the scan plan and its cost without sending queries
 main_lab.go                    - -simulate-zone: serve a lab scenario on a loopback DNS server
@@ -69,6 +70,7 @@ internal/scan/verify.go        - Verify: re-check names against the trusted reso
 internal/dns/resolver.go       - NewResolver, Lookup (ResolveTypes, Resolve, CheckWildcard,
                                  FingerprintWildcard), Classify, ParseTypes
 internal/dns/transport.go      - UDP (TCP fallback), DNS over TLS and DNS over HTTPS dialers
+internal/dns/axfr.go           - Transfer: an AXFR zone transfer over TCP (-axfr)
 internal/dns/pool.go           - Pool: the -r resolver pool (health benching, canaries, second opinions)
 internal/dns/ratelimit.go      - RateLimiter, WithLimiter (per-wire-query pacing)
 internal/dns/takeover.go       - TakeoverProvider, TakeoverHint, HintsTakeover (dangling or takeover-prone CNAMEs, dangling NS delegations)

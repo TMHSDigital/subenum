@@ -31,7 +31,7 @@ Planned features that make results more trustworthy and the tool easier to get.
 
 Ideas we want, with no date attached.
 
-- Try AXFR and detect NSEC-walkable zones before brute-forcing ([#85](https://github.com/TMHSDigital/subenum/issues/85)).
+- Detect NSEC-walkable zones before brute-forcing ([#234](https://github.com/TMHSDigital/subenum/issues/234)); zone transfers (`-axfr`) shipped in [#85](https://github.com/TMHSDigital/subenum/issues/85).
 - Discoverability: demo GIF and launch posts ([#74](https://github.com/TMHSDigital/subenum/issues/74)).
 - An MCP server mode for budgeted scans by AI agents ([#131](https://github.com/TMHSDigital/subenum/issues/131)).
 

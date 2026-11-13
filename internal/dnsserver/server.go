@@ -50,6 +50,11 @@ type Reply struct {
 	MX    []string // "<preference> <host>" (or just "<host>", preference 10) for MX queries
 	TXT   []string // texts for TXT queries, one record each
 
+	// Transfer answers an AXFR query for the queried zone: its SOA, an A
+	// record (192.0.2.1) for each of these names, and the SOA again (#85).
+	// Nil answers AXFR like any unknown type; set RCode to refuse it.
+	Transfer []string
+
 	RCode    dnsmessage.RCode // e.g. RCodeNameError (NXDOMAIN), RCodeServerFailure, RCodeRefused
 	Drop     bool             // send nothing; the client times out
 	Delay    time.Duration    // wait before answering
@@ -487,6 +492,36 @@ var answerBuilders = map[dnsmessage.Type]answerBuilder{
 	dnsmessage.TypeNS:   addNS,
 	dnsmessage.TypeMX:   addMX,
 	dnsmessage.TypeTXT:  addTXT,
+	dnsmessage.TypeAXFR: addTransfer,
+}
+
+// addTransfer answers a zone transfer in one message: the zone's SOA, an A
+// record per name in r.Transfer, and the SOA again. Nil Transfer adds nothing.
+func addTransfer(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	if r.Transfer == nil {
+		return 0, nil
+	}
+	soa := func() error {
+		mname, _ := dnsmessage.NewName("ns." + owner.String())
+		rname, _ := dnsmessage.NewName("hostmaster." + owner.String())
+		return b.SOAResource(rrHeader(owner, dnsmessage.TypeSOA),
+			dnsmessage.SOAResource{NS: mname, MBox: rname, Serial: 1, Refresh: 3600, Retry: 600, Expire: 86400, MinTTL: 60})
+	}
+	if err := soa(); err != nil {
+		return 0, err
+	}
+	n := 1
+	for _, name := range r.Transfer {
+		host, err := dnsmessage.NewName(fqdn(name))
+		if err != nil {
+			continue
+		}
+		if err := b.AResource(rrHeader(host, dnsmessage.TypeA), dnsmessage.AResource{A: [4]byte{192, 0, 2, 1}}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n + 1, soa()
 }
 
 // rrHeader is the header every answer record carries.

@@ -35,6 +35,8 @@ func buildSummary(s *session, elapsed time.Duration) output.Summary {
 func targetSummary(domain, status string, res targetResult) output.TargetSummary {
 	t := report.Target(domain, status, res.err, res.done, res.final, scan.FlagName)
 	t.CTNames, t.CTError = len(res.ct.names), res.ct.err
+	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
+	t.QueriesSent += res.axfr.queries // the NS and address lookups and the transfers (#85)
 	if p := res.permutation; p != nil && res.done && status != "" && status != "skipped" {
 		t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}
 		if p.pass.done {

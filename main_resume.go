@@ -54,6 +54,11 @@ type resumeTarget struct {
 	// so the candidate list is the same (#130).
 	CT        []string `json:"ct,omitempty"`
 	CTFetched bool     `json:"ct_fetched,omitempty"`
+	// AXFR holds the names an -axfr zone transfer gave, and AXFRServers the
+	// name servers that allowed it, reused on resume like CT (#85).
+	AXFR        []string `json:"axfr,omitempty"`
+	AXFRServers []string `json:"axfr_servers,omitempty"`
+	AXFRDone    bool     `json:"axfr_done,omitempty"`
 }
 
 // resumePass is how far an interrupted scan pass got.
@@ -334,7 +339,8 @@ func saveResumeState(s *session) {
 			continue
 		}
 		res := s.results[i]
-		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched}
+		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched,
+			AXFR: res.axfr.names, AXFRServers: res.axfr.allowed, AXFRDone: res.axfr.done}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total

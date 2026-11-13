@@ -343,6 +343,10 @@ func (s *session) announceSimulation() {
 		out.Info("Note: -ct is ignored in simulation mode, which sends nothing off the machine")
 		f.ct = false
 	}
+	if f.axfr {
+		out.Info("Note: -axfr is ignored in simulation mode, which sends no DNS queries")
+		f.axfr = false
+	}
 }
 
 // loadInputs checks a -resume run against its inputs and reads the wordlist
@@ -615,6 +619,18 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			out.Info("Certificate Transparency: %d names under %s, %d of them new candidates", len(ctInfo.names), target, added)
 		}
 	}
+	var axfrInfo targetAXFR
+	if s.f.axfr {
+		// Transferred names are candidates like -ct's: each is still looked
+		// up, so only names that resolve are reported (#85).
+		axfrInfo = zoneTransfer(ctx, s.f, target, saved, out)
+		var added int
+		entries, added = withCTEntries(entries, axfrInfo.names, target)
+		seeds = withCTSeeds(seeds, axfrInfo.names, target)
+		if len(axfrInfo.allowed) > 0 {
+			out.Info("Zone transfer: %d names under %s, %d of them new candidates", len(axfrInfo.names), target, added)
+		}
+	}
 	pass := scanPass{domain: target, entries: entries, maxQueries: s.f.maxQueries}
 	var mainSaved *resumePass
 	restoredHits := 0 // permutation results restored from the state
@@ -654,6 +670,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		}
 	}
 	res.ct = ctInfo
+	res.axfr = axfrInfo
 	return s.recordTarget(i, res)
 }
 

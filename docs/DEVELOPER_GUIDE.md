@@ -111,6 +111,7 @@ subenum/
 │   │   ├── resolver.go         # NewResolver, Lookup (ResolveTypes, Resolve, CheckWildcard,
 │   │   │                       # FingerprintWildcard), Classify, ParseTypes
 │   │   ├── transport.go        # UDP (TCP fallback), DNS over TLS, DNS over HTTPS dialers
+│   │   ├── axfr.go             # Transfer: AXFR zone transfer over TCP (-axfr)
 │   │   ├── pool.go             # Pool: the -r resolver pool (benching, canaries, second opinions)
 │   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
 │   │   ├── takeover.go         # TakeoverProvider, TakeoverHint (dangling CNAMEs and NS delegations)
@@ -170,6 +171,7 @@ subenum/
 ├── main_completion.go          # completion and man subcommands
 ├── main_config.go              # Config file and SUBENUM_* environment defaults, -print-config
 ├── main_ct.go                  # -ct: Certificate Transparency names as candidates
+├── main_axfr.go                # -axfr: zone transfer names as candidates
 ├── main_diff.go                # -diff / -diff-records against a previous results file
 ├── main_dryrun.go              # -dry-run: the scan plan and its cost, no queries sent
 ├── main_lab.go                 # -simulate-zone: serve a lab scenario locally

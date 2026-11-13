@@ -124,6 +124,7 @@ type cliFlags struct {
 	showProgress bool
 	silent       bool // -silent: results only on stdout, errors only on stderr (#128)
 	ct           bool // -ct: seed from Certificate Transparency logs (#130)
+	axfr         bool // -axfr: try a zone transfer from each name server (#85)
 	testMode     bool
 	testHitRate  int
 	seed         uint64
@@ -250,6 +251,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.StringVar(&f.providersFile, "takeover-providers", "", "File of takeover-prone services, one \"<suffix> <name>\" per line (.example-cdn.net example-cdn; # comments allowed; name - removes a suffix), added to the built-in list for takeover hints")
 	fs.BoolVar(&f.providersOnly, "takeover-providers-only", false, "Use only the -takeover-providers file, not the built-in provider list")
 	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
+	fs.BoolVar(&f.axfr, "axfr", false, "Try a zone transfer (AXFR) from each of the target's name servers first, and add the names it gives as candidates and -permute seeds")
 	fs.BoolVar(&f.ct, "ct", false, "Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds")
 	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
 	fs.StringVar(&f.stateFile, "state", defaultStateFile, "Where an interrupted run saves its state for -resume")
@@ -323,7 +325,8 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 			{"simulate", f.testMode},
 			{"dns-server", f.dnsServer != DefaultDNSServer},
 			{"r", f.resolvers != ""},
-			{"ct", f.ct}, // an HTTPS request to crt.sh
+			{"ct", f.ct},     // an HTTPS request to crt.sh
+			{"axfr", f.axfr}, // transfers from the zone's real name servers
 		} {
 			if c.set || flagSet(fs, c.name) {
 				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with %s", in.defaults.describe(fs, c.name))
@@ -680,7 +683,8 @@ type targetResult struct {
 	err           string     // first error message, if any
 	final         scan.Event // the EventDone, when done
 	permutation   *permutationResult
-	ct            targetCT // -ct names, kept for the report and resume state
+	ct            targetCT   // -ct names, kept for the report and resume state
+	axfr          targetAXFR // -axfr zone transfer, kept for the report and resume state
 }
 
 // scanTarget runs one pass over a domain and streams its events to the
