@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,9 +24,14 @@ func TestProbeDenial(t *testing.T) {
 		{"", dnstest.NXDomain, DenialNone},
 		{"nsec", dnstest.Reply{}, DenialNSEC}, // NODATA proves absence too
 	} {
-		var asked string
+		var (
+			mu    sync.Mutex
+			asked string // written by the server's handler goroutine
+		)
 		srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+			mu.Lock()
 			asked = q.Name
+			mu.Unlock()
 			r := c.rcode
 			r.Denial = c.denial
 			return r
@@ -37,6 +43,8 @@ func TestProbeDenial(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%q: denial = %q, want %q", c.denial, got, c.want)
 		}
+		mu.Lock()
+		defer mu.Unlock()
 		if !strings.HasSuffix(asked, ".example.test") || strings.Count(asked, ".") != 2 {
 			t.Errorf("%q: probed %q, want a random label under example.test", c.denial, asked)
 		}
