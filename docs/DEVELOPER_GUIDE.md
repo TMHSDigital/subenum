@@ -106,6 +106,7 @@ subenum/
 │   ├── ct/
 │   │   ├── ct.go               # Certificate Transparency (crt.sh) client for -ct
 │   │   └── ct_test.go
+│   ├── diff/                   # Result comparison shared by -diff and subenum.Diff
 │   ├── dns/
 │   │   ├── resolver.go         # NewResolver, Lookup (ResolveTypes, Resolve, CheckWildcard,
 │   │   │                       # FingerprintWildcard), Classify, ParseTypes

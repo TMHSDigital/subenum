@@ -5,11 +5,11 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/TMHSDigital/subenum/internal/diff"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -57,7 +57,7 @@ func loadBaseline(path string) (baseline, error) {
 	}
 	b := baseline{names: map[string]struct{}{}, records: map[string][]dns.Record{}}
 	add := func(name string, records ...dns.Record) string {
-		name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+		name = diff.Name(name)
 		if name != "" {
 			b.names[name] = struct{}{}
 			for _, r := range records {
@@ -139,45 +139,13 @@ func (d *differ) observe(name string, records []dns.Record) (change string, prev
 		d.added++
 		return "added", nil
 	}
-	if prev, ok := d.records[name]; ok && recordsChanged(prev, records, d.types) {
+	// d.types is the run's record types, never empty, so only the types
+	// this run looked up are compared.
+	if prev, ok := d.records[name]; ok && diff.RecordsChanged(prev, records, d.types) {
 		d.changed++
 		return "changed", prev
 	}
 	return "", nil
-}
-
-// recordsChanged compares a name's baseline and current records over the
-// record types this run looked up, as sets. When either side has a CNAME,
-// only the CNAME targets are compared: a re-pointed alias is the change that
-// matters (#189), while the addresses behind a CDN alias rotate with every
-// TTL and would make every CDN host look changed.
-func recordsChanged(prev, cur []dns.Record, types []string) bool {
-	set := func(rs []dns.Record, only string) map[string]struct{} {
-		s := map[string]struct{}{}
-		for _, r := range rs {
-			t := strings.ToUpper(r.Type)
-			if (only != "" && t != only) || !slices.Contains(types, t) {
-				continue
-			}
-			s[t+" "+strings.ToLower(strings.TrimSuffix(r.Value, "."))] = struct{}{}
-		}
-		return s
-	}
-	isCNAME := func(r dns.Record) bool { return strings.EqualFold(r.Type, "CNAME") }
-	only := ""
-	if slices.Contains(types, "CNAME") && (slices.ContainsFunc(prev, isCNAME) || slices.ContainsFunc(cur, isCNAME)) {
-		only = "CNAME"
-	}
-	a, b := set(prev, only), set(cur, only)
-	if len(a) != len(b) {
-		return true
-	}
-	for k := range a {
-		if _, ok := b[k]; !ok {
-			return true
-		}
-	}
-	return false
 }
 
 // missingNames returns previous names under one of targets that this run did

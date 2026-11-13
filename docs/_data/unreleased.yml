@@ -21,6 +21,7 @@ action:
 # pkg/subenum identifiers
 library:
   - AutoRate
+  - Diff
   - Internal
   - MaxDuration
   - Permutations

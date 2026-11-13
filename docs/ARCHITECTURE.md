@@ -34,6 +34,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/wordlist` | Reads wordlist files and normalizes their entries into candidate prefixes |
 | `internal/validate` | Input validators shared by the CLI and the TUI (domain, resolver address, punycode) |
 | `internal/permute` | Generates second-pass candidates from names a scan has already found |
+| `internal/diff` | Compares two runs' results: new and missing names, changed records (shared by `-diff` and `pkg/subenum`'s `Diff`) |
 | `internal/cliargs` | Parses command lines whose flags may follow positional arguments, shared by subenum and wordlist-gen |
 | `internal/ct` | Looks up subdomain names in Certificate Transparency logs through crt.sh |
 | `internal/labzone` | Parses `-simulate-zone` scenario files for lab mode |
@@ -81,6 +82,7 @@ internal/output/eta.go         - ETA: progress estimate over a sliding window, F
 internal/output/log.go         - -log-format: text or JSON diagnostics on stderr (ParseLogFormat, SetLogFormat)
 internal/report/report.go      - New, Target, Finish: the run-quality report
 internal/permute/permute.go    - Generate: permutations of found names
+internal/diff/diff.go          - Name, RecordsChanged: the comparison behind -diff-records and subenum.Diff
 internal/ct/ct.go              - Client.Names: crt.sh lookup
 internal/labzone/labzone.go    - Load, Parse: lab scenario files
 internal/dnsserver/server.go   - Listen: scriptable loopback DNS server
@@ -95,6 +97,7 @@ internal/tui/scan_view.go      - Live results screen (viewport + progress bar)
 internal/tui/logo.go           - Styled wordmark
 internal/tui/config.go         - Session persistence (load/save <user config dir>/subenum/last.json)
 pkg/subenum/subenum.go         - Scan, Run, DefaultWords, Permutations: the embeddable API
+pkg/subenum/diff.go            - Diff, Changes: compare two sets of results
 tools/wordlist-gen.go          - Standalone wordlist generator
 ```
 

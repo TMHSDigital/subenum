@@ -668,6 +668,7 @@ subenum/
 ├── internal/
 │   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/                     # Certificate Transparency (crt.sh) client for -ct
+│   ├── diff/                   # Result comparison shared by -diff and subenum.Diff
 │   ├── dns/                    # Resolution, transports (UDP/TCP, DoT, DoH), resolver pool, wildcard checks
 │   ├── dnsserver/              # Scriptable local DNS server (labs, tests)
 │   ├── dnstest/                # Runs dnsserver for hermetic tests

@@ -75,6 +75,19 @@ more, _, err := subenum.Scan(ctx, subenum.Config{
 
 The result is sorted and duplicate-free, and names that are not valid in DNS are left out.
 
+## Diff: what changed since last time
+
+`Diff`{% include unreleased.html library="Diff" %} compares two sets of results the way the CLI's `-diff` and `-diff-records` do: names added, names missing, and names whose records changed. Pass the record types both scans looked up. When a CNAME is involved only its target counts, so a re-pointed alias is a change and the rotating addresses behind a CDN are not. It sends no DNS queries:
+
+```go
+changes := subenum.Diff(lastWeek, today, []string{"A", "AAAA", "CNAME"})
+for _, c := range changes.Changed {
+    fmt.Println(c.Name, c.Previous, "->", c.Current)
+}
+```
+
+`Removed` lists previous names the new results lack, which is not proof they are gone: they may not have been candidates this time, or their lookup failed. The CLI reports a name removed only after a fresh NXDOMAIN on a complete run, so look them up again before acting on them.
+
 ## Configuration
 
 | Field | Default | What it does |
