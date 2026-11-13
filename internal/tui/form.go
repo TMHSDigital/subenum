@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -179,6 +179,26 @@ var (
 	dimmedRow     = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 )
 
+// inputView renders a text field. Inputs have no width, so a value is never
+// cut, but bubbles v2's textinput shows only the first character of a
+// placeholder when its width is 0; an empty field is rendered from a copy
+// sized to show the placeholder whole, without padding.
+func inputView(ti textinput.Model) string {
+	if ti.Value() == "" && ti.Placeholder != "" {
+		ti.SetWidth(max(0, lipgloss.Width(ti.Placeholder)-1))
+	}
+	return ti.View()
+}
+
+// inputStyles colours a text field's prompt and text by focus: the input
+// switches between the two states itself.
+func inputStyles() textinput.Styles {
+	s := textinput.DefaultStyles(true)
+	s.Focused.Prompt, s.Focused.Text = focusedStyle, focusedStyle
+	s.Blurred.Prompt, s.Blurred.Text = blurredStyle, blurredStyle
+	return s
+}
+
 // formModel is the configuration form screen.
 type formModel struct {
 	inputs  [fieldCount]textinput.Model // used by text fields
@@ -200,8 +220,7 @@ func newFormModel(saved savedConfig) formModel {
 			ti := textinput.New()
 			ti.Placeholder = spec.placeholder
 			ti.SetValue(spec.value(saved))
-			ti.PromptStyle = blurredStyle
-			ti.TextStyle = blurredStyle
+			ti.SetStyles(inputStyles())
 			m.inputs[f] = ti
 		case toggleField:
 			m.toggles[f] = spec.on(saved)
@@ -210,8 +229,6 @@ func newFormModel(saved savedConfig) formModel {
 
 	// Focus domain on start - cursor blink cmd returned from Init.
 	m.inputs[fieldDomain].Focus()
-	m.inputs[fieldDomain].PromptStyle = focusedStyle
-	m.inputs[fieldDomain].TextStyle = focusedStyle
 
 	return m
 }
@@ -247,7 +264,7 @@ func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "tab", "down":
 			return m.shiftFocus(+1)
@@ -255,7 +272,7 @@ func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 		case "shift+tab", "up":
 			return m.shiftFocus(-1)
 
-		case " ":
+		case "space":
 			if m.isToggle() {
 				m.toggles[m.focus] = !m.toggles[m.focus]
 			}
@@ -276,15 +293,10 @@ func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 func (m formModel) shiftFocus(delta int) (formModel, tea.Cmd) {
 	if !m.isToggle() {
 		m.inputs[m.focus].Blur()
-		m.inputs[m.focus].PromptStyle = blurredStyle
-		m.inputs[m.focus].TextStyle = blurredStyle
 	}
 	m.moveFocus(delta)
 	if !m.isToggle() {
-		m.inputs[m.focus].Focus()
-		m.inputs[m.focus].PromptStyle = focusedStyle
-		m.inputs[m.focus].TextStyle = focusedStyle
-		return m, textinput.Blink
+		return m, m.inputs[m.focus].Focus()
 	}
 	return m, nil
 }
@@ -308,7 +320,7 @@ func (m formModel) View() string {
 				content += blurredStyle.Render("  [space to toggle]")
 			}
 		} else {
-			content = m.inputs[f].View()
+			content = inputView(m.inputs[f])
 		}
 		lbl := labelStyle.Render(spec.name() + ":")
 		if m.focus == f {

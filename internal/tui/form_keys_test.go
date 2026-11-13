@@ -5,20 +5,28 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Key handling for the form and the root model (#172).
 
 var (
-	keyTab      = tea.KeyMsg{Type: tea.KeyTab}
-	keyShiftTab = tea.KeyMsg{Type: tea.KeyShiftTab}
-	keyDown     = tea.KeyMsg{Type: tea.KeyDown}
-	keyUp       = tea.KeyMsg{Type: tea.KeyUp}
-	keySpace    = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
+	keyTab       = tea.KeyPressMsg{Code: tea.KeyTab}
+	keyShiftTab  = tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	keyDown      = tea.KeyPressMsg{Code: tea.KeyDown}
+	keyUp        = tea.KeyPressMsg{Code: tea.KeyUp}
+	keySpace     = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+	keyEnter     = tea.KeyPressMsg{Code: tea.KeyEnter}
+	keyEsc       = tea.KeyPressMsg{Code: tea.KeyEscape}
+	keyBackspace = tea.KeyPressMsg{Code: tea.KeyBackspace}
+	keyCtrlC     = tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	keyCtrlR     = tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
 )
 
-func typeText(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+// typeText is the key press that types s, as a terminal reports it.
+func typeText(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
+}
 
 // focusedInputs counts the text inputs that have focus.
 func focusedInputs(m formModel) int {
@@ -157,13 +165,13 @@ func TestModelFormKeys(t *testing.T) {
 	if m.Init() == nil {
 		t.Error("Init returned no blink command")
 	}
-	if !strings.Contains(m.View(), "Configure Scan") {
+	if !strings.Contains(m.View().Content, "Configure Scan") {
 		t.Error("model view is not the form")
 	}
 
 	// ctrl+r with an invalid domain shows an error and starts nothing.
 	m.form.inputs[fieldDomain].SetValue("not a domain!")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next, cmd := m.Update(keyCtrlR)
 	nm := next.(Model)
 	if cmd != nil || nm.form.err == "" || nm.form.loading || nm.state != stateForm {
 		t.Fatalf("invalid domain: cmd=%v err=%q loading=%v state=%v", cmd != nil, nm.form.err, nm.form.loading, nm.state)
@@ -182,7 +190,7 @@ func TestModelFormKeys(t *testing.T) {
 		t.Fatalf("tab through the model: focus=%d", next.(Model).form.focus)
 	}
 
-	_, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd = nm.Update(keyCtrlC)
 	if cmd == nil {
 		t.Fatal("ctrl+c on the form returned no command")
 	}
@@ -194,12 +202,12 @@ func TestModelFormKeys(t *testing.T) {
 func TestModelScanKeys(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := Model{state: stateScan, scanView: newScanViewModel(80, 24, false), cancel: cancel}
-	if m.View() == "" {
+	if m.View().Content == "" {
 		t.Fatal("scan state renders nothing")
 	}
 
 	// q and r do nothing while the scan runs.
-	for _, k := range []tea.KeyMsg{typeText("q"), typeText("r")} {
+	for _, k := range []tea.KeyPressMsg{typeText("q"), typeText("r")} {
 		next, cmd := m.Update(k)
 		if next.(Model).state != stateScan {
 			t.Fatalf("%q during a scan left the scan screen", k.String())
@@ -212,7 +220,7 @@ func TestModelScanKeys(t *testing.T) {
 	}
 
 	// ctrl+c during a scan cancels it and marks it aborted, without quitting.
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, _ := m.Update(keyCtrlC)
 	am := next.(Model)
 	if ctx.Err() == nil || !am.scanView.aborted || am.state != stateScan {
 		t.Fatalf("ctrl+c during a scan: cancelled=%v aborted=%v state=%v", ctx.Err() != nil, am.scanView.aborted, am.state)
@@ -231,7 +239,7 @@ func TestModelScanKeys(t *testing.T) {
 	if fm.state != stateForm || fm.events != nil || cmd == nil {
 		t.Fatalf("r after done: state=%v events=%v cmd=%v", fm.state, fm.events != nil, cmd != nil)
 	}
-	if !strings.Contains(fm.View(), "Configure Scan") {
+	if !strings.Contains(fm.View().Content, "Configure Scan") {
 		t.Fatal("r after done does not show the form")
 	}
 }

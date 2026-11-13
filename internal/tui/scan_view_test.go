@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
@@ -18,8 +18,8 @@ func TestScanViewShortTerminal(t *testing.T) {
 	for _, h := range []int{0, 3, 8} {
 		m := newScanViewModel(0, h, false)
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 10, Height: h})
-		if m.viewport.Height < 1 || m.viewport.Width < 1 || m.progress.Width < 1 {
-			t.Errorf("height %d: viewport %dx%d, progress %d", h, m.viewport.Width, m.viewport.Height, m.progress.Width)
+		if m.viewport.Height() < 1 || m.viewport.Width() < 1 || m.progress.Width() < 1 {
+			t.Errorf("height %d: viewport %dx%d, progress %d", h, m.viewport.Width(), m.viewport.Height(), m.progress.Width())
 		}
 		_ = m.View()
 	}
@@ -80,7 +80,7 @@ func TestScanViewFilter(t *testing.T) {
 	if !key(typeText("/")) || !m.typing {
 		t.Fatal("/ did not start the filter")
 	}
-	for _, k := range []tea.KeyMsg{typeText("q"), typeText("r"), {Type: tea.KeyBackspace}, typeText("r-")} {
+	for _, k := range []tea.KeyPressMsg{typeText("q"), typeText("r"), keyBackspace, typeText("r-")} {
 		if !key(k) {
 			t.Fatalf("key %v not taken while typing", k)
 		}
@@ -88,14 +88,14 @@ func TestScanViewFilter(t *testing.T) {
 	if m.filter != "qr-" || !strings.Contains(content(), "qr-api.example.com") || strings.Contains(content(), "www.example.com") {
 		t.Fatalf("filter %q shows:\n%s", m.filter, content())
 	}
-	if key(tea.KeyMsg{Type: tea.KeyCtrlC}) {
+	if key(keyCtrlC) {
 		t.Error("ctrl+c was swallowed by the filter")
 	}
-	key(tea.KeyMsg{Type: tea.KeyEnter})
+	key(keyEnter)
 	if m.typing || m.filter != "qr-" || !strings.Contains(m.View(), "showing 1 of 3") {
 		t.Errorf("after enter: typing %v filter %q, hint:\n%s", m.typing, m.filter, m.View())
 	}
-	key(tea.KeyMsg{Type: tea.KeyEsc})
+	key(keyEsc)
 	if m.filtered() || !strings.Contains(content(), "www.example.com") {
 		t.Errorf("esc did not clear the filter:\n%s", content())
 	}

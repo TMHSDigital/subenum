@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -81,11 +81,11 @@ type scanViewModel struct {
 }
 
 func newScanViewModel(width, height int, simMode bool) scanViewModel {
-	vp := viewport.New(max(1, width), 1)
+	vp := viewport.New(viewport.WithWidth(max(1, width)), viewport.WithHeight(1))
 	vp.Style = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238"))
 
 	prog := progress.New(
-		progress.WithDefaultGradient(),
+		progress.WithDefaultBlend(),
 		progress.WithWidth(max(1, width-4)),
 	)
 
@@ -103,13 +103,13 @@ func newScanViewModel(width, height int, simMode bool) scanViewModel {
 // layout sizes the viewport from the terminal size minus the fixed chrome and
 // the notices currently shown, never going below one row (#37, #43).
 func (m *scanViewModel) layout() {
-	m.viewport.Width = max(1, m.width)
+	m.viewport.SetWidth(max(1, m.width))
 	msgLines := 0
 	if mv := m.messagesView(); mv != "" {
 		msgLines = lipgloss.Height(mv)
 	}
-	m.viewport.Height = max(1, m.height-chromeLines-msgLines)
-	m.progress.Width = max(1, m.width-4)
+	m.viewport.SetHeight(max(1, m.height-chromeLines-msgLines))
+	m.progress.SetWidth(max(1, m.width-4))
 }
 
 // messagesView renders at most maxShownMessages notices, newest last.
@@ -164,21 +164,21 @@ func (m *scanViewModel) refresh() {
 
 // handleFilterKey applies a key to the result filter and reports whether it
 // used it. While typing, every key but ctrl+c edits the filter.
-func (m *scanViewModel) handleFilterKey(msg tea.KeyMsg) bool {
+func (m *scanViewModel) handleFilterKey(msg tea.KeyPressMsg) bool {
 	if m.typing {
-		switch msg.Type {
-		case tea.KeyEnter:
+		switch {
+		case msg.Code == tea.KeyEnter:
 			m.typing = false
-		case tea.KeyEsc:
+		case msg.Code == tea.KeyEscape:
 			m.typing, m.filter = false, ""
-		case tea.KeyBackspace:
+		case msg.Code == tea.KeyBackspace:
 			if r := []rune(m.filter); len(r) > 0 {
 				m.filter = string(r[:len(r)-1])
 			}
-		case tea.KeyRunes, tea.KeySpace:
-			m.filter += strings.ToLower(string(msg.Runes))
+		case msg.Text != "":
+			m.filter += strings.ToLower(msg.Text)
 		default:
-			return msg.Type != tea.KeyCtrlC
+			return msg.String() != "ctrl+c"
 		}
 		m.dirty = true
 		m.refresh()

@@ -7,7 +7,7 @@ import (
 	"math/rand/v2"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -82,7 +82,7 @@ func (o Options) prefill(saved savedConfig) savedConfig {
 // the last scan failed (#55) or its results file could not be written
 // (#155), else 0.
 func Start(opts Options) int {
-	p := tea.NewProgram(New(opts), tea.WithAltScreen())
+	p := tea.NewProgram(New(opts)) // View asks for the alternate screen
 	final, err := p.Run()
 	if err != nil {
 		return 1
@@ -117,7 +117,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -256,7 +256,7 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 
 func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// The result filter (#221) takes its keys first; while it is being
 		// typed it takes every key but ctrl+c, so q and r can be typed.
 		if m.scanView.handleFilterKey(msg) {
@@ -395,8 +395,15 @@ func (m *Model) reportOutputErr(err error) {
 	}
 }
 
-// View satisfies tea.Model.
-func (m Model) View() string {
+// View satisfies tea.Model. The TUI runs on the alternate screen.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.content())
+	v.AltScreen = true
+	return v
+}
+
+// content renders the current screen.
+func (m Model) content() string {
 	switch m.state {
 	case stateForm:
 		return m.form.View()

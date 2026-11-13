@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -123,7 +123,7 @@ func TestFinalizeOutputNoFile(t *testing.T) {
 func TestCtrlCAfterDoneQuits(t *testing.T) {
 	m := Model{state: stateScan, scanView: newScanViewModel(80, 24, false)}
 	m.scanView.done = true
-	next, cmd := m.updateScan(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, cmd := m.updateScan(keyCtrlC)
 	if cmd == nil {
 		t.Fatal("expected a quit command")
 	}
@@ -144,7 +144,7 @@ func TestFilterTypingDoesNotQuit(t *testing.T) {
 	m = Model{state: stateScan, scanView: sv}
 	for _, k := range []string{"/", "q"} {
 		var cmd tea.Cmd
-		m, cmd = m.(Model).updateScan(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		m, cmd = m.(Model).updateScan(typeText(k))
 		if cmd != nil {
 			t.Fatalf("key %q returned a command while typing the filter", k)
 		}
@@ -152,8 +152,8 @@ func TestFilterTypingDoesNotQuit(t *testing.T) {
 	if f := m.(Model).scanView.filter; f != "q" {
 		t.Fatalf("filter = %q, want q", f)
 	}
-	m, _ = m.(Model).updateScan(tea.KeyMsg{Type: tea.KeyEnter})
-	if _, cmd := m.(Model).updateScan(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}); cmd == nil {
+	m, _ = m.(Model).updateScan(keyEnter)
+	if _, cmd := m.(Model).updateScan(typeText("q")); cmd == nil {
 		t.Error("q after enter did not quit the finished scan")
 	}
 }
@@ -232,7 +232,7 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 	m.form.inputs[fieldOutput].SetValue("") // no output file
 	m.form.toggles[fieldSimulate] = true    // simulate: the started scan sends no DNS traffic
 
-	next, cmd := m.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next, cmd := m.updateForm(keyCtrlR)
 	nm := next.(Model)
 	if nm.form.err != "" {
 		t.Fatalf("form error: %s", nm.form.err)
@@ -244,7 +244,7 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 		t.Error("form does not show the loading state")
 	}
 	// A second ctrl+r while loading is ignored.
-	if _, again := nm.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR}); again != nil {
+	if _, again := nm.updateForm(keyCtrlR); again != nil {
 		t.Error("ctrl+r during load started a second load")
 	}
 

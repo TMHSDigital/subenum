@@ -335,9 +335,12 @@ Please follow these style guidelines when contributing:
 There is no CLI-only build: `main` imports `internal/tui`, so Bubble Tea links
 into every binary. Direct third-party deps:
 
-- [`github.com/charmbracelet/bubbletea`](https://github.com/charmbracelet/bubbletea) - Elm-architecture terminal UI framework
-- [`github.com/charmbracelet/bubbles`](https://github.com/charmbracelet/bubbles) - reusable TUI components (textinput, viewport, progress bar)
-- [`github.com/charmbracelet/lipgloss`](https://github.com/charmbracelet/lipgloss) - terminal styling
+- [`charm.land/bubbletea/v2`](https://github.com/charmbracelet/bubbletea) - Elm-architecture terminal UI framework
+- [`charm.land/bubbles/v2`](https://github.com/charmbracelet/bubbles) - reusable TUI components (textinput, viewport, progress bar)
+- [`charm.land/lipgloss/v2`](https://github.com/charmbracelet/lipgloss) - terminal styling
+
+Keep these on versions whose `go` directive is at most the module's `go
+1.26.0`: lipgloss v2.1.0 needs Go 1.26.7, so lipgloss stays on v2.0.x for now.
 
 If you need to add a further dependency:
 
