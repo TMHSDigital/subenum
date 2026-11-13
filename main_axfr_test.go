@@ -17,8 +17,9 @@ import (
 
 // axfrZone serves example.test from one local server: ns1 is its name server
 // and resolves to the server itself, so the transfer goes to it too. allow
-// decides whether AXFR is allowed.
-func axfrZone(t *testing.T, allow bool) *dnstest.Server {
+// decides whether AXFR is allowed, and denial ("", "nsec", "nsec3") how its
+// negative answers are signed.
+func axfrZone(t *testing.T, allow bool, denial string) *dnstest.Server {
 	t.Helper()
 	found := map[string]bool{"example.test": true, "www.example.test": true, "admin-legacy.example.test": true}
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
@@ -40,7 +41,7 @@ func axfrZone(t *testing.T, allow bool) *dnstest.Server {
 		case found[q.Name]:
 			return dnstest.Reply{}
 		}
-		return dnstest.NXDomain
+		return dnstest.Reply{RCode: dnsmessage.RCodeNameError, Denial: denial}
 	})
 	_, port, err := net.SplitHostPort(srv.Addr)
 	if err != nil {
@@ -56,7 +57,7 @@ func axfrZone(t *testing.T, allow bool) *dnstest.Server {
 // names the wordlist lacks, each still verified by resolution (gone. is in
 // the zone but does not resolve), and the report names the server.
 func TestE2EZoneTransfer(t *testing.T) {
-	srv := axfrZone(t, true)
+	srv := axfrZone(t, true, "")
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
 	code, out := runCLIMerged(t, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
@@ -89,7 +90,7 @@ func TestE2EZoneTransfer(t *testing.T) {
 // TestE2EZoneTransferRefused: a refusal, the correct configuration, is not
 // an error and leaves the scan to the wordlist.
 func TestE2EZoneTransferRefused(t *testing.T) {
-	srv := axfrZone(t, false)
+	srv := axfrZone(t, false, "nsec3")
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
 	code, out := runCLIMerged(t, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
@@ -102,8 +103,34 @@ func TestE2EZoneTransferRefused(t *testing.T) {
 	var s output.Summary
 	data, _ := os.ReadFile(stats)
 	_ = json.Unmarshal(data, &s)
-	if tg := s.Targets[0]; len(tg.AXFRAllowed) != 0 || tg.AXFRError != "" {
-		t.Errorf("report axfr_allowed = %q, axfr_error = %q; want neither", tg.AXFRAllowed, tg.AXFRError)
+	if tg := s.Targets[0]; len(tg.AXFRAllowed) != 0 || tg.AXFRError != "" || tg.ZoneDenial != "nsec3" {
+		t.Errorf("report axfr_allowed = %q, axfr_error = %q, zone_denial = %q; want neither, and nsec3", tg.AXFRAllowed, tg.AXFRError, tg.ZoneDenial)
+	}
+	if strings.Contains(out, "Zone walkable") {
+		t.Errorf("an NSEC3 zone was reported walkable\n%s", out)
+	}
+}
+
+// TestE2EZoneWalkable covers #234: a zone signed with plain NSEC is reported
+// walkable even when its servers refuse transfers, with the probe counted.
+func TestE2EZoneWalkable(t *testing.T) {
+	srv := axfrZone(t, false, "nsec")
+	wl := writeFile(t, "wl.txt", "www\n")
+	stats := filepath.Join(t.TempDir(), "run.json")
+	code, out := runCLIMerged(t, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
+	if code != 0 || !strings.Contains(out, "Zone walkable") {
+		t.Fatalf("exit %d; want a walkable-zone finding\n%s", code, out)
+	}
+	var s output.Summary
+	data, err := os.ReadFile(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if tg := s.Targets[0]; tg.ZoneDenial != "nsec" {
+		t.Errorf("zone_denial = %q, want nsec", tg.ZoneDenial)
 	}
 }
 

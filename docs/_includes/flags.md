@@ -4,7 +4,7 @@
 | :--- | :--- | :--- |
 | `-attempts <int>` | 1 | Total DNS resolution attempts per subdomain, 1 = no retry (default 1) |
 | `-auto-rate` {% include unreleased.html flag="auto-rate" %} | - | When over 20% of the last 200 lookups fail, halve the query rate and keep going (up to 6 times, down to 5 queries/s) instead of aborting; speed back up once lookups succeed |
-| `-axfr` {% include unreleased.html flag="axfr" %} | - | Try a zone transfer (AXFR) from each of the target's name servers first, and add the names it gives as candidates and -permute seeds |
+| `-axfr` {% include unreleased.html flag="axfr" %} | - | Try a zone transfer (AXFR) from each of the target's name servers first, and add the names it gives as candidates and -permute seeds; also report a zone that DNSSEC NSEC lets anyone walk |
 | `-ct` | - | Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds |
 | `-dL <string>` | - | File of apex domains to scan, one per line (- for stdin); replaces the &lt;domain&gt; argument |
 | `-depth <int>` | 1 | Max recursion depth when -recursive is set (1 = no recursion) |

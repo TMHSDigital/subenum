@@ -251,7 +251,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.StringVar(&f.providersFile, "takeover-providers", "", "File of takeover-prone services, one \"<suffix> <name>\" per line (.example-cdn.net example-cdn; # comments allowed; name - removes a suffix), added to the built-in list for takeover hints")
 	fs.BoolVar(&f.providersOnly, "takeover-providers-only", false, "Use only the -takeover-providers file, not the built-in provider list")
 	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
-	fs.BoolVar(&f.axfr, "axfr", false, "Try a zone transfer (AXFR) from each of the target's name servers first, and add the names it gives as candidates and -permute seeds")
+	fs.BoolVar(&f.axfr, "axfr", false, "Try a zone transfer (AXFR) from each of the target's name servers first, and add the names it gives as candidates and -permute seeds; also report a zone that DNSSEC NSEC lets anyone walk")
 	fs.BoolVar(&f.ct, "ct", false, "Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds")
 	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
 	fs.StringVar(&f.stateFile, "state", defaultStateFile, "Where an interrupted run saves its state for -resume")

@@ -26,12 +26,33 @@ const (
 
 // targetAXFR is a target's zone transfer attempt (#85).
 type targetAXFR struct {
-	names   []string // relative to the target, from every transfer that succeeded
-	allowed []string // name servers that allowed the transfer: a misconfiguration
-	tried   int      // name server addresses asked
-	queries int64    // DNS queries sent: the NS and address lookups, and one per transfer
-	done    bool     // the attempt ran (it may have found nothing)
-	err     string   // why no transfer could be attempted, such as a failed NS lookup
+	names   []string   // relative to the target, from every transfer that succeeded
+	allowed []string   // name servers that allowed the transfer: a misconfiguration
+	tried   int        // name server addresses asked
+	denial  dns.Denial // how the zone proves a name does not exist; "" when no server answered the probe (#234)
+	queries int64      // DNS queries sent: the NS and address lookups, the denial probe, and one per transfer
+	done    bool       // the attempt ran (it may have found nothing)
+	err     string     // why no transfer could be attempted, such as a failed NS lookup
+}
+
+// probeDenial asks one authoritative address how target proves a name does
+// not exist (#234). Plain NSEC means anyone can list the zone by walking it,
+// which is reported like an allowed transfer. A failed probe is "" so the
+// next address is tried.
+func probeDenial(ctx context.Context, f cliFlags, host, addr, target string, timeout time.Duration, out *output.Writer) dns.Denial {
+	d, err := dns.ProbeDenial(ctx, net.JoinHostPort(addr, axfrPort), target, timeout)
+	if err != nil {
+		if f.verbose {
+			out.Info("-axfr: DNSSEC denial probe to %s (%s): %v", host, addr, err)
+		}
+		return ""
+	}
+	if d == dns.DenialNSEC {
+		out.Info("Zone walkable: %s signs %s with plain NSEC, so anyone can list every name by walking it. NSEC3 would hide them.", host, target)
+	} else if f.verbose {
+		out.Info("-axfr: %s proves absent names with %s; the zone cannot be walked", target, d)
+	}
+	return d
 }
 
 // zoneTransfer tries a full zone transfer (AXFR) of target from each of its
@@ -41,7 +62,7 @@ type targetAXFR struct {
 // the names the interrupted run got, so its candidate list matches.
 func zoneTransfer(ctx context.Context, f cliFlags, target string, saved *resumeTarget, out *output.Writer) targetAXFR {
 	if saved != nil && saved.AXFRDone {
-		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, done: true}
+		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, denial: dns.Denial(saved.Denial), done: true}
 	}
 	timeout := time.Duration(f.timeoutMs) * time.Millisecond
 	resolver := dns.NewResolver(timeout, f.dnsServer)
@@ -84,6 +105,10 @@ func zoneTransfer(ctx context.Context, f cliFlags, target string, saved *resumeT
 		for _, addr := range addrs {
 			if ctx.Err() != nil {
 				return res
+			}
+			if res.denial == "" {
+				res.queries++
+				res.denial = probeDenial(ctx, f, host, addr, target, timeout, out)
 			}
 			res.tried++
 			res.queries++

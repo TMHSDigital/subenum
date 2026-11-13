@@ -112,6 +112,7 @@ subenum/
 │   │   │                       # FingerprintWildcard), Classify, ParseTypes
 │   │   ├── transport.go        # UDP (TCP fallback), DNS over TLS, DNS over HTTPS dialers
 │   │   ├── axfr.go             # Transfer: AXFR zone transfer over TCP (-axfr)
+│   │   ├── nsec.go             # ProbeDenial: is the zone NSEC-walkable (-axfr)
 │   │   ├── pool.go             # Pool: the -r resolver pool (benching, canaries, second opinions)
 │   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
 │   │   ├── takeover.go         # TakeoverProvider, TakeoverHint (dangling CNAMEs and NS delegations)

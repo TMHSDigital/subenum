@@ -55,6 +55,10 @@ type Reply struct {
 	// Nil answers AXFR like any unknown type; set RCode to refuse it.
 	Transfer []string
 
+	// Denial adds a DNSSEC denial-of-existence record to a negative answer's
+	// authority section, after the SOA: "nsec" or "nsec3" (#234).
+	Denial string
+
 	RCode    dnsmessage.RCode // e.g. RCodeNameError (NXDOMAIN), RCodeServerFailure, RCodeRefused
 	Drop     bool             // send nothing; the client times out
 	Delay    time.Duration    // wait before answering
@@ -475,8 +479,38 @@ func build(qh dnsmessage.Header, question dnsmessage.Question, q Query, r Reply)
 		if err := addSOA(&b, q.Name); err != nil {
 			return nil, err
 		}
+		if err := addDenial(&b, q.Name, r.Denial); err != nil {
+			return nil, err
+		}
 	}
 	return b.Finish()
+}
+
+// addDenial adds an NSEC or NSEC3 record for name's zone to the authority
+// section addSOA started. Only the record type matters to clients here, so
+// the data is minimal but well formed: NSEC names the root as next and
+// covers A; NSEC3 is SHA-1, no salt, a zero hash, and covers A.
+func addDenial(b *dnsmessage.Builder, name, denial string) error {
+	bitmapA := []byte{0, 1, 0x40} // window 0, one byte, type A
+	var t dnsmessage.Type
+	var data []byte
+	switch denial {
+	case "":
+		return nil
+	case "nsec":
+		t, data = 47, append([]byte{0}, bitmapA...)
+	case "nsec3":
+		t = 50
+		data = append([]byte{1, 0, 0, 0, 0, 20}, make([]byte, 20)...)
+		data = append(data, bitmapA...)
+	default:
+		return fmt.Errorf("dnsserver: unknown Denial %q", denial)
+	}
+	owner, err := dnsmessage.NewName(fqdn(zoneOf(name)))
+	if err != nil {
+		return err
+	}
+	return b.UnknownResource(dnsmessage.ResourceHeader{Name: owner, Type: t, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.UnknownResource{Type: t, Data: data})
 }
 
 // answerBuilder adds r's records of one query type, owned by owner, and

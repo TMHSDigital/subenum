@@ -59,6 +59,7 @@ type resumeTarget struct {
 	AXFR        []string `json:"axfr,omitempty"`
 	AXFRServers []string `json:"axfr_servers,omitempty"`
 	AXFRDone    bool     `json:"axfr_done,omitempty"`
+	Denial      string   `json:"denial,omitempty"` // the zone's denial of existence, from -axfr (#234)
 }
 
 // resumePass is how far an interrupted scan pass got.
@@ -340,7 +341,7 @@ func saveResumeState(s *session) {
 		}
 		res := s.results[i]
 		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched,
-			AXFR: res.axfr.names, AXFRServers: res.axfr.allowed, AXFRDone: res.axfr.done}
+			AXFR: res.axfr.names, AXFRServers: res.axfr.allowed, AXFRDone: res.axfr.done, Denial: string(res.axfr.denial)}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total

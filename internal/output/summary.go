@@ -93,9 +93,13 @@ type TargetSummary struct {
 	// transfer (a misconfiguration), AXFRNames counts the names it added as
 	// candidates and seeds, and AXFRError says why no transfer could be
 	// tried (#85). A refusal is the correct configuration, not an error.
-	AXFRAllowed []string     `json:"axfr_allowed,omitempty"`
-	AXFRNames   int          `json:"axfr_names,omitempty"`
-	AXFRError   string       `json:"axfr_error,omitempty"`
+	AXFRAllowed []string `json:"axfr_allowed,omitempty"`
+	AXFRNames   int      `json:"axfr_names,omitempty"`
+	AXFRError   string   `json:"axfr_error,omitempty"`
+	// ZoneDenial is how the zone proves a name does not exist, from -axfr's
+	// DNSSEC probe: "nsec" (walkable: every name can be listed), "nsec3" or
+	// "none" (unsigned) (#234).
+	ZoneDenial  string       `json:"zone_denial,omitempty"`
 	PoolHits    int64        `json:"pool_hits,omitempty"`   // -r: names a pool resolver said exist
 	Confirmed   int64        `json:"confirmed,omitempty"`   // pool hits the trusted resolver confirmed
 	Unconfirmed int64        `json:"unconfirmed,omitempty"` // pool hits the trusted resolver denied
