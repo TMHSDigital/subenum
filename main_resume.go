@@ -334,7 +334,7 @@ func saveResumeState(s *session) {
 			continue
 		}
 		res := s.results[i]
-		t := resumeTarget{Domain: domain, Results: s.runs[i], Entries: s.entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched}
+		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: res.ct.names, CTFetched: res.ct.fetched}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total

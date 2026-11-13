@@ -247,7 +247,7 @@ func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 		status:       []string{"interrupted", ""},
 		entryDigests: []string{"d1", ""},
 		results:      []targetResult{{}, {}},
-		runs:         [][]output.Result{{{Result: scan.Result{Subdomain: "x.a.example"}}}, nil},
+		runs:         []resultLog{{names: []string{"x.a.example"}}, {}},
 	})
 	data, err := os.ReadFile(f.stateFile)
 	if err != nil {
@@ -288,7 +288,7 @@ func TestSaveResumeStateRecordsFinishedPermutePass(t *testing.T) {
 			final:       scan.Event{Kind: scan.EventDone, Stats: scan.Stats{RootDone: 40}, Processed: 40, Total: 40},
 			permutation: &permutationResult{candidates: 12, pass: targetResult{done: true, final: final}},
 		}},
-		runs: [][]output.Result{nil},
+		runs: []resultLog{{}},
 	})
 	data, err := os.ReadFile(f.stateFile)
 	if err != nil {

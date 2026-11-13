@@ -49,15 +49,15 @@ type session struct {
 	outWriter *bufio.Writer // the -o file's buffer; nil without -o
 	diff      *differ
 
-	targetResults []output.Result // the current target's results: -permute seeds, saved on interrupt
+	targetResults resultLog       // the current target's results: -permute seeds, saved on interrupt
 	takeovers     []output.Result // every target's takeover candidates, for -sarif
 	restored      map[string]bool // names re-emitted from a -resume state
 	refound       int             // restored names a resumed pass found again (#156)
 
 	status        []string
 	results       []targetResult
-	runs          [][]output.Result // results per target, for -resume state
-	entryDigests  []string          // per target, for -resume state
+	runs          []resultLog // results per target, for -resume state
+	entryDigests  []string    // per target, for -resume state
 	failedTargets int
 	anyDone       bool
 	anyFailed     bool
@@ -517,7 +517,7 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 		return
 	}
 	res := output.Result{Result: ev.Result, Permutation: permutation}
-	s.targetResults = append(s.targetResults, res)
+	s.targetResults.add(res)
 	if res.Takeover != "" {
 		s.takeovers = append(s.takeovers, res)
 	}
@@ -545,7 +545,7 @@ func (s *session) scanAll(ctx context.Context) {
 	n := len(s.targets)
 	s.status = make([]string, n)
 	s.results = make([]targetResult, n)
-	s.runs = make([][]output.Result, n)
+	s.runs = make([]resultLog, n)
 	s.entryDigests = make([]string, n)
 	s.started = time.Now()
 	if s.f.maxDuration > 0 {
@@ -599,7 +599,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		s.failedTargets++
 		return true
 	}
-	s.targetResults = nil
+	// A resumed run re-emits these results; their records are needed only
+	// when the output shows them or -diff compares them (#183).
+	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil}
 	s.entryDigests[i] = entryDigest(entries)
 	saved := s.resume.target(target)
 	var ctInfo targetCT
@@ -626,7 +628,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			s.status[i] = "ok"
 			return true
 		}
-		pass.resumeFrom, pass.resumeNames = saved.RootDone, mainPassNames(s.targetResults)
+		pass.resumeFrom, pass.resumeNames = saved.RootDone, s.targetResults.mainPassNames()
 		out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
 	}
 	res := s.mainPass(ctx, pass, mainSaved)
@@ -635,7 +637,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	// main pass's names only, so a resumed pass rebuilds the same
 	// candidate list, and it resumes from its own position (#107).
 	if s.f.permute && res.done && !res.resolverAbort && s.signalCode.Load() == 0 {
-		p := permuteInput{target: target, entries: entries, found: mainPassNames(s.targetResults), seeds: seeds, restoredHits: restoredHits}
+		p := permuteInput{target: target, entries: entries, found: s.targetResults.mainPassNames(), seeds: seeds, restoredHits: restoredHits}
 		if saved != nil {
 			p.prev = saved.Permute
 		}
