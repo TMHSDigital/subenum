@@ -242,7 +242,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
-	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
+	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type (three for CNAME), per attempt")
 	fs.DurationVar(&f.maxDuration, "max-duration", 0, "Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report and a degraded verdict")
 	fs.BoolVar(&f.retryIncon, "retry-inconclusive", false, "After each scan, look up once more (against -dns-server) every name that timed out, was refused or failed; names it resolves are reported, but not expanded by -recursive")
 	fs.StringVar(&f.inconFile, "inconclusive", "", "Write the names still without an answer (timeout, refused, other) to this file, one per line, to rescan with -w")
