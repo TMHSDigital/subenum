@@ -34,3 +34,4 @@ library:
   - Sources
   - RetryInconclusive
   - TakeoverProviders
+  - Verdict

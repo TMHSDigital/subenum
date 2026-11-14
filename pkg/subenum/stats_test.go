@@ -2,6 +2,7 @@ package subenum
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
@@ -55,6 +56,34 @@ func TestStatsCoversEveryEngineField(t *testing.T) {
 	for i := range got.NumField() {
 		if got.Field(i).IsZero() {
 			t.Errorf("subenum.Stats.%s is never set from scan.Stats", got.Type().Field(i).Name)
+		}
+	}
+	// engineStats is stats' inverse (#263): every field survives the round
+	// trip, so Stats.Verdict sees what the engine saw.
+	all.RootDone = 0
+	if back := engineStats(stats(all)); !reflect.DeepEqual(back, all) {
+		t.Errorf("engineStats(stats(s)) = %+v, want %+v", back, all)
+	}
+}
+
+// TestStatsVerdict: the public verdict follows the engine's rules and names
+// Config fields in its reason (#263).
+func TestStatsVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		s           Stats
+		interrupted bool
+		want        string
+		reason      string
+	}{
+		{Stats{NXDomain: 10, Found: 2}, false, VerdictComplete, ""},
+		{Stats{NXDomain: 8, Skipped: 2}, false, VerdictDegraded, "MaxQueries"},
+		{Stats{NXDomain: 8, Skipped: 2, Expired: true}, false, VerdictDegraded, "MaxDuration"},
+		{Stats{NXDomain: 1, Timeout: 9}, false, VerdictUnreliable, ""},
+		{Stats{NXDomain: 5}, true, VerdictDegraded, ""},
+	} {
+		v, reason := tc.s.Verdict(tc.interrupted)
+		if v != tc.want || !strings.Contains(reason, tc.reason) || strings.Contains(reason, "{") {
+			t.Errorf("%+v (interrupted %v): %s (%s), want %s naming %q", tc.s, tc.interrupted, v, reason, tc.want, tc.reason)
 		}
 	}
 }

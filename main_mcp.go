@@ -530,21 +530,29 @@ func runMCPScan(ctx context.Context, cfg subenum.Config) *mcpReport {
 	report.Outcomes = mcpOutcomes{NXDomain: stats.NXDomain, Timeout: stats.Timeout, Refused: stats.Refused, Other: stats.Other, WildcardFiltered: stats.WildcardFiltered}
 	report.Skipped = stats.Skipped
 	report.Wildcard = stats.Wildcard
-	verdict, reason := scan.Stats{
-		Found: stats.Found, NXDomain: stats.NXDomain, Timeout: stats.Timeout, Refused: stats.Refused,
-		Other: stats.Other, WildcardFiltered: stats.WildcardFiltered,
-		Skipped: stats.Skipped, Aborted: stats.Aborted, Expired: stats.Expired,
-	}.Verdict(ctx.Err() != nil)
-	report.Verdict = verdict
-	report.Reason = scan.Render(reason, func(s scan.Setting) string { return string(s) })
-	switch {
-	case report.Error != "" && stats.Total() == 0:
-		// A wildcard zone, a failed resolver check: nothing was tested.
-		report.Verdict, report.Reason = verdictNotRun, "the scan stopped before testing any name; see error"
-	case report.Error != "" && verdict == scan.VerdictComplete:
-		report.Verdict, report.Reason = scan.VerdictUnreliable, "the scan stopped early; see error"
-	}
+	report.Verdict, report.Reason = mcpVerdict(stats, report.Error, ctx.Err() != nil)
 	return report
+}
+
+// mcpReasonTerms renders the Config fields a verdict reason names in the
+// terms an agent sees: its own max_queries argument, the operator's
+// -max-duration.
+var mcpReasonTerms = strings.NewReplacer("MaxQueries", "max_queries", "MaxDuration", "the server's -max-duration")
+
+// mcpVerdict is a scan's verdict for the agent. It is the library's verdict
+// (the CLI report's rules, #263) with two additions for a report that has
+// no status field: an error before any name was tested is not_run, and an
+// error after an otherwise complete scan is unreliable.
+func mcpVerdict(stats subenum.Stats, errMsg string, interrupted bool) (verdict, reason string) {
+	verdict, reason = stats.Verdict(interrupted)
+	switch {
+	case errMsg != "" && stats.Total() == 0:
+		// A wildcard zone, a failed resolver check: nothing was tested.
+		return verdictNotRun, "the scan stopped before testing any name; see error"
+	case errMsg != "" && verdict == subenum.VerdictComplete:
+		return subenum.VerdictUnreliable, "the scan stopped early; see error"
+	}
+	return verdict, mcpReasonTerms.Replace(reason)
 }
 
 func (r *mcpReport) result() mcp.Result {

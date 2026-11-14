@@ -15,6 +15,8 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/labzone"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/report"
+	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
@@ -307,6 +309,53 @@ func TestMCPExplainStatsBranches(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("explanation lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestMCPVerdictMatchesReport is #263's drift guard: for the same finished
+// scan the agent gets the verdict the CLI's run-quality report gives, except
+// for the two cases the MCP report covers without a status field.
+func TestMCPVerdictMatchesReport(t *testing.T) {
+	type counts struct {
+		found, nx, timeout, skipped int64
+		expired, aborted, wildcard  bool
+	}
+	for _, tc := range []struct {
+		name        string
+		c           counts
+		errMsg      string
+		interrupted bool
+		want        string // "" = the report's verdict
+	}{
+		{name: "complete", c: counts{found: 2, nx: 8}},
+		{name: "query cap", c: counts{nx: 8, skipped: 2}},
+		{name: "time cap", c: counts{nx: 8, skipped: 2, expired: true}},
+		{name: "failures", c: counts{nx: 1, timeout: 9}},
+		{name: "aborted", c: counts{nx: 3, timeout: 7, aborted: true}},
+		{name: "wildcard", c: counts{found: 1, nx: 9, wildcard: true}},
+		{name: "interrupted", c: counts{nx: 5}, interrupted: true},
+		{name: "error before testing", errMsg: "wildcard zone", want: verdictNotRun},
+		{name: "error after a complete scan", c: counts{nx: 10}, errMsg: "boom", want: "unreliable"},
+	} {
+		c := tc.c
+		pub := subenum.Stats{Found: c.found, NXDomain: c.nx, Timeout: c.timeout, Skipped: c.skipped, Expired: c.expired, Aborted: c.aborted, Wildcard: c.wildcard}
+		eng := scan.Stats{Found: c.found, NXDomain: c.nx, Timeout: c.timeout, Skipped: c.skipped, Expired: c.expired, Aborted: c.aborted, Wildcard: c.wildcard}
+		status := "ok"
+		if tc.interrupted {
+			status = "interrupted"
+		}
+		rep := report.Target("x.example", status, "", true, scan.Event{Kind: scan.EventDone, Stats: eng}, scan.FieldName)
+		want := tc.want
+		if want == "" {
+			want = rep.Verdict
+		}
+		got, reason := mcpVerdict(pub, tc.errMsg, tc.interrupted)
+		if got != want {
+			t.Errorf("%s: MCP verdict %s (%s), want %s (report: %s, %s)", tc.name, got, reason, want, rep.Verdict, rep.Reason)
+		}
+		if strings.ContainsAny(reason, "{}") || strings.Contains(reason, "MaxDuration") || strings.Contains(reason, "MaxQueries") {
+			t.Errorf("%s: reason %q names a setting the agent does not know", tc.name, reason)
 		}
 	}
 }

@@ -777,6 +777,61 @@ func notice(n scan.NoticeKind) Notice {
 	return NoticeNone
 }
 
+// Verdicts a finished scan can get from Stats.Verdict, the same ones the
+// CLI's run-quality report gives.
+const (
+	VerdictComplete   = scan.VerdictComplete   // a name missing from the results most likely does not exist
+	VerdictDegraded   = scan.VerdictDegraded   // some names were not tested or got no answer
+	VerdictUnreliable = scan.VerdictUnreliable // too many lookups failed: a missing name means nothing
+)
+
+// Verdict says how far the results of a finished scan can be trusted, by
+// the rules of the CLI's run-quality report: VerdictComplete,
+// VerdictDegraded or VerdictUnreliable, with the reason in plain words.
+// interrupted reports that the scan was cancelled before it ended. The
+// reason names Config fields, such as MaxQueries.
+func (s Stats) Verdict(interrupted bool) (verdict, reason string) {
+	v, r := engineStats(s).Verdict(interrupted)
+	return v, scan.Render(r, scan.FieldName)
+}
+
+// engineStats is the inverse of stats, for the engine's verdict rules.
+func engineStats(s Stats) scan.Stats {
+	var fp []dns.Record
+	if len(s.WildcardFingerprint) > 0 {
+		fp = dnsRecords(s.WildcardFingerprint)
+	}
+	return scan.Stats{
+		Found:            s.Found,
+		NXDomain:         s.NXDomain,
+		Timeout:          s.Timeout,
+		Refused:          s.Refused,
+		Other:            s.Other,
+		WildcardFiltered: s.WildcardFiltered,
+
+		QueriesSent: s.QueriesSent,
+		Skipped:     s.Skipped,
+		Excluded:    s.Excluded,
+		Takeover:    s.Takeover,
+		Internal:    s.Internal,
+
+		PoolHits:    s.PoolHits,
+		Confirmed:   s.Confirmed,
+		Unconfirmed: s.Unconfirmed,
+
+		Aborted:     s.Aborted,
+		Expired:     s.Expired,
+		Wildcard:    s.Wildcard,
+		Fingerprint: fp,
+
+		Retried:      s.Retried,
+		Recovered:    s.Recovered,
+		Inconclusive: s.Inconclusive,
+		RateBackoffs: s.RateBackoffs,
+		FinalRate:    s.FinalRate,
+	}
+}
+
 func stats(s scan.Stats) Stats {
 	return Stats{
 		Found:            s.Found,
