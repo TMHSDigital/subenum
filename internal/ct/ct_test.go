@@ -123,10 +123,11 @@ func TestNamesMalformedJSON(t *testing.T) {
 }
 
 func TestNamesOversizedBody(t *testing.T) {
-	// A valid JSON array longer than maxBody: the cut-off must surface as an
-	// error, not as a silently truncated name list.
+	// A valid JSON array longer than maxBody (#251): the entries before the
+	// cut-off are kept, and the cut-off is reported as ErrTruncated rather
+	// than losing every name or passing silently.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `[{"name_value": "a.example.com"},{"name_value": "`)
+		_, _ = io.WriteString(w, `[{"name_value": "a.example.com"},{"name_value": "b.example.com"},{"name_value": "`)
 		chunk := strings.Repeat("x", 1<<20)
 		for written := 0; written <= maxBody; written += len(chunk) {
 			if _, err := io.WriteString(w, chunk); err != nil {
@@ -138,11 +139,22 @@ func TestNamesOversizedBody(t *testing.T) {
 	defer srv.Close()
 
 	got, err := names(context.Background(), srv, 0)
-	if err == nil {
-		t.Fatalf("an oversized answer was accepted: %d names", len(got))
+	if !errors.Is(err, ErrTruncated) {
+		t.Errorf("error = %v, want one wrapping ErrTruncated", err)
 	}
-	if !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Errorf("error = %v, want one wrapping io.ErrUnexpectedEOF", err)
+	if want := []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("Names = %v, want the names before the cut-off %v", got, want)
+	}
+}
+
+func TestNamesNotAnArray(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name_value": "a.example.com"}`))
+	}))
+	defer srv.Close()
+
+	if got, err := names(context.Background(), srv, 0); err == nil || errors.Is(err, ErrTruncated) {
+		t.Errorf("a JSON object: names %v, err %v; want a non-truncation error", got, err)
 	}
 }
 

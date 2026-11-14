@@ -6,6 +6,7 @@ package passive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -76,9 +77,22 @@ func ParseList(s string) ([]string, error) {
 func New(name string, opts Options) (Source, error) {
 	switch name {
 	case "ct":
-		return ct.Client{BaseURL: opts.BaseURLs["ct"], UserAgent: opts.UserAgent}, nil
+		return ctSource{ct.Client{BaseURL: opts.BaseURLs["ct"], UserAgent: opts.UserAgent}}, nil
 	case "wayback":
 		return Wayback{BaseURL: opts.BaseURLs["wayback"], UserAgent: opts.UserAgent}, nil
 	}
 	return nil, fmt.Errorf("unknown source %q", name)
+}
+
+// ctSource reports a crt.sh answer cut off at its read limit as Truncated,
+// with the names read before the cut (#251).
+type ctSource struct{ ct.Client }
+
+func (s ctSource) Names(ctx context.Context, domain string) ([]string, error) {
+	names, err := s.Client.Names(ctx, domain)
+	if errors.Is(err, ct.ErrTruncated) {
+		_, why, _ := strings.Cut(err.Error(), ": ")
+		return names, &Truncated{Source: "ct", Why: why}
+	}
+	return names, err
 }

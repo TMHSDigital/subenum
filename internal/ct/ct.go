@@ -7,6 +7,7 @@ package ct
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,29 +79,83 @@ func (c Client) Names(ctx context.Context, domain string) ([]string, error) {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var entries []entry
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&entries); err != nil {
+	body := &limitReader{r: resp.Body, n: maxBody}
+	set := map[string]bool{}
+	if err := decodeEntries(json.NewDecoder(body), set, domain); err != nil {
+		if body.hit {
+			// The array is cut off at the limit: keep the entries before the
+			// cut instead of losing them all (#251).
+			return sortedNames(set), fmt.Errorf("%w: the answer reached the %d MiB read limit", ErrTruncated, maxBody>>20)
+		}
 		return nil, fmt.Errorf("certificate transparency lookup: reading %s's answer: %w", resp.Request.URL.Host, err)
 	}
-	return relativeNames(entries, domain), nil
+	return sortedNames(set), nil
 }
 
-func relativeNames(entries []entry, domain string) []string {
+// ErrTruncated is returned, wrapped, with the names read before the answer
+// reached its read limit: they are good, but some hosts may be missing.
+var ErrTruncated = errors.New("certificate transparency answer truncated")
+
+// decodeEntries streams crt.sh's JSON array one entry at a time, adding each
+// entry's names to set, so memory follows the names, not the body (#251).
+func decodeEntries(dec *json.Decoder, set map[string]bool, domain string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '[' {
+		return fmt.Errorf("want a JSON array, got %v", tok)
+	}
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
-	set := map[string]bool{}
-	for _, e := range entries {
-		for _, name := range strings.Split(e.NameValue, "\n") {
-			name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
-			name = strings.TrimPrefix(name, "*.")
-			rel, ok := strings.CutSuffix(name, "."+domain)
-			if !ok || rel == "" {
-				continue
-			}
-			if norm, ok := wordlist.Normalize(rel); ok {
-				set[norm] = true
-			}
+	for dec.More() {
+		var e entry
+		if err := dec.Decode(&e); err != nil {
+			return err
+		}
+		addNames(set, e, domain)
+	}
+	_, err = dec.Token() // the closing ']'
+	return err
+}
+
+// limitReader is io.LimitReader that records whether the limit cut the
+// body short.
+type limitReader struct {
+	r   io.Reader
+	n   int64
+	hit bool
+}
+
+func (l *limitReader) Read(p []byte) (int, error) {
+	if l.n <= 0 {
+		l.hit = true
+		return 0, io.EOF
+	}
+	if int64(len(p)) > l.n {
+		p = p[:l.n]
+	}
+	n, err := l.r.Read(p)
+	l.n -= int64(n)
+	return n, err
+}
+
+// addNames adds e's names that fall under domain to set, relative to it.
+// Wildcard entries give their parent ("*.dev" gives "dev").
+func addNames(set map[string]bool, e entry, domain string) {
+	for _, name := range strings.Split(e.NameValue, "\n") {
+		name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+		name = strings.TrimPrefix(name, "*.")
+		rel, ok := strings.CutSuffix(name, "."+domain)
+		if !ok || rel == "" {
+			continue
+		}
+		if norm, ok := wordlist.Normalize(rel); ok {
+			set[norm] = true
 		}
 	}
+}
+
+func sortedNames(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
 	for n := range set {
 		out = append(out, n)

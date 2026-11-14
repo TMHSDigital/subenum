@@ -106,6 +106,30 @@ func TestWaybackTruncated(t *testing.T) {
 	}
 }
 
+// TestCTTruncated covers #251: a crt.sh answer cut off at the read limit
+// gives the names before the cut with a Truncated error.
+func TestCTTruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name_value": "a.example.com"},{"name_value": "`))
+		chunk := strings.Repeat("x", 1<<20)
+		for range 65 { // past crt.sh's 64 MiB read limit
+			if _, err := w.Write([]byte(chunk)); err != nil {
+				return // the client stopped reading
+			}
+		}
+	}))
+	defer srv.Close()
+	src, err := New("ct", Options{BaseURLs: map[string]string{"ct": srv.URL + "/"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := src.Names(context.Background(), "example.com")
+	var tr *Truncated
+	if !errors.As(err, &tr) || tr.Source != "ct" || !strings.Contains(err.Error(), "read limit") || !slices.Equal(names, []string{"a"}) {
+		t.Errorf("names %q, err %v; want [a] and a ct Truncated error naming the read limit", names, err)
+	}
+}
+
 func TestWaybackError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)

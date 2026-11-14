@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/TMHSDigital/subenum/internal/ct"
 	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
@@ -26,7 +25,11 @@ const sourceUserAgent = "subenum-library (+https://github.com/TMHSDigital/subenu
 // Certificate Transparency logs, through crt.sh. One HTTPS request per scan,
 // no API key.
 func CertificateTransparency() Source {
-	return ct.Client{UserAgent: sourceUserAgent}
+	src, err := passive.New("ct", passive.Options{UserAgent: sourceUserAgent})
+	if err != nil { // "ct" is a built-in source
+		panic(err)
+	}
+	return src
 }
 
 // WaybackMachine returns the source behind the CLI's -sources wayback:
