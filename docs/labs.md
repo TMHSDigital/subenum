@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Labs
+numbered: false
 ---
 
 # Labs: DNS enumeration without touching real infrastructure

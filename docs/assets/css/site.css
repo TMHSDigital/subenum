@@ -1166,14 +1166,48 @@ pre.cmd code::before {
   text-wrap: balance;
 }
 
+/* Sections are numbered like a report's: a mono 01, 02 ... over a rule. */
+.prose {
+  counter-reset: doc-sec;
+}
+
+.doc-section {
+  margin: 0 0 14px;
+  color: var(--accent-text);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .prose h2 {
   margin: 2.4em 0 0.6em;
-  padding-top: 0.2em;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
   font-family: var(--cond);
   font-size: 1.75rem;
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: -0.005em;
+  counter-increment: doc-sec;
+}
+
+/* Pages whose headings carry their own numbers ("Lab 1", "1. Overview")
+   set `numbered: false` in their front matter. */
+.prose.is-unnumbered h2::before {
+  content: none;
+}
+
+.prose h2::before {
+  content: counter(doc-sec, decimal-leading-zero);
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .prose h3 {
