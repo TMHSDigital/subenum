@@ -7,7 +7,6 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
-	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // ctBaseURL and waybackBaseURL, when set by a test, replace crt.sh and the
@@ -126,15 +125,8 @@ func (c *candidates) add(names []string) int {
 			c.have[e] = true
 		}
 	}
-	extra, _, _ := wordlist.Build(names, c.target)
-	added := 0
-	for _, e := range extra {
-		if !c.have[e] {
-			c.have[e] = true
-			c.entries = append(c.entries, e)
-			added++
-		}
-	}
+	var added int
+	c.entries, added = passive.Merge(c.entries, c.have, names, c.target)
 	if !c.owned {
 		own := make(map[string]struct{}, len(c.seeds)+len(names))
 		for s := range c.seeds {

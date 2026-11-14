@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/TMHSDigital/subenum/internal/ct"
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // Source finds names under a domain without querying the domain's DNS.
@@ -82,6 +83,25 @@ func New(name string, opts Options) (Source, error) {
 		return Wayback{BaseURL: opts.BaseURLs["wayback"], UserAgent: opts.UserAgent}, nil
 	}
 	return nil, fmt.Errorf("unknown source %q", name)
+}
+
+// Merge appends to entries the names that are not already in have, after
+// them, so the entries' own order (and a resumed scan's positions) stays
+// put, and records them in have. Names are relative to domain; wordlist.Build
+// normalises them and drops invalid ones and ones too long for domain. It
+// returns the entries and how many names were new. The CLI and pkg/subenum
+// share it, so both merge sources the same way (#265).
+func Merge(entries []string, have map[string]bool, names []string, domain string) ([]string, int) {
+	extra, _, _ := wordlist.Build(names, domain)
+	added := 0
+	for _, e := range extra {
+		if !have[e] {
+			have[e] = true
+			entries = append(entries, e)
+			added++
+		}
+	}
+	return entries, added
 }
 
 // ctSource reports a crt.sh answer cut off at its read limit as Truncated,

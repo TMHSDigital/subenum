@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/passive"
-	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // Source proposes names under a domain without querying the domain's DNS,
@@ -25,18 +24,24 @@ const sourceUserAgent = "subenum-library (+https://github.com/TMHSDigital/subenu
 // Certificate Transparency logs, through crt.sh. One HTTPS request per scan,
 // no API key.
 func CertificateTransparency() Source {
-	src, err := passive.New("ct", passive.Options{UserAgent: sourceUserAgent})
-	if err != nil { // "ct" is a built-in source
-		panic(err)
-	}
-	return src
+	return builtinSource("ct")
 }
 
 // WaybackMachine returns the source behind the CLI's -sources wayback:
 // hostnames in the Wayback Machine's index of archived URLs. One HTTPS
 // request per scan, no API key.
 func WaybackMachine() Source {
-	return passive.Wayback{UserAgent: sourceUserAgent}
+	return builtinSource("wayback")
+}
+
+// builtinSource builds a source from the same registry as the CLI's
+// -sources (#265).
+func builtinSource(name string) Source {
+	src, err := passive.New(name, passive.Options{UserAgent: sourceUserAgent})
+	if err != nil { // name is one of passive.Known
+		panic(err)
+	}
+	return src
 }
 
 // withSourceNames asks every source for domain's names at once (#271) and
@@ -75,13 +80,7 @@ func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, do
 				Message: fmt.Sprintf("Sources[%d]: %v; scanning without its names", i, a.err)})
 			continue
 		}
-		extra, _, _ := wordlist.Build(a.names, domain)
-		for _, e := range extra {
-			if !have[e] {
-				have[e] = true
-				entries = append(entries, e)
-			}
-		}
+		entries, _ = passive.Merge(entries, have, a.names, domain)
 	}
 	return entries
 }

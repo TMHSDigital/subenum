@@ -37,7 +37,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/diff` | Compares two runs' results: new and missing names, changed records (shared by `-diff` and `pkg/subenum`'s `Diff`) |
 | `internal/cliargs` | Parses command lines whose flags may follow positional arguments, shared by subenum and wordlist-gen |
 | `internal/ct` | Looks up subdomain names in Certificate Transparency logs through crt.sh |
-| `internal/passive` | The `Source` interface behind `-sources`, the source registry, and the Wayback Machine source |
+| `internal/passive` | The `Source` interface behind `-sources`, the source registry, the merge of source names into candidates (shared by the CLI and `pkg/subenum`), and the Wayback Machine source |
 | `internal/labzone` | Parses `-simulate-zone` scenario files for lab mode |
 | `internal/mcp` | Minimal Model Context Protocol server (JSON-RPC over stdio, tools only) behind `subenum mcp` |
 | `internal/dnsserver` | Scriptable local DNS server backing lab mode and the hermetic tests |
@@ -91,7 +91,7 @@ internal/report/report.go      - New, Target, Finish: the run-quality report
 internal/permute/permute.go    - Generate: permutations of found names
 internal/diff/diff.go          - Name, RecordsChanged: the comparison behind -diff-records and subenum.Diff
 internal/ct/ct.go              - Client.Names: crt.sh lookup
-internal/passive/passive.go    - Source, Known, ParseList, New: the -sources registry
+internal/passive/passive.go    - Source, Known, ParseList, New: the -sources registry; Merge: source names into candidates
 internal/passive/wayback.go    - Wayback.Names: hostnames from the Wayback Machine's CDX index
 internal/mcp/mcp.go            - Server.Serve: MCP over stdio (initialize, ping, tools/list, tools/call, cancellation)
 pkg/subenum/sources.go         - Source, CertificateTransparency, WaybackMachine: Config.Sources
