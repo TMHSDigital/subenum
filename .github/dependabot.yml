@@ -40,6 +40,13 @@ updates:
     groups:
       docker:
         patterns: ["*"]
+    # devcontainers/go tags lead with the image version once it is 2.x
+    # (2.3-bookworm is image 2.3 with Go 1.27), which Dependabot reads as a
+    # newer release of 1.26-bookworm. Keep the Go 1.26 tag and take its new
+    # digests instead.
+    ignore:
+      - dependency-name: "devcontainers/go"
+        versions: [">= 2"]
     labels:
       - "dependencies"
       - "docker"

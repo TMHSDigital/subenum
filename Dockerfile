@@ -2,7 +2,7 @@
 # minimum); Dependabot keeps both digests fresh. It runs on the build host's
 # platform and cross-compiles for the target, so multi-arch images (#40) need
 # no QEMU emulation.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS builder
 
 # Set by BuildKit for each platform being built.
 ARG TARGETOS
@@ -32,7 +32,7 @@ COPY examples/labs/*.zone examples/labs/words.txt ./examples/labs/
 # Build the binary with optimizations
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o subenum -ldflags="-w -s -X main.Version=${VERSION}" .
 
-FROM gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
+FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
 
 WORKDIR /home/nonroot
 
