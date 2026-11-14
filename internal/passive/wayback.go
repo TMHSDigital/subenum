@@ -3,6 +3,7 @@ package passive
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -93,38 +94,32 @@ func (w Wayback) Names(ctx context.Context, domain string) ([]string, error) {
 	return names, nil
 }
 
+// waybackMaxLine bounds one archived URL. A longer line is skipped, not
+// fatal: it used to fail the whole answer and lose every name (#259).
+const waybackMaxLine = 1 << 20
+
 // hostNames reads one archived URL per line and returns the hosts under
 // domain, relative to it, and how many lines it read.
 func hostNames(r io.Reader, domain string) ([]string, int, error) {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	set := map[string]bool{}
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	br := bufio.NewReaderSize(r, 64<<10)
 	lines := 0
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
+	for {
+		raw, tooLong, err := readURLLine(br)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, lines, err
 		}
-		lines++
-		if !strings.Contains(line, "://") {
-			line = "http://" + line
+		line := strings.TrimSpace(string(raw))
+		if tooLong {
+			lines++
+		} else if line != "" {
+			lines++
+			addHost(set, line, domain)
 		}
-		u, err := url.Parse(line)
-		if err != nil {
-			continue
+		if err != nil { // io.EOF, after the last line
+			break
 		}
-		host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-		rel, ok := strings.CutSuffix(host, "."+domain)
-		if !ok || rel == "" {
-			continue
-		}
-		if norm, ok := wordlist.Normalize(rel); ok {
-			set[norm] = true
-		}
-	}
-	if err := sc.Err(); err != nil {
-		return nil, lines, err
 	}
 	out := make([]string, 0, len(set))
 	for n := range set {
@@ -132,4 +127,44 @@ func hostNames(r io.Reader, domain string) ([]string, int, error) {
 	}
 	sort.Strings(out)
 	return out, lines, nil
+}
+
+// readURLLine reads one line, without its newline. A line over
+// waybackMaxLine is read to its end and returned empty with tooLong set. The
+// last line may lack a newline: it comes with io.EOF.
+func readURLLine(br *bufio.Reader) (line []byte, tooLong bool, err error) {
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if !tooLong {
+			if len(line)+len(chunk) > waybackMaxLine+1 { // +1: the newline
+				line, tooLong = nil, true
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return line, tooLong, err
+	}
+}
+
+// addHost adds the host of one archived URL to set, relative to domain, if
+// it is a valid name under it.
+func addHost(set map[string]bool, line, domain string) {
+	if !strings.Contains(line, "://") {
+		line = "http://" + line
+	}
+	u, err := url.Parse(line)
+	if err != nil {
+		return
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	rel, ok := strings.CutSuffix(host, "."+domain)
+	if !ok || rel == "" {
+		return
+	}
+	if norm, ok := wordlist.Normalize(rel); ok {
+		set[norm] = true
+	}
 }

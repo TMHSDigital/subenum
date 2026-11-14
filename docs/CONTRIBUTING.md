@@ -191,3 +191,15 @@ NODATA, delay, drop, truncation) and counts every query per name and type.
 `internal/dns` tests can also use the table-driven `startTestDNS` wrapper in
 `internal/dns/testdns_test.go`. The optional live smoke test is gated on
 `SUBENUM_NETWORK_TESTS=1`.
+
+Parsers of untrusted input have fuzz targets (`grep -rn "^func Fuzz" .`): the
+Wayback answer, lab scenarios, domain and wordlist normalisation, MCP request
+lines, and zone-transfer and DNSSEC denial messages. `go test` runs their seed
+inputs; to fuzz one, name it and its package:
+
+```bash
+go test -run '^$' -fuzz '^FuzzHostNames$' -fuzztime 1m ./internal/passive/
+```
+
+A failing input is saved under the package's `testdata/fuzz/`; commit it with
+the fix so it stays a regression test.

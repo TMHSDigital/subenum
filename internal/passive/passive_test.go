@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/retryhttp"
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // Failing test servers are retried at once, not after a real backoff.
@@ -156,4 +157,64 @@ func TestWaybackError(t *testing.T) {
 	if _, err := (Wayback{BaseURL: srv.URL}).Names(context.Background(), "example.com"); err == nil || !strings.Contains(err.Error(), "503") {
 		t.Errorf("err = %v, want the 503", err)
 	}
+}
+
+// TestWaybackEdgeCases covers #259: an over-long line is skipped rather than
+// failing the answer, and odd hosts are handled.
+func TestWaybackEdgeCases(t *testing.T) {
+	body := strings.Join([]string{
+		"http://" + strings.Repeat("a", 2<<20) + ".example.com/", // 2 MiB: skipped
+		"http://www.example.com/",
+		"http://user:pw@login.example.com/",      // userinfo
+		"http://[2001:db8::1]/x",                 // IPv6 literal
+		"http://*.wild.example.com/",             // wildcard: not a name
+		"http://%zz.example.com/",                // malformed URL
+		"https://Shop.EXAMPLE.com.:443/cart",     // case and trailing dot
+		"http://evil.example.com.attacker.test/", // a lookalike outside the domain
+		"no-newline.example.com",                 // last line without a newline
+	}, "\n")
+	names, lines, err := hostNames(strings.NewReader(body), "EXAMPLE.com.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"login", "no-newline", "shop", "www"}; !slices.Equal(names, want) {
+		t.Errorf("names = %q, want %q", names, want)
+	}
+	if lines != 9 {
+		t.Errorf("lines = %d, want 9 (the skipped line counts toward the URL limit)", lines)
+	}
+}
+
+// TestWaybackTransportError: a connection dropped mid-answer is reported,
+// not taken for an empty index.
+func TestWaybackTransportError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "1000")
+		_, _ = w.Write([]byte("http://www.example.com/\n"))
+	}))
+	defer srv.Close()
+	if names, err := (Wayback{BaseURL: srv.URL}).Names(context.Background(), "example.com"); err == nil {
+		t.Errorf("a short body was accepted: names %q", names)
+	}
+}
+
+// FuzzHostNames: any answer parses without panicking, and every name it
+// gives is a valid entry under the domain (#259).
+func FuzzHostNames(f *testing.F) {
+	f.Add("http://www.example.com/\nhttps://u@API.example.com:8443/x\n", "example.com")
+	f.Add("[::1]\n*.example.com\n\n\r\n%zz", "Example.COM.")
+	f.Fuzz(func(t *testing.T, body, domain string) {
+		names, _, err := hostNames(strings.NewReader(body), domain)
+		if err != nil {
+			t.Fatalf("reading from memory failed: %v", err)
+		}
+		if !slices.IsSorted(names) {
+			t.Errorf("names not sorted: %q", names)
+		}
+		for _, n := range names {
+			if norm, ok := wordlist.Normalize(n); !ok || norm != n {
+				t.Errorf("name %q is not a normalised entry", n)
+			}
+		}
+	})
 }
