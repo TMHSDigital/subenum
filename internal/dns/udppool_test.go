@@ -141,3 +141,63 @@ func TestPooledSocketSkipsStaleReply(t *testing.T) {
 		t.Errorf("SERVFAIL after a stale REFUSED: %v, want other (not refused)", o)
 	}
 }
+
+// TestPoolSharesIdleSocketBudget covers #252: a pool's members keep their
+// idle UDP sockets within one shared budget, however many members there
+// are, and the pool closes them all at the end of a scan.
+func TestPoolSharesIdleSocketBudget(t *testing.T) {
+	srv := dnstest.Start(t, func(dnstest.Query) dnstest.Reply { return dnstest.NXDomain })
+	addrs := make([]string, 6)
+	for i := range addrs {
+		addrs[i] = srv.Addr // distinct members, same server
+	}
+	p := NewPool(addrs, time.Second)
+	budget := dialerOf(t, p.members[0].resolver).budget
+	budget.max = 4
+	idle := func() int {
+		n := 0
+		for _, m := range p.members {
+			d := dialerOf(t, m.resolver)
+			if d.budget != budget {
+				t.Fatal("pool members do not share one idle budget")
+			}
+			n += len(d.idle)
+		}
+		return n
+	}
+	for _, m := range p.members {
+		// Two sockets open at once per member, then both closed.
+		d := dialerOf(t, m.resolver)
+		c1, err := d.dial(context.Background(), "udp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		c2, err := d.dial(context.Background(), "udp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = c1.Close()
+		_ = c2.Close()
+	}
+	if n := idle(); n != 4 || budget.n.Load() != 4 {
+		t.Errorf("%d idle sockets (budget counts %d) across %d members, want the shared cap of 4", n, budget.n.Load(), len(p.members))
+	}
+	p.CloseIdleConnections()
+	if n := idle(); n != 0 || budget.n.Load() != 0 {
+		t.Errorf("after CloseIdleConnections: %d idle sockets, budget counts %d; want 0", n, budget.n.Load())
+	}
+}
+
+// dialerOf returns the UDP dialer behind a resolver from NewResolver.
+func dialerOf(t *testing.T, r *net.Resolver) *udpDialer {
+	t.Helper()
+	v, ok := pooledDialers.Load(weak.Make(r))
+	if !ok {
+		t.Fatal("resolver has no registered dialer")
+	}
+	d, ok := v.(*udpDialer)
+	if !ok {
+		t.Fatalf("dialer is %T, want *udpDialer", v)
+	}
+	return d
+}

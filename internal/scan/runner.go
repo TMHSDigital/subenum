@@ -584,8 +584,10 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	if cfg.Resolver == nil {
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
 	}
-	// DoT and DoH connections kept for reuse are not held past the scan (#113).
+	// DoT and DoH connections kept for reuse are not held past the scan
+	// (#113), nor are the -r pool members' sockets (#252).
 	defer dns.CloseIdleConnections(cfg.Resolver)
+	defer cfg.Pool.CloseIdleConnections()
 	var jobLimiter *dns.RateLimiter
 	if cfg.Simulate || cfg.resolveHook != nil {
 		jobLimiter = limiter

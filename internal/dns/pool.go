@@ -120,13 +120,27 @@ func ParseResolverList(lines []string) ([]string, error) {
 	return out, nil
 }
 
-// NewPool builds a pool of resolvers from NewResolver.
+// NewPool builds a pool of resolvers from NewResolver. Their idle UDP
+// sockets share one budget, so a long -r list does not hold a socket open
+// per member for the whole run (#252).
 func NewPool(addrs []string, timeout time.Duration) *Pool {
 	p := &Pool{now: time.Now, sleep: sleepCtx, canarySeen: map[string]bool{}}
+	budget := newIdleBudget()
 	for _, a := range addrs {
-		p.members = append(p.members, &PoolResolver{Addr: a, resolver: NewResolver(timeout, a), stats: ResolverStats{Addr: a}})
+		p.members = append(p.members, &PoolResolver{Addr: a, resolver: newResolver(timeout, a, budget), stats: ResolverStats{Addr: a}})
 	}
 	return p
+}
+
+// CloseIdleConnections closes the sockets every member keeps for reuse, as
+// CloseIdleConnections does for one resolver. A scan calls it when it ends.
+func (p *Pool) CloseIdleConnections() {
+	if p == nil {
+		return
+	}
+	for _, m := range p.members {
+		CloseIdleConnections(m.resolver)
+	}
 }
 
 // SetRatePerResolver caps the DNS queries sent to each member at perSecond,

@@ -141,7 +141,7 @@ tools/wordlist-gen.go          - Standalone wordlist generator
 *   **Purpose**: This is the core component responsible for performing the DNS lookups for each candidate name and classifying what happened. It also provides wildcard detection and wire-level rate limiting.
 *   **Implementation**:
     *   **Resolver and transports**: `dns.NewResolver` builds a `net.Resolver` with `PreferGo: true` whose `Dial` hook always connects to the configured server through a transport chosen from the `-dns-server` value (`dns.Transport`, `internal/dns/transport.go`):
-        *   `ip:port` - UDP, with UDP sockets reused between queries; a truncated answer (TC=1) falls back to TCP, which dials per query.
+        *   `ip:port` - UDP, with UDP sockets reused between queries (at most 512 idle, a budget an `-r` pool shares across its members); a truncated answer (TC=1) falls back to TCP, which dials per query.
         *   `tls://host[:853]` - DNS over TLS (RFC 7858), over a small pool of reused TLS connections.
         *   `https://host/path` - DNS over HTTPS (RFC 8484), each query sent as an HTTP POST of `application/dns-message`.
 

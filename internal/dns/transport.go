@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"weak"
 
@@ -93,8 +94,10 @@ func CloseIdleConnections(r *net.Resolver) {
 const dotIdleConns = 128
 
 // newDialer returns the dialer for a -dns-server value. It is validated
-// earlier (validate.DNSServer), so errors here fall back to UDP.
-func newDialer(timeout time.Duration, server string) dialer {
+// earlier (validate.DNSServer), so errors here fall back to UDP. A UDP
+// dialer keeps its idle sockets within budget, which a pool shares across
+// its members; nil gives it a budget of its own.
+func newDialer(timeout time.Duration, server string, budget *idleBudget) dialer {
 	switch Transport(server) {
 	case TransportTLS:
 		addr, name, err := validate.DoTAddress(server)
@@ -126,12 +129,39 @@ func newDialer(timeout time.Duration, server string) dialer {
 			},
 		}
 	}
-	return newUDPDialer(server, timeout)
+	d := newUDPDialer(server, timeout)
+	if budget != nil {
+		d.budget = budget
+	}
+	return d
 }
 
 // udpIdleConns bounds the UDP sockets kept for reuse; it covers a busy -t
-// without holding thousands of sockets open.
+// without holding thousands of sockets open. A resolver pool shares one
+// such budget across its members, so a 10k-resolver -r list keeps at most
+// this many idle sockets, not one or more per member (#252).
 const udpIdleConns = 512
+
+// idleBudget counts idle UDP sockets against a cap shared by one or more
+// dialers.
+type idleBudget struct {
+	n   atomic.Int64
+	max int64
+}
+
+func newIdleBudget() *idleBudget { return &idleBudget{max: udpIdleConns} }
+
+// take reserves room for one more idle socket, if there is any.
+func (b *idleBudget) take() bool {
+	if b.n.Add(1) > b.max {
+		b.n.Add(-1)
+		return false
+	}
+	return true
+}
+
+// release gives back the room of a socket that left the idle set.
+func (b *idleBudget) release() { b.n.Add(-1) }
 
 // udpDialer reuses UDP sockets between queries (#180). Opening and closing
 // a socket per query capped live scans near 10k queries per second, nearly
@@ -143,16 +173,18 @@ type udpDialer struct {
 	addr    string
 	timeout time.Duration
 	idle    chan *net.UDPConn
+	budget  *idleBudget // room for idle sockets, possibly shared
 }
 
 func newUDPDialer(addr string, timeout time.Duration) *udpDialer {
-	return &udpDialer{addr: addr, timeout: timeout, idle: make(chan *net.UDPConn, udpIdleConns)}
+	return &udpDialer{addr: addr, timeout: timeout, idle: make(chan *net.UDPConn, udpIdleConns), budget: newIdleBudget()}
 }
 
 func (d *udpDialer) dial(ctx context.Context, network string) (net.Conn, error) {
 	if network == "udp" {
 		select {
 		case u := <-d.idle:
+			d.budget.release()
 			return &pooledUDPConn{UDPConn: u, pool: d}, nil
 		default:
 		}
@@ -173,6 +205,7 @@ func (d *udpDialer) closeIdle() {
 	for {
 		select {
 		case u := <-d.idle:
+			d.budget.release()
 			_ = u.Close()
 		default:
 			return
@@ -211,13 +244,14 @@ func (c *pooledUDPConn) Write(p []byte) (int, error) {
 }
 
 func (c *pooledUDPConn) Close() error {
-	if c.bad || c.SetDeadline(time.Time{}) != nil {
+	if c.bad || c.SetDeadline(time.Time{}) != nil || !c.pool.budget.take() {
 		return c.UDPConn.Close()
 	}
 	select {
 	case c.pool.idle <- c.UDPConn:
 		return nil
 	default:
+		c.pool.budget.release()
 		return c.UDPConn.Close()
 	}
 }
