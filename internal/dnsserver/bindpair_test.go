@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -37,22 +38,38 @@ func failingPair(t *testing.T, n int) (pairListeners, *[]string) {
 func TestBindPairLeavesReservedBlock(t *testing.T) {
 	l, asked := failingPair(t, 3)
 	pick := func() int {
-		// Let the OS find a free UDP port to stand in for a random one, so
-		// the test cannot collide with a busy port.
-		pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
+		// Draw from randomPort, as the server does, and keep a port that is
+		// free for both UDP and TCP. An OS-assigned port would come from the
+		// ephemeral range, which on Windows hosts with Hyper-V or WinNAT can
+		// sit inside a reserved TCP block and fail the real bind (#254).
+		for range 100 {
+			port := randomPort()
+			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+			pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", addr)
+			if err != nil {
+				continue
+			}
+			ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
+			_ = pc.Close()
+			if err != nil {
+				continue
+			}
+			_ = ln.Close()
+			return port
 		}
-		defer func() { _ = pc.Close() }()
-		return pc.LocalAddr().(*net.UDPAddr).Port
+		t.Fatal("no free UDP+TCP port in 100 tries")
+		return 0
 	}
 	pc, ln, err := bindPair("127.0.0.1", l, pick)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = pc.Close(); _ = ln.Close() }()
-	if len(*asked) != 4 {
-		t.Fatalf("UDP binds %v, want 4 (one OS-picked, three explicit)", *asked)
+	// One OS-picked attempt, the three forced failures' explicit retries,
+	// and, should a picked port be taken between the check and the bind,
+	// more explicit ones.
+	if len(*asked) < 4 {
+		t.Fatalf("UDP binds %v, want at least 4 (one OS-picked, then explicit)", *asked)
 	}
 	if !strings.HasSuffix((*asked)[0], ":0") {
 		t.Errorf("first attempt %q, want an OS-picked port", (*asked)[0])
