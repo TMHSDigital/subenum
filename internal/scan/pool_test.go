@@ -188,10 +188,14 @@ func TestPoolBenchesDeadResolver(t *testing.T) {
 	dead, stopD := startUDPDNSAction(t, func(string) dnsAction { return dnsAction{drop: true} })
 	defer stopD()
 
-	pool := dns.NewPool([]string{dead, healthy}, 50*time.Millisecond)
+	// The timeout covers the trusted preflight and every pool lookup. 50ms
+	// made the test flaky (#253): a busy loopback server missed it, failing
+	// the preflight or turning a healthy answer into a timeout. 250ms still
+	// benches the dead member quickly, since it never answers.
+	pool := dns.NewPool([]string{dead, healthy}, 250*time.Millisecond)
 	cfg := Config{
 		Domain: "example.com", Entries: makeEntries(80), Concurrency: 4,
-		Timeout: 50 * time.Millisecond, Attempts: 2, Types: []string{"A"},
+		Timeout: 250 * time.Millisecond, Attempts: 2, Types: []string{"A"},
 		Resolver: dns.NewResolver(time.Second, trusted), DNSServer: trusted, Pool: pool,
 	}
 	done, errs := runPool(t, cfg)
