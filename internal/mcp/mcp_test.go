@@ -222,6 +222,51 @@ func TestProgressNotifications(t *testing.T) {
 	}
 }
 
+// TestMalformedToolCallParams: params that are not a tools/call object get
+// an invalid-params error, not a crash or a call (#258).
+func TestMalformedToolCallParams(t *testing.T) {
+	send, recv, _ := serve(t, &Server{Tools: []Tool{echoTool()}})
+	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":"echo"}`)
+	m := recv()
+	e, ok := m["error"].(map[string]any)
+	if !ok || e["code"] != float64(codeInvalidParams) || !strings.Contains(e["message"].(string), "invalid tools/call params") {
+		t.Errorf("string params: %v, want an invalid-params error", m)
+	}
+}
+
+// TestServeStopsWhenContextEnds: cancelling Serve's context ends it and
+// stops the running call, even while input is still open (#258).
+func TestServeStopsWhenContextEnds(t *testing.T) {
+	started := make(chan struct{})
+	block := Tool{
+		Name:        "block",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Call: func(ctx context.Context, _ json.RawMessage) Result {
+			close(started)
+			<-ctx.Done()
+			return Result{Text: "stopped"}
+		},
+	}
+	inR, inW := io.Pipe()
+	defer func() { _ = inW.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- (&Server{Tools: []Tool{block}}).Serve(ctx, inR, io.Discard) }()
+	if _, err := io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"block"}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("Serve returned nil after cancellation, want the context error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return after its context was cancelled")
+	}
+}
+
 func TestInputEndFinishesPendingCalls(t *testing.T) {
 	send, recv, closeInput := serve(t, &Server{Tools: []Tool{echoTool()}})
 	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":null}}`)

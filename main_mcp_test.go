@@ -14,6 +14,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/labzone"
+	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
@@ -230,6 +231,83 @@ func TestE2EMCPScanSources(t *testing.T) {
 	_, replies = runMCPSession(t, base, mcpCall{"scan", `{"domain": "lab.example", "sources": ["ct"]}`})
 	if text, isErr := toolText(t, replies[0]); !isErr || !strings.Contains(text, "sources are off") {
 		t.Errorf("sources without -sources: %q (isError %v)", text, isErr)
+	}
+}
+
+// TestE2EMCPArgumentErrors covers the tool-argument checks the allow-list
+// test does not (#258): each bad call is an isError result, and the server
+// keeps answering after a scan that could not start.
+func TestE2EMCPArgumentErrors(t *testing.T) {
+	tooMany, _ := json.Marshal(make([]string, maxMCPWords+1))
+	_, replies := runMCPSession(t, []string{"-allow", "lab.example", "-dns-server", "127.0.0.1:9", "-max-queries", "10"},
+		mcpCall{"lab_scan", `{"rate": -1}`},
+		mcpCall{"lab_scan", `{"rate": 1001}`},
+		mcpCall{"scan", `{"domain": "lab.example", "words": ` + string(tooMany) + `}`},
+		mcpCall{"scan", `{"domain": "exa mple.com"}`},
+		mcpCall{"scan", `{"domain": ""}`},
+		mcpCall{"scan", `{"domain": "lab.example", "max_queries": -1}`},
+		mcpCall{"scan", `{"domain": "lab.example", "words": ["!!!", "-"]}`},
+		mcpCall{"lab_scan", `{"words": ["www"]}`},
+	)
+	for i, want := range []string{
+		"rate must be 0 to 1000",
+		"rate must be 0 to 1000",
+		fmt.Sprintf("at most %d", maxMCPWords),
+		"domain:",
+		"domain:",
+		"max_queries must be at least 1",
+		"did not start",
+	} {
+		if text, isErr := toolText(t, replies[i]); !isErr || !strings.Contains(text, want) {
+			t.Errorf("call %d: %q (isError %v), want an error containing %q", i, text, isErr, want)
+		}
+	}
+	if r := mcpReportOf(t, replies[6]); r.Verdict != verdictNotRun || r.Error == "" {
+		t.Errorf("unstartable scan: %+v, want not_run with an error", r)
+	}
+	if r := mcpReportOf(t, replies[7]); r.Verdict != "complete" || !slices.Equal(reportNames(r), []string{"www"}) {
+		t.Errorf("the call after a failed one: %+v, want www and complete", r)
+	}
+}
+
+// TestMCPExplainStatsBranches feeds explain_stats a report with every
+// optional part set, so each explanation it can give is checked (#258).
+func TestMCPExplainStatsBranches(t *testing.T) {
+	s := output.Summary{
+		Type: "summary", Verdict: "unreliable", Reason: "too many failures", Zone: "lab5-flaky",
+		Resolver: "127.0.0.1:5353", QueriesSent: 300, DurationMs: 3000, AchievedQPS: 100, RateLimit: 50,
+		Targets: []output.TargetSummary{{
+			Domain: "lab.example", Status: "ok", Verdict: "unreliable", Reason: "too many failures",
+			Processed: 90, Total: 100, Found: 4, SkippedCap: 10, StoppedBy: "duration", Wildcard: true,
+			Outcomes: output.Outcomes{Resolved: 4, NXDomain: 50, Timeout: 30, Refused: 3, Other: 3, WildcardFiltered: 7},
+			Takeover: 2, Internal: 1, AXFRAllowed: []string{"ns1.lab.example"}, ZoneDenial: "nsec",
+			Sources:     []output.SourceSummary{{Name: "wayback", Error: "503"}},
+			Permutation: &output.PermutationSummary{Seeds: 4, Candidates: 40, Found: 1},
+			Error:       "resolver stopped answering",
+		}},
+		Diff: &output.DiffSummary{Previous: "prev.jsonl", Added: 1, Removed: 2, Unverified: 3},
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quote, _ := json.Marshal(string(data))
+	_, replies := runMCPSession(t, nil, mcpCall{"explain_stats", `{"stats": ` + string(quote) + `}`})
+	text, isErr := toolText(t, replies[0])
+	if isErr {
+		t.Fatalf("explain_stats failed: %s", text)
+	}
+	for _, want := range []string{
+		"Overall verdict: unreliable", "too many lookups failed", "lab run", "a limit of 50 per second",
+		"Error: resolver stopped answering", "Next time: lower -rate", "because -max-duration ran out",
+		"(a wildcard)", "2 results have a subdomain-takeover hint", "1 public names answer with internal",
+		"Zone transfer (AXFR) was allowed by ns1.lab.example", "plain NSEC", "Passive source wayback failed (503)",
+		"Permutation pass: 40 candidates from 4 seeds, 1 found", "Compared with prev.jsonl: 1 added, 2 removed",
+		"3 earlier names could not be checked",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("explanation lacks %q:\n%s", want, text)
+		}
 	}
 }
 
