@@ -164,7 +164,7 @@ flowchart LR
 go install github.com/TMHSDigital/subenum@latest
 ```
 
-Requires Go 1.26 or newer. The binary lands in `$(go env GOPATH)/bin` and reports the installed module version with `-version`.
+Requires Go 1.26 or newer; an older 1.26 release fetches the patched toolchain named in `go.mod` automatically (the default `GOTOOLCHAIN=auto`). The binary lands in `$(go env GOPATH)/bin` and reports the installed module version with `-version`.
 
 </details>
 

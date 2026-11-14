@@ -24,6 +24,13 @@ if it drifts. Current `golang.org/x/sys` and `golang.org/x/text` declare
 `govulncheck`, which CI runs. On PowerShell, quote `-go=1.26.0`; unquoted it is
 parsed as `-go=1`. After changing dependencies run `make tidy` (plain `go mod tidy`), then confirm the `go` directive is still `go 1.26.0`.
 
+The `toolchain` line is separate: it names the patched Go release that builds
+from source use (#243). With the default `GOTOOLCHAIN=auto`, an older local Go
+downloads that release, so `go install` and source builds of the action never
+ship the original 1.26.0 standard library, which has since had security fixes.
+Raise it to the newest 1.26.x when a Go patch release comes out; it never
+changes the `go 1.26.0` language floor.
+
 ### Codespaces / Dev Containers
 
 The quickest start needs no local setup. [Open the repository in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum), or use "Reopen in Container" in VS Code. The container in `.devcontainer/` comes with Go 1.26 and the CI version of golangci-lint, and builds the binary. `make test` and `./subenum -simulate example.com` then work with no network access to any target.

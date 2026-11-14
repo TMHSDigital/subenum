@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `-resume` no longer skips names when a passive source failed in the interrupted run and works on resume. The failed source was fetched again, its names were inserted before later sources' names, and the saved position then pointed past candidates that were never tested while the verdict could still read `complete`. The resume state now records a failed source with no names, and the resumed run replays that (#237).
 
 ### Security
+- `go.mod` names a patched toolchain (`toolchain go1.26.11`) beside the unchanged `go 1.26.0` floor, so `go install` and the action's `version: source` build with the security-fixed `net/http`, `crypto/tls` and `crypto/x509` instead of the original 1.26.0 standard library; with the default `GOTOOLCHAIN=auto` an older local Go fetches it. Release binaries were already built with a current Go (#243).
 - The GitHub Action checks the downloaded release archive's build provenance with `gh attestation verify` as well as its `checksums.txt`, since an archive and its checksums file could be replaced together. The Pages workflow grants `pages: write` and `id-token: write` only to the job that deploys, not to the whole workflow (#210).
 
 ## [0.10.0] - 2026-11-08
