@@ -167,22 +167,13 @@ All pull requests must pass the full test suite, including the race detector:
 go test -v -race ./...
 ```
 
-On Windows, use Go 1.26.3 or later for race runs. Go 1.26.0 reports false
-data races there (between `context.WithTimeout` and the net package's DNS
-lookup goroutine) and can crash with `Exception 0xc0000005` in `scan.Run`;
-neither is a bug in subenum, and Linux, where CI runs `-race`, is not
-affected. `go.mod` keeps `go 1.26.0` as the minimum, so pick the toolchain
-per command:
-
-```bash
-GOTOOLCHAIN=go1.26.3 go test -race ./...
-```
-
-In PowerShell:
-
-```powershell
-$env:GOTOOLCHAIN = "go1.26.3"; go test -race ./...; Remove-Item Env:GOTOOLCHAIN
-```
+On Windows, Go 1.26.0 reports false data races (between
+`context.WithTimeout` and the net package's DNS lookup goroutine) and can
+crash with `Exception 0xc0000005` in `scan.Run`; neither is a bug in
+subenum, and Linux, where CI runs `-race`, is not affected. You need no
+workaround: `go.mod` names `toolchain go1.26.11`, so a local Go older than
+that switches to the patched toolchain by itself. The problem only comes
+back if you force Go 1.26.0 with `GOTOOLCHAIN=local`.
 
 New features should include tests. New flags must be covered by at least one test case.
 Do not hit public resolvers. Use `-simulate` or the in-process DNS server in
