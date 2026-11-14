@@ -4,13 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"golang.org/x/net/dns/dnsmessage"
+
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/dnstest"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -228,6 +234,77 @@ func TestE2EResumeRefusesChangedSettings(t *testing.T) {
 	path = writeState(t, resumeState{Args: args, Targets: []resumeTarget{{Domain: "example.com", Entries: "0123"}}})
 	if code, out := runCLIMerged(t, "-resume", path); code != exitFailure || !strings.Contains(out, "wordlist for example.com changed") {
 		t.Errorf("changed entries: exit %d\n%s", code, out)
+	}
+}
+
+// TestE2EResumeRefusesBadState covers #255: a changed input file, and a
+// state file that is missing, corrupt or from another version, each refuse
+// to resume with a message saying which.
+func TestE2EResumeRefusesBadState(t *testing.T) {
+	wl := writeFile(t, "wl.txt", "www\napi\n")
+	args := []string{"-simulate", "-seed", "3", "-progress=false", "-w", wl, "example.com"}
+	changed := writeState(t, resumeState{Args: args, Inputs: map[string]string{wl: "digest-of-the-old-file"}, Targets: []resumeTarget{{Domain: "example.com"}}})
+	dir := t.TempDir()
+	corrupt := filepath.Join(dir, "corrupt.json")
+	future := filepath.Join(dir, "future.json")
+	if err := os.WriteFile(corrupt, []byte(`{"version": 1, "args": [`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(future, []byte(`{"version": 999, "args": ["example.com"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ path, want string }{
+		{changed, "changed since the interrupted run"},
+		{corrupt, "-resume " + corrupt + ":"},
+		{future, "unsupported state version 999"},
+		{filepath.Join(dir, "missing.json"), "reading -resume state"},
+	} {
+		if code, out := runCLIMerged(t, "-resume", tc.path); code == exitOK || !strings.Contains(out, tc.want) {
+			t.Errorf("-resume %s: exit %d, want a failure saying %q\n%s", filepath.Base(tc.path), code, tc.want, out)
+		}
+	}
+}
+
+// TestE2EResumeReplaysSourceNames covers #255: a resumed scan reuses the
+// names each passive source returned before the interrupt, in the current
+// and the legacy (-ct only) state format, and asks no source again.
+func TestE2EResumeReplaysSourceNames(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Name == "legacy.example.com" && q.Type == dnsmessage.TypeA {
+			return dnstest.Reply{A: []string{"192.0.2.10"}}
+		}
+		if q.Name == "legacy.example.com" {
+			return dnstest.Reply{}
+		}
+		return dnstest.NXDomain
+	})
+	var hits atomic.Int32
+	ct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte(`[{"name_value": "other.example.com"}]`))
+	}))
+	defer ct.Close()
+	ctBaseURL = ct.URL + "/"
+	t.Cleanup(func() { ctBaseURL = "" })
+
+	wl := writeFile(t, "wl.txt", "www\n")
+	for name, tc := range map[string]struct {
+		flag  string
+		saved resumeTarget
+	}{
+		"sources": {"-sources=ct", resumeTarget{Domain: "example.com", Sources: map[string][]string{"ct": {"legacy"}}}},
+		"legacy":  {"-ct", resumeTarget{Domain: "example.com", CT: []string{"legacy"}, CTFetched: true}},
+	} {
+		args := []string{tc.flag, "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.com"}
+		path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{tc.saved}})
+		hits.Store(0)
+		code, out := runCLI(t, "", "-resume", path)
+		if code != 0 || !strings.Contains(out, "legacy.example.com") || strings.Contains(out, "other.example.com") {
+			t.Errorf("%s: exit %d, results %q; want the saved name legacy only", name, code, out)
+		}
+		if hits.Load() != 0 {
+			t.Errorf("%s: the resumed scan asked crt.sh again (%d requests)", name, hits.Load())
+		}
 	}
 }
 
