@@ -75,55 +75,61 @@
 
 /* ---------- Tokens ---------- */
 
+/* A field report: paper and ink, one annotation blue for links, focus and
+   the main action, and the outcome colours only where they mean an outcome. */
 :root,
-:root[data-theme="dark"] {
-  --bg: #0e1726;
-  --bg-raised: #142036;
-  --bg-sunk: #0a111d;
-  --line: #22324d;
-  --line-soft: #1a2840;
-  --text: #e8ecf2;
-  --text-2: #a3b0c4;
-  --text-3: #7d8aa0;
-  --accent: #f2b441;
-  --accent-text: #f5c066;
-  --on-accent: #1b1406;
-  --code-bg: #1a2740;
+:root[data-theme="light"] {
+  --bg: #fbfbfa;
+  --bg-raised: #ffffff;
+  --bg-sunk: #f1f1ee;
+  --line: #dcdcd7;
+  --line-soft: #e8e8e4;
+  --rule: #111214;
+  --text: #111214;
+  --text-2: #45474c;
+  --text-3: #62656b;
+  --accent: #1f4fd1;
+  --accent-hover: #173da6;
+  --accent-text: #1f4fd1;
+  --on-accent: #ffffff;
+  --code-bg: #f1f1ee;
 
-  --resolved: #4cc9a0;
-  --nxdomain: #75849c;
-  --timeout: #a991f2;
-  --refused: #f08a76;
+  --resolved: #1d7a4d;
+  --nxdomain: #6c6f75;
+  --timeout: #5b45c2;
+  --refused: #c0352b;
   --complete: var(--resolved);
-  --degraded: var(--accent);
+  --degraded: #a35f00;
   --unreliable: var(--refused);
 
-  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.6);
-  color-scheme: dark;
+  --shadow: 0 24px 60px -30px rgba(17, 18, 20, 0.35);
+  color-scheme: light;
 }
 
-:root[data-theme="light"] {
-  --bg: #f6f7f9;
-  --bg-raised: #ffffff;
-  --bg-sunk: #eef1f5;
-  --line: #d6dce5;
-  --line-soft: #e4e8ee;
-  --text: #13203a;
-  --text-2: #475670;
-  --text-3: #66748b;
-  --accent: #f2b441;
-  --accent-text: #9a5b00;
-  --on-accent: #1b1406;
-  --code-bg: #e9edf3;
+:root[data-theme="dark"] {
+  --bg: #111214;
+  --bg-raised: #1a1b1e;
+  --bg-sunk: #0c0d0e;
+  --line: #2c2e33;
+  --line-soft: #212327;
+  --rule: #ecebe6;
+  --text: #ecebe6;
+  --text-2: #b4b5b9;
+  --text-3: #8b8d93;
+  --accent: #8aa6ff;
+  --accent-hover: #a9bfff;
+  --accent-text: #9db4ff;
+  --on-accent: #0b1020;
+  --code-bg: #1a1b1e;
 
-  --resolved: #12825e;
-  --nxdomain: #64728a;
-  --timeout: #6a4fd0;
-  --refused: #c2412b;
-  --degraded: #a86400;
+  --resolved: #5cc995;
+  --nxdomain: #8b8d93;
+  --timeout: #b3a2ff;
+  --refused: #ff8a7a;
+  --degraded: #e0a640;
 
-  --shadow: 0 24px 60px -30px rgba(19, 32, 58, 0.35);
-  color-scheme: light;
+  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
 }
 
 :root {
@@ -133,7 +139,7 @@
   --wrap: 1240px;
   --gutter: clamp(16px, 4vw, 40px);
   --topbar: 60px;
-  --radius: 10px;
+  --radius: 2px;
 }
 
 /* ---------- Base ---------- */
@@ -178,7 +184,7 @@ a:hover {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 
 code,
@@ -193,7 +199,7 @@ kbd {
   padding: 0 0.4em;
   border: 1px solid var(--line);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: 2px;
   background: var(--bg-sunk);
   color: var(--text-2);
   font-size: 0.75rem;
@@ -207,7 +213,7 @@ kbd {
   left: 16px;
   z-index: 100;
   padding: 8px 14px;
-  border-radius: 6px;
+  border-radius: 2px;
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
@@ -229,8 +235,8 @@ kbd {
   top: 0;
   z-index: 40;
   height: var(--topbar);
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border-bottom: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: saturate(140%) blur(10px);
   -webkit-backdrop-filter: saturate(140%) blur(10px);
 }
@@ -274,16 +280,17 @@ kbd {
 
 .brand-word {
   font-family: var(--cond);
-  font-size: 1.35rem;
+  font-size: 1.2rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.04em;
   line-height: 1;
+  text-transform: uppercase;
 }
 
 .release-tag {
   padding: 2px 8px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 2px;
   color: var(--text-2);
   font-family: var(--mono);
   font-size: 0.75rem;
@@ -301,7 +308,7 @@ kbd {
   margin-left: 6px;
   padding: 0 5px;
   border: 1px dashed var(--accent);
-  border-radius: 3px;
+  border-radius: 2px;
   color: var(--accent-text);
   font-family: var(--mono);
   font-size: 0.7rem;
@@ -323,7 +330,7 @@ kbd {
 
 .topnav a {
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 2px;
   color: var(--text-2);
   font-size: 0.94rem;
   font-weight: 500;
@@ -338,7 +345,7 @@ kbd {
 .topnav a[aria-current="page"] {
   color: var(--text);
   box-shadow: inset 0 -2px 0 var(--accent);
-  border-radius: 6px 6px 0 0;
+  border-radius: 0;
 }
 
 .topbar-tools {
@@ -355,7 +362,7 @@ kbd {
   height: 36px;
   padding: 0 8px 0 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 2px;
   background: var(--bg-sunk);
   color: var(--text-3);
   font: inherit;
@@ -392,7 +399,7 @@ kbd {
   height: 36px;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: 2px;
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
@@ -468,9 +475,11 @@ kbd {
 .nav-group-title {
   margin: 0 0 6px;
   color: var(--text-3);
-  font-family: var(--sans);
-  font-size: 0.82rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
   font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .nav-group ul {
@@ -505,11 +514,12 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   min-height: 44px;
   padding: 0 20px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg-raised);
+  border: 1.5px solid var(--rule);
+  border-radius: 2px;
+  background: transparent;
   color: var(--text);
   font: inherit;
   font-size: 0.97rem;
@@ -519,8 +529,14 @@ kbd {
 }
 
 .btn:hover {
-  border-color: var(--text-3);
+  background: var(--bg-sunk);
   text-decoration: none;
+}
+
+.btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 
 .btn-primary {
@@ -530,8 +546,8 @@ kbd {
 }
 
 .btn-primary:hover {
-  border-color: #f7c76b;
-  background: #f7c76b;
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
 }
 
 .hero-actions {
@@ -643,7 +659,7 @@ pre.cmd code::before {
   margin: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 2px;
   background: var(--bg-sunk);
   box-shadow: var(--shadow);
   font-family: var(--mono);
@@ -702,7 +718,7 @@ pre.cmd code::before {
 
 .console-out mark {
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: 2px;
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent-text);
 }
@@ -752,7 +768,7 @@ pre.cmd code::before {
   padding: 9px 11px;
   border: 1px solid var(--line-soft);
   border-top: 3px solid var(--o);
-  border-radius: 6px;
+  border-radius: 2px;
   background: var(--bg);
 }
 
@@ -790,7 +806,7 @@ pre.cmd code::before {
   display: inline-block;
   padding: 1px 9px;
   border: 1px solid color-mix(in srgb, var(--v) 55%, transparent);
-  border-radius: 999px;
+  border-radius: 2px;
   background: color-mix(in srgb, var(--v) 14%, transparent);
   color: var(--v);
   font-family: var(--mono);
@@ -809,7 +825,7 @@ pre.cmd code::before {
   right: 12px;
   padding: 3px 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 2px;
   background: var(--bg);
   color: var(--text-3);
   font: inherit;
@@ -943,7 +959,7 @@ pre.cmd code::before {
 .gauge {
   position: relative;
   height: 8px;
-  border-radius: 4px;
+  border-radius: 2px;
   background: linear-gradient(
     to right,
     color-mix(in srgb, var(--complete) 45%, transparent) 0 30%,
@@ -1020,7 +1036,7 @@ pre.cmd code::before {
   max-width: 100%;
   padding: 4px 10px;
   border-left: 2px solid var(--accent);
-  border-radius: 0 6px 6px 0;
+  border-radius: 0;
   background: var(--bg-sunk);
   color: var(--text);
   font-size: 0.82rem;
@@ -1146,8 +1162,11 @@ pre.cmd code::before {
 .toc h2 {
   margin: 22px 0 8px;
   color: var(--text-3);
-  font-size: 0.82rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
   font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .toc ol {
@@ -1238,12 +1257,13 @@ pre.cmd code::before {
 }
 
 .prose h1 {
-  margin: 0 0 18px;
+  margin: 0 0 20px;
   font-family: var(--cond);
-  font-size: clamp(2.1rem, 4vw, 2.75rem);
+  font-size: clamp(2.3rem, 4.6vw, 3.2rem);
   font-weight: 700;
-  line-height: 1.08;
-  letter-spacing: -0.015em;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
   text-wrap: balance;
 }
 
@@ -1251,10 +1271,10 @@ pre.cmd code::before {
   margin: 2.4em 0 0.6em;
   padding-top: 0.2em;
   font-family: var(--cond);
-  font-size: 1.7rem;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.005em;
 }
 
 .prose h3 {
@@ -1336,7 +1356,7 @@ pre.cmd code::before {
 
 .prose :not(pre) > code {
   padding: 0.12em 0.38em;
-  border-radius: 4px;
+  border-radius: 2px;
   background: var(--code-bg);
   font-size: 0.86em;
   overflow-wrap: anywhere;
@@ -1347,10 +1367,10 @@ pre.cmd code::before {
 }
 
 .prose blockquote {
-  padding: 12px 18px;
-  border-left: 3px solid var(--accent);
-  border-radius: 0 8px 8px 0;
-  background: var(--bg-raised);
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
+  background: none;
   color: var(--text-2);
 }
 
@@ -1365,7 +1385,7 @@ pre.cmd code::before {
 .prose details {
   padding: 10px 16px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 2px;
   background: var(--bg-raised);
 }
 
@@ -1405,10 +1425,14 @@ pre.cmd code::before {
 }
 
 .prose th {
+  border-bottom: 1.5px solid var(--rule);
   background: var(--bg-raised);
   color: var(--text-2);
-  font-size: 0.84rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .prose tr:last-child td {
@@ -1460,7 +1484,7 @@ pre code {
   right: 8px;
   padding: 2px 9px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 2px;
   background: var(--bg);
   color: var(--text-3);
   font-family: var(--sans);
@@ -1510,7 +1534,7 @@ pre code {
 .highlight .kt,
 .highlight .kc,
 .highlight .nt {
-  color: var(--accent-text);
+  color: var(--refused);
 }
 
 .highlight .s,
@@ -1538,14 +1562,7 @@ pre code {
 .highlight .bp,
 .highlight .nf,
 .highlight .fm {
-  color: #7cb7f0;
-}
-
-:root[data-theme="light"] .highlight .nb,
-:root[data-theme="light"] .highlight .nf,
-:root[data-theme="light"] .highlight .fm,
-:root[data-theme="light"] .highlight .bp {
-  color: #1f64b5;
+  color: var(--accent-text);
 }
 
 .highlight .nv,
@@ -1576,7 +1593,7 @@ pre code {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 2px;
   background: var(--bg);
   box-shadow: var(--shadow);
 }
@@ -1616,7 +1633,7 @@ pre code {
 .search-results a {
   display: block;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 2px;
   color: var(--text);
   text-decoration: none;
 }
@@ -1661,7 +1678,7 @@ pre code {
 /* ---------- Footer ---------- */
 
 .site-footer {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--rule);
   background: var(--bg-sunk);
 }
 
@@ -1688,9 +1705,12 @@ pre code {
 
 .footer-col h2 {
   margin: 0 0 10px;
-  color: var(--text);
-  font-size: 0.88rem;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 0.74rem;
   font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .footer-col ul {
@@ -1742,8 +1762,9 @@ pre code {
 .notfound h1 {
   margin: 0 0 12px;
   font-family: var(--cond);
-  font-size: clamp(2.2rem, 5vw, 3.2rem);
-  line-height: 1.05;
+  font-size: clamp(2.4rem, 6vw, 4rem);
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .notfound p {
