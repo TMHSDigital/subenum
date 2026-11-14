@@ -361,6 +361,15 @@
   /* ---------- 404: echo the missing path ---------- */
 
   var missing = $('[data-path]');
+  /* ---------- Demo video: no autoplay for reduced motion ---------- */
+
+  if (reduceMotion) {
+    $$('video[data-demo]').forEach(function (v) {
+      v.removeAttribute('autoplay');
+      v.pause();
+    });
+  }
+
   if (missing) {
     var path = window.location.pathname.replace(/^\/subenum\/?/, '').replace(/\.html$/, '').replace(/[^\w.-]+/g, '.').replace(/^\.+|\.+$/g, '');
     if (path) missing.textContent = path.slice(0, 48);

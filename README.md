@@ -20,7 +20,7 @@
 
 <br>
 
-<img src="docs/assets/tui-form.png" alt="subenum interactive TUI" width="640"/>
+<img src="docs/assets/demo.gif" alt="subenum in a terminal: lab 1 lists six hosts with their records and flags blog.lab.example as a dangling CNAME takeover candidate; lab 2 detects a wildcard zone, and with -force keeps only the three real hosts" width="720"/>
 
 <br>
 
@@ -589,7 +589,9 @@ jq -e '.verdict == "complete"' run.json > /dev/null || { jq -r .reason run.json;
 ./subenum -tui
 ```
 
-No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `last.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows) and restored on next launch. The interface is shown at the top of this README.
+No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `last.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows) and restored on next launch.
+
+<img src="docs/assets/tui-form.png" alt="subenum interactive TUI" width="640"/>
 
 Flags and a domain given with `-tui` fill the form, so a prepared command line opens ready to run: `./subenum -tui example.com -w big.txt -r resolvers.txt`. The form takes one wordlist (the first `-w`), and `-tui` warns about any flag it has no field for. The **Resolver Pool** and **Rate/Resolver** fields are `-r` and `-rate-per-resolver`; the pool is not used with Simulate on.
 
@@ -690,7 +692,7 @@ subenum/
 │   ├── data.go
 │   └── wordlist.txt            # Sample wordlist for the Docker examples (mounted at /data)
 ├── docs/                       # Source of the website (GitHub Pages)
-│   ├── assets/                 # Brand, CSS, JS, TUI screenshot
+│   ├── assets/                 # Brand, CSS, JS, TUI screenshot, demo clip
 │   ├── _data/, _includes/, _layouts/
 │   ├── ARCHITECTURE.md, CONTRIBUTING.md, DEVELOPER_GUIDE.md, ROADMAP.md
 │   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md, docker.md

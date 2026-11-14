@@ -73,6 +73,20 @@ body_class: is-home
   </figure>
 </section>
 
+<section class="band band-plain" aria-labelledby="demo-h">
+  <div class="band-inner split split-media">
+    <div class="split-copy">
+      <h2 id="demo-h">See it on a lab zone</h2>
+      <p>Two of the <a href="{{ '/labs.html' | relative_url }}">labs</a>, recorded as they run. Lab 1 lists each host with its records and flags a CNAME that points at a name nobody owns. In lab 2 every name resolves, so subenum reports the wildcard instead of thirty false hits; with <code>-force</code> it filters the wildcard's answers and keeps the three real hosts.</p>
+      <p>The answers come from a DNS server on your own machine, so you can try the same commands with no network traffic.</p>
+    </div>
+    <figure class="shot">
+      <video data-demo src="{{ '/assets/demo.mp4' | relative_url }}" poster="{{ '/assets/demo-poster.jpg' | relative_url }}" width="954" height="616" autoplay muted loop playsinline controls preload="metadata" aria-label="subenum scanning lab 1, then lab 2 with and without -force"></video>
+      <figcaption><code>subenum -simulate-zone</code>, lab 1 and lab 2</figcaption>
+    </figure>
+  </div>
+</section>
+
 <section class="band" id="verdicts" aria-labelledby="verdicts-h">
   <div class="band-inner split">
     <div class="split-copy">
