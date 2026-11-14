@@ -53,6 +53,11 @@ jobs:
     - name: Verify dependencies
       run: go mod verify
 
+    # verify checks hashes, not tidiness: this fails on a go.mod or go.sum
+    # that `make tidy` would change.
+    - name: Check go.mod and go.sum are tidy
+      run: go mod tidy -diff
+
     - name: Check go directive
       shell: bash
       run: |
@@ -433,13 +438,15 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
-        rel=$(gh api "repos/${REPO}/releases" --jq "([.[] | select(.tag_name==\"${TAG}\")][0]) // empty")
+        # Every page: past 30 releases the draft is not on the first one.
+        rel=$(gh api --paginate "repos/${REPO}/releases?per_page=100" \
+          --jq ".[] | select(.tag_name==\"${TAG}\") | [.id, .draft] | @tsv" | awk 'NR==1')
         if [ -z "${rel}" ]; then
           echo "No release found for ${TAG}; nothing to clean."
           exit 0
         fi
-        id=$(printf '%s' "${rel}" | jq -r '.id')
-        draft=$(printf '%s' "${rel}" | jq -r '.draft')
+        id=$(printf '%s' "${rel}" | cut -f1)
+        draft=$(printf '%s' "${rel}" | cut -f2)
         if [ "${draft}" != "true" ]; then
           echo "Release ${id} for ${TAG} is published (draft=${draft}); leaving it intact."
           exit 0
