@@ -269,9 +269,10 @@ jobs:
   # release notes from the tag's CHANGELOG.md section. GoReleaser creates the
   # release as a draft; it is published only after provenance is attested, so
   # the public never sees a partial release (cleanup-failed-release removes a
-  # failed draft).
+  # failed draft). It waits for every test job, the macOS and Windows tests
+  # and the action included, since their binaries and the action ship too.
   release:
-    needs: [ build, docker ]
+    needs: [ build, test-os, action, docker ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
