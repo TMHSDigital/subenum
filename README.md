@@ -455,7 +455,7 @@ The run-quality report counts them per target (`ct_names`). If crt.sh is down or
 subenum -sources ct,wayback example.com
 ```
 
-The report has one `sources` entry per source, with the names it added or the `error` it hit; a failed source is a warning, and the scan goes on with the others. Simulation ignores `-sources`, lab mode refuses it, and a resumed scan reuses what each source returned.
+The sources of a target are asked at the same time, and a busy answer (429, 502, 503, 504) or a dropped connection is retried twice with a short backoff, honouring `Retry-After`, within the source's 60-second limit. The report has one `sources` entry per source, with the names it added or the `error` it hit; a failed source is a warning, and the scan goes on with the others. Simulation ignores `-sources`, lab mode refuses it, and a resumed scan reuses what each source returned.
 
 ### Zone transfers: the whole zone in one query
 

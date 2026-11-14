@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/retryhttp"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
@@ -62,25 +63,24 @@ func (c Client) Names(ctx context.Context, domain string) ([]string, error) {
 	defer cancel()
 
 	q := url.Values{"q": {"%." + domain}, "output": {"json"}, "deduplicate": {"Y"}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
+	resp, err := retryhttp.Get(ctx, hc, "certificate transparency lookup", func(ctx context.Context) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		if c.UserAgent != "" {
+			req.Header.Set("User-Agent", c.UserAgent)
+		}
+		req.Header.Set("Accept", "application/json")
+		return req, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if c.UserAgent != "" {
-		req.Header.Set("User-Agent", c.UserAgent)
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := hc.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("certificate transparency lookup: %w", err)
-	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("certificate transparency lookup: %s returned %s", req.URL.Host, resp.Status)
-	}
 	var entries []entry
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&entries); err != nil {
-		return nil, fmt.Errorf("certificate transparency lookup: reading %s's answer: %w", req.URL.Host, err)
+		return nil, fmt.Errorf("certificate transparency lookup: reading %s's answer: %w", resp.Request.URL.Host, err)
 	}
 	return relativeNames(entries, domain), nil
 }

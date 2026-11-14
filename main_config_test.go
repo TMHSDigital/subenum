@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/TMHSDigital/subenum/internal/retryhttp"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/tui"
 )
@@ -24,6 +27,8 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv(configEnv, filepath.Join(os.TempDir(), "subenum-test-no-such-config.json"))
 	// An interrupted run saves resume state; keep it out of the package dir.
 	_ = os.Setenv("SUBENUM_STATE", filepath.Join(os.TempDir(), "subenum-test-resume.json"))
+	// Passive-source tests use failing local servers; retry them at once.
+	retryhttp.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 	os.Exit(m.Run())
 }
 

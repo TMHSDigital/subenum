@@ -3,6 +3,7 @@ package subenum
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/ct"
 	"github.com/TMHSDigital/subenum/internal/passive"
@@ -34,24 +35,37 @@ func WaybackMachine() Source {
 	return passive.Wayback{UserAgent: sourceUserAgent}
 }
 
-// withSourceNames asks each source for domain's names and appends the ones
-// entries lack. A failed source is reported as a NoticeSource event.
+// withSourceNames asks every source for domain's names at once (#271) and
+// appends the ones entries lack, in the order of sources. A failed source is
+// reported as a NoticeSource event.
 func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, domain string, entries []string) []string {
-	have := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		have[e] = true
+	type answer struct {
+		names []string
+		err   error
 	}
+	answers := make([]answer, len(sources))
+	var wg sync.WaitGroup
 	for i, src := range sources {
 		if src == nil {
 			continue
 		}
-		names, err := src.Names(ctx, domain)
-		if err != nil {
+		wg.Go(func() {
+			names, err := src.Names(ctx, domain)
+			answers[i] = answer{names, err}
+		})
+	}
+	wg.Wait()
+	have := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		have[e] = true
+	}
+	for i, a := range answers {
+		if a.err != nil {
 			forward(ctx, out, Event{Kind: KindNotice, Notice: NoticeSource,
-				Message: fmt.Sprintf("Sources[%d]: %v; scanning without its names", i, err)})
+				Message: fmt.Sprintf("Sources[%d]: %v; scanning without its names", i, a.err)})
 			continue
 		}
-		extra, _, _ := wordlist.Build(names, domain)
+		extra, _, _ := wordlist.Build(a.names, domain)
 		for _, e := range extra {
 			if !have[e] {
 				have[e] = true

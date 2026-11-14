@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -64,6 +66,49 @@ func TestSources(t *testing.T) {
 	}
 	if n := srv.QueriesFor("www.example.test", dnsmessage.TypeA); n != 1 {
 		t.Errorf("www was looked up %d times; a source repeating a word must not add it twice", n)
+	}
+}
+
+// rendezvousSource answers only once every source sharing its WaitGroup has
+// been asked, so sources asked one after another would wait forever.
+type rendezvousSource struct {
+	wg    *sync.WaitGroup
+	names []string
+}
+
+func (s rendezvousSource) Names(ctx context.Context, _ string) ([]string, error) {
+	s.wg.Done()
+	done := make(chan struct{})
+	go func() { s.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return s.names, nil
+	case <-time.After(5 * time.Second):
+		return nil, errors.New("the other source was never asked: sources ran one at a time")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// TestSourcesRunAtOnce covers #271: a target's sources are asked
+// concurrently, so their latencies do not add up.
+func TestSourcesRunAtOnce(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	srv := dnstest.Start(t, func(dnstest.Query) dnstest.Reply { return dnstest.NXDomain })
+	start := time.Now()
+	_, stats, err := subenum.Scan(context.Background(), subenum.Config{
+		Domain: "example.test", Words: []string{"www"}, Resolver: srv.Addr, Types: []string{"A"},
+		Sources: []subenum.Source{rendezvousSource{&wg, []string{"a"}}, rendezvousSource{&wg, []string{"b"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 4*time.Second {
+		t.Fatalf("sources took %v: they ran one at a time", time.Since(start))
+	}
+	if got := stats.NXDomain; got != 3 {
+		t.Errorf("looked up %d names, want www plus both sources' names", got)
 	}
 }
 

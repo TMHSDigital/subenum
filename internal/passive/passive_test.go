@@ -7,7 +7,15 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/TMHSDigital/subenum/internal/retryhttp"
 )
+
+// Failing test servers are retried at once, not after a real backoff.
+func init() {
+	retryhttp.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+}
 
 func TestParseList(t *testing.T) {
 	got, err := ParseList(" Wayback, ct ,,ct")

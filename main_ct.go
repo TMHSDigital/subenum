@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
@@ -20,9 +21,10 @@ type targetSource struct {
 	err     string
 }
 
-// passiveNames asks each source in turn for target's names: the ones a
-// resumed run saved, so its candidate list matches the interrupted run's,
-// or a fresh lookup. A failed lookup is a warning, not a failed scan.
+// passiveNames asks every source for target's names at once (#271): the
+// ones a resumed run saved, so its candidate list matches the interrupted
+// run's, or a fresh lookup. The results, and the warning for each failed
+// lookup (a warning, not a failed scan), keep the order of sources.
 func passiveNames(ctx context.Context, sources []string, target string, saved *resumeTarget, out *output.Writer) []targetSource {
 	if len(sources) == 0 {
 		return nil
@@ -31,24 +33,33 @@ func passiveNames(ctx context.Context, sources []string, target string, saved *r
 		UserAgent: ProgramName + "/" + resolveVersion() + " (+https://github.com/TMHSDigital/subenum)",
 		BaseURLs:  map[string]string{"ct": ctBaseURL, "wayback": waybackBaseURL},
 	}
-	res := make([]targetSource, 0, len(sources))
-	for _, name := range sources {
+	res := make([]targetSource, len(sources))
+	var wg sync.WaitGroup
+	for i, name := range sources {
+		res[i].source = name
 		if names, ok := saved.sourceNames(name); ok {
-			res = append(res, targetSource{source: name, names: names, fetched: true})
+			res[i].names, res[i].fetched = names, true
 			continue
 		}
 		src, err := passive.New(name, opts)
 		if err != nil { // ParseList admitted only known names
-			res = append(res, targetSource{source: name, err: err.Error()})
+			res[i].err = err.Error()
 			continue
 		}
-		names, err := src.Names(ctx, target)
-		if err != nil {
-			out.Info("Warning: %v; scanning %s without %s names", err, target, passive.Labels[name])
-			res = append(res, targetSource{source: name, err: err.Error()})
-			continue
+		wg.Go(func() {
+			names, err := src.Names(ctx, target)
+			if err != nil {
+				res[i].err = err.Error()
+				return
+			}
+			res[i].names, res[i].fetched = names, true
+		})
+	}
+	wg.Wait()
+	for _, r := range res {
+		if !r.fetched && r.err != "" {
+			out.Info("Warning: %s; scanning %s without %s names", r.err, target, passive.Labels[r.source])
 		}
-		res = append(res, targetSource{source: name, names: names, fetched: true})
 	}
 	return res
 }

@@ -11,7 +11,14 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/TMHSDigital/subenum/internal/retryhttp"
 )
+
+// Failing test servers are retried at once, not after a real backoff.
+func init() {
+	retryhttp.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+}
 
 func TestNames(t *testing.T) {
 	var query string

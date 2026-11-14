@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/retryhttp"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
@@ -64,24 +65,23 @@ func (w Wayback) Names(ctx context.Context, domain string) ([]string, error) {
 		"collapse":  {"urlkey"},
 		"limit":     {strconv.Itoa(waybackLimit)},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
+	resp, err := retryhttp.Get(ctx, hc, "wayback machine lookup", func(ctx context.Context) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		if w.UserAgent != "" {
+			req.Header.Set("User-Agent", w.UserAgent)
+		}
+		return req, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if w.UserAgent != "" {
-		req.Header.Set("User-Agent", w.UserAgent)
-	}
-	resp, err := hc.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("wayback machine lookup: %w", err)
-	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wayback machine lookup: %s returned %s", req.URL.Host, resp.Status)
-	}
 	names, err := hostNames(io.LimitReader(resp.Body, waybackMaxBody), domain)
 	if err != nil {
-		return nil, fmt.Errorf("wayback machine lookup: reading %s's answer: %w", req.URL.Host, err)
+		return nil, fmt.Errorf("wayback machine lookup: reading %s's answer: %w", resp.Request.URL.Host, err)
 	}
 	return names, nil
 }
