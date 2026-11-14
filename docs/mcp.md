@@ -66,6 +66,14 @@ subenum mcp -allow example.com,example.org    # adds scan, for these domains
 | `-max-queries` | 1000 | Most candidate names one call may test |
 | `-max-duration` | 2m | Longest one call may scan |
 | `-timeout` | 1000 | Live-scan lookup timeout in milliseconds |
+| `-sources` | none | Passive sources (`ct`, `wayback`) a `scan` call may ask for |
+
+Passive sources are off unless you enable them, because they send the domain
+to third parties (crt.sh, the Wayback Machine). With `-sources ct,wayback`,
+`scan` gains a `sources` argument: the names a source proposes join the words
+after dedupe, count against `max_queries`, and are each verified by a lookup.
+The report lists each source with the number of names it proposed, or the
+error it hit; a failed source does not stop the scan.
 
 The caps cannot be turned off: `-rate`, `-max-queries` and `-max-duration` must
 be positive.

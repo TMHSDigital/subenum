@@ -61,6 +61,38 @@ type mcpConfig struct {
 	rate        int
 	maxDuration time.Duration
 	timeout     time.Duration // one lookup, live scans
+	sources     []string      // passive sources a scan call may ask for (#268)
+}
+
+// mcpSources builds the passive sources -sources may enable, by name. Tests
+// replace it so no request leaves the machine.
+var mcpSources = map[string]func() subenum.Source{
+	"ct":      subenum.CertificateTransparency,
+	"wayback": subenum.WaybackMachine,
+}
+
+// mcpSourceNames lists mcpSources' keys in a fixed order.
+func mcpSourceNames() []string {
+	names := make([]string, 0, len(mcpSources))
+	for name := range mcpSources {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// countedSource remembers what its source returned, for the report.
+type countedSource struct {
+	name  string
+	src   subenum.Source
+	names int
+	err   error
+}
+
+func (c *countedSource) Names(ctx context.Context, domain string) ([]string, error) {
+	names, err := c.src.Names(ctx, domain)
+	c.names, c.err = len(names), err
+	return names, err
 }
 
 // runMCP runs `subenum mcp [flags]` until standard input closes or a
@@ -83,7 +115,7 @@ func runMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok bool) {
 	fs := flag.NewFlagSet(ProgramName+" mcp", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	var allow string
+	var allow, sources string
 	var timeoutMs int
 	fs.StringVar(&allow, "allow", "", "Comma-separated domains the scan tool may enumerate, each with its subdomains. Without it only lab_scan and explain_stats are offered")
 	fs.StringVar(&cfg.dnsServer, "dns-server", DefaultDNSServer, "Resolver for live scans: ip:port, tls://host or https://host/path")
@@ -91,6 +123,7 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 	fs.IntVar(&cfg.rate, "rate", defaultMCPRate, "DNS queries per second for live scans")
 	fs.DurationVar(&cfg.maxDuration, "max-duration", defaultMCPMaxDuration, "Longest one tool call may scan")
 	fs.IntVar(&timeoutMs, "timeout", int(subenum.DefaultTimeout/time.Millisecond), "Live-scan DNS lookup timeout in milliseconds")
+	fs.StringVar(&sources, "sources", "", "Comma-separated passive sources ("+strings.Join(mcpSourceNames(), ", ")+") a scan call may ask for. Off by default: they send the domain to third parties")
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(stderr, "Usage: %s mcp [flags]\n\n", ProgramName)
 		_, _ = fmt.Fprintln(stderr, "Serves subenum to AI agents over the Model Context Protocol (stdio).")
@@ -142,6 +175,17 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 			cfg.allow = append(cfg.allow, domain)
 		}
 	}
+	for name := range strings.SplitSeq(sources, ",") {
+		if name = strings.ToLower(strings.TrimSpace(name)); name == "" {
+			continue
+		}
+		if _, ok := mcpSources[name]; !ok {
+			return fail("-sources: unknown source %q; choose from %s", name, strings.Join(mcpSourceNames(), ", "))
+		}
+		if !slices.Contains(cfg.sources, name) {
+			cfg.sources = append(cfg.sources, name)
+		}
+	}
 	return cfg, exitOK, true
 }
 
@@ -152,6 +196,10 @@ func mcpServer(cfg mcpConfig) *mcp.Server {
 		tools = append(tools, scanTool(cfg))
 		instructions += fmt.Sprintf("scan enumerates real domains, only under %s, with at most %d names per call at %d queries per second. ",
 			strings.Join(cfg.allow, ", "), cfg.maxQueries, cfg.rate)
+		if len(cfg.sources) > 0 {
+			instructions += fmt.Sprintf("scan can also seed candidates from passive sources (%s) when a call lists them in sources. ",
+				strings.Join(cfg.sources, ", "))
+		}
 	} else {
 		instructions += "Live scanning is off: the operator allowed no domains. "
 	}
@@ -275,17 +323,23 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 }
 
 func scanTool(cfg mcpConfig) mcp.Tool {
+	sourcesProp := ""
+	if len(cfg.sources) > 0 {
+		enum, _ := json.Marshal(cfg.sources)
+		sourcesProp = fmt.Sprintf(`,
+    "sources": {"type": "array", "items": {"enum": %s}, "description": "Passive sources to seed candidates from before the scan; default none. Their names are added to words after dedupe, count against max_queries, and are each verified by a lookup. One HTTPS request per source."}`, enum)
+	}
 	schema := fmt.Sprintf(`{
   "type": "object",
   "properties": {
     "domain": {"type": "string", "description": "Domain to enumerate: one of %s, or a subdomain of one."},
     "words": {"type": "array", "items": {"type": "string"}, "maxItems": %d, "description": "Subdomain labels to try; default subenum's bundled list of the most common ones."},
     "types": %s,
-    "max_queries": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Most names to test; default and ceiling %d."}
+    "max_queries": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Most names to test; default and ceiling %d."}%s
   },
   "required": ["domain"],
   "additionalProperties": false
-}`, strings.Join(cfg.allow, ", "), maxMCPWords, recordTypeSchema, cfg.maxQueries, cfg.maxQueries)
+}`, strings.Join(cfg.allow, ", "), maxMCPWords, recordTypeSchema, cfg.maxQueries, cfg.maxQueries, sourcesProp)
 	return mcp.Tool{
 		Name:  "scan",
 		Title: "Enumerate subdomains",
@@ -299,9 +353,22 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 				Words      []string `json:"words"`
 				Types      []string `json:"types"`
 				MaxQueries int      `json:"max_queries"`
+				Sources    []string `json:"sources"`
 			}
 			if err := strictUnmarshal(raw, &args); err != nil {
 				return mcp.Errorf("invalid arguments: %v", err)
+			}
+			var counted []*countedSource
+			for _, name := range args.Sources {
+				if !slices.Contains(cfg.sources, name) {
+					if len(cfg.sources) == 0 {
+						return mcp.Errorf("sources are off: the operator did not enable any with -sources")
+					}
+					return mcp.Errorf("source %q is not enabled; choose from %s", name, strings.Join(cfg.sources, ", "))
+				}
+				if !slices.ContainsFunc(counted, func(c *countedSource) bool { return c.name == name }) {
+					counted = append(counted, &countedSource{name: name, src: mcpSources[name]()})
+				}
 			}
 			domain, _, err := validate.NormalizeDomain(args.Domain)
 			if err != nil {
@@ -319,7 +386,11 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			if err != nil {
 				return mcp.Errorf("%v", err)
 			}
-			return runMCPScan(ctx, subenum.Config{
+			var sources []subenum.Source
+			for _, c := range counted {
+				sources = append(sources, c)
+			}
+			report := runMCPScan(ctx, subenum.Config{
 				Domain:      domain,
 				Words:       words,
 				Resolver:    cfg.dnsServer,
@@ -328,7 +399,16 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 				Rate:        cfg.rate,
 				MaxQueries:  maxQueries,
 				MaxDuration: cfg.maxDuration,
-			}).result()
+				Sources:     sources,
+			})
+			for _, c := range counted {
+				s := mcpSource{Name: c.name, Names: c.names}
+				if c.err != nil {
+					s.Error = c.err.Error()
+				}
+				report.Sources = append(report.Sources, s)
+			}
+			return report.result()
 		},
 	}
 }
@@ -389,8 +469,16 @@ type mcpReport struct {
 	Skipped    int64       `json:"skipped_by_cap,omitempty"`
 	Wildcard   bool        `json:"wildcard,omitempty"`
 	Notices    []string    `json:"notices,omitempty"`
+	Sources    []mcpSource `json:"sources,omitempty"`
 	MaxQueries int         `json:"max_queries"`
 	Rate       int         `json:"rate,omitempty"`
+}
+
+// mcpSource is what one passive source proposed, or the error it hit.
+type mcpSource struct {
+	Name  string `json:"name"`
+	Names int    `json:"names"`
+	Error string `json:"error,omitempty"`
 }
 
 type mcpResult struct {

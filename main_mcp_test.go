@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/labzone"
+	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
 // mcpCall is one tools/call request for runMCPSession.
@@ -176,6 +179,60 @@ func TestE2EMCPScanAllowList(t *testing.T) {
 	}
 }
 
+// fakeSource is a passive source for tests: it returns names, or err.
+type fakeSource struct {
+	names []string
+	err   error
+}
+
+func (f fakeSource) Names(context.Context, string) ([]string, error) { return f.names, f.err }
+
+// TestE2EMCPScanSources checks that scan seeds candidates from the passive
+// sources the operator enabled and only those, reporting each one (#268).
+func TestE2EMCPScanSources(t *testing.T) {
+	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := dnsserver.Listen(dnsserver.Options{}, zone.Handler([]string{"lab.example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	saved := mcpSources
+	t.Cleanup(func() { mcpSources = saved })
+	mcpSources = map[string]func() subenum.Source{
+		"ct":      func() subenum.Source { return fakeSource{names: []string{"vpn", "www"}} },
+		"wayback": func() subenum.Source { return fakeSource{err: errors.New("503 from the archive")} },
+	}
+
+	base := []string{"-allow", "lab.example", "-dns-server", srv.Addr, "-rate", "1000", "-timeout", "5000"}
+	_, replies := runMCPSession(t, append(base, "-sources", "ct,wayback"),
+		mcpCall{"scan", `{"domain": "lab.example", "words": ["www"], "sources": ["ct", "wayback"]}`},
+		mcpCall{"scan", `{"domain": "lab.example", "words": ["www"]}`},
+		mcpCall{"scan", `{"domain": "lab.example", "sources": ["dns"]}`},
+	)
+	r := mcpReportOf(t, replies[0])
+	if want := []string{"vpn", "www"}; !slices.Equal(reportNames(r), want) {
+		t.Errorf("with sources: names %v, want %v", reportNames(r), want)
+	}
+	if len(r.Sources) != 2 || r.Sources[0] != (mcpSource{Name: "ct", Names: 2}) ||
+		r.Sources[1].Name != "wayback" || !strings.Contains(r.Sources[1].Error, "503") {
+		t.Errorf("sources report = %+v", r.Sources)
+	}
+	if r := mcpReportOf(t, replies[1]); len(r.Sources) != 0 || !slices.Equal(reportNames(r), []string{"www"}) {
+		t.Errorf("a call without sources used them: %+v", r)
+	}
+	if text, isErr := toolText(t, replies[2]); !isErr || !strings.Contains(text, `source "dns" is not enabled`) {
+		t.Errorf("unknown source: %q (isError %v)", text, isErr)
+	}
+
+	_, replies = runMCPSession(t, base, mcpCall{"scan", `{"domain": "lab.example", "sources": ["ct"]}`})
+	if text, isErr := toolText(t, replies[0]); !isErr || !strings.Contains(text, "sources are off") {
+		t.Errorf("sources without -sources: %q (isError %v)", text, isErr)
+	}
+}
+
 func TestMCPFlagErrors(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -188,6 +245,7 @@ func TestMCPFlagErrors(t *testing.T) {
 		{[]string{"-timeout", "0"}, exitUsage, "-timeout must be at least 1"},
 		{[]string{"-allow", "not a domain"}, exitUsage, `-allow "not a domain"`},
 		{[]string{"-dns-server", "nope"}, exitUsage, "-dns-server"},
+		{[]string{"-sources", "ct,dns"}, exitUsage, `unknown source "dns"`},
 		{[]string{"example.com"}, exitUsage, "unexpected argument"},
 		{[]string{"-h"}, exitOK, "Model Context Protocol"},
 	} {
