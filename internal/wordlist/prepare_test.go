@@ -76,6 +76,31 @@ func TestPrepareMatchesReference(t *testing.T) {
 	}
 }
 
+// TestPrepareIndexAcrossGrowth covers #248: the entry index keeps finding
+// earlier entries while its table doubles many times, so repeats seen long
+// after their first occurrence (in another case) still count as duplicates,
+// and first-occurrence order is kept.
+func TestPrepareIndexAcrossGrowth(t *testing.T) {
+	rng := rand.New(rand.NewPCG(3, 4))
+	const unique = 200_000 // the table starts at 1<<10 slots and doubles about 9 times
+	var lines []string
+	for i := range unique {
+		lines = append(lines, fmt.Sprintf("w%d", i))
+		// Repeat a random earlier entry, upper-cased, about one time in three.
+		if rng.IntN(3) == 0 {
+			lines = append(lines, strings.ToUpper(fmt.Sprintf("w%d", rng.IntN(i+1))))
+		}
+	}
+	wantE, wantD, wantS := referenceBuild(lines, "example.com")
+	gotE, gotD, gotS := Prepare(lines).For("example.com")
+	if !reflect.DeepEqual(gotE, wantE) || gotD != wantD || gotS != wantS {
+		t.Fatalf("got %d entries, %d dupes, %d skipped; want %d, %d, %d", len(gotE), gotD, gotS, len(wantE), wantD, wantS)
+	}
+	if len(gotE) != unique || gotD == 0 {
+		t.Fatalf("got %d entries and %d duplicates; want %d entries and some duplicates", len(gotE), gotD, unique)
+	}
+}
+
 // TestForResultIsNotAliased checks that appending to one target's entries
 // cannot change another's, since For may share its backing array.
 func TestForResultIsNotAliased(t *testing.T) {

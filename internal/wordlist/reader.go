@@ -4,7 +4,9 @@ package wordlist
 
 import (
 	"bufio"
+	"hash/maphash"
 	"io"
+	"math"
 	"os"
 	"strings"
 )
@@ -150,7 +152,7 @@ func Build(lines []string, domain string) (entries []string, duplicates, skipped
 // (#182).
 type Prepared struct {
 	entries []string // valid, deduplicated, in first-occurrence order
-	counts  []int    // occurrences of each entry in the raw lines
+	counts  []uint32 // occurrences of each entry in the raw lines (#248: 4 bytes, not 8)
 	invalid int      // lines that are not valid DNS labels
 	maxLen  int      // longest entry
 }
@@ -169,12 +171,70 @@ func Prepare(lines []string) *Prepared {
 // (#248).
 type Preparer struct {
 	p     *Prepared
-	index map[string]int
+	index *entryIndex
 }
 
 // NewPreparer returns an empty Preparer.
 func NewPreparer() *Preparer {
-	return &Preparer{p: &Prepared{}, index: make(map[string]int)}
+	return &Preparer{p: &Prepared{}, index: newEntryIndex()}
+}
+
+// entryIndex finds an entry's position in Prepared.entries. It is an
+// open-addressing hash table whose slots hold only a position plus one (0
+// is an empty slot), and it compares against the entries themselves, so it
+// costs about 5 to 11 bytes per entry where a map[string]int cost several
+// times that: on a 5M-line list it was most of the load's peak memory (#248).
+type entryIndex struct {
+	seed  maphash.Seed
+	slots []uint32
+	bits  uint   // len(slots) is 1<<bits
+	n     uint32 // occupied slots, which is also the next entry's position
+}
+
+const minIndexBits = 10
+
+func newEntryIndex() *entryIndex {
+	return &entryIndex{seed: maphash.MakeSeed(), slots: make([]uint32, 1<<minIndexBits), bits: minIndexBits}
+}
+
+// find returns entry's slot and position plus one, or its empty slot and 0
+// when entries does not hold it.
+func (x *entryIndex) find(entries []string, entry string) (slot uint64, pos uint32) {
+	mask := uint64(1)<<x.bits - 1
+	for slot = maphash.String(x.seed, entry) & mask; ; slot = (slot + 1) & mask {
+		pos = x.slots[slot]
+		if pos == 0 || entries[pos-1] == entry {
+			return slot, pos
+		}
+	}
+}
+
+// add records that the entry just appended to entries belongs at slot, the
+// empty slot find returned for it. The table doubles once it is 3/4 full,
+// which keeps probe runs short while the table stays small.
+func (x *entryIndex) add(entries []string, slot uint64) {
+	if x.n == math.MaxUint32-1 {
+		panic("wordlist: more than 4294967294 distinct entries")
+	}
+	x.n++
+	x.slots[slot] = x.n
+	if uint64(x.n)*4 <= uint64(3)<<x.bits {
+		return
+	}
+	x.bits++
+	mask := uint64(1)<<x.bits - 1
+	slots := make([]uint32, 1<<x.bits)
+	for _, pos := range x.slots {
+		if pos == 0 {
+			continue
+		}
+		s := maphash.String(x.seed, entries[pos-1]) & mask
+		for slots[s] != 0 {
+			s = (s + 1) & mask
+		}
+		slots[s] = pos
+	}
+	x.slots = slots
 }
 
 // Add takes one raw wordlist line.
@@ -188,14 +248,15 @@ func (pr *Preparer) Add(line string) {
 		p.invalid++
 		return
 	}
-	if i, exists := pr.index[entry]; exists {
-		p.counts[i]++
+	slot, pos := pr.index.find(p.entries, entry)
+	if pos != 0 {
+		p.counts[pos-1]++
 		return
 	}
-	pr.index[entry] = len(p.entries)
 	p.entries = append(p.entries, entry)
 	p.counts = append(p.counts, 1)
 	p.maxLen = max(p.maxLen, len(entry))
+	pr.index.add(p.entries, slot)
 }
 
 // Prepared returns the result and releases the Preparer's index; the
@@ -215,16 +276,16 @@ func (p *Prepared) For(domain string) (entries []string, duplicates, skipped int
 	skipped = p.invalid
 	if p.maxLen <= limit {
 		for _, c := range p.counts {
-			duplicates += c - 1
+			duplicates += int(c) - 1
 		}
 		return p.entries[:len(p.entries):len(p.entries)], duplicates, skipped
 	}
 	for i, entry := range p.entries {
 		if len(entry) > limit {
-			skipped += p.counts[i]
+			skipped += int(p.counts[i])
 			continue
 		}
-		duplicates += p.counts[i] - 1
+		duplicates += int(p.counts[i]) - 1
 		entries = append(entries, entry)
 	}
 	return entries, duplicates, skipped
