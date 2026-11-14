@@ -182,6 +182,46 @@ func TestToolCallsRunOneAtATimeAndCanBeCancelled(t *testing.T) {
 	}
 }
 
+func TestProgressNotifications(t *testing.T) {
+	counter := Tool{
+		Name:        "count",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Call: func(ctx context.Context, _ json.RawMessage) Result {
+			ReportProgress(ctx, 1, 3, "one")
+			ReportProgress(ctx, 1, 3, "again") // not above the last: dropped
+			ReportProgress(ctx, 2, 0, "")
+			return Result{Text: "done"}
+		},
+	}
+	send, recv, _ := serve(t, &Server{Tools: []Tool{counter}})
+
+	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"count","_meta":{"progressToken":"tok"}}}`)
+	first := recv()
+	if first["method"] != "notifications/progress" {
+		t.Fatalf("first message = %v, want a progress notification", first)
+	}
+	p := first["params"].(map[string]any)
+	if p["progressToken"] != "tok" || p["progress"] != float64(1) || p["total"] != float64(3) || p["message"] != "one" {
+		t.Errorf("first progress params = %v", p)
+	}
+	second := recv()["params"].(map[string]any)
+	if second["progress"] != float64(2) {
+		t.Errorf("second progress = %v, want 2 (the repeat of 1 dropped)", second)
+	}
+	if _, ok := second["total"]; ok {
+		t.Errorf("zero total was sent: %v", second)
+	}
+	if m := recv(); m["id"] != float64(1) {
+		t.Fatalf("expected the call result, got %v", m)
+	}
+
+	// Without a token the tool's reports go nowhere.
+	send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"count"}}`)
+	if m := recv(); m["id"] != float64(2) {
+		t.Fatalf("a call without progressToken sent %v before its result", m)
+	}
+}
+
 func TestInputEndFinishesPendingCalls(t *testing.T) {
 	send, recv, closeInput := serve(t, &Server{Tools: []Tool{echoTool()}})
 	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":null}}`)

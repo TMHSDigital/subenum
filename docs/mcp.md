@@ -19,7 +19,9 @@ safety. The model chooses only what to scan within those limits.
 
 Tool calls run one at a time, so a model cannot multiply the budget by calling
 in parallel, and arguments the tools do not define (a resolver, say) are
-refused rather than ignored.
+refused rather than ignored. A client that sends a `progressToken` with a
+`scan` or `lab_scan` call gets a progress notification about once a second
+(`312/1000 tested, 4 found`), and can cancel the call at any time.
 
 ## Tools
 

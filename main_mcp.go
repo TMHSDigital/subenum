@@ -425,6 +425,9 @@ func runMCPScan(ctx context.Context, cfg subenum.Config) *mcpReport {
 				r.Records = append(r.Records, rec.Type+" "+rec.Value)
 			}
 			report.Results = append(report.Results, r)
+		case subenum.KindProgress:
+			mcp.ReportProgress(ctx, float64(ev.Processed), float64(ev.Total),
+				fmt.Sprintf("%d/%d tested, %d found", ev.Processed, ev.Total, ev.Found))
 		case subenum.KindNotice:
 			report.Notices = append(report.Notices, ev.Message)
 		case subenum.KindError:

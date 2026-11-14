@@ -249,9 +249,15 @@ func (ss *session) call(ctx context.Context, params json.RawMessage) (any, *rpcE
 	var p struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
+		Meta      struct {
+			ProgressToken json.RawMessage `json:"progressToken"`
+		} `json:"_meta"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &rpcError{codeInvalidParams, "invalid tools/call params: " + err.Error()}
+	}
+	if tok := p.Meta.ProgressToken; len(tok) > 0 && string(tok) != "null" {
+		ctx = context.WithValue(ctx, progressKey{}, &progressReporter{ss: ss, token: tok})
 	}
 	i := slices.IndexFunc(ss.srv.Tools, func(t Tool) bool { return t.Name == p.Name })
 	if i < 0 {
@@ -284,7 +290,56 @@ func (ss *session) reply(id json.RawMessage, result any, rerr *rpcError) {
 	if err != nil {
 		b, _ = json.Marshal(response{JSONRPC: "2.0", ID: id, Error: &rpcError{-32603, "internal error: " + err.Error()}})
 	}
+	ss.write(b)
+}
+
+// write sends one message line.
+func (ss *session) write(b []byte) {
 	ss.writeMu.Lock()
 	defer ss.writeMu.Unlock()
 	_, _ = ss.w.Write(append(b, '\n'))
+}
+
+// progressKey carries a tool call's progress reporter in its context.
+type progressKey struct{}
+
+// progressReporter sends notifications/progress for one tool call whose
+// request carried _meta.progressToken (#267).
+type progressReporter struct {
+	ss    *session
+	token json.RawMessage
+
+	mu   sync.Mutex
+	sent bool
+	last float64
+}
+
+// ReportProgress tells the client how far the tool call ctx belongs to has
+// got, if the client asked for progress; otherwise it does nothing. total is
+// left out when zero, and message when empty. A report whose progress is not
+// above the last one sent is dropped, as the protocol requires progress to
+// increase.
+func ReportProgress(ctx context.Context, progress, total float64, message string) {
+	p, _ := ctx.Value(progressKey{}).(*progressReporter)
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sent && progress <= p.last {
+		return
+	}
+	params := map[string]any{"progressToken": p.token, "progress": progress}
+	if total > 0 {
+		params["total"] = total
+	}
+	if message != "" {
+		params["message"] = message
+	}
+	b, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/progress", "params": params})
+	if err != nil {
+		return
+	}
+	p.sent, p.last = true, progress
+	p.ss.write(b)
 }
