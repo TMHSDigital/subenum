@@ -250,6 +250,7 @@ func writeManPage(w io.Writer) {
 	p(".SH NAME\nsubenum \\- subdomain enumeration you can trust\n")
 	p(".SH SYNOPSIS\n.B subenum\n[\\fIoptions\\fR] \\fIdomain\\fR\n.br\n.B subenum\n[\\fIoptions\\fR] \\fB\\-dL\\fR \\fIdomains_file\\fR\n")
 	p(".br\n.B subenum completion\n\\fBbash\\fR|\\fBzsh\\fR|\\fBfish\\fR|\\fBpowershell\\fR\n.br\n.B subenum man\n")
+	p(".br\n.B subenum mcp\n[\\fB\\-allow\\fR \\fIdomains\\fR] [\\fIflags\\fR]\n")
 	p(".SH DESCRIPTION\n%s\n.PP\n%s\n",
 		line("subenum brute-forces subdomains by resolving a wordlist against a target domain with a concurrent worker pool. Resolved names go to stdout; progress, diagnostics and a per-query breakdown go to stderr. Without -w it uses a built-in list of the 5,000 most common subdomain labels."),
 		line("Only scan domains you own or have explicit written permission to test."))

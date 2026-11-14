@@ -708,6 +708,7 @@ subenum/
 │   ├── dnsserver/              # Scriptable local DNS server (labs, tests)
 │   ├── dnstest/                # Runs dnsserver for hermetic tests
 │   ├── labzone/                # Lab scenario file parser
+│   ├── mcp/                    # Minimal Model Context Protocol server (stdio) behind subenum mcp
 │   ├── output/                 # Thread-safe Writer, results file, SARIF and summary writers
 │   ├── passive/                # -sources: keyless passive name sources (Wayback Machine; crt.sh is in ct/)
 │   ├── permute/                # -permute candidate generation

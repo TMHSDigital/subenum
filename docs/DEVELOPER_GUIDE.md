@@ -181,6 +181,7 @@ subenum/
 ├── main_mcp.go                 # subenum mcp: MCP tools, allow-list and caps
 ├── main_permute.go             # -permute / -seeds: the permutation pass
 ├── main_resume.go              # -resume / -state: save and replay an interrupted run
+├── main_results.go             # resultLog: a target's results, kept for -permute seeds and -diff
 ├── main_summary.go             # Run-quality report assembly (-stats, JSONL summary line)
 ├── main_wordlist.go            # -w file or the bundled wordlist
 ├── main_test.go                # CLI-level tests: validation, flag logic

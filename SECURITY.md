@@ -9,6 +9,14 @@ Security fixes land on `main` and ship in the next release. Only the latest mino
 | Latest minor release | Yes |
 | Older releases | No |
 
+## In Scope
+
+Report these, among anything else that lets input subenum does not control harm its user:
+
+- In `subenum mcp`: a tool call that scans a domain outside the operator's `-allow` list, raises a cap the operator set (`-max-queries`, `-max-duration`, `-rate`, `-max-calls`), picks the resolver, or reads or writes files.
+- Data from a scanned zone, a resolver, a passive source (crt.sh, the Wayback Machine) or a zone transfer that subenum passes on unsafely: to the terminal, an output file, the GitHub Action's job summary, or an MCP client.
+- The GitHub Action or the release workflow running code or using secrets it should not.
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in `subenum`, **do not open a public issue.**

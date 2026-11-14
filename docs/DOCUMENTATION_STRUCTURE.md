@@ -14,6 +14,7 @@ Where each piece of subenum's documentation lives and who it is for. The files u
 | [`docs/docker.md`](docker.md) | The container image: volumes, output files, permissions |
 | [`docs/labs.md`](labs.md) | Offline exercises against [`examples/labs/`](../examples/labs/) zones with `-simulate-zone` |
 | [`docs/library.md`](library.md) | The Go library `pkg/subenum`; the full API reference is on pkg.go.dev |
+| [`docs/mcp.md`](mcp.md) | `subenum mcp`: its tools, the operator's flags and caps, client setup |
 | [`examples/advanced_usage.md`](../examples/advanced_usage.md) | Longer recipes: wildcards, record types, rate limiting, the reliability guard, CSV |
 | [`tools/README.md`](../tools/README.md) | The `wordlist-gen` tool |
 

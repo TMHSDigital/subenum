@@ -60,6 +60,7 @@ main_lab.go                    - -simulate-zone: serve a lab scenario on a loopb
 main_mcp.go                    - subenum mcp: the lab_scan, scan and explain_stats tools, the allow-list and caps
 main_permute.go                - -permute / -seeds: the permutation pass
 main_resume.go                 - -resume / -state: save and replay an interrupted run
+main_results.go                - resultLog: a target's results, kept for -permute seeds and -diff
 main_summary.go                - assemble the run-quality report (-stats, JSONL summary line)
 main_wordlist.go               - readWordlist: the -w file, or the bundled list when -w is not given
 internal/scan/options.go       - Options: user-facing settings shared by CLI and TUI (Validate, Config)
