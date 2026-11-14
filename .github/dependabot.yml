@@ -12,6 +12,11 @@ updates:
     groups:
       go-modules:
         patterns: ["*"]
+    # lipgloss v2.1.0 requires go 1.26.7; the supported minimum stays at
+    # go 1.26.0 (CI's "Check go directive") until it is raised on purpose.
+    ignore:
+      - dependency-name: "charm.land/lipgloss/v2"
+        versions: [">= 2.1.0"]
     labels:
       - "dependencies"
       - "go"
@@ -40,10 +45,10 @@ updates:
     groups:
       docker:
         patterns: ["*"]
-    # devcontainers/go tags lead with the image version once it is 2.x
+    # devcontainers/go also has tags that lead with the image version
     # (2.3-bookworm is image 2.3 with Go 1.27), which Dependabot reads as a
-    # newer release of 1.26-bookworm. Keep the Go 1.26 tag and take its new
-    # digests instead.
+    # newer release of the <go version>-bookworm tag the devcontainers use.
+    # Ignore those, so updates stay on Go-version tags and their digests.
     ignore:
       - dependency-name: "devcontainers/go"
         versions: [">= 2"]
