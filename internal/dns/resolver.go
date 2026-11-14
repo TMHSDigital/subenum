@@ -12,6 +12,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -316,35 +317,62 @@ type Lookup struct {
 // Each type gets its own timeout, so a slow A answer cannot starve AAAA or
 // CNAME. If ctx carries a RateLimiter (see WithLimiter), each type first waits
 // for one slot per query it will send; the timeout starts only after that.
+//
+// The types are looked up at the same time (#250), so a name costs its
+// slowest type's round trip rather than the sum of them all; the records
+// and the error are combined in the order of types, as before. The
+// duration is the wall time of the whole call.
 func (l Lookup) ResolveTypes(ctx context.Context, domain string) ([]Record, time.Duration, error) {
-	resolver, timeout, types := l.Resolver, l.Timeout, l.Types
+	types := l.Types
 	if len(types) == 0 {
 		types = DefaultTypes
 	}
-	lim := limiterFrom(ctx)
-	name := fqdn(domain)
-	var elapsed time.Duration
+	start := time.Now()
+	type answer struct {
+		recs []Record
+		err  error
+	}
+	answers := make([]answer, len(types))
+	if len(types) == 1 {
+		answers[0].recs, answers[0].err = l.lookupOne(ctx, domain, types[0])
+	} else {
+		var wg sync.WaitGroup
+		for i, t := range types {
+			wg.Go(func() {
+				answers[i].recs, answers[i].err = l.lookupOne(ctx, domain, t)
+			})
+		}
+		wg.Wait()
+	}
 	var records []Record
 	var worstErr error
-	for _, t := range types {
-		for i := int32(0); i < queriesPerType[t]; i++ {
-			if err := lim.Wait(ctx); err != nil {
-				return records, elapsed, err
-			}
-		}
-		b := &wireBudget{prepaid: queriesPerType[t]}
-		lookupCtx, cancel := context.WithTimeout(context.WithValue(ctx, budgetKey{}, b), timeout)
-		start := time.Now()
-		recs, err := lookupType(lookupCtx, resolver, name, domain, t)
-		elapsed += time.Since(start)
-		cancel()
-		if err != nil {
-			worstErr = worse(worstErr, b.fixErr(err))
+	for _, a := range answers {
+		if a.err != nil {
+			worstErr = worse(worstErr, a.err)
 			continue
 		}
-		records = append(records, recs...)
+		records = append(records, a.recs...)
 	}
-	return records, elapsed, worstErr
+	return records, time.Since(start), worstErr
+}
+
+// lookupOne is one type's lookup for ResolveTypes: its rate-limiter slots,
+// then the lookup under its own timeout and wire budget.
+func (l Lookup) lookupOne(ctx context.Context, domain, t string) ([]Record, error) {
+	lim := limiterFrom(ctx)
+	for range queriesPerType[t] {
+		if err := lim.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	b := &wireBudget{prepaid: queriesPerType[t]}
+	lookupCtx, cancel := context.WithTimeout(context.WithValue(ctx, budgetKey{}, b), l.Timeout)
+	defer cancel()
+	recs, err := lookupType(lookupCtx, l.Resolver, fqdn(domain), domain, t)
+	if err != nil {
+		return nil, b.fixErr(err)
+	}
+	return recs, nil
 }
 
 // worse keeps the more severe of two lookup errors. Any infrastructure failure

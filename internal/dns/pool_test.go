@@ -82,6 +82,25 @@ func TestQueriesFor(t *testing.T) {
 	}
 }
 
+// TestResolveTypesAtOnce covers #250: a name's record types are looked up
+// at the same time, so two slow types cost one delay, not two, and the
+// records still come back in the order of types.
+func TestResolveTypesAtOnce(t *testing.T) {
+	const delay = 300 * time.Millisecond
+	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10", AAAA: "2001:db8::10", DelayA: delay, DelayAAAA: delay}})
+	l := Lookup{Resolver: srv.Resolver(2 * time.Second), Timeout: 2 * time.Second, Types: []string{"A", "AAAA"}}
+	recs, elapsed, err := l.ResolveTypes(context.Background(), "www.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 || recs[0].Type != "A" || recs[1].Type != "AAAA" {
+		t.Errorf("records = %v, want A then AAAA", recs)
+	}
+	if elapsed >= 2*delay-50*time.Millisecond {
+		t.Errorf("A and AAAA took %v; looked up one after another they take %v, at once about %v", elapsed, 2*delay, delay)
+	}
+}
+
 // TestTypesArePriced: every type -type accepts has a query cost, and no
 // cost is listed for a type it rejects (#264).
 func TestTypesArePriced(t *testing.T) {

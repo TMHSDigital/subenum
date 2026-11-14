@@ -26,6 +26,7 @@ type testReply struct {
 	Refused   bool          // every query gets REFUSED
 	Drop      bool          // queries are never answered (the client times out)
 	DelayA    time.Duration // A answers are sent after this delay
+	DelayAAAA time.Duration // AAAA answers are sent after this delay
 }
 
 // testDNS is a table-driven dnstest server (#67).
@@ -88,6 +89,7 @@ func (s *testDNS) answer(q dnstest.Query) dnstest.Reply {
 			reply.A = []string{r.A}
 		}
 	case dnsmessage.TypeAAAA:
+		reply.Delay = r.DelayAAAA
 		if r.AAAA != "" {
 			reply.AAAA = []string{r.AAAA}
 		}
