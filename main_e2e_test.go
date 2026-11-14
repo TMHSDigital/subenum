@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -32,6 +31,39 @@ func runCLI(t *testing.T, stdin string, args ...string) (int, string) {
 	code := runWith(runArgs{args: args, stdin: strings.NewReader(stdin), stdout: &stdout, stderr: io.Discard})
 	return code, stdout.String()
 }
+
+// runCLICapture is runCLI with a caller-supplied stdout writer.
+func runCLICapture(t *testing.T, stdout io.Writer, args ...string) int {
+	t.Helper()
+	return runWith(runArgs{args: args, stdin: strings.NewReader(""), stdout: stdout, stderr: io.Discard})
+}
+
+// interruptWriter captures stdout and calls fire once, after the at-th line.
+// Tests interrupt on a result event instead of a wall-clock sleep, so a slow
+// runner cannot finish the scan before the interrupt lands (#260).
+type interruptWriter struct {
+	buf   bytes.Buffer
+	at    int
+	lines int
+	fire  func()
+}
+
+func newInterruptWriter(at int, fire func()) *interruptWriter {
+	return &interruptWriter{at: at, fire: fire}
+}
+
+func (w *interruptWriter) Write(p []byte) (int, error) {
+	n, err := w.buf.Write(p)
+	w.lines += bytes.Count(p, []byte("\n"))
+	if w.lines >= w.at && w.fire != nil {
+		fire := w.fire
+		w.fire = nil
+		fire()
+	}
+	return n, err
+}
+
+func (w *interruptWriter) String() string { return w.buf.String() }
 
 // lockedBuffer is a bytes.Buffer safe for concurrent writers, standing in
 // for one pipe that both stdout and stderr write to.
@@ -842,16 +874,15 @@ func TestE2EResume(t *testing.T) {
 		t.Fatalf("reference run found only %d names", len(want))
 	}
 
-	// Interrupted run: -rate 20 makes 40 names take ~2s; interrupt at ~1s.
+	// Interrupted run: -rate 20 makes 40 names take ~2s. Interrupt after the
+	// first few result lines on stdout, so the interrupt cannot miss a scan
+	// that a slow runner has already finished (#260).
 	ready := make(chan struct{})
 	signalReady, testSignals = ready, make(chan os.Signal, 1)
 	t.Cleanup(func() { signalReady, testSignals = nil, nil })
-	go func() {
-		<-ready
-		time.Sleep(time.Second)
-		testSignals <- os.Interrupt
-	}()
-	code, first := runCLI(t, "", append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")...)
+	stdout := newInterruptWriter(3, func() { testSignals <- os.Interrupt })
+	code := runCLICapture(t, stdout, append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")...)
+	first := stdout.String()
 	signalReady, testSignals = nil, nil
 	if code != 130 {
 		t.Fatalf("interrupted run: exit %d, want 130", code)
