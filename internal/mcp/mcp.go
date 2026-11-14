@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -134,20 +135,26 @@ func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	// it sooner.
 	defer ss.wg.Wait()
 
-	lines := make(chan []byte)
+	lines := make(chan inputLine)
 	errc := make(chan error, 1)
 	go func() {
-		sc := bufio.NewScanner(r)
-		sc.Buffer(make([]byte, 64<<10), maxMessage)
-		for sc.Scan() {
+		br := bufio.NewReaderSize(r, 64<<10)
+		for {
+			line, err := readMessageLine(br)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					err = nil
+				}
+				errc <- err
+				close(lines)
+				return
+			}
 			select {
-			case lines <- slices.Clone(sc.Bytes()):
+			case lines <- line:
 			case <-ctx.Done():
 				return
 			}
 		}
-		errc <- sc.Err()
-		close(lines)
 	}()
 	for {
 		select {
@@ -157,7 +164,45 @@ func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 			if !ok {
 				return <-errc
 			}
-			ss.dispatch(ctx, line)
+			if line.tooLong {
+				// Answer it and read on, rather than drop the session (#241).
+				ss.reply(nil, nil, &rpcError{codeParse, fmt.Sprintf("message too large: more than %d bytes", maxMessage)})
+				continue
+			}
+			ss.dispatch(ctx, line.data)
+		}
+	}
+}
+
+// inputLine is one line of input, or the note that it was too long.
+type inputLine struct {
+	data    []byte
+	tooLong bool
+}
+
+// readMessageLine reads one newline-terminated line. A line longer than
+// maxMessage is read to its end and dropped, so the next one still parses.
+// The last line may lack its newline; io.EOF comes after it.
+func readMessageLine(br *bufio.Reader) (inputLine, error) {
+	var line inputLine
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if !line.tooLong {
+			if len(line.data)+len(chunk) > maxMessage+1 { // +1: the newline
+				line.data, line.tooLong = nil, true
+			} else {
+				line.data = append(line.data, chunk...)
+			}
+		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case err == nil:
+			return line, nil
+		case errors.Is(err, io.EOF) && (len(line.data) > 0 || line.tooLong):
+			return line, nil // a last line without a newline
+		default:
+			return inputLine{}, err
 		}
 	}
 }
@@ -187,9 +232,16 @@ func (ss *session) dispatch(ctx context.Context, line []byte) {
 		ss.notification(req)
 		return
 	}
-	ctx, cancel := context.WithCancel(ctx)
 	key := string(req.ID)
 	ss.mu.Lock()
+	if _, busy := ss.cancels[key]; busy {
+		ss.mu.Unlock()
+		// Reusing the ID of a request still running would make that one
+		// impossible to cancel (#241).
+		ss.reply(req.ID, nil, &rpcError{codeInvalidRequest, "a request with this id is still in progress"})
+		return
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	ss.cancels[key] = cancel
 	ss.mu.Unlock()
 	ss.wg.Go(func() {

@@ -298,6 +298,48 @@ func TestServeStopsWhenContextEnds(t *testing.T) {
 	}
 }
 
+// TestOversizedLineIsAnErrorNotTheEnd covers #241: a line over maxMessage
+// gets a parse error, and the session goes on with the next line.
+func TestOversizedLineIsAnErrorNotTheEnd(t *testing.T) {
+	send, recv, _ := serve(t, &Server{})
+	send(`{"jsonrpc":"2.0","id":1,"method":"ping","params":{"pad":"` + strings.Repeat("x", maxMessage) + `"}}`)
+	m := recv()
+	if e, ok := m["error"].(map[string]any); !ok || e["code"] != float64(codeParse) || !strings.Contains(e["message"].(string), "too large") {
+		t.Fatalf("oversized line: %v, want a parse error", m)
+	}
+	send(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+	if m := recv(); m["id"] != float64(2) || m["error"] != nil {
+		t.Errorf("the next request: %v, want its ping reply", m)
+	}
+}
+
+// TestDuplicateInFlightIDIsRefused covers #241: a request reusing the ID of
+// one still running is refused, so the first stays cancellable.
+func TestDuplicateInFlightIDIsRefused(t *testing.T) {
+	started := make(chan struct{}, 1)
+	block := Tool{
+		Name:        "block",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Call: func(ctx context.Context, _ json.RawMessage) Result {
+			started <- struct{}{}
+			<-ctx.Done()
+			return Result{Text: "stopped"}
+		},
+	}
+	send, recv, _ := serve(t, &Server{Tools: []Tool{block}})
+	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"block"}}`)
+	<-started
+	send(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)
+	m := recv()
+	if e, ok := m["error"].(map[string]any); !ok || e["code"] != float64(codeInvalidRequest) {
+		t.Fatalf("duplicate id: %v, want an invalid-request error", m)
+	}
+	send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}`)
+	if m := recv(); m["id"] != float64(1) || m["result"] == nil {
+		t.Errorf("the first request could not be cancelled: %v", m)
+	}
+}
+
 // brokenWriter fails every write, like a pipe whose reader has exited.
 type brokenWriter struct{}
 

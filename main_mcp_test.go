@@ -371,6 +371,7 @@ func TestMCPVerdictMatchesReport(t *testing.T) {
 		{name: "aborted", c: counts{nx: 3, timeout: 7, aborted: true}},
 		{name: "wildcard", c: counts{found: 1, nx: 9, wildcard: true}},
 		{name: "interrupted", c: counts{nx: 5}, interrupted: true},
+		{name: "cancelled before testing", interrupted: true, want: verdictNotRun},
 		{name: "error before testing", errMsg: "wildcard zone", want: verdictNotRun},
 		{name: "error after a complete scan", c: counts{nx: 10}, errMsg: "boom", want: "unreliable"},
 	} {

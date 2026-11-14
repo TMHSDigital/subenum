@@ -629,6 +629,9 @@ var mcpReasonTerms = strings.NewReplacer("MaxQueries", "max_queries", "MaxDurati
 func mcpVerdict(stats subenum.Stats, errMsg string, interrupted bool) (verdict, reason string) {
 	verdict, reason = stats.Verdict(interrupted)
 	switch {
+	case interrupted && stats.Total() == 0 && errMsg == "":
+		// Cancelled during the preflight or the wildcard probes (#241).
+		return verdictNotRun, "the scan was cancelled before testing any name"
 	case errMsg != "" && stats.Total() == 0:
 		// A wildcard zone, a failed resolver check: nothing was tested.
 		return verdictNotRun, "the scan stopped before testing any name; see error"
