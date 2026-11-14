@@ -76,8 +76,8 @@ func TestQueriesFor(t *testing.T) {
 		{[]string{"A", "AAAA", "CNAME"}, 5},
 		{[]string{"NS", "MX", "TXT"}, 3},
 	} {
-		if got := queriesFor(tc.types); got != tc.want {
-			t.Errorf("queriesFor(%v) = %d, want %d", tc.types, got, tc.want)
+		if got := QueriesFor(tc.types); got != tc.want {
+			t.Errorf("QueriesFor(%v) = %d, want %d", tc.types, got, tc.want)
 		}
 	}
 }

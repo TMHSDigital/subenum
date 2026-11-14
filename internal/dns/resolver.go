@@ -281,11 +281,11 @@ func fqdn(domain string) string {
 // dialed (see NewResolver).
 var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 3, "NS": 1, "MX": 1, "TXT": 1}
 
-// queriesFor is how many queries one lookup of types puts on the wire, by
+// QueriesFor is how many queries one lookup of types puts on the wire, by
 // queriesPerType; empty types means DefaultTypes, as in ResolveTypes. The
 // pool's per-resolver cap reserves this many slots, so it matches what the
 // global -rate limiter charges (#236).
-func queriesFor(types []string) int {
+func QueriesFor(types []string) int {
 	if len(types) == 0 {
 		types = DefaultTypes
 	}
