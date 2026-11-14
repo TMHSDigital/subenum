@@ -37,13 +37,12 @@ func TestE2ECertificateTransparency(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer ctDown.Close()
-	t.Cleanup(func() { ctBaseURL = "" })
 
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
 	scan := func(base string) (int, string, output.Summary) {
-		ctBaseURL = base + "/"
-		code, out := runCLI(t, "", "-ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com")
+		code, out := runCLIWith(t, runArgs{sourceURLs: map[string]string{"ct": base + "/"},
+			args: []string{"-ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com"}})
 		var s output.Summary
 		if data, err := os.ReadFile(stats); err == nil {
 			_ = json.Unmarshal(data, &s)
@@ -94,7 +93,6 @@ func TestE2EPassiveSources(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer down.Close()
-	t.Cleanup(func() { ctBaseURL, waybackBaseURL = "", "" })
 
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
@@ -110,8 +108,8 @@ func TestE2EPassiveSources(t *testing.T) {
 		return s.Targets[0]
 	}
 
-	ctBaseURL, waybackBaseURL = ctUp.URL+"/", wayback.URL
-	code, out := runCLI(t, "", "-ct", "-sources", "wayback", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com")
+	code, out := runCLIWith(t, runArgs{sourceURLs: map[string]string{"ct": ctUp.URL + "/", "wayback": wayback.URL},
+		args: []string{"-ct", "-sources", "wayback", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com"}})
 	if code != 0 || !strings.Contains(out, "legacy-billing.example.com") || !strings.Contains(out, "old-shop.example.com") {
 		t.Fatalf("exit %d, results %q: want the CT and the Wayback name", code, out)
 	}
@@ -123,8 +121,8 @@ func TestE2EPassiveSources(t *testing.T) {
 		t.Errorf("ct_names = %d, want 1 (the ct entry, for compatibility)", tg.CTNames)
 	}
 
-	waybackBaseURL = down.URL
-	code, out = runCLI(t, "", "-sources", "wayback,ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com")
+	code, out = runCLIWith(t, runArgs{sourceURLs: map[string]string{"ct": ctUp.URL + "/", "wayback": down.URL},
+		args: []string{"-sources", "wayback,ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com"}})
 	if code != 0 || !strings.Contains(out, "legacy-billing.example.com") || strings.Contains(out, "old-shop") {
 		t.Errorf("wayback down: exit %d, results %q; want the CT name only", code, out)
 	}
@@ -182,11 +180,10 @@ func TestE2ESimulateSkipsCT(t *testing.T) {
 		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer ct.Close()
-	ctBaseURL = ct.URL + "/"
-	t.Cleanup(func() { ctBaseURL = "" })
 
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
-	code, out := runCLIMerged(t, "-ct", "-simulate", "-seed", "1", "-progress=false", "-w", wl, "example.com")
+	code, out := runCLIMergedWith(t, runArgs{sourceURLs: map[string]string{"ct": ct.URL + "/"},
+		args: []string{"-ct", "-simulate", "-seed", "1", "-progress=false", "-w", wl, "example.com"}})
 	if code != 0 || !strings.Contains(out, "-ct is ignored in simulation mode") {
 		t.Errorf("exit %d, want 0 and a note that -ct is ignored\n%s", code, out)
 	}

@@ -12,10 +12,6 @@ import (
 	"github.com/TMHSDigital/subenum/internal/output"
 )
 
-// axfrPort is the port zone transfers are requested on; tests point it at a
-// local server.
-var axfrPort = "53"
-
 // Zone transfer bounds (#85): a target with many name servers, or name
 // servers with many addresses, cannot turn -axfr into a flood.
 const (
@@ -39,8 +35,8 @@ type targetAXFR struct {
 // not exist (#234). Plain NSEC means anyone can list the zone by walking it,
 // which is reported like an allowed transfer. A failed probe is "" so the
 // next address is tried.
-func probeDenial(ctx context.Context, f cliFlags, host, addr, target string, timeout time.Duration, out *output.Writer) dns.Denial {
-	d, err := dns.ProbeDenial(ctx, net.JoinHostPort(addr, axfrPort), target, timeout)
+func probeDenial(ctx context.Context, f cliFlags, host, addr, port, target string, timeout time.Duration, out *output.Writer) dns.Denial {
+	d, err := dns.ProbeDenial(ctx, net.JoinHostPort(addr, port), target, timeout)
 	if err != nil {
 		if f.verbose {
 			out.Info("-axfr: DNSSEC denial probe to %s (%s): %v", host, addr, err)
@@ -60,7 +56,7 @@ func probeDenial(ctx context.Context, f cliFlags, host, addr, target string, tim
 // gives every name in the zone in one query; most refuse, which is the
 // correct configuration and not reported as an error. A resumed run reuses
 // the names the interrupted run got, so its candidate list matches.
-func zoneTransfer(ctx context.Context, f cliFlags, target string, saved *resumeTarget, out *output.Writer) targetAXFR {
+func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *resumeTarget, out *output.Writer) targetAXFR {
 	if saved != nil && saved.AXFRDone {
 		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, denial: dns.Denial(saved.Denial), done: true}
 	}
@@ -108,11 +104,11 @@ func zoneTransfer(ctx context.Context, f cliFlags, target string, saved *resumeT
 			}
 			if res.denial == "" {
 				res.queries++
-				res.denial = probeDenial(ctx, f, host, addr, target, timeout, out)
+				res.denial = probeDenial(ctx, f, host, addr, port, target, timeout, out)
 			}
 			res.tried++
 			res.queries++
-			got, err := dns.Transfer(ctx, net.JoinHostPort(addr, axfrPort), target, transferTimeout)
+			got, err := dns.Transfer(ctx, net.JoinHostPort(addr, port), target, transferTimeout)
 			if err != nil {
 				if f.verbose || !errors.Is(err, dns.ErrTransferRefused) {
 					out.Info("-axfr: %s (%s): %v", host, addr, err)

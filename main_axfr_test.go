@@ -43,14 +43,18 @@ func axfrZone(t *testing.T, allow bool, denial string) *dnstest.Server {
 		}
 		return dnstest.Reply{RCode: dnsmessage.RCodeNameError, Denial: denial}
 	})
+	return srv
+}
+
+// runAXFR runs the CLI against srv with zone transfers asked on its port,
+// stdout and stderr merged.
+func runAXFR(t *testing.T, srv *dnstest.Server, args ...string) (int, string) {
+	t.Helper()
 	_, port, err := net.SplitHostPort(srv.Addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := axfrPort
-	axfrPort = port
-	t.Cleanup(func() { axfrPort = old })
-	return srv
+	return runCLIMergedWith(t, runArgs{axfrPort: port, args: args})
 }
 
 // TestE2EZoneTransfer covers #85: a name server that allows AXFR gives
@@ -60,7 +64,7 @@ func TestE2EZoneTransfer(t *testing.T) {
 	srv := axfrZone(t, true, "")
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
-	code, out := runCLIMerged(t, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
+	code, out := runAXFR(t, srv, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
 	if code != 0 || !strings.Contains(out, "admin-legacy.example.test") {
 		t.Fatalf("exit %d: the transferred name was not found\n%s", code, out)
 	}
@@ -93,7 +97,7 @@ func TestE2EZoneTransferRefused(t *testing.T) {
 	srv := axfrZone(t, false, "nsec3")
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
-	code, out := runCLIMerged(t, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
+	code, out := runAXFR(t, srv, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
 	if code != 0 || !strings.Contains(out, "www.example.test") || strings.Contains(out, "admin-legacy") {
 		t.Fatalf("exit %d; want the wordlist scan only\n%s", code, out)
 	}
@@ -117,7 +121,7 @@ func TestE2EZoneWalkable(t *testing.T) {
 	srv := axfrZone(t, false, "nsec")
 	wl := writeFile(t, "wl.txt", "www\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
-	code, out := runCLIMerged(t, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
+	code, out := runAXFR(t, srv, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
 	if code != 0 || !strings.Contains(out, "Zone walkable") {
 		t.Fatalf("exit %d; want a walkable-zone finding\n%s", code, out)
 	}

@@ -70,14 +70,6 @@ const exitCodesHelp = `Exit codes:
   143  terminated (SIGTERM); partial results are kept
 `
 
-// signalReady, when set by a test, is closed once run's signal handler is
-// installed.
-var signalReady chan struct{}
-
-// testSignals, when set by a test, receives signals in place of a fresh
-// channel, so a test can interrupt a run in-process on Windows too.
-var testSignals chan os.Signal
-
 // Version is the release identifier. Makefile, CI and the Dockerfile set it
 // with -ldflags "-X main.Version=$(git describe --tags --dirty)". When it is
 // empty (go install, plain go build), the module version from the build info
@@ -607,6 +599,27 @@ type runArgs struct {
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
+
+	// Test seams, zero in production (#266). Being per run rather than
+	// package variables, they let tests that set them run in parallel.
+
+	// signals, when set, receives signals in place of a fresh channel, so a
+	// test can interrupt a run in-process on Windows too.
+	signals chan os.Signal
+	// signalReady, when set, is closed once the signal handler is installed.
+	signalReady chan struct{}
+	// sourceURLs replace passive sources' endpoints, by source name.
+	sourceURLs map[string]string
+	// axfrPort is the port zone transfers are requested on; "" is 53.
+	axfrPort string
+}
+
+// transferPort is the port -axfr asks name servers on.
+func (a runArgs) transferPort() string {
+	if a.axfrPort == "" {
+		return "53"
+	}
+	return a.axfrPort
 }
 
 func run() int {

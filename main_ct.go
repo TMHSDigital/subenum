@@ -9,10 +9,6 @@ import (
 	"github.com/TMHSDigital/subenum/internal/passive"
 )
 
-// ctBaseURL and waybackBaseURL, when set by a test, replace crt.sh and the
-// Wayback Machine.
-var ctBaseURL, waybackBaseURL string
-
 // targetSource is one passive source's lookup for a target (#130, #193).
 type targetSource struct {
 	source  string   // -sources name: ct, wayback
@@ -28,13 +24,14 @@ type targetSource struct {
 // ones a resumed run saved, so its candidate list matches the interrupted
 // run's, or a fresh lookup. The results, and the warning for each failed
 // lookup (a warning, not a failed scan), keep the order of sources.
-func passiveNames(ctx context.Context, sources []string, target string, saved *resumeTarget, out *output.Writer) []targetSource {
+// baseURLs, set by tests, replace the sources' endpoints by name.
+func passiveNames(ctx context.Context, sources []string, target string, saved *resumeTarget, out *output.Writer, baseURLs map[string]string) []targetSource {
 	if len(sources) == 0 {
 		return nil
 	}
 	opts := passive.Options{
 		UserAgent: ProgramName + "/" + resolveVersion() + " (+https://github.com/TMHSDigital/subenum)",
-		BaseURLs:  map[string]string{"ct": ctBaseURL, "wayback": waybackBaseURL},
+		BaseURLs:  baseURLs,
 	}
 	res := make([]targetSource, len(sources))
 	var wg sync.WaitGroup

@@ -284,8 +284,7 @@ func TestE2EResumeReplaysSourceNames(t *testing.T) {
 		_, _ = w.Write([]byte(`[{"name_value": "other.example.com"}]`))
 	}))
 	defer ct.Close()
-	ctBaseURL = ct.URL + "/"
-	t.Cleanup(func() { ctBaseURL = "" })
+	urls := map[string]string{"ct": ct.URL + "/"}
 
 	wl := writeFile(t, "wl.txt", "www\n")
 	for name, tc := range map[string]struct {
@@ -298,7 +297,7 @@ func TestE2EResumeReplaysSourceNames(t *testing.T) {
 		args := []string{tc.flag, "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.com"}
 		path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{tc.saved}})
 		hits.Store(0)
-		code, out := runCLI(t, "", "-resume", path)
+		code, out := runCLIWith(t, runArgs{sourceURLs: urls, args: []string{"-resume", path}})
 		if code != 0 || !strings.Contains(out, "legacy.example.com") || strings.Contains(out, "other.example.com") {
 			t.Errorf("%s: exit %d, results %q; want the saved name legacy only", name, code, out)
 		}

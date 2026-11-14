@@ -20,8 +20,8 @@ func TestE2ESIGTERMExits143(t *testing.T) {
 
 	// 200 names at -rate 10 would take 20s; the signal, sent once the first
 	// result is out rather than after a fixed sleep (#260), ends it early.
-	code, _ := runCLIUntilLines(t, 1, func() { _ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM) },
-		"-simulate", "-hit-rate", "100", "-rate", "10", "-progress=false", "-w", wl, "example.com")
+	code, _ := runCLIUntilLines(t, 1, func() { _ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM) }, runArgs{
+		args: []string{"-simulate", "-hit-rate", "100", "-rate", "10", "-progress=false", "-w", wl, "example.com"}})
 	if code != 143 {
 		t.Fatalf("exit %d after SIGTERM, want 143", code)
 	}

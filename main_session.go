@@ -505,12 +505,12 @@ func (s *session) setProgress() {
 // exit code for it. The returned stop ends the signal handling.
 func (s *session) handleSignals(ctx context.Context, cancel context.CancelFunc) (stop func()) {
 	sigCh := make(chan os.Signal, 1)
-	if testSignals != nil {
-		sigCh = testSignals // tests deliver an interrupt on any OS
+	if s.a.signals != nil {
+		sigCh = s.a.signals // tests deliver an interrupt on any OS
 	}
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	if signalReady != nil {
-		close(signalReady)
+	if s.a.signalReady != nil {
+		close(s.a.signalReady)
 	}
 	out := s.out
 	go func() {
@@ -633,7 +633,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	// like a wordlist entry (#130, #193). One set of the entries serves
 	// every source and the zone transfer (#248).
 	cands := &candidates{target: target, entries: entries, seeds: s.seeds}
-	sourceInfo := passiveNames(ctx, s.in.sources, target, saved, out)
+	sourceInfo := passiveNames(ctx, s.in.sources, target, saved, out, s.a.sourceURLs)
 	for _, src := range sourceInfo {
 		added := cands.add(src.names)
 		if src.fetched {
@@ -644,7 +644,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	if s.f.axfr {
 		// Transferred names are candidates like -ct's: each is still looked
 		// up, so only names that resolve are reported (#85).
-		axfrInfo = zoneTransfer(ctx, s.f, target, saved, out)
+		axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, out)
 		added := cands.add(axfrInfo.names)
 		if len(axfrInfo.allowed) > 0 {
 			out.Info("Zone transfer: %d names under %s, %d of them new candidates", len(axfrInfo.names), target, added)

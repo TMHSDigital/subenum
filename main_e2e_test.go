@@ -74,13 +74,30 @@ func (w *lineTrigger) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// runCLIUntilLines runs the CLI like runCLI and calls fire once n lines of
-// its stdout have been written.
-func runCLIUntilLines(t *testing.T, n int, fire func(), args ...string) (int, string) {
+// runCLIUntilLines runs the CLI like runCLIWith and calls fire once n lines
+// of its stdout have been written.
+func runCLIUntilLines(t *testing.T, n int, fire func(), a runArgs) (int, string) {
 	t.Helper()
 	stdout := &lineTrigger{n: n, fire: fire}
-	code := runWith(runArgs{args: args, stdin: strings.NewReader(""), stdout: stdout, stderr: io.Discard})
-	return code, stdout.String()
+	a.stdin, a.stdout, a.stderr = strings.NewReader(""), stdout, io.Discard
+	return runWith(a), stdout.String()
+}
+
+// runCLIWith is runCLI for a run that also sets test seams on runArgs
+// (#266): stdin is empty, and stdout is returned.
+func runCLIWith(t *testing.T, a runArgs) (int, string) {
+	t.Helper()
+	var stdout bytes.Buffer
+	a.stdin, a.stdout, a.stderr = strings.NewReader(""), &stdout, io.Discard
+	return runWith(a), stdout.String()
+}
+
+// runCLIMergedWith is runCLIMerged with test seams set on runArgs.
+func runCLIMergedWith(t *testing.T, a runArgs) (int, string) {
+	t.Helper()
+	var merged lockedBuffer
+	a.stdin, a.stdout, a.stderr = strings.NewReader(""), &merged, &merged
+	return runWith(a), merged.String()
 }
 
 func writeFile(t *testing.T, name, content string) string {
@@ -876,11 +893,8 @@ func TestE2EResume(t *testing.T) {
 	// Interrupted run: -rate 20 makes 40 names take ~2s; interrupt once
 	// three results are out, whatever the runner's speed (#260).
 	signals := make(chan os.Signal, 1)
-	signalReady, testSignals = nil, signals
-	t.Cleanup(func() { signalReady, testSignals = nil, nil })
-	code, first := runCLIUntilLines(t, 3, func() { signals <- os.Interrupt },
-		append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")...)
-	signalReady, testSignals = nil, nil
+	code, first := runCLIUntilLines(t, 3, func() { signals <- os.Interrupt }, runArgs{signals: signals,
+		args: append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")})
 	if code != 130 {
 		t.Fatalf("interrupted run: exit %d, want 130", code)
 	}
