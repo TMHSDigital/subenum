@@ -562,16 +562,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cfg.Attempts = max(cfg.Attempts, 1)
-
-	var total, processed, found int64
-	var stats counters
-	var guardOnce sync.Once
-	atomic.StoreInt64(&total, int64(len(cfg.Entries)))
-
-	maxDepth := cfg.Depth
-	if maxDepth < 1 {
-		maxDepth = 1
-	}
+	maxDepth := max(cfg.Depth, 1)
 
 	// One limiter paces the whole scan. Live lookups carry it on ctx and take a
 	// slot per DNS query they send (every record type, every retry, wildcard
@@ -604,16 +595,89 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			events <- Event{Kind: EventDone, Stopped: true, Total: int64(len(cfg.Entries)), Stats: Stats{QueriesSent: queriesSent.Load()}}
 		}
 	}()
-	wildcardRoot := false
 
+	cfg.scope = newScope(cfg.Exclude)
+	cfg.takeover = &dns.TakeoverCache{Providers: cfg.TakeoverProviders}
+	wildcardRoot, fingerprint, ok := preflight(ctx, &cfg, maxDepth, events)
+	if !ok {
+		return
+	}
+
+	st := &scanState{
+		cfg: cfg, maxDepth: maxDepth, limiter: jobLimiter, events: events,
+		cancel: cancel, fp: fingerprint, wc: &wildcardCache{known: make(map[string]bool)}, pending: &pendingList{},
+	}
+	st.total.Store(int64(len(cfg.Entries)))
+	if cfg.AutoRate {
+		sent := queriesSent.Load
+		if jobLimiter != nil {
+			// Simulated and hooked jobs send nothing; one job is one slot.
+			sent = st.processed.Load
+		}
+		st.auto = newAutoRate(limiter, sent)
+	}
+
+	// Work queue channels. The dispatcher owns the lifecycle: it tracks
+	// outstanding work and closes jobs only once every dispatched job has
+	// completed. Workers send found parents on enqueue (before signalling
+	// completed) and the dispatcher expands them into depth-capped children.
+	// Jobs go out in small chunks and both hand-off channels are buffered,
+	// so workers and the dispatcher rarely block on each other (#184); a
+	// worker reports the completions of a whole chunk in one send once the
+	// chunk is done.
+	workers := workerCount(cfg, maxDepth)
+	jobs := make(chan []job, handoffPerWorker*workers)
+	enqueue := make(chan job)
+	completed := make(chan []completion, handoffPerWorker*workers)
+	st.enqueue = enqueue
+
+	stopTicker := st.startTicker(ctx)
+	// The dispatcher hands out candidates and closes jobs once every
+	// dispatched job has completed, or ctx is cancelled (see dispatcher).
+	go newDispatcher(cfg, maxDepth).run(ctx, workers, jobs, enqueue, completed, &st.total, &st.stats, events)
+	st.runWorkers(ctx, workers, jobs, completed)
+	if cfg.RetryInconclusive {
+		st.retryPending(ctx, workers)
+	}
+	// Stop the ticker and wait for it to fully exit before emitting
+	// EventDone, so the deferred close(events) can never race an in-flight
+	// ticker send.
+	stopTicker()
+
+	snap := st.stats.snapshot()
+	snap.QueriesSent = queriesSent.Load()
+	snap.Wildcard = wildcardRoot
+	snap.Fingerprint = fingerprint.records()
+	snap.Inconclusive = st.pending.names()
+	if st.auto != nil {
+		snap.RateBackoffs, snap.FinalRate = st.auto.result()
+	}
+	// EventDone is the abort/finish signal. CLI Finish and TUI aborted=true both
+	// wait for it after cancel, so this send must not be select-guarded on
+	// ctx.Done(): once ctx is cancelled that select is a coin-flip drop.
+	// Contract: consumers drain until close. See #23.
+	doneSent = true
+	events <- Event{
+		Kind:      EventDone,
+		Processed: st.processed.Load(),
+		Total:     st.total.Load(),
+		Found:     st.found.Load(),
+		Stats:     snap,
+	}
+}
+
+// preflight runs the checks a scan passes before any candidate is tested:
+// the scope of the target (#87), the recursion ceiling, the resolver
+// preflight and wildcard detection. It reports whether the root is a
+// wildcard zone and the wildcard fingerprint to filter with. On false the
+// scan must stop: preflight has sent the EventError explaining why, or ctx
+// was cancelled, and Run's deferred EventDone (Stopped) ends the scan.
+func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Event) (wildcardRoot bool, fp *fingerprint, ok bool) {
 	// Out-of-scope names are never queried (#87). A target that is itself
 	// out of scope, or whose every candidate would be, is refused outright.
-	sc := newScope(cfg.Exclude)
-	cfg.scope = sc
-	cfg.takeover = &dns.TakeoverCache{Providers: cfg.TakeoverProviders}
-	if sc.excluded(cfg.Domain) || sc.subtreeExcluded(cfg.Domain) {
+	if cfg.scope.excluded(cfg.Domain) || cfg.scope.subtreeExcluded(cfg.Domain) {
 		events <- Event{Kind: EventError, Message: "refusing to scan " + cfg.Domain + ": it is out of scope ({exclude})"}
-		return
+		return false, nil, false
 	}
 
 	if cfg.Recursive {
@@ -622,7 +686,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			events <- Event{Kind: EventError, Message: fmt.Sprintf(
 				"refusing to start: {recursive} {depth} %d with %d entries can generate up to %.1e queries; set {max_queries} or {force}",
 				maxDepth, len(cfg.Entries), ceiling)}
-			return
+			return false, nil, false
 		}
 		consider := "Consider {max_queries}."
 		if maxDepth > 1 {
@@ -638,12 +702,12 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		// scan that -attempts would otherwise complete (#57).
 		_, outcome := cfg.resolve(ctx, cfg.Domain, nil)
 		if ctx.Err() != nil {
-			return // interrupted during preflight: not a resolver failure
+			return false, nil, false // interrupted during preflight: not a resolver failure
 		}
 		if outcome != dns.OutcomeFound && outcome != dns.OutcomeNXDomain {
 			msg := fmt.Sprintf("resolver %s failed preflight for %s: %s after %d attempt(s)", cfg.DNSServer, cfg.Domain, outcome, cfg.Attempts)
 			events <- Event{Kind: EventError, Message: msg}
-			return
+			return false, nil, false
 		}
 		// An apex the trusted resolver answers is the first canary for
 		// checking that pool members do not hide existing names (#105).
@@ -652,55 +716,42 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		}
 	}
 
-	fingerprint := newFingerprint(nil)
-	wc := &wildcardCache{known: make(map[string]bool)}
+	fp = newFingerprint(nil)
 
 	// Wildcard detection (skip in simulation mode).
 	if !cfg.Simulate {
-		isWildcard, fp, err := cfg.lookup(nil).FingerprintWildcard(ctx, cfg.Domain)
+		isWildcard, probed, err := cfg.lookup(nil).FingerprintWildcard(ctx, cfg.Domain)
 		if ctx.Err() != nil {
-			return // interrupted during wildcard probes
+			return false, nil, false // interrupted during wildcard probes
 		}
 		// An inconclusive check is never "no wildcard": under a real wildcard
 		// every candidate would resolve and flood the results (#47). -force
 		// scans anyway, but without a fingerprint to filter with.
 		if err != nil && !cfg.Force {
 			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error() + "; results could not be filtered. Use {force} to scan anyway."}
-			return
+			return false, nil, false
 		}
 		if err != nil {
 			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of {force}"}
 		}
-		fingerprint.add(fp)
+		fp.add(probed)
 		if isWildcard {
 			wildcardRoot = true
 			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
 			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: msg}
 			if !cfg.Force {
 				events <- Event{Kind: EventError, Message: "Results would be meaningless. Use {force} to scan anyway."}
-				return
+				return false, nil, false
 			}
 		}
 	}
+	return wildcardRoot, fp, true
+}
 
-	var wg sync.WaitGroup
-
-	// Work queue channels. The dispatcher owns the lifecycle: it tracks
-	// outstanding work and closes jobs only once every dispatched job has
-	// completed. Workers send found parents on enqueue (before signalling
-	// completed) and the dispatcher expands them into depth-capped children.
-	// Jobs go out in small chunks and both hand-off channels are buffered,
-	// so workers and the dispatcher rarely block on each other (#184); a
-	// worker reports the completions of a whole chunk in one send once the
-	// chunk is done.
-	workers := workerCount(cfg, maxDepth)
-	jobs := make(chan []job, handoffPerWorker*workers)
-	enqueue := make(chan job)
-	completed := make(chan []completion, handoffPerWorker*workers)
-
-	// Progress ticker - fires every second.
-	// tickerDone signals the goroutine to stop; tickerStopped confirms it has
-	// fully exited so we never close events while a send is pending.
+// startTicker sends an EventProgress every second until ctx is done or the
+// returned stop function is called. stop waits for the ticker goroutine to
+// exit, so no progress send is still pending once it returns.
+func (s *scanState) startTicker(ctx context.Context) (stop func()) {
 	tickerDone := make(chan struct{})
 	tickerStopped := make(chan struct{})
 	ticker := time.NewTicker(time.Second)
@@ -710,10 +761,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		for {
 			select {
 			case <-ticker.C:
-				p := atomic.LoadInt64(&processed)
-				f := atomic.LoadInt64(&found)
+				ev := Event{Kind: EventProgress, Processed: s.processed.Load(), Total: s.total.Load(), Found: s.found.Load()}
 				select {
-				case events <- Event{Kind: EventProgress, Processed: p, Total: atomic.LoadInt64(&total), Found: f}:
+				case s.events <- ev:
 				case <-tickerDone:
 					return
 				case <-ctx.Done():
@@ -726,37 +776,27 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			}
 		}
 	}()
-
-	// The dispatcher hands out candidates and closes jobs once every
-	// dispatched job has completed, or ctx is cancelled (see dispatcher).
-	go newDispatcher(cfg, maxDepth).run(ctx, workers, jobs, enqueue, completed, &total, &stats, events)
-
-	// Worker pool.
-	st := &scanState{
-		cfg: cfg, maxDepth: maxDepth, limiter: jobLimiter, events: events, enqueue: enqueue,
-		processed: &processed, found: &found, stats: &stats, cancel: cancel, guardOnce: &guardOnce,
-		fp: fingerprint, wc: wc, pending: &pendingList{},
+	return func() {
+		close(tickerDone)
+		<-tickerStopped
 	}
-	if cfg.AutoRate {
-		sent := queriesSent.Load
-		if jobLimiter != nil {
-			// Simulated and hooked jobs send nothing; one job is one slot.
-			sent = func() int64 { return atomic.LoadInt64(&processed) }
-		}
-		st.auto = newAutoRate(limiter, sent)
-	}
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+}
+
+// runWorkers runs the worker pool until the dispatcher closes jobs, and
+// returns once every worker has exited. Each worker processes a chunk of
+// jobs and reports its completions in one send.
+func (s *scanState) runWorkers(ctx context.Context, workers int, jobs <-chan []job, completed chan<- []completion) {
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
 			for chunk := range jobs {
 				done := make([]completion, 0, len(chunk))
 				for _, j := range chunk {
 					c := completion{root: j.root, skipped: true}
 					// One taken after the budget ran out is skipped, like the
 					// candidates the dispatcher never handed out (#190).
-					if !cfg.pastDeadline() {
-						c = completion{root: j.root, finished: st.processJob(ctx, j)}
+					if !s.cfg.pastDeadline() {
+						c = completion{root: j.root, finished: s.processJob(ctx, j)}
 					}
 					done = append(done, c)
 				}
@@ -772,39 +812,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 					}
 				}
 			}
-		}()
+		})
 	}
-
 	wg.Wait()
-	if cfg.RetryInconclusive {
-		st.retryPending(ctx, workers)
-	}
-	// Stop the ticker goroutine and wait for it to fully exit before emitting
-	// EventDone, so the deferred close(events) can never race an in-flight
-	// ticker send.
-	close(tickerDone)
-	<-tickerStopped
-
-	snap := stats.snapshot()
-	snap.QueriesSent = queriesSent.Load()
-	snap.Wildcard = wildcardRoot
-	snap.Fingerprint = fingerprint.records()
-	snap.Inconclusive = st.pending.names()
-	if st.auto != nil {
-		snap.RateBackoffs, snap.FinalRate = st.auto.result()
-	}
-	// EventDone is the abort/finish signal. CLI Finish and TUI aborted=true both
-	// wait for it after cancel, so this send must not be select-guarded on
-	// ctx.Done(): once ctx is cancelled that select is a coin-flip drop.
-	// Contract: consumers drain until close. See #23.
-	doneSent = true
-	events <- Event{
-		Kind:      EventDone,
-		Processed: atomic.LoadInt64(&processed),
-		Total:     atomic.LoadInt64(&total),
-		Found:     atomic.LoadInt64(&found),
-		Stats:     snap,
-	}
 }
 
 // scanState is what every worker shares during one scan (#159).
@@ -814,11 +824,12 @@ type scanState struct {
 	limiter   *dns.RateLimiter // paces simulated and hooked jobs; nil for live lookups, which pace per query
 	events    chan<- Event
 	enqueue   chan<- job // found parents, for the dispatcher to expand
-	processed *int64     // atomic
-	found     *int64     // atomic
-	stats     *counters
+	processed atomic.Int64
+	found     atomic.Int64
+	total     atomic.Int64 // the progress total; the dispatcher updates it as recursion adds work
+	stats     counters
 	cancel    context.CancelFunc // the reliability guard's abort
-	guardOnce *sync.Once
+	guardOnce sync.Once
 	fp        *fingerprint
 	wc        *wildcardCache
 	pending   *pendingList // inconclusive lookups (#217)
@@ -842,7 +853,7 @@ func (s *scanState) observe(failed bool) {
 // processJob resolves a single job and, on success, optionally enqueues
 // depth-capped children for recursive enumeration.
 func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
-	cfg, st, maxDepth := s.cfg, s.stats, s.maxDepth
+	cfg, st, maxDepth := s.cfg, &s.stats, s.maxDepth
 	if ctx.Err() != nil {
 		return false
 	}
@@ -868,7 +879,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, s.fp, j.domain, records) {
 		st.wildcardFiltered.Add(1)
 		s.observe(false)
-		s.checkReliability(atomic.AddInt64(s.processed, 1))
+		s.checkReliability(s.processed.Add(1))
 		return true
 	}
 
@@ -877,7 +888,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 		s.pending.add(j, outcome)
 	}
 	s.observe(inconclusive(outcome))
-	s.checkReliability(atomic.AddInt64(s.processed, 1))
+	s.checkReliability(s.processed.Add(1))
 
 	if outcome != dns.OutcomeFound {
 		return true
@@ -914,7 +925,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 // report counts a found name and sends it as a result.
 func (s *scanState) report(ctx context.Context, name string, records []dns.Record) {
 	cfg := s.cfg
-	atomic.AddInt64(s.found, 1)
+	s.found.Add(1)
 	// Unguarded: CLI and TUI drain until close. A ctx.Done() guard here would
 	// only matter for a consumer that stops reading with a full buffer.
 	// A CNAME result gets a DNS-only takeover hint; its target is resolved
@@ -976,7 +987,7 @@ func (s *scanState) retryPending(ctx context.Context, workers int) {
 // reported (unless it is a wildcard answer) but not expanded. A name still
 // without an answer keeps its first outcome and stays pending.
 func (s *scanState) retry(ctx context.Context, it pendingLookup) {
-	cfg, st := s.cfg, s.stats
+	cfg, st := s.cfg, &s.stats
 	if err := s.limiter.Wait(ctx); err != nil {
 		s.pending.add(it.j, it.outcome)
 		return
@@ -1040,7 +1051,7 @@ func resolveViaPool(ctx context.Context, cfg Config, name string, st *counters) 
 // counted: past the failure threshold it reports once, and aborts the scan
 // unless NoAbort is set.
 func (s *scanState) checkReliability(processed int64) {
-	cfg, st := s.cfg, s.stats
+	cfg, st := s.cfg, &s.stats
 	if processed < reliabilityMinJobs {
 		return
 	}

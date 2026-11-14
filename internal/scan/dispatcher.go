@@ -299,7 +299,7 @@ func (d *dispatcher) finish(ctx context.Context, stats *counters, events chan<- 
 // completed), and run expands them. total receives the progress total as it
 // changes.
 func (d *dispatcher) run(ctx context.Context, workers int, jobs chan<- []job, enqueue <-chan job, completed <-chan []completion,
-	total *int64, stats *counters, events chan<- Event) {
+	total *atomic.Int64, stats *counters, events chan<- Event) {
 	defer close(jobs)
 	// The deadline timer wakes the dispatcher while it waits on a busy
 	// worker pool, so the budget holds even if no job completes (#190).
@@ -309,7 +309,7 @@ func (d *dispatcher) run(ctx context.Context, workers int, jobs chan<- []job, en
 		defer timer.Stop()
 		deadline = timer.C
 	}
-	publish := func() { atomic.StoreInt64(total, d.total()) }
+	publish := func() { total.Store(d.total()) }
 
 	var ready []job
 	for {
