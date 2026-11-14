@@ -237,6 +237,40 @@ func TestE2EMCPScanSources(t *testing.T) {
 	}
 }
 
+// TestE2EMCPRemediationArgs covers #269: depth recurses, exclude keeps names
+// out, retry_inconclusive retries the failed lookups, and the limits hold.
+func TestE2EMCPRemediationArgs(t *testing.T) {
+	_, replies := runMCPSession(t, []string{"-max-queries", "500"},
+		mcpCall{"lab_scan", `{"scenario": "lab4-recursive", "words": ["www", "dev", "api", "git", "corp", "vpn"], "depth": 2, "exclude": ["*.corp.lab.example"]}`},
+		mcpCall{"lab_scan", `{"scenario": "lab5-failures", "words": ["www", "backup", "beta"], "retry_inconclusive": true, "auto_rate": true}`},
+		mcpCall{"lab_scan", `{"depth": 4}`},
+		mcpCall{"lab_scan", `{"exclude": `+string(must(json.Marshal(make([]string, maxMCPExclude+1))))+`}`},
+	)
+	r := mcpReportOf(t, replies[0])
+	if want := []string{"api.dev", "corp", "dev", "git.dev", "www"}; !slices.Equal(reportNames(r), want) {
+		t.Errorf("depth 2 with corp's branch excluded: %v, want %v", reportNames(r), want)
+	}
+	if r.Excluded == 0 {
+		t.Errorf("excluded names not counted: %+v", r)
+	}
+	if r := mcpReportOf(t, replies[1]); r.Retried != 2 || r.Verdict == "complete" {
+		t.Errorf("retry_inconclusive on lab5: retried %d, verdict %s; want 2 retried, still not complete", r.Retried, r.Verdict)
+	}
+	for i, want := range map[int]string{2: "depth must be 1 to 3", 3: "exclude has"} {
+		if text, isErr := toolText(t, replies[i]); !isErr || !strings.Contains(text, want) {
+			t.Errorf("call %d: %q (isError %v), want an error containing %q", i, text, isErr, want)
+		}
+	}
+}
+
+// must returns v, failing on err; for building test inputs.
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 // TestE2EMCPArgumentErrors covers the tool-argument checks the allow-list
 // test does not (#258): each bad call is an isError result, and the server
 // keeps answering after a scan that could not start.

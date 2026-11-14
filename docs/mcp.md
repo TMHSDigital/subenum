@@ -55,6 +55,14 @@ every lookup ended, any notices, and the scan's verdict:
 | `unreliable` | Too many lookups failed, or the scan stopped early with an error (see `error`): a missing name means nothing. |
 | `not_run` | The scan stopped before testing any name, for example on a wildcard zone; `error` says why. |
 
+When a verdict is not `complete`, the agent can act on it within the
+operator's limits: `retry_inconclusive` looks up the names that got no answer
+once more at the end, `auto_rate` slows down while lookups fail instead of
+giving up, `exclude` keeps names or branches (`*.corp.example.com`) out of the
+scan, and `depth` (up to 3) enumerates again under the names found. The report
+counts `retried`, `recovered`, `rate_backoffs` and `excluded`. Every one of
+these stays within `max_queries` and `-max-duration`.
+
 ## Running it
 
 ```bash

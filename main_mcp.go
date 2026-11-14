@@ -247,6 +247,46 @@ func serveLab(scenario string) (*dnsserver.Server, error) {
 	return srv, nil
 }
 
+// maxMCPDepth is the deepest recursion a call may ask for, and
+// maxMCPExclude the most exclude patterns; max_queries bounds the work
+// either way.
+const (
+	maxMCPDepth   = 3
+	maxMCPExclude = 1000
+)
+
+// remediationProps are the scan settings an agent can change after a verdict
+// that is not complete (#269). None can raise the operator's caps.
+var remediationProps = fmt.Sprintf(`,
+    "retry_inconclusive": {"type": "boolean", "description": "At the end, look up once more every name that timed out, was refused or failed; an answer replaces the first outcome. Use it when failures degraded the verdict."},
+    "auto_rate": {"type": "boolean", "description": "Halve the query rate while many lookups fail and raise it again once they succeed, never above the starting rate, instead of giving up."},
+    "exclude": {"type": "array", "items": {"type": "string"}, "maxItems": %d, "description": "Names out of scope that are never queried: one name (mail.example.com) or a branch (*.corp.example.com)."},
+    "depth": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Enumerate the words again under every name found, down to this many levels; default 1, no recursion. Every level stays within max_queries."}`,
+	maxMCPExclude, maxMCPDepth)
+
+// remediation holds the remediationProps arguments.
+type remediation struct {
+	RetryInconclusive bool     `json:"retry_inconclusive"`
+	AutoRate          bool     `json:"auto_rate"`
+	Exclude           []string `json:"exclude"`
+	Depth             int      `json:"depth"`
+}
+
+// apply checks the arguments and sets them on cfg.
+func (r remediation) apply(cfg *subenum.Config) error {
+	if r.Depth < 0 || r.Depth > maxMCPDepth {
+		return fmt.Errorf("depth must be 1 to %d, got %d", maxMCPDepth, r.Depth)
+	}
+	if len(r.Exclude) > maxMCPExclude {
+		return fmt.Errorf("exclude has %d entries; at most %d", len(r.Exclude), maxMCPExclude)
+	}
+	cfg.RetryInconclusive, cfg.AutoRate, cfg.Exclude = r.RetryInconclusive, r.AutoRate, r.Exclude
+	if r.Depth > 1 {
+		cfg.Recursive, cfg.Depth = true, r.Depth
+	}
+	return nil
+}
+
 // recordTypeSchema offers every type -type accepts (#264).
 var recordTypeSchema = func() json.RawMessage {
 	enum, _ := json.Marshal(dns.Types())
@@ -263,10 +303,10 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
     "types": %s,
     "rate": {"type": "integer", "minimum": 0, "maximum": 1000, "description": "Queries per second; 0 or absent is unlimited. Lab traffic stays on this machine."},
     "max_queries": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Most names to test."},
-    "force": {"type": "boolean", "description": "Scan a wildcard zone anyway, filtering answers that match the wildcard."}
+    "force": {"type": "boolean", "description": "Scan a wildcard zone anyway, filtering answers that match the wildcard."}%s
   },
   "additionalProperties": false
-}`, scenarios, labDomain, maxMCPWords, recordTypeSchema, cfg.maxQueries)
+}`, scenarios, labDomain, maxMCPWords, recordTypeSchema, cfg.maxQueries, remediationProps)
 	return mcp.Tool{
 		Name:        "lab_scan",
 		Title:       "Scan a lab zone",
@@ -281,6 +321,7 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 				Rate       int      `json:"rate"`
 				MaxQueries int      `json:"max_queries"`
 				Force      bool     `json:"force"`
+				remediation
 			}
 			if err := strictUnmarshal(raw, &args); err != nil {
 				return mcp.Errorf("invalid arguments: %v", err)
@@ -302,15 +343,9 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 			if err != nil {
 				return mcp.Errorf("%v", err)
 			}
-			srv, err := serveLab(args.Scenario) //nolint:contextcheck // the server lives until the deferred Close, not until ctx ends
-			if err != nil {
-				return mcp.Errorf("%v", err)
-			}
-			defer srv.Close()
-			report := runMCPScan(ctx, subenum.Config{
-				Domain:   labDomain,
-				Words:    words,
-				Resolver: srv.Addr,
+			scanCfg := subenum.Config{
+				Domain: labDomain,
+				Words:  words,
 				// The server is in-process: allow for a busy machine, but
 				// keep lab5's deliberate timeouts short.
 				Timeout:     labTimeout,
@@ -320,7 +355,17 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 				MaxQueries:  maxQueries,
 				MaxDuration: cfg.maxDuration,
 				Force:       args.Force,
-			})
+			}
+			if err := args.apply(&scanCfg); err != nil {
+				return mcp.Errorf("%v", err)
+			}
+			srv, err := serveLab(args.Scenario) //nolint:contextcheck // the server lives until the deferred Close, not until ctx ends
+			if err != nil {
+				return mcp.Errorf("%v", err)
+			}
+			defer srv.Close()
+			scanCfg.Resolver = srv.Addr
+			report := runMCPScan(ctx, scanCfg)
 			report.Scenario = args.Scenario
 			return report.result()
 		},
@@ -340,11 +385,11 @@ func scanTool(cfg mcpConfig) mcp.Tool {
     "domain": {"type": "string", "description": "Domain to enumerate: one of %s, or a subdomain of one."},
     "words": {"type": "array", "items": {"type": "string"}, "maxItems": %d, "description": "Subdomain labels to try; default subenum's bundled list of the most common ones."},
     "types": %s,
-    "max_queries": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Most names to test; default and ceiling %d."}%s
+    "max_queries": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Most names to test; default and ceiling %d."}%s%s
   },
   "required": ["domain"],
   "additionalProperties": false
-}`, strings.Join(cfg.allow, ", "), maxMCPWords, recordTypeSchema, cfg.maxQueries, cfg.maxQueries, sourcesProp)
+}`, strings.Join(cfg.allow, ", "), maxMCPWords, recordTypeSchema, cfg.maxQueries, cfg.maxQueries, sourcesProp, remediationProps)
 	return mcp.Tool{
 		Name:  "scan",
 		Title: "Enumerate subdomains",
@@ -359,6 +404,7 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 				Types      []string `json:"types"`
 				MaxQueries int      `json:"max_queries"`
 				Sources    []string `json:"sources"`
+				remediation
 			}
 			if err := strictUnmarshal(raw, &args); err != nil {
 				return mcp.Errorf("invalid arguments: %v", err)
@@ -395,7 +441,7 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			for _, c := range counted {
 				sources = append(sources, c)
 			}
-			report := runMCPScan(ctx, subenum.Config{
+			scanCfg := subenum.Config{
 				Domain:      domain,
 				Words:       words,
 				Resolver:    cfg.dnsServer,
@@ -405,7 +451,11 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 				MaxQueries:  maxQueries,
 				MaxDuration: cfg.maxDuration,
 				Sources:     sources,
-			})
+			}
+			if err := args.apply(&scanCfg); err != nil {
+				return mcp.Errorf("%v", err)
+			}
+			report := runMCPScan(ctx, scanCfg)
 			for _, c := range counted {
 				s := mcpSource{Name: c.name, Names: c.names}
 				if c.err != nil {
@@ -472,6 +522,10 @@ type mcpReport struct {
 	Results    []mcpResult `json:"results"`
 	Outcomes   mcpOutcomes `json:"outcomes"`
 	Skipped    int64       `json:"skipped_by_cap,omitempty"`
+	Excluded   int64       `json:"excluded,omitempty"`
+	Retried    int64       `json:"retried,omitempty"`   // retry_inconclusive looked these up again
+	Recovered  int64       `json:"recovered,omitempty"` // and these then got an answer
+	Backoffs   int64       `json:"rate_backoffs,omitempty"`
 	Wildcard   bool        `json:"wildcard,omitempty"`
 	Notices    []string    `json:"notices,omitempty"`
 	Sources    []mcpSource `json:"sources,omitempty"`
@@ -534,6 +588,7 @@ func runMCPScan(ctx context.Context, cfg subenum.Config) *mcpReport {
 	report.Found = len(report.Results)
 	report.Outcomes = mcpOutcomes{NXDomain: stats.NXDomain, Timeout: stats.Timeout, Refused: stats.Refused, Other: stats.Other, WildcardFiltered: stats.WildcardFiltered}
 	report.Skipped = stats.Skipped
+	report.Excluded, report.Retried, report.Recovered, report.Backoffs = stats.Excluded, stats.Retried, stats.Recovered, stats.RateBackoffs
 	report.Wildcard = stats.Wildcard
 	report.Verdict, report.Reason = mcpVerdict(stats, report.Error, ctx.Err() != nil)
 	return report
