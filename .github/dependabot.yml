@@ -28,8 +28,13 @@ updates:
       - "github-actions"
 
   # Dockerfile base images are pinned by digest and would otherwise go stale.
+  # That includes the devcontainers' images, which Codespaces and the
+  # devcontainer CI job use (#187, #244).
   - package-ecosystem: "docker"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.devcontainer"
+      - "/.devcontainer/labs"
     schedule:
       interval: "weekly"
     groups:
@@ -39,7 +44,8 @@ updates:
       - "dependencies"
       - "docker"
 
-  # Codespaces and the devcontainer CI job use digest-pinned images (#187).
+  # Devcontainer Features, should either devcontainer.json add any. It does
+  # not bump the images: those are in Dockerfiles, under docker above (#244).
   - package-ecosystem: "devcontainers"
     directory: "/"
     schedule:
