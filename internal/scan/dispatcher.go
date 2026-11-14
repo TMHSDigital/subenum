@@ -100,9 +100,36 @@ func (d *dispatcher) settle(i int) {
 }
 
 // stopAdmitting ends admission for a budget: every candidate not yet
-// generated, and every child a later find would add, is skipped.
+// generated, and every child a later find would add, is skipped. Candidates
+// that -exclude, or a recursive scan's visited set, would have kept out are
+// counted as they would have been, not as skipped, so a budget that ran out
+// only past them still leaves the verdict complete (#238). Without
+// exclusions that walk is not needed, and a cap stays O(1).
 func (d *dispatcher) stopAdmitting() {
-	d.skipped += d.remaining
+	if d.cfg.scope.empty() && d.visited == nil {
+		d.skipped += d.remaining
+	} else {
+		for _, e := range d.frontier[d.head:] {
+			for i := e.next; i < d.n; i++ {
+				entry := d.cfg.Entries[i]
+				name := entry + "." + e.parent
+				if d.visited != nil {
+					key := entry
+					if e.depth > 1 {
+						key = name[:len(name)-len(d.cfg.Domain)-1]
+					}
+					if _, dup := d.visited[key]; dup {
+						continue
+					}
+				}
+				if d.cfg.scope.excluded(name) {
+					d.excluded++
+				} else {
+					d.skipped++
+				}
+			}
+		}
+	}
 	d.remaining = 0
 	d.capped = true
 	d.frontier, d.head = nil, 0

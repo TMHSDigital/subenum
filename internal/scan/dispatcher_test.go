@@ -51,6 +51,32 @@ func drain(d *dispatcher) []string {
 	}
 }
 
+// TestCapLeavesExcludedOutOfSkipped covers #238: a budget that runs out with
+// only excluded candidates left counts them as excluded, not skipped, so the
+// scan is still complete; in-scope candidates past it are still skipped.
+func TestCapLeavesExcludedOutOfSkipped(t *testing.T) {
+	entries := makeEntries(100)
+	var excl []string
+	for _, e := range entries[90:] {
+		excl = append(excl, e+".example.com")
+	}
+	cfg := Config{Domain: "example.com", Entries: entries, MaxQueries: 90, Exclude: excl}
+	d := testDispatcher(cfg, 1)
+	if got := len(drain(d)); got != 90 {
+		t.Fatalf("admitted %d, want 90", got)
+	}
+	if d.skipped != 0 || d.excluded != 10 {
+		t.Errorf("skipped %d excluded %d, want 0 and 10", d.skipped, d.excluded)
+	}
+
+	cfg.MaxQueries = 80 // now 10 in-scope names are past the cap too
+	d = testDispatcher(cfg, 1)
+	drain(d)
+	if d.skipped != 10 || d.excluded != 10 {
+		t.Errorf("cap 80: skipped %d excluded %d, want 10 and 10", d.skipped, d.excluded)
+	}
+}
+
 // A recursive scan can reach one name twice, so it dedupes; a flat scan
 // relies on its entries being unique already and keeps no visited set
 // (#248).

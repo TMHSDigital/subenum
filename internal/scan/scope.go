@@ -50,6 +50,11 @@ func newScope(patterns []string) *scope {
 	return s
 }
 
+// empty reports whether no pattern excludes anything.
+func (s *scope) empty() bool {
+	return s == nil || (len(s.exact) == 0 && len(s.suffixes) == 0)
+}
+
 // excluded reports whether name is out of scope.
 func (s *scope) excluded(name string) bool {
 	if s == nil {
