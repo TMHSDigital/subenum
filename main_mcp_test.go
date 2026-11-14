@@ -244,7 +244,7 @@ func TestE2EMCPRemediationArgs(t *testing.T) {
 		mcpCall{"lab_scan", `{"scenario": "lab4-recursive", "words": ["www", "dev", "api", "git", "corp", "vpn"], "depth": 2, "exclude": ["*.corp.lab.example"]}`},
 		mcpCall{"lab_scan", `{"scenario": "lab5-failures", "words": ["www", "backup", "beta"], "retry_inconclusive": true, "auto_rate": true}`},
 		mcpCall{"lab_scan", `{"depth": 4}`},
-		mcpCall{"lab_scan", `{"exclude": `+string(must(json.Marshal(make([]string, maxMCPExclude+1))))+`}`},
+		mcpCall{"lab_scan", `{"exclude": ` + string(must(json.Marshal(make([]string, maxMCPExclude+1)))) + `}`},
 	)
 	r := mcpReportOf(t, replies[0])
 	if want := []string{"api.dev", "corp", "dev", "git.dev", "www"}; !slices.Equal(reportNames(r), want) {
