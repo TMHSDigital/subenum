@@ -266,6 +266,43 @@ func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 	}
 }
 
+// TestSaveResumeStateKeepsFailedSources covers #237: a source that failed in
+// the interrupted run is saved with no names, so the resumed run replays
+// that instead of fetching it again; a fetch that now succeeded would insert
+// names before later sources' and shift the saved resume position.
+func TestSaveResumeStateKeepsFailedSources(t *testing.T) {
+	f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json")}
+	saveResumeState(&session{
+		f: f, out: output.New(nil, false, output.FormatText),
+		targets:      []string{"a.example"},
+		status:       []string{"interrupted"},
+		entryDigests: []string{"d1"},
+		results: []targetResult{{sources: []targetSource{
+			{source: "ct", err: "crt.sh: 502 Bad Gateway"},
+			{source: "wayback", names: []string{"old-shop"}, fetched: true},
+		}}},
+		runs: []resultLog{{}},
+	})
+	data, err := os.ReadFile(f.stateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st resumeState
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	tg := &st.Targets[0]
+	if names, ok := tg.sourceNames("ct"); !ok || len(names) != 0 {
+		t.Errorf("failed ct source replays %v (saved %v), want no names and no new fetch", names, ok)
+	}
+	if names, ok := tg.sourceNames("wayback"); !ok || len(names) != 1 || names[0] != "old-shop" {
+		t.Errorf("wayback replays %v (saved %v), want [old-shop]", names, ok)
+	}
+	if _, ok := tg.sourceNames("dns"); ok {
+		t.Error("a source the run never asked reads as saved")
+	}
+}
+
 // TestSaveResumeStateRecordsFinishedPermutePass covers #174: a -permute pass
 // that finished before the interrupt is saved from its final EventDone, field
 // for field, and replays as that same event on resume.

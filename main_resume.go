@@ -320,6 +320,27 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 	return a
 }
 
+// savedSources is what the resume state keeps of a target's passive-source
+// lookups: each source's names, and an empty list for one that failed. The
+// resume position indexes the wordlist plus every source's names, so a
+// resumed run must replay exactly the names the interrupted one scanned: a
+// failed source fetched again could now succeed and shift every later
+// candidate, skipping names silently (#237).
+func savedSources(sources []targetSource) map[string][]string {
+	if len(sources) == 0 {
+		return nil
+	}
+	saved := make(map[string][]string, len(sources))
+	for _, src := range sources {
+		if src.fetched {
+			saved[src.source] = src.names
+		} else {
+			saved[src.source] = []string{}
+		}
+	}
+	return saved
+}
+
 // saveResumeState writes the state file after an interrupt and tells the
 // user how to continue. Runs that read stdin cannot be replayed. prev is the
 // state this run resumed from, if any: a target interrupted again before its
@@ -346,15 +367,8 @@ func saveResumeState(s *session) {
 		res := s.results[i]
 		ct := sourceByName(res.sources, "ct")
 		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: ct.names, CTFetched: ct.fetched,
-			AXFR: res.axfr.names, AXFRServers: res.axfr.allowed, AXFRDone: res.axfr.done, Denial: string(res.axfr.denial)}
-		for _, src := range res.sources {
-			if src.fetched {
-				if t.Sources == nil {
-					t.Sources = map[string][]string{}
-				}
-				t.Sources[src.source] = src.names
-			}
-		}
+			AXFR: res.axfr.names, AXFRServers: res.axfr.allowed, AXFRDone: res.axfr.done, Denial: string(res.axfr.denial),
+			Sources: savedSources(res.sources)}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total
