@@ -22,6 +22,18 @@ type Source interface {
 	Names(ctx context.Context, domain string) ([]string, error)
 }
 
+// Truncated is returned with the names a source did get when it stopped at
+// one of its limits before reading everything (#272): the names are good,
+// but some hosts may be missing. Callers use the names and report it.
+type Truncated struct {
+	Source string // the source's -sources name
+	Why    string // the limit it hit
+}
+
+func (t *Truncated) Error() string {
+	return fmt.Sprintf("%s results truncated: %s; some hosts may be missing", Labels[t.Source], t.Why)
+}
+
 // Known lists the sources -sources accepts, in the order they run.
 var Known = []string{"ct", "wayback"}
 

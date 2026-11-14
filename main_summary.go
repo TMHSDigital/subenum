@@ -37,7 +37,7 @@ func targetSummary(domain, status string, res targetResult) output.TargetSummary
 	ct := sourceByName(res.sources, "ct")
 	t.CTNames, t.CTError = len(ct.names), ct.err
 	for _, src := range res.sources {
-		t.Sources = append(t.Sources, output.SourceSummary{Name: src.source, Names: len(src.names), Error: src.err})
+		t.Sources = append(t.Sources, output.SourceSummary{Name: src.source, Names: len(src.names), Error: src.err, Truncated: src.truncated != ""})
 	}
 	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
 	t.ZoneDenial = string(res.axfr.denial)

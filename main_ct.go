@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -19,6 +20,9 @@ type targetSource struct {
 	names   []string // relative to the target
 	fetched bool     // the lookup succeeded (names may still be empty)
 	err     string
+	// truncated says why a source that succeeded stopped at one of its
+	// limits, so some hosts may be missing (#272).
+	truncated string
 }
 
 // passiveNames asks every source for target's names at once (#271): the
@@ -48,7 +52,11 @@ func passiveNames(ctx context.Context, sources []string, target string, saved *r
 		}
 		wg.Go(func() {
 			names, err := src.Names(ctx, target)
-			if err != nil {
+			var tr *passive.Truncated
+			switch {
+			case errors.As(err, &tr):
+				res[i].truncated = tr.Error()
+			case err != nil:
 				res[i].err = err.Error()
 				return
 			}
@@ -57,8 +65,11 @@ func passiveNames(ctx context.Context, sources []string, target string, saved *r
 	}
 	wg.Wait()
 	for _, r := range res {
-		if !r.fetched && r.err != "" {
+		switch {
+		case !r.fetched && r.err != "":
 			out.Info("Warning: %s; scanning %s without %s names", r.err, target, passive.Labels[r.source])
+		case r.truncated != "":
+			out.Info("Note: %s (%s, %d names)", r.truncated, target, len(r.names))
 		}
 	}
 	return res

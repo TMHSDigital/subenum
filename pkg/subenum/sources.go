@@ -2,6 +2,7 @@ package subenum
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -60,7 +61,13 @@ func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, do
 		have[e] = true
 	}
 	for i, a := range answers {
-		if a.err != nil {
+		var tr *passive.Truncated
+		switch {
+		case errors.As(a.err, &tr):
+			// The names are good, only incomplete (#272).
+			forward(ctx, out, Event{Kind: KindNotice, Notice: NoticeSource,
+				Message: fmt.Sprintf("Sources[%d]: %v; scanning its %d names", i, a.err, len(a.names))})
+		case a.err != nil:
 			forward(ctx, out, Event{Kind: KindNotice, Notice: NoticeSource,
 				Message: fmt.Sprintf("Sources[%d]: %v; scanning without its names", i, a.err)})
 			continue

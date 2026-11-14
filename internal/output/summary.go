@@ -118,6 +118,9 @@ type SourceSummary struct {
 	Name  string `json:"name"`            // -sources name: ct, wayback
 	Names int    `json:"names"`           // names it added as candidates and seeds
 	Error string `json:"error,omitempty"` // why the lookup failed; the scan went on without it
+	// Truncated reports that the source stopped at one of its limits: its
+	// names were used, but some hosts may be missing (#272).
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // PermutationSummary counts a target's -permute pass.

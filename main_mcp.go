@@ -22,6 +22,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/labzone"
 	"github.com/TMHSDigital/subenum/internal/mcp"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/validate"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -460,7 +461,11 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			report := runMCPScan(ctx, scanCfg)
 			for _, c := range counted {
 				s := mcpSource{Name: c.name, Names: c.names}
-				if c.err != nil {
+				var tr *passive.Truncated
+				switch {
+				case errors.As(c.err, &tr):
+					s.Truncated = true // names used, but some may be missing (#272)
+				case c.err != nil:
 					s.Error = c.err.Error()
 				}
 				report.Sources = append(report.Sources, s)
@@ -537,9 +542,10 @@ type mcpReport struct {
 
 // mcpSource is what one passive source proposed, or the error it hit.
 type mcpSource struct {
-	Name  string `json:"name"`
-	Names int    `json:"names"`
-	Error string `json:"error,omitempty"`
+	Name      string `json:"name"`
+	Names     int    `json:"names"`
+	Error     string `json:"error,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type mcpResult struct {
@@ -663,7 +669,7 @@ var mcpReportSchema = json.RawMessage(`{
     "notices": {"type": "array", "items": {"type": "string"}},
     "sources": {"type": "array", "items": {
       "type": "object",
-      "properties": {"name": {"type": "string"}, "names": {"type": "integer"}, "error": {"type": "string"}},
+      "properties": {"name": {"type": "string"}, "names": {"type": "integer"}, "error": {"type": "string"}, "truncated": {"type": "boolean", "description": "the source hit one of its limits: its names were used, but some hosts may be missing"}},
       "required": ["name", "names"]
     }},
     "max_queries": {"type": "integer"},
@@ -800,6 +806,9 @@ func explainTarget(p func(string, ...any), t output.TargetSummary) {
 	for _, src := range t.Sources {
 		if src.Error != "" {
 			p("  Passive source %s failed (%s); the scan went on without it.", src.Name, src.Error)
+		}
+		if src.Truncated {
+			p("  Passive source %s stopped at one of its limits: its %d names were scanned, but some hosts may be missing.", src.Name, src.Names)
 		}
 	}
 	if t.Permutation != nil {

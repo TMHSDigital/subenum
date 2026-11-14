@@ -20,10 +20,10 @@ import (
 const WaybackURL = "https://web.archive.org/cdx/search/cdx"
 
 // Wayback bounds: a long-lived domain has millions of archived URLs, and
-// the index returns them one per line.
-const (
-	waybackLimit   = 200000   // URLs asked for
-	waybackMaxBody = 64 << 20 // bytes read
+// the index returns them one per line. Variables so tests can lower them.
+var (
+	waybackLimit         = 200000   // URLs asked for
+	waybackMaxBody int64 = 64 << 20 // bytes read
 )
 
 // Wayback finds hostnames in the Wayback Machine's index of archived URLs
@@ -79,25 +79,34 @@ func (w Wayback) Names(ctx context.Context, domain string) ([]string, error) {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	names, err := hostNames(io.LimitReader(resp.Body, waybackMaxBody), domain)
+	body := &io.LimitedReader{R: resp.Body, N: waybackMaxBody}
+	names, lines, err := hostNames(body, domain)
 	if err != nil {
 		return nil, fmt.Errorf("wayback machine lookup: reading %s's answer: %w", resp.Request.URL.Host, err)
+	}
+	switch {
+	case lines >= waybackLimit:
+		return names, &Truncated{Source: "wayback", Why: fmt.Sprintf("the index returned its limit of %d URLs", waybackLimit)}
+	case body.N <= 0:
+		return names, &Truncated{Source: "wayback", Why: fmt.Sprintf("the answer reached the %d MiB read limit", waybackMaxBody>>20)}
 	}
 	return names, nil
 }
 
 // hostNames reads one archived URL per line and returns the hosts under
-// domain, relative to it.
-func hostNames(r io.Reader, domain string) ([]string, error) {
+// domain, relative to it, and how many lines it read.
+func hostNames(r io.Reader, domain string) ([]string, int, error) {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	set := map[string]bool{}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	lines := 0
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
 		}
+		lines++
 		if !strings.Contains(line, "://") {
 			line = "http://" + line
 		}
@@ -115,12 +124,12 @@ func hostNames(r io.Reader, domain string) ([]string, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, err
+		return nil, lines, err
 	}
 	out := make([]string, 0, len(set))
 	for n := range set {
 		out = append(out, n)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out, lines, nil
 }

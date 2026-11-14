@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/TMHSDigital/subenum/internal/dnstest"
+	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
@@ -109,6 +111,41 @@ func TestSourcesRunAtOnce(t *testing.T) {
 	}
 	if got := stats.NXDomain; got != 3 {
 		t.Errorf("looked up %d names, want www plus both sources' names", got)
+	}
+}
+
+type truncatedSource []string
+
+func (s truncatedSource) Names(context.Context, string) ([]string, error) {
+	return s, &passive.Truncated{Source: "wayback", Why: "the index returned its limit"}
+}
+
+// TestTruncatedSourceIsScanned covers #272: a source that stopped at a
+// limit still has its names scanned, with a notice that some may be missing.
+func TestTruncatedSourceIsScanned(t *testing.T) {
+	srv := dnstest.Start(t, func(dnstest.Query) dnstest.Reply { return dnstest.NXDomain })
+	events, err := subenum.Run(context.Background(), subenum.Config{
+		Domain: "example.test", Words: []string{"www"}, Resolver: srv.Addr, Types: []string{"A"},
+		Sources: []subenum.Source{truncatedSource{"old"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notice string
+	var stats subenum.Stats
+	for ev := range events {
+		switch {
+		case ev.Kind == subenum.KindNotice && ev.Notice == subenum.NoticeSource:
+			notice = ev.Message
+		case ev.Kind == subenum.KindDone:
+			stats = ev.Stats
+		}
+	}
+	if stats.NXDomain != 2 {
+		t.Errorf("looked up %d names, want www and the truncated source's old", stats.NXDomain)
+	}
+	if !strings.Contains(notice, "truncated") || !strings.Contains(notice, "scanning its 1 names") {
+		t.Errorf("notice = %q, want it to say the source was truncated and its names scanned", notice)
 	}
 }
 
