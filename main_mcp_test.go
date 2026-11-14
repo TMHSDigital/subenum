@@ -476,6 +476,38 @@ func TestTypeAndFormatListsAgree(t *testing.T) {
 	}
 }
 
+// TestE2EMCPSessionBudget covers #240: -max-calls caps a session's scan
+// calls, so a looping agent cannot multiply -max-queries without end.
+func TestE2EMCPSessionBudget(t *testing.T) {
+	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := dnsserver.Listen(dnsserver.Options{}, zone.Handler([]string{"lab.example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	call := mcpCall{"scan", `{"domain": "lab.example", "words": ["www"]}`}
+	_, replies := runMCPSession(t, []string{"-allow", "lab.example", "-dns-server", srv.Addr, "-rate", "1000", "-timeout", "5000", "-max-calls", "2"},
+		call, call, call)
+	// Calls run one at a time but in no fixed order: exactly one of the
+	// three finds the budget spent.
+	refused := 0
+	for i, r := range replies {
+		text, isErr := toolText(t, r)
+		switch {
+		case isErr && strings.Contains(text, "allows 2 scan calls per session"):
+			refused++
+		case isErr:
+			t.Errorf("call %d failed: %s", i, text)
+		}
+	}
+	if refused != 1 {
+		t.Errorf("%d calls refused by the session budget, want 1", refused)
+	}
+}
+
 func TestMCPFlagErrors(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -489,6 +521,7 @@ func TestMCPFlagErrors(t *testing.T) {
 		{[]string{"-allow", "not a domain"}, exitUsage, `-allow "not a domain"`},
 		{[]string{"-dns-server", "nope"}, exitUsage, "-dns-server"},
 		{[]string{"-sources", "ct,dns"}, exitUsage, `unknown source "dns"`},
+		{[]string{"-max-calls", "0"}, exitUsage, "-max-calls must be at least 1"},
 		{[]string{"example.com"}, exitUsage, "unexpected argument"},
 		{[]string{"-h"}, exitOK, "Model Context Protocol"},
 	} {

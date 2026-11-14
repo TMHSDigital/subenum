@@ -14,6 +14,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -64,7 +65,13 @@ type mcpConfig struct {
 	maxDuration time.Duration
 	timeout     time.Duration // one lookup, live scans
 	sources     []string      // passive sources a scan call may ask for (#268)
+	maxCalls    int           // scan calls one session may make (#240)
 }
+
+// defaultMCPMaxCalls bounds a session's scan calls, so an agent that loops
+// (or keeps working after its user left) cannot multiply -max-queries
+// without end.
+const defaultMCPMaxCalls = 100
 
 // mcpSources builds the passive sources -sources may enable, by name. Tests
 // replace it so no request leaves the machine.
@@ -125,6 +132,7 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 	fs.IntVar(&cfg.rate, "rate", defaultMCPRate, "DNS queries per second for live scans")
 	fs.DurationVar(&cfg.maxDuration, "max-duration", defaultMCPMaxDuration, "Longest one tool call may scan")
 	fs.IntVar(&timeoutMs, "timeout", int(subenum.DefaultTimeout/time.Millisecond), "Live-scan DNS lookup timeout in milliseconds")
+	fs.IntVar(&cfg.maxCalls, "max-calls", defaultMCPMaxCalls, "Most scan calls one session may make; with -max-queries it caps the session's live lookups")
 	fs.StringVar(&sources, "sources", "", "Comma-separated passive sources ("+strings.Join(mcpSourceNames(), ", ")+") a scan call may ask for. Off by default: they send the domain to third parties")
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(stderr, "Usage: %s mcp [flags]\n\n", ProgramName)
@@ -160,6 +168,9 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 	}
 	if timeoutMs < 1 {
 		return fail("-timeout must be at least 1 millisecond, got %d", timeoutMs)
+	}
+	if cfg.maxCalls < 1 {
+		return fail("-max-calls must be at least 1, got %d", cfg.maxCalls)
 	}
 	cfg.timeout = time.Duration(timeoutMs) * time.Millisecond
 	if err := validate.DNSServer(cfg.dnsServer); err != nil {
@@ -392,6 +403,7 @@ func scanTool(cfg mcpConfig) mcp.Tool {
   "required": ["domain"],
   "additionalProperties": false
 }`, strings.Join(cfg.allow, ", "), maxMCPWords, recordTypeSchema, cfg.maxQueries, cfg.maxQueries, sourcesProp, remediationProps)
+	var calls atomic.Int64 // scan calls this session has made
 	return mcp.Tool{
 		Name:  "scan",
 		Title: "Enumerate subdomains",
@@ -457,6 +469,9 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			}
 			if err := args.apply(&scanCfg); err != nil {
 				return mcp.Errorf("%v", err)
+			}
+			if calls.Add(1) > int64(cfg.maxCalls) {
+				return mcp.Errorf("session budget spent: the operator allows %d scan calls per session (-max-calls)", cfg.maxCalls)
 			}
 			report := runMCPScan(ctx, scanCfg)
 			for _, c := range counted {

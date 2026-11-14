@@ -298,6 +298,35 @@ func TestServeStopsWhenContextEnds(t *testing.T) {
 	}
 }
 
+// brokenWriter fails every write, like a pipe whose reader has exited.
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// TestGoneClientStopsQueuedCalls covers #240: once a reply cannot be
+// written, the client is gone, and calls still queued are cancelled instead
+// of scanning for nobody.
+func TestGoneClientStopsQueuedCalls(t *testing.T) {
+	block := Tool{
+		Name:        "block",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Call: func(ctx context.Context, _ json.RawMessage) Result {
+			<-ctx.Done()
+			return Result{Text: "stopped"}
+		},
+	}
+	// The ping's reply, which waits for no call, is the first failed write.
+	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"block"}}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"ping"}` + "\n")
+	done := make(chan error, 1)
+	go func() { done <- (&Server{Tools: []Tool{block}}).Serve(context.Background(), in, brokenWriter{}) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve kept running queued calls after its client was gone")
+	}
+}
+
 func TestInputEndFinishesPendingCalls(t *testing.T) {
 	send, recv, closeInput := serve(t, &Server{Tools: []Tool{echoTool()}})
 	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":null}}`)

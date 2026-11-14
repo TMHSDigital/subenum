@@ -81,6 +81,7 @@ subenum mcp -allow example.com,example.org    # adds scan, for these domains
 | `-max-duration` | 2m | Longest one call may scan |
 | `-timeout` | 1000 | Live-scan lookup timeout in milliseconds |
 | `-sources` | none | Passive sources (`ct`, `wayback`) a `scan` call may ask for |
+| `-max-calls` | 100 | Most `scan` calls one session may make; with `-max-queries` it caps the session's live lookups |
 
 Passive sources are off unless you enable them, because they send the domain
 to third parties (crt.sh, the Wayback Machine). With `-sources ct,wayback`,
@@ -89,8 +90,12 @@ after dedupe, count against `max_queries`, and are each verified by a lookup.
 The report lists each source with the number of names it proposed, or the
 error it hit; a failed source does not stop the scan.
 
-The caps cannot be turned off: `-rate`, `-max-queries`, `-max-duration` and
-`-timeout` must be positive.
+The caps cannot be turned off: `-rate`, `-max-queries`, `-max-duration`,
+`-timeout` and `-max-calls` must be positive. A session is one run of the
+server: it ends when the client closes it. Calls the client sent before
+closing standard input are still answered, but once the client stops
+reading the replies, the running call is cancelled and queued ones never
+start.
 
 `subenum mcp` takes its settings from these flags only. The `SUBENUM_*`
 environment variables and the config file that set defaults for scans do not

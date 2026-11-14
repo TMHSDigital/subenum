@@ -106,6 +106,9 @@ type session struct {
 
 	writeMu sync.Mutex
 	w       io.Writer
+	// stop ends the session. A failed write calls it: the client is gone,
+	// so calls still queued would scan for nobody (#240).
+	stop context.CancelFunc
 
 	// calls runs one tool call at a time, so a client cannot multiply the
 	// operator's query budget by calling in parallel.
@@ -125,8 +128,11 @@ type session struct {
 func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	ss := &session{srv: s, w: w, calls: make(chan struct{}, 1), cancels: map[string]context.CancelFunc{}}
-	defer ss.wg.Wait() // when input ends, finish what was asked; ctx stops it sooner
+	ss := &session{srv: s, w: w, stop: cancel, calls: make(chan struct{}, 1), cancels: map[string]context.CancelFunc{}}
+	// When input ends, finish what was asked, for clients that send their
+	// requests and close stdin; ctx, or a client that stopped reading, stops
+	// it sooner.
+	defer ss.wg.Wait()
 
 	lines := make(chan []byte)
 	errc := make(chan error, 1)
@@ -303,11 +309,15 @@ func (ss *session) reply(id json.RawMessage, result any, rerr *rpcError) {
 	ss.write(b)
 }
 
-// write sends one message line.
+// write sends one message line. A failed write means the client stopped
+// reading, so the session ends: the running call is cancelled, and queued
+// ones never start.
 func (ss *session) write(b []byte) {
 	ss.writeMu.Lock()
 	defer ss.writeMu.Unlock()
-	_, _ = ss.w.Write(append(b, '\n'))
+	if _, err := ss.w.Write(append(b, '\n')); err != nil && ss.stop != nil {
+		ss.stop()
+	}
 }
 
 // progressKey carries a tool call's progress reporter in its context.
