@@ -1836,9 +1836,10 @@ pre code {
     gap: 2px;
   }
 
+  /* Wrap rather than scroll: a hidden scrollbar left the last tab cut off
+     with nothing to say more tabs exist (#285). */
   .recipe-tabs {
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
   }
 
   .recipe-tabs button {
