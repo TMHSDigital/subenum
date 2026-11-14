@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -363,7 +364,10 @@ func TestGoneClientStopsQueuedCalls(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- (&Server{Tools: []Tool{block}}).Serve(context.Background(), in, brokenWriter{}) }()
 	select {
-	case <-done:
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Serve returned %v, want context.Canceled from the failed write", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve kept running queued calls after its client was gone")
 	}
