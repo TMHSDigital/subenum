@@ -63,6 +63,55 @@ func TestPoolRotatesAndBenches(t *testing.T) {
 	}
 }
 
+// TestQueriesFor checks that the pool books the queries a lookup really
+// sends: default types are two, and CNAME is three (#236).
+func TestQueriesFor(t *testing.T) {
+	for _, tc := range []struct {
+		types []string
+		want  int
+	}{
+		{nil, 2},
+		{[]string{"A"}, 1},
+		{[]string{"A", "AAAA"}, 2},
+		{[]string{"A", "AAAA", "CNAME"}, 5},
+		{[]string{"NS", "MX", "TXT"}, 3},
+	} {
+		if got := queriesFor(tc.types); got != tc.want {
+			t.Errorf("queriesFor(%v) = %d, want %d", tc.types, got, tc.want)
+		}
+	}
+}
+
+// TestPoolReservesWireQueries resolves through a capped member on a fake
+// clock and checks the slots Resolve books (#236): one per wire query the
+// lookup sends, not one per record type, so default types book two and a
+// CNAME lookup three.
+func TestPoolReservesWireQueries(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10", AAAA: "2001:db8::10"}})
+	for _, tc := range []struct {
+		types []string
+		want  int // slots booked by one lookup
+	}{
+		{nil, 2},
+		{[]string{"A", "AAAA", "CNAME"}, 5},
+	} {
+		p := NewPool([]string{srv.addr}, 2*time.Second)
+		p.SetRatePerResolver(10) // 100ms per query
+		now := time.Unix(0, 0)
+		p.now = func() time.Time { return now }
+		p.sleep = func(context.Context, time.Duration) error { return nil }
+		m := p.members[0]
+		m.trusted = true // no canary or second opinion: only the lookup books
+		ans := p.Resolve(context.Background(), Lookup{Timeout: 2 * time.Second, Types: tc.types}, "www.example.com")
+		if ans.Outcome != OutcomeFound {
+			t.Fatalf("types %v: outcome %v, want found", tc.types, ans.Outcome)
+		}
+		if want := now.Add(time.Duration(tc.want) * 100 * time.Millisecond); !m.free.Equal(want) {
+			t.Errorf("types %v: member free at %v, want %v (%d slots)", tc.types, m.free.Sub(now), want.Sub(now), tc.want)
+		}
+	}
+}
+
 // TestPoolRatePerResolver drives the per-resolver cap (#196) on a fake clock:
 // lookups go to members with room first, wait for the one that frees up
 // soonest when every cap is spent, and count each spent cap as throttled.

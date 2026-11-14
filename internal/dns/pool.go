@@ -360,7 +360,7 @@ func (p *Pool) checkCanary(ctx context.Context, m *PoolResolver, l Lookup) {
 		return
 	}
 	name := p.canary()
-	if name == "" || p.reserve(ctx, m, len(l.Types)) != nil {
+	if name == "" || p.reserve(ctx, m, queriesFor(l.Types)) != nil {
 		m.mu.Lock()
 		m.canaryBusy = false
 		m.mu.Unlock()
@@ -402,7 +402,7 @@ func (p *Pool) Resolve(ctx context.Context, l Lookup, domain string) PoolAnswer 
 		}
 		last = m
 		p.checkCanary(ctx, m, l)
-		if p.reserve(ctx, m, len(l.Types)) != nil {
+		if p.reserve(ctx, m, queriesFor(l.Types)) != nil {
 			return PoolAnswer{Outcome: OutcomeCanceled}
 		}
 		var recs []Record
@@ -430,7 +430,7 @@ func (p *Pool) secondOpinion(ctx context.Context, m *PoolResolver, l Lookup, dom
 		return nx
 	}
 	other := p.pickHealthy(m)
-	if other == nil || p.reserve(ctx, other, len(l.Types)) != nil {
+	if other == nil || p.reserve(ctx, other, queriesFor(l.Types)) != nil {
 		return nx
 	}
 	recs, o := other.lookup(l).Resolve(ctx, domain)
