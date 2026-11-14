@@ -23,6 +23,8 @@ func startAllTransports(t *testing.T) (*dnstest.Server, map[string]string) {
 		switch q.Name {
 		case "www.example.com":
 			return dnstest.Reply{A: []string{"192.0.2.1"}, AAAA: []string{"2001:db8::1"}}
+		case "alias.example.com":
+			return dnstest.Reply{CNAME: "edge.example.net"}
 		case "refused.example.com":
 			return dnstest.Refused
 		case "dropped.example.com":
@@ -91,11 +93,19 @@ func TestTransportsAgree(t *testing.T) {
 				}
 			}
 
-			if _, o := (Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 2, Types: []string{"A"}}).Resolve(context.Background(), "missing.example.com"); o != OutcomeNXDomain {
-				t.Errorf("missing name: outcome %v, want NXDOMAIN", o)
+			// CNAME is its own raw query (#249), so check it over each
+			// transport too.
+			cname := Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 1, Types: []string{"CNAME"}}
+			if recs, o := cname.Resolve(context.Background(), "alias.example.com"); o != OutcomeFound || len(recs) != 1 || recs[0].Value != "edge.example.net" {
+				t.Errorf("CNAME alias: records %v, outcome %v; want edge.example.net", recs, o)
 			}
-			if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "refused.example.com"); Classify(err) != OutcomeRefused {
-				t.Errorf("REFUSED: Classify(%v) = %v, want refused", err, Classify(err))
+			for _, typ := range []string{"A", "CNAME"} {
+				if _, o := (Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 2, Types: []string{typ}}).Resolve(context.Background(), "missing.example.com"); o != OutcomeNXDomain {
+					t.Errorf("%s missing name: outcome %v, want NXDOMAIN", typ, o)
+				}
+				if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{typ}}).ResolveTypes(context.Background(), "refused.example.com"); Classify(err) != OutcomeRefused {
+					t.Errorf("%s REFUSED: Classify(%v) = %v, want refused", typ, err, Classify(err))
+				}
 			}
 			short := NewResolver(300*time.Millisecond, server)
 			if _, o := (Lookup{Resolver: short, Timeout: 300 * time.Millisecond, Attempts: 1, Types: []string{"A"}}).Resolve(context.Background(), "dropped.example.com"); o != OutcomeTimeout {

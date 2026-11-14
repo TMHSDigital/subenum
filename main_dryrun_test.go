@@ -56,13 +56,13 @@ func TestDryRunMaxQueriesCapsEstimate(t *testing.T) {
 	}
 }
 
-// TestDryRunCountsCNAMEQueries covers #223: a CNAME lookup sends three
-// queries, and the estimate says so, as -rate charges it.
+// TestDryRunCountsCNAMEQueries covers #223 and #249: a CNAME lookup sends one
+// query of its own, and the estimate says so, as -rate charges it.
 func TestDryRunCountsCNAMEQueries(t *testing.T) {
 	wl := writeFile(t, "wl.txt", "www\napi\n")
 	_, plans := dryRunPlans(t, "-simulate", "-w", wl, "-type", "A,AAAA,CNAME", "example.com")
-	if len(plans) != 1 || plans[0].Queries != 2*5 {
-		t.Fatalf("plans = %+v, want 10 queries: 2 names x (A 1 + AAAA 1 + CNAME 3)", plans)
+	if len(plans) != 1 || plans[0].Queries != 2*3 {
+		t.Fatalf("plans = %+v, want 6 queries: 2 names x (A 1 + AAAA 1 + CNAME 1)", plans)
 	}
 }
 

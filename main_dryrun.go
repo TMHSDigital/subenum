@@ -58,7 +58,7 @@ func (s *session) dryRun() int {
 		if f.maxQueries > 0 {
 			names = min(names, int64(f.maxQueries))
 		}
-		// One lookup per name sends a query per type, three for CNAME (#223).
+		// One lookup per name sends a query per type (#223, #249).
 		p.Queries = names * int64(dns.QueriesFor(s.in.recordTypes))
 		p.QueriesMax = p.Queries * int64(max(s.in.maxAttempts, 1))
 		if f.rate > 0 {

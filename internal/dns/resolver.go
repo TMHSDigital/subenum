@@ -275,11 +275,12 @@ func fqdn(domain string) string {
 }
 
 // queriesPerType is how many DNS queries one lookup of each type puts on the
-// wire when the first answer is definitive. Go's LookupCNAME sends A, AAAA
-// and CNAME queries. These slots are reserved before the lookup's timeout
-// starts; anything Go sends beyond them (its own retries) is charged as it is
-// dialed (see NewResolver).
-var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 3, "NS": 1, "MX": 1, "TXT": 1}
+// wire when the first answer is definitive. CNAME is one query of its own
+// (lookupCNAME), not Go's LookupCNAME, which also sends A and AAAA (#249).
+// These slots are reserved before the lookup's timeout starts; anything sent
+// beyond them (Go's retries, a TCP retry after truncation) is charged as it
+// is dialed (see NewResolver).
+var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 1, "NS": 1, "MX": 1, "TXT": 1}
 
 // QueriesFor is how many queries one lookup of types puts on the wire, by
 // queriesPerType; empty types means DefaultTypes, as in ResolveTypes. The
@@ -407,11 +408,11 @@ func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t str
 		}
 		return recs, nil
 	case "CNAME":
-		cname, err := resolver.LookupCNAME(ctx, name)
+		cname, err := lookupCNAME(ctx, resolver, name)
 		if err != nil {
 			return nil, err
 		}
-		// LookupCNAME returns the domain itself when there is no CNAME chain.
+		// lookupCNAME returns the domain itself when there is no CNAME chain.
 		if cname != "" && !strings.EqualFold(strings.TrimSuffix(cname, "."), strings.TrimSuffix(domain, ".")) {
 			return []Record{{Type: "CNAME", Value: strings.TrimSuffix(cname, ".")}}, nil
 		}

@@ -20,7 +20,7 @@
 | `-inconclusive <string>` {% include unreleased.html flag="inconclusive" %} | - | Write the names still without an answer (timeout, refused, other) to this file, one per line, to rescan with -w |
 | `-log-format <string>` {% include unreleased.html flag="log-format" %} | text | Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged |
 | `-max-duration <duration>` {% include unreleased.html flag="max-duration" %} | 0s | Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report and a degraded verdict |
-| `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type (three for CNAME), per attempt |
+| `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt |
 | `-no-abort` | - | Do not abort when the resolver failure rate exceeds 20% (warning is still emitted) |
 | `-o <string>` | - | Write results to file (in addition to stdout) |
 | `-permute` | - | After each scan, scan permutations of the names found (api -&gt; api-dev, dev-api, dev.api, api2, ...) |

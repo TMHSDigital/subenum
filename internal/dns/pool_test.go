@@ -64,7 +64,7 @@ func TestPoolRotatesAndBenches(t *testing.T) {
 }
 
 // TestQueriesFor checks that the pool books the queries a lookup really
-// sends: default types are two, and CNAME is three (#236).
+// sends: default types are two, and CNAME is one, its own query (#236, #249).
 func TestQueriesFor(t *testing.T) {
 	for _, tc := range []struct {
 		types []string
@@ -73,7 +73,7 @@ func TestQueriesFor(t *testing.T) {
 		{nil, 2},
 		{[]string{"A"}, 1},
 		{[]string{"A", "AAAA"}, 2},
-		{[]string{"A", "AAAA", "CNAME"}, 5},
+		{[]string{"A", "AAAA", "CNAME"}, 3},
 		{[]string{"NS", "MX", "TXT"}, 3},
 	} {
 		if got := QueriesFor(tc.types); got != tc.want {
@@ -120,7 +120,7 @@ func TestTypesArePriced(t *testing.T) {
 // TestPoolReservesWireQueries resolves through a capped member on a fake
 // clock and checks the slots Resolve books (#236): one per wire query the
 // lookup sends, not one per record type, so default types book two and a
-// CNAME lookup three.
+// CNAME lookup one (#249).
 func TestPoolReservesWireQueries(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10", AAAA: "2001:db8::10"}})
 	for _, tc := range []struct {
@@ -128,7 +128,7 @@ func TestPoolReservesWireQueries(t *testing.T) {
 		want  int // slots booked by one lookup
 	}{
 		{nil, 2},
-		{[]string{"A", "AAAA", "CNAME"}, 5},
+		{[]string{"A", "AAAA", "CNAME"}, 3},
 	} {
 		p := NewPool([]string{srv.addr}, 2*time.Second)
 		p.SetRatePerResolver(10) // 100ms per query
