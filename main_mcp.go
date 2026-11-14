@@ -235,6 +235,46 @@ func labScenarios() []string {
 	return names
 }
 
+// labScenarioDescription is what a scenario teaches, from its file's opening
+// comment (#275): the comment lines before the first record, without the
+// "Lab N:" prefix, the "Run:" hint or the indented command under it.
+func labScenarioDescription(name string) string {
+	b, _ := labFiles.ReadFile(path.Join(labDir, name+".zone"))
+	var parts []string
+	for line := range strings.Lines(string(b)) {
+		text, ok := strings.CutPrefix(line, "#")
+		if !ok {
+			break
+		}
+		if strings.HasPrefix(text, "  ") { // a command to run
+			continue
+		}
+		text = strings.TrimSpace(text)
+		if strings.HasPrefix(text, "Lab ") {
+			if _, rest, ok := strings.Cut(text, ": "); ok {
+				text = rest
+			}
+		}
+		text = strings.TrimSpace(strings.TrimSuffix(text, "Run:"))
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// labScenarioGuide lists every scenario with its description, for the
+// lab_scan schema.
+func labScenarioGuide() string {
+	var b strings.Builder
+	for _, name := range labScenarios() {
+		if desc := labScenarioDescription(name); desc != "" {
+			fmt.Fprintf(&b, " %s: %s", name, desc)
+		}
+	}
+	return b.String()
+}
+
 func labWords() []string {
 	b, _ := labFiles.ReadFile(path.Join(labDir, "words.txt"))
 	words, _ := wordlist.ReadLinesFrom(bytes.NewReader(b))
@@ -307,10 +347,12 @@ var recordTypeSchema = func() json.RawMessage {
 
 func labScanTool(cfg mcpConfig) mcp.Tool {
 	scenarios, _ := json.Marshal(labScenarios())
+	scenarioDesc, _ := json.Marshal(fmt.Sprintf("Lab scenario to scan; default lab1-first-scan. Each is a fictional zone for %s served on this machine.%s",
+		labDomain, labScenarioGuide()))
 	schema := fmt.Sprintf(`{
   "type": "object",
   "properties": {
-    "scenario": {"enum": %s, "description": "Lab scenario to scan; default lab1-first-scan. Each is a fictional zone for %s served on this machine."},
+    "scenario": {"enum": %s, "description": %s},
     "words": {"type": "array", "items": {"type": "string"}, "maxItems": %d, "description": "Subdomain labels to try; default the labs' short wordlist."},
     "types": %s,
     "rate": {"type": "integer", "minimum": 0, "maximum": 1000, "description": "Queries per second; 0 or absent is unlimited. Lab traffic stays on this machine."},
@@ -318,7 +360,7 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
     "force": {"type": "boolean", "description": "Scan a wildcard zone anyway, filtering answers that match the wildcard."}%s
   },
   "additionalProperties": false
-}`, scenarios, labDomain, maxMCPWords, recordTypeSchema, cfg.maxQueries, remediationProps)
+}`, scenarios, scenarioDesc, maxMCPWords, recordTypeSchema, cfg.maxQueries, remediationProps)
 	return mcp.Tool{
 		Name:         "lab_scan",
 		Title:        "Scan a lab zone",

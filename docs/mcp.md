@@ -33,7 +33,9 @@ refused rather than ignored. A client that sends a `progressToken` with a
 compiled into the binary and answered by a DNS server on the loopback
 interface. No traffic leaves the machine, so it is always offered and always
 safe. It is the place for an agent to learn what wildcards, rate limits and a
-failing resolver do to a scan.
+failing resolver do to a scan. Its `scenario` argument describes each
+scenario, from the opening comment of its zone file, so an agent can pick one
+and explain it.
 
 **`scan`** enumerates a real domain through the operator's resolver. It is
 offered only when `-allow` names at least one domain, and it refuses any domain

@@ -188,6 +188,11 @@ slow     TIMEOUT                        # never answered
 broken   SERVFAIL                       # also: REFUSED, NXDOMAIN
 ```
 
+Start a scenario in `examples/labs` with a comment saying what it teaches
+(`# Lab 6: <title>. <what to look for>`): `subenum mcp` shows that comment,
+without the lab number and any indented command line, to agents choosing a
+scenario.
+
 Names the file does not define are NXDOMAIN. The scenario is the whole world
 during a lab, so names outside the scanned domain (such as an external CNAME
 target) are NXDOMAIN too. Use the

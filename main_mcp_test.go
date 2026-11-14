@@ -429,6 +429,32 @@ func TestMCPReportSchemaCoversTheReport(t *testing.T) {
 	check("sources[]", reflect.TypeOf(mcpSource{}), props(top["sources"].(map[string]any)["items"].(map[string]any)))
 }
 
+// TestMCPLabScenariosDescribed covers #275: lab_scan's schema tells the
+// agent what each scenario teaches, from the zone files' opening comments.
+func TestMCPLabScenariosDescribed(t *testing.T) {
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(labScanTool(mcpConfig{maxQueries: 10}).InputSchema, &schema); err != nil {
+		t.Fatalf("lab_scan inputSchema is not JSON: %v", err)
+	}
+	desc := schema.Properties["scenario"].Description
+	for _, name := range labScenarios() {
+		about := labScenarioDescription(name)
+		if about == "" || strings.Contains(about, "subenum ") || strings.Contains(about, "Run:") || strings.HasPrefix(about, "Lab ") {
+			t.Errorf("%s: description %q; want the opening comment without the lab number or the command", name, about)
+		}
+		if !strings.Contains(desc, name+": "+about) {
+			t.Errorf("scenario schema description lacks %s's description:\n%s", name, desc)
+		}
+	}
+	if want := "spot the wildcard. Every name under lab.example resolves... except that a few of them are real hosts with their own addresses."; labScenarioDescription("lab2-wildcard") != want {
+		t.Errorf("lab2-wildcard = %q, want %q", labScenarioDescription("lab2-wildcard"), want)
+	}
+}
+
 // TestE2EMCPStructuredContent: a scan reply carries the report as
 // structuredContent too, equal to the JSON in its text (#270).
 func TestE2EMCPStructuredContent(t *testing.T) {
