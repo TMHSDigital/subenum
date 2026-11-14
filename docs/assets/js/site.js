@@ -305,62 +305,6 @@
     }
   });
 
-  /* ---------- Home: the scan console ---------- */
-
-  var consoleEl = $('[data-console]');
-  if (consoleEl && !reduceMotion && window.requestAnimationFrame) {
-    var lines = $$('.console-out li', consoleEl);
-    var counters = $$('[data-count]', consoleEl).map(function (el) {
-      return { el: el, to: +el.getAttribute('data-count') };
-    });
-    var progress = $('[data-progress]', consoleEl);
-    var verdict = $('[data-verdict]', consoleEl);
-    var replay = $('[data-replay]', consoleEl);
-    var DURATION = 3600;
-
-    var fmt = function (n) { return n.toLocaleString('en-US'); };
-
-    var play = function () {
-      replay.hidden = true;
-      consoleEl.classList.add('is-running');
-      verdict.classList.remove('is-in');
-      lines.forEach(function (li) { li.classList.remove('is-in'); });
-      var t0 = null;
-      var step = function (now) {
-        if (t0 === null) t0 = now;
-        var p = Math.min((now - t0) / DURATION, 1);
-        var eased = 1 - Math.pow(1 - p, 2);
-        counters.forEach(function (c) { c.el.textContent = fmt(Math.round(c.to * eased)); });
-        progress.style.setProperty('--p', eased);
-        lines.forEach(function (li) {
-          if (p >= +li.getAttribute('data-at')) li.classList.add('is-in');
-        });
-        if (p < 1) {
-          requestAnimationFrame(step);
-        } else {
-          verdict.classList.add('is-in');
-          replay.hidden = false;
-        }
-      };
-      requestAnimationFrame(step);
-    };
-
-    replay.addEventListener('click', play);
-    // On narrow screens the console sits below the fold: start when it is seen.
-    if ('IntersectionObserver' in window) {
-      consoleEl.classList.add('is-running');
-      var seen = new IntersectionObserver(function (entries) {
-        if (entries[0].isIntersecting) { seen.disconnect(); play(); }
-      }, { threshold: 0.35 });
-      seen.observe(consoleEl);
-    } else {
-      play();
-    }
-  }
-
-  /* ---------- 404: echo the missing path ---------- */
-
-  var missing = $('[data-path]');
   /* ---------- Demo video: no autoplay for reduced motion ---------- */
 
   if (reduceMotion) {
@@ -370,6 +314,9 @@
     });
   }
 
+  /* ---------- 404: echo the missing path ---------- */
+
+  var missing = $('[data-path]');
   if (missing) {
     var path = window.location.pathname.replace(/^\/subenum\/?/, '').replace(/\.html$/, '').replace(/[^\w.-]+/g, '.').replace(/^\.+|\.+$/g, '');
     if (path) missing.textContent = path.slice(0, 48);
