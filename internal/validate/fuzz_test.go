@@ -3,8 +3,8 @@ package validate
 import "testing"
 
 // FuzzNormalizeDomain: any input normalises or fails without panicking, and
-// an accepted domain passes Domain and normalises to itself (#259). Fuzzing
-// it finds #281 (a kept trailing dot) until that is fixed.
+// an accepted domain passes Domain and normalises to itself (#259). It found
+// #281: a kept trailing dot and unmapped Unicode full stops.
 func FuzzNormalizeDomain(f *testing.F) {
 	for _, s := range []string{"example.com", " HTTPS://Example.COM:8443/path?q ", "*.example.com.", "bücher.example", "user@example.com", "[::1]:53", "a..b", "xn--bcher-kva.example", "example.com/#x"} {
 		f.Add(s)
