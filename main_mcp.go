@@ -308,11 +308,12 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
   "additionalProperties": false
 }`, scenarios, labDomain, maxMCPWords, recordTypeSchema, cfg.maxQueries, remediationProps)
 	return mcp.Tool{
-		Name:        "lab_scan",
-		Title:       "Scan a lab zone",
-		Description: fmt.Sprintf("Enumerate subdomains of %s in one of subenum's lab scenarios: fictional zones answered by a DNS server on this machine, so no traffic leaves it. Safe for practice and for learning how wildcards, rate limits and failing resolvers change a scan's verdict.", labDomain),
-		InputSchema: json.RawMessage(schema),
-		Annotations: mcp.Annotations{ReadOnlyHint: true},
+		Name:         "lab_scan",
+		Title:        "Scan a lab zone",
+		Description:  fmt.Sprintf("Enumerate subdomains of %s in one of subenum's lab scenarios: fictional zones answered by a DNS server on this machine, so no traffic leaves it. Safe for practice and for learning how wildcards, rate limits and failing resolvers change a scan's verdict.", labDomain),
+		InputSchema:  json.RawMessage(schema),
+		OutputSchema: mcpReportSchema,
+		Annotations:  mcp.Annotations{ReadOnlyHint: true},
 		Call: func(ctx context.Context, raw json.RawMessage) mcp.Result {
 			var args struct {
 				Scenario   string   `json:"scenario"`
@@ -395,8 +396,9 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 		Title: "Enumerate subdomains",
 		Description: fmt.Sprintf("Enumerate subdomains of a real domain by DNS, through the operator's resolver at %d queries per second, testing at most %d names in %s. Only domains the operator allowed can be scanned: %s.",
 			cfg.rate, cfg.maxQueries, cfg.maxDuration, strings.Join(cfg.allow, ", ")),
-		InputSchema: json.RawMessage(schema),
-		Annotations: mcp.Annotations{ReadOnlyHint: true, OpenWorldHint: true},
+		InputSchema:  json.RawMessage(schema),
+		OutputSchema: mcpReportSchema,
+		Annotations:  mcp.Annotations{ReadOnlyHint: true, OpenWorldHint: true},
 		Call: func(ctx context.Context, raw json.RawMessage) mcp.Result {
 			var args struct {
 				Domain     string   `json:"domain"`
@@ -620,8 +622,55 @@ func (r *mcpReport) result() mcp.Result {
 	if err != nil {
 		return mcp.Errorf("encoding the report: %v", err)
 	}
-	return mcp.Result{Text: string(b), IsError: r.Error != ""}
+	return mcp.Result{Text: string(b), IsError: r.Error != "", Structured: r}
 }
+
+// mcpReportSchema is the outputSchema of scan and lab_scan: mcpReport as
+// JSON Schema (#270). TestMCPReportSchemaCoversTheReport keeps the two in
+// step.
+var mcpReportSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "domain": {"type": "string"},
+    "scenario": {"type": "string", "description": "lab_scan only"},
+    "verdict": {"enum": ["complete", "degraded", "unreliable", "not_run"]},
+    "reason": {"type": "string"},
+    "error": {"type": "string"},
+    "found": {"type": "integer"},
+    "results": {"type": "array", "items": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "records": {"type": "array", "items": {"type": "string"}, "description": "\"TYPE value\", such as \"A 192.0.2.10\""},
+        "takeover": {"type": "string"},
+        "internal": {"type": "string"}
+      },
+      "required": ["name", "records"]
+    }},
+    "outcomes": {"type": "object", "properties": {
+      "nxdomain": {"type": "integer"},
+      "timeout": {"type": "integer"},
+      "refused": {"type": "integer"},
+      "other": {"type": "integer"},
+      "wildcard_filtered": {"type": "integer"}
+    }},
+    "skipped_by_cap": {"type": "integer"},
+    "excluded": {"type": "integer"},
+    "retried": {"type": "integer"},
+    "recovered": {"type": "integer"},
+    "rate_backoffs": {"type": "integer"},
+    "wildcard": {"type": "boolean"},
+    "notices": {"type": "array", "items": {"type": "string"}},
+    "sources": {"type": "array", "items": {
+      "type": "object",
+      "properties": {"name": {"type": "string"}, "names": {"type": "integer"}, "error": {"type": "string"}},
+      "required": ["name", "names"]
+    }},
+    "max_queries": {"type": "integer"},
+    "rate": {"type": "integer"}
+  },
+  "required": ["domain", "verdict", "reason", "found", "results", "outcomes", "max_queries"]
+}`)
 
 func explainStatsTool() mcp.Tool {
 	return mcp.Tool{

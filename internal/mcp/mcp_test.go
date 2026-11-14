@@ -222,6 +222,37 @@ func TestProgressNotifications(t *testing.T) {
 	}
 }
 
+// TestStructuredContent: a tool's outputSchema is listed, and a Structured
+// result is sent as structuredContent beside the text (#270).
+func TestStructuredContent(t *testing.T) {
+	tool := Tool{
+		Name:         "data",
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		OutputSchema: json.RawMessage(`{"type":"object","properties":{"n":{"type":"integer"}}}`),
+		Call: func(context.Context, json.RawMessage) Result {
+			return Result{Text: `{"n":1}`, Structured: map[string]int{"n": 1}}
+		},
+	}
+	send, recv, _ := serve(t, &Server{Tools: []Tool{tool, echoTool()}})
+	send(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	tools := recv()["result"].(map[string]any)["tools"].([]any)
+	if _, ok := tools[0].(map[string]any)["outputSchema"]; !ok {
+		t.Errorf("tools/list lacks the outputSchema: %v", tools[0])
+	}
+	if _, ok := tools[1].(map[string]any)["outputSchema"]; ok {
+		t.Errorf("a tool without one lists an outputSchema: %v", tools[1])
+	}
+	send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"data"}}`)
+	r := recv()["result"].(map[string]any)
+	if sc, ok := r["structuredContent"].(map[string]any); !ok || sc["n"] != float64(1) {
+		t.Errorf("structuredContent = %v", r["structuredContent"])
+	}
+	send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo"}}`)
+	if r := recv()["result"].(map[string]any); r["structuredContent"] != nil {
+		t.Errorf("a text-only result sent structuredContent: %v", r)
+	}
+}
+
 // TestMalformedToolCallParams: params that are not a tools/call object get
 // an invalid-params error, not a crash or a call (#258).
 func TestMalformedToolCallParams(t *testing.T) {

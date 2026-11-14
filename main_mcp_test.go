@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -392,6 +393,57 @@ func TestMCPVerdictMatchesReport(t *testing.T) {
 		if strings.ContainsAny(reason, "{}") || strings.Contains(reason, "MaxDuration") || strings.Contains(reason, "MaxQueries") {
 			t.Errorf("%s: reason %q names a setting the agent does not know", tc.name, reason)
 		}
+	}
+}
+
+// TestMCPReportSchemaCoversTheReport is #270's drift guard: every JSON field
+// of the report, and of its nested results, outcomes and sources, is in
+// the outputSchema, and the schema names nothing the report lacks.
+func TestMCPReportSchemaCoversTheReport(t *testing.T) {
+	var schema map[string]any
+	if err := json.Unmarshal(mcpReportSchema, &schema); err != nil {
+		t.Fatalf("outputSchema is not JSON: %v", err)
+	}
+	props := func(s map[string]any) map[string]any { return s["properties"].(map[string]any) }
+	top := props(schema)
+	check := func(where string, typ reflect.Type, schemaProps map[string]any) {
+		t.Helper()
+		fields := map[string]bool{}
+		for i := range typ.NumField() {
+			name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+			fields[name] = true
+			if _, ok := schemaProps[name]; !ok {
+				t.Errorf("%s field %q is missing from the outputSchema", where, name)
+			}
+		}
+		for name := range schemaProps {
+			if !fields[name] {
+				t.Errorf("outputSchema names %s.%s, which the report does not have", where, name)
+			}
+		}
+	}
+	check("report", reflect.TypeOf(mcpReport{}), top)
+	check("results[]", reflect.TypeOf(mcpResult{}), props(top["results"].(map[string]any)["items"].(map[string]any)))
+	check("outcomes", reflect.TypeOf(mcpOutcomes{}), props(top["outcomes"].(map[string]any)))
+	check("sources[]", reflect.TypeOf(mcpSource{}), props(top["sources"].(map[string]any)["items"].(map[string]any)))
+}
+
+// TestE2EMCPStructuredContent: a scan reply carries the report as
+// structuredContent too, equal to the JSON in its text (#270).
+func TestE2EMCPStructuredContent(t *testing.T) {
+	_, replies := runMCPSession(t, nil, mcpCall{"lab_scan", `{"words": ["www", "nope"]}`})
+	result := replies[0]["result"].(map[string]any)
+	structured, ok := result["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("no structuredContent in %v", result)
+	}
+	text, _ := toolText(t, replies[0])
+	var fromText map[string]any
+	if err := json.Unmarshal([]byte(text), &fromText); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(structured, fromText) {
+		t.Errorf("structuredContent %v differs from the text report %v", structured, fromText)
 	}
 }
 

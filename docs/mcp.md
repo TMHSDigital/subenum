@@ -46,7 +46,9 @@ same summary. It says how far the results can be trusted, why, and what to
 change next time.
 
 `lab_scan` and `scan` return JSON with the names found and their records, how
-every lookup ended, any notices, and the scan's verdict:
+every lookup ended, any notices, and the scan's verdict. Both declare it as an
+`outputSchema`, and send it as `structuredContent` as well as text, so a client
+can read the report as data without parsing it:
 
 | Verdict | Meaning for the agent |
 | :--- | :--- |

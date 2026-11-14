@@ -42,7 +42,10 @@ type Tool struct {
 	Title       string          `json:"title,omitempty"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
-	Annotations Annotations     `json:"annotations"`
+	// OutputSchema, when set, describes Result.Structured, which every
+	// successful call of the tool then returns (#270).
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+	Annotations  Annotations     `json:"annotations"`
 
 	// Call runs the tool. ctx is cancelled when the client cancels the
 	// request or the session ends.
@@ -56,10 +59,13 @@ type Annotations struct {
 }
 
 // Result is what a tool call returns: text for the model, and whether it
-// reports a failure the model should see as one.
+// reports a failure the model should see as one. Structured, when set, is
+// sent as structuredContent for clients that read results as data; Text
+// should then hold the same value as JSON, for clients that do not.
 type Result struct {
-	Text    string
-	IsError bool
+	Text       string
+	IsError    bool
+	Structured any
 }
 
 // Errorf is a failed tool call with a message for the model.
@@ -276,10 +282,14 @@ func (ss *session) call(ctx context.Context, params json.RawMessage) (any, *rpcE
 }
 
 func toolResult(r Result) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"content": []map[string]any{{"type": "text", "text": r.Text}},
 		"isError": r.IsError,
 	}
+	if r.Structured != nil {
+		m["structuredContent"] = r.Structured
+	}
+	return m
 }
 
 func (ss *session) reply(id json.RawMessage, result any, rerr *rpcError) {
