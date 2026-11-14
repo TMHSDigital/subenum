@@ -615,6 +615,8 @@ API reference and runnable examples: [pkg.go.dev/github.com/TMHSDigital/subenum/
 
 ### AI agents (MCP)
 
+> **Unreleased:** `subenum mcp` is on `main` but not in v0.10.0, the latest release, so a release binary treats `mcp` as a domain. Until the next release, build from main: `go install github.com/TMHSDigital/subenum@main`.
+
 `subenum mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio, for AI agents and assistants:
 
 ```bash

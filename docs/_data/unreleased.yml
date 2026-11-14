@@ -3,6 +3,9 @@
 # docs-flags` tags the listed flags in the generated CLI table.
 #
 # In the release commit, empty these lists and run `make docs-flags`.
+# subcommands (#245)
+commands:
+  - mcp
 flags:
   - auto-rate
   - axfr

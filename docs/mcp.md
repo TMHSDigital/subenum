@@ -3,7 +3,11 @@ layout: default
 title: AI agents (MCP)
 ---
 
-# AI agents (MCP)
+# AI agents (MCP){% include unreleased.html command="mcp" %}
+
+{% if site.data.unreleased.commands contains "mcp" -%}
+<p class="unreleased-note"><code>subenum mcp</code> is on <code>main</code> but not in {{ site.github.latest_release.tag_name | default: "the latest release" }} yet, so a release binary treats <code>mcp</code> as a domain. To use it now, build from main: <code>go install github.com/TMHSDigital/subenum@main</code>.</p>
+{%- endif %}
 
 `subenum mcp` serves subdomain enumeration to AI agents and assistants over the
 [Model Context Protocol](https://modelcontextprotocol.io), on standard input and
