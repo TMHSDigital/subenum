@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type savedConfig struct {
@@ -30,6 +31,20 @@ type savedConfig struct {
 	Force           bool   `json:"force"`
 	Recursive       bool   `json:"recursive"`
 	NoAbort         bool   `json:"no_abort"`
+	// AutoRate, MaxDuration and RetryInconclusive are -auto-rate,
+	// -max-duration (as typed, e.g. "20m") and -retry-inconclusive (#274).
+	AutoRate          bool   `json:"auto_rate,omitempty"`
+	MaxDuration       string `json:"max_duration,omitempty"`
+	RetryInconclusive bool   `json:"retry_inconclusive,omitempty"`
+}
+
+// durationText is how a max duration is saved: "" for none, so the form
+// shows its placeholder again, else the duration as Go prints it.
+func durationText(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
 }
 
 func configPath() (string, error) {
@@ -85,6 +100,10 @@ func saveConfig(fv formValues) error {
 		Force:           fv.force,
 		Recursive:       fv.recursive,
 		NoAbort:         fv.noAbort,
+
+		AutoRate:          fv.autoRate,
+		MaxDuration:       durationText(fv.maxDuration),
+		RetryInconclusive: fv.retryIncon,
 	}
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {

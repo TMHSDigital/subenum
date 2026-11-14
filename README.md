@@ -593,7 +593,7 @@ No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-u
 
 <img src="docs/assets/tui-form.png" alt="subenum interactive TUI" width="640"/>
 
-Flags and a domain given with `-tui` fill the form, so a prepared command line opens ready to run: `./subenum -tui example.com -w big.txt -r resolvers.txt`. The form takes one wordlist (the first `-w`), and `-tui` warns about any flag it has no field for. The **Resolver Pool** and **Rate/Resolver** fields are `-r` and `-rate-per-resolver`; the pool is not used with Simulate on.
+Flags and a domain given with `-tui` fill the form, so a prepared command line opens ready to run: `./subenum -tui example.com -w big.txt -r resolvers.txt`. The form takes one wordlist (the first `-w`), and `-tui` warns about any flag it has no field for. The **Resolver Pool** and **Rate/Resolver** fields are `-r` and `-rate-per-resolver`; the pool is not used with Simulate on. **Auto Rate**, **Max Duration** (blank for none, or a duration such as `20m`) and **Retry Inconclusive** are `-auto-rate`, `-max-duration` and `-retry-inconclusive`.
 
 ### Go library
 

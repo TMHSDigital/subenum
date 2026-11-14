@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -35,12 +36,15 @@ const (
 	fieldRecursive
 	fieldDepth // only reachable when Recursive is ON
 	fieldRate
+	fieldAutoRate // -auto-rate (#274)
 	fieldMaxQueries
+	fieldMaxDuration // -max-duration (#274)
 	fieldExclude
 	fieldOutput
 	fieldFormat
 	fieldForce
 	fieldNoAbort
+	fieldRetryIncon // -retry-inconclusive (#274)
 	fieldCount
 )
 
@@ -102,8 +106,12 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.Depth }},
 	fieldRate: {setting: scan.SettingRate, kind: textField, placeholder: "0 = unlimited", def: "0",
 		saved: func(c *savedConfig) any { return &c.Rate }},
+	fieldAutoRate: {label: "Auto Rate", flag: "auto-rate", kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.AutoRate }},
 	fieldMaxQueries: {setting: scan.SettingMaxQueries, kind: textField, placeholder: "0 = unlimited", def: "0",
 		saved: func(c *savedConfig) any { return &c.MaxQueries }},
+	fieldMaxDuration: {setting: scan.SettingMaxDuration, kind: textField, placeholder: "optional, e.g. 20m",
+		saved: func(c *savedConfig) any { return &c.MaxDuration }},
 	fieldExclude: {setting: scan.SettingExclude, kind: textField, placeholder: "optional, e.g. vpn.example.com,*.corp.example.com",
 		saved: func(c *savedConfig) any { return &c.Exclude }},
 	fieldOutput: {label: "Output File", flag: "o", kind: textField, placeholder: "optional, e.g. results.txt",
@@ -114,6 +122,8 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.Force }},
 	fieldNoAbort: {label: "No Abort", flag: "no-abort", kind: toggleField,
 		saved: func(c *savedConfig) any { return &c.NoAbort }},
+	fieldRetryIncon: {label: "Retry Inconclusive", flag: "retry-inconclusive", kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.RetryInconclusive }},
 }
 
 // name is the field's row label.
@@ -171,7 +181,7 @@ func (f formField) set(c *savedConfig, v string) {
 var (
 	focusedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
 	blurredStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	labelStyle    = lipgloss.NewStyle().Width(18)
+	labelStyle    = lipgloss.NewStyle().Width(20) // fits "Retry Inconclusive:"
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).MarginBottom(1)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginTop(1)
@@ -310,7 +320,9 @@ func (m formModel) View() string {
 	for f, spec := range formFields {
 		if !m.shown(f) {
 			gate := formFields[spec.gate].name()
-			b.WriteString(dimmedRow.Render(fmt.Sprintf("  %-20s(enable %s)", spec.name()+":", gate)) + "\n")
+			// The label's width plus the "> " of a text field, so the hint
+			// lines up with the values.
+			b.WriteString(dimmedRow.Render(fmt.Sprintf("  %-22s(enable %s)", spec.name()+":", gate)) + "\n")
 			continue
 		}
 		var content string
@@ -422,6 +434,13 @@ func (m *formModel) validate() (formValues, string) {
 	rate := num(fieldRate, "Rate", 0)                    // blank means unlimited
 	maxQueries := num(fieldMaxQueries, "Max queries", 0) // blank means unlimited
 	ratePerResolver := num(fieldRatePerResolver, formFields[fieldRatePerResolver].name(), 0)
+	var maxDuration time.Duration // blank means unlimited, as -max-duration 0
+	if s := strings.TrimSpace(text(fieldMaxDuration)); err == nil && s != "" {
+		var perr error
+		if maxDuration, perr = time.ParseDuration(s); perr != nil {
+			err = fmt.Errorf("%s must be a duration such as 20m or 1h30m, got %q", formFields[fieldMaxDuration].name(), s)
+		}
+	}
 	var exclude []string // out-of-scope names, never queried (#87)
 	for _, p := range strings.Split(text(fieldExclude), ",") {
 		if p = strings.TrimSpace(p); p != "" {
@@ -463,9 +482,12 @@ func (m *formModel) validate() (formValues, string) {
 		recursive:       m.toggles[fieldRecursive],
 		depth:           depth,
 		rate:            rate,
+		autoRate:        m.toggles[fieldAutoRate],
 		maxQueries:      maxQueries,
+		maxDuration:     maxDuration,
 		exclude:         exclude,
 		noAbort:         m.toggles[fieldNoAbort],
+		retryIncon:      m.toggles[fieldRetryIncon],
 		outputFile:      outputFile,
 		format:          format,
 		formatName:      formatStr,
@@ -496,11 +518,14 @@ func (v formValues) options(entries []string, seed uint64) scan.Options {
 		Recursive:   v.recursive,
 		Depth:       v.depth,
 		Rate:        v.rate,
+		AutoRate:    v.autoRate,
 		MaxQueries:  v.maxQueries,
+		MaxDuration: v.maxDuration,
 		Exclude:     v.exclude,
 		NoAbort:     v.noAbort,
 
-		RatePerResolver: v.ratePerResolver,
+		RatePerResolver:   v.ratePerResolver,
+		RetryInconclusive: v.retryIncon,
 	}
 }
 
@@ -521,9 +546,12 @@ type formValues struct {
 	recursive       bool
 	depth           int
 	rate            int
+	autoRate        bool
 	maxQueries      int
+	maxDuration     time.Duration // 0 = unlimited; beginScan turns it into the deadline
 	exclude         []string
 	noAbort         bool
+	retryIncon      bool
 	outputFile      string
 	format          output.Format
 	formatName      string

@@ -62,24 +62,24 @@ func TestFormTabOrderWrapsAndSkipsGatedFields(t *testing.T) {
 			t.Fatalf("tab visited gated field %d with its toggle off: %v", f, order)
 		}
 	}
-	// 18 fields less the 2 gated ones: the 16th tab is back on the domain.
+	// Every field less the 2 gated ones: that many tabs are back on the domain.
 	if order[fieldCount-3] != fieldDomain {
-		t.Fatalf("tab order %v does not wrap to the domain after 16 steps", order)
+		t.Fatalf("tab order %v does not wrap to the domain after %d steps", order, fieldCount-2)
 	}
 
 	// Backwards from the domain wraps to the last field.
 	m = newFormModel(savedConfig{})
 	m, _ = m.Update(keyShiftTab)
-	if m.focus != fieldNoAbort || m.inputs[fieldDomain].Focused() {
+	if m.focus != fieldRetryIncon || m.inputs[fieldDomain].Focused() {
 		t.Fatalf("shift+tab from the domain: focus=%d domain focused=%v", m.focus, m.inputs[fieldDomain].Focused())
 	}
 	m, _ = m.Update(keyUp)
-	if m.focus != fieldForce {
-		t.Fatalf("up: focus=%d, want Force", m.focus)
+	if m.focus != fieldNoAbort {
+		t.Fatalf("up: focus=%d, want No Abort", m.focus)
 	}
 	m, _ = m.Update(keyDown)
-	if m.focus != fieldNoAbort {
-		t.Fatalf("down: focus=%d, want No Abort", m.focus)
+	if m.focus != fieldRetryIncon {
+		t.Fatalf("down: focus=%d, want Retry Inconclusive", m.focus)
 	}
 }
 

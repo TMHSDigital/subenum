@@ -241,6 +241,11 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 
 	opts := vals.options(entries, seed)
 	opts.Pool = pool
+	if vals.maxDuration > 0 {
+		// The budget starts with the scan, as -max-duration's starts when the
+		// CLI's scans do (#274).
+		opts.Deadline = time.Now().Add(vals.maxDuration)
+	}
 	cfg := opts.Config()
 
 	// Persist form values for next session (best-effort).

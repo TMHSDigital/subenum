@@ -214,6 +214,44 @@ func TestFormBuildsSharedConfig(t *testing.T) {
 	}
 }
 
+// TestAutoRateDurationRetryFields covers #274: Auto Rate, Max Duration and
+// Retry Inconclusive reach the scan options, a bad or negative duration is
+// rejected on the form, and the values are saved for the next session.
+func TestAutoRateDurationRetryFields(t *testing.T) {
+	m := newFormModel(savedConfig{})
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.toggles[fieldAutoRate] = true
+	m.toggles[fieldRetryIncon] = true
+	m.inputs[fieldMaxDuration].SetValue(" 1h30m ")
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	opts := vals.options(nil, 0)
+	if !opts.AutoRate || !opts.RetryInconclusive || opts.MaxDuration != 90*time.Minute {
+		t.Errorf("options: AutoRate %v, RetryInconclusive %v, MaxDuration %s", opts.AutoRate, opts.RetryInconclusive, opts.MaxDuration)
+	}
+	saved := savedConfig{AutoRate: vals.autoRate, MaxDuration: durationText(vals.maxDuration), RetryInconclusive: vals.retryIncon}
+	again := newFormModel(saved)
+	if !again.toggles[fieldAutoRate] || !again.toggles[fieldRetryIncon] || again.inputs[fieldMaxDuration].Value() != "1h30m0s" {
+		t.Errorf("reloaded form: auto rate %v, retry %v, max duration %q", again.toggles[fieldAutoRate], again.toggles[fieldRetryIncon], again.inputs[fieldMaxDuration].Value())
+	}
+
+	for value, want := range map[string]string{
+		"soon": `Max Duration must be a duration such as 20m or 1h30m, got "soon"`,
+		"-5m":  "max duration (Max Duration) must be 0 (unlimited) or positive, got -5m0s",
+	} {
+		m.inputs[fieldMaxDuration].SetValue(value)
+		if _, errStr := m.validate(); errStr != want {
+			t.Errorf("max duration %q: got %q, want %q", value, errStr, want)
+		}
+	}
+	m.inputs[fieldMaxDuration].SetValue("")
+	if vals, errStr := m.validate(); errStr != "" || vals.maxDuration != 0 {
+		t.Errorf("blank max duration: %q, %s; want no error and no budget", errStr, vals.maxDuration)
+	}
+}
+
 // TestValidateExclude covers #87 in the TUI: the Exclude field reaches the
 // scan config, and an invalid pattern is rejected on the form.
 func TestValidateExclude(t *testing.T) {
@@ -289,26 +327,29 @@ func TestFormViewRows(t *testing.T) {
 		}
 	}
 	want := []string{
-		"▸ Domain*:          > e.g. example.com",
-		"  Wordlist*:        > examples/sample_wordlist.txt",
-		"  Simulate:         OFF",
-		"  Hit Rate (%):       (enable Simulate)",
-		"  DNS Server:       > 8.8.8.8:53",
-		"  Resolver Pool:    > optional, file of resolver addresses",
-		"  Rate/Resolver:    > 0",
-		"  Concurrency:      > 100",
-		"  Timeout (ms):     > 1000",
-		"  Attempts:         > 1",
-		"  Record Types:     > A,AAAA",
-		"  Recursive:        OFF",
-		"  Depth:              (enable Recursive)",
-		"  Rate (qps):       > 0",
-		"  Max Names:        > 0",
-		"  Exclude:          > optional, e.g. vpn.example.com,*.corp.example.com",
-		"  Output File:      > optional, e.g. results.txt",
-		"  Format:           > text",
-		"  Force:            OFF",
-		"  No Abort:         OFF",
+		"▸ Domain*:            > e.g. example.com",
+		"  Wordlist*:          > examples/sample_wordlist.txt",
+		"  Simulate:           OFF",
+		"  Hit Rate (%):         (enable Simulate)",
+		"  DNS Server:         > 8.8.8.8:53",
+		"  Resolver Pool:      > optional, file of resolver addresses",
+		"  Rate/Resolver:      > 0",
+		"  Concurrency:        > 100",
+		"  Timeout (ms):       > 1000",
+		"  Attempts:           > 1",
+		"  Record Types:       > A,AAAA",
+		"  Recursive:          OFF",
+		"  Depth:                (enable Recursive)",
+		"  Rate (qps):         > 0",
+		"  Auto Rate:          OFF",
+		"  Max Names:          > 0",
+		"  Max Duration:       > optional, e.g. 20m",
+		"  Exclude:            > optional, e.g. vpn.example.com,*.corp.example.com",
+		"  Output File:        > optional, e.g. results.txt",
+		"  Format:             > text",
+		"  Force:              OFF",
+		"  No Abort:           OFF",
+		"  Retry Inconclusive: OFF",
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("form rows:\n got %q\nwant %q", rows, want)
@@ -432,10 +473,7 @@ func TestWithSettingsSeedsEveryFlaggedField(t *testing.T) {
 func TestOptionsSetsEveryField(t *testing.T) {
 	tuiUnmapped := map[string]string{
 		"Pool":              "beginScan sets it from the pool loadPool built",
-		"AutoRate":          "no form field yet (#274)",
-		"RetryInconclusive": "no form field yet (#274)",
-		"MaxDuration":       "no form field yet (#274)",
-		"Deadline":          "no form field yet (#274)",
+		"Deadline":          "beginScan sets it from MaxDuration when the scan starts",
 		"TakeoverProviders": "the form has no takeover provider file; the built-in list applies",
 		"ResumeFrom":        "the TUI does not resume interrupted scans",
 		"ResumeParents":     "the TUI does not resume interrupted scans",
@@ -445,8 +483,8 @@ func TestOptionsSetsEveryField(t *testing.T) {
 	v := formValues{
 		domain: "example.com", wordlist: "words.txt", dnsServer: "192.0.2.53:53", resolvers: "pool.txt",
 		ratePerResolver: 5, concurrency: 7, timeoutMs: 700, attempts: 2, hitRate: 40, recordTypes: []string{"A"},
-		recursive: true, depth: 3, rate: 50, maxQueries: 10, exclude: []string{"vpn.example.com"},
-		noAbort: true, simulate: true, force: true,
+		recursive: true, depth: 3, rate: 50, autoRate: true, maxQueries: 10, maxDuration: time.Minute,
+		exclude: []string{"vpn.example.com"}, noAbort: true, retryIncon: true, simulate: true, force: true,
 	}
 	opts := reflect.ValueOf(v.options([]string{"www"}, 9))
 	for i := range opts.NumField() {
