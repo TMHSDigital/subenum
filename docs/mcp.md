@@ -52,7 +52,7 @@ every lookup ended, any notices, and the scan's verdict:
 | :--- | :--- |
 | `complete` | A name missing from the results most likely does not exist. |
 | `degraded` | Some names were not tested or got no answer, so a missing name may still exist. |
-| `unreliable` | Too many lookups failed: a missing name means nothing. |
+| `unreliable` | Too many lookups failed, or the scan stopped early with an error (see `error`): a missing name means nothing. |
 | `not_run` | The scan stopped before testing any name, for example on a wildcard zone; `error` says why. |
 
 ## Running it
@@ -79,8 +79,25 @@ after dedupe, count against `max_queries`, and are each verified by a lookup.
 The report lists each source with the number of names it proposed, or the
 error it hit; a failed source does not stop the scan.
 
-The caps cannot be turned off: `-rate`, `-max-queries` and `-max-duration` must
-be positive.
+The caps cannot be turned off: `-rate`, `-max-queries`, `-max-duration` and
+`-timeout` must be positive.
+
+`subenum mcp` takes its settings from these flags only. The `SUBENUM_*`
+environment variables and the config file that set defaults for scans do not
+apply to it, so `SUBENUM_DNS_SERVER` does not change the agent's resolver: pass
+`-dns-server`.
+
+A `scan` call without `words` uses the bundled list of 5,000 common labels, but
+tests no more than `-max-queries` of them (1,000 by default), so its verdict is
+`degraded` with the rest counted as skipped. Raise `-max-queries` to cover the
+whole list, or have the agent pass a shorter `words` list.
+
+In a container, keep standard input open with `-i`, since the protocol runs over
+it:
+
+```bash
+docker run -i --rm ghcr.io/tmhsdigital/subenum:latest mcp -allow example.com
+```
 
 Most MCP clients take a command and its arguments. For example, in a client
 configuration file:

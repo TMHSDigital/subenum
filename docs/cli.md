@@ -38,7 +38,7 @@ Flags may appear before or after the domain. The domain is normalized to its hos
 
 ## Defaults from the environment or a file
 
-Settings you repeat on every run can live in the environment or a config file. Precedence, highest first: **command-line flag, then `SUBENUM_*` environment variable, then config file, then built-in default.**
+Settings you repeat on every run can live in the environment or a config file. They apply to scans (and `-tui`), not to the `mcp` subcommand, which takes its settings from its own flags only. Precedence, highest first: **command-line flag, then `SUBENUM_*` environment variable, then config file, then built-in default.**
 
 - Each flag reads `SUBENUM_<FLAG>`, upper-cased with dashes as underscores: `SUBENUM_DNS_SERVER`, `SUBENUM_RATE`, `SUBENUM_T`.
 - The config file is `config.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows), or the path in `SUBENUM_CONFIG`. Keys are flag names; values are strings, numbers or booleans, and `exclude` and `type` also take a list of strings. Mode flags (`tui`, `version`, `print-config`, `dry-run`, `resume`) are command-line only.

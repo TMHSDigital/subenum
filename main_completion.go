@@ -257,7 +257,7 @@ func writeManPage(w io.Writer) {
 		}
 	}
 	p(".SH ENVIRONMENT\n")
-	p(".TP\n.B SUBENUM_\\fIFLAG\\fR\n%s\n", line("Default for a flag, with the name upper-cased and dashes turned into underscores: SUBENUM_DNS_SERVER, SUBENUM_RATE, SUBENUM_T. Overrides the config file; a flag on the command line overrides both."))
+	p(".TP\n.B SUBENUM_\\fIFLAG\\fR\n%s\n", line("Default for a flag, with the name upper-cased and dashes turned into underscores: SUBENUM_DNS_SERVER, SUBENUM_RATE, SUBENUM_T. Overrides the config file; a flag on the command line overrides both. Neither applies to subenum mcp, which takes its own flags only."))
 	p(".TP\n.B SUBENUM_CONFIG\n%s\n", line("Path of the config file, instead of the default location."))
 	p(".SH FILES\n.TP\n.I <user config dir>/subenum/config.json\n%s\n", line(`Default flag values as a JSON object keyed by flag name, e.g. {"dns-server": "1.1.1.1:53", "rate": 200}. Run subenum -print-config to see the effective settings and their sources.`))
 	p(".SH EXIT STATUS\n")

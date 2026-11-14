@@ -23,6 +23,12 @@ docker run --rm -v "$(pwd)/data:/data" ghcr.io/tmhsdigital/subenum:latest -w /da
 
 Verify provenance with `gh attestation verify oci://ghcr.io/tmhsdigital/subenum:latest --owner TMHSDigital`.
 
+To serve AI agents from the image with [`subenum mcp`](mcp.html), keep standard input open with `-i`, since the protocol runs over it; an MCP client configuration then uses `docker` as its command with these arguments:
+
+```bash
+docker run -i --rm ghcr.io/tmhsdigital/subenum:latest mcp -allow example.com
+```
+
 ## Building the Docker Image
 
 ### Using docker build
