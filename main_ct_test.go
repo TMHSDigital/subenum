@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -133,6 +134,29 @@ func TestE2EPassiveSources(t *testing.T) {
 
 	if code, out := runCLIMerged(t, "-sources", "ct,shodan", "-w", wl, "example.com"); code != exitUsage || !strings.Contains(out, "shodan") {
 		t.Errorf("unknown source: exit %d\n%s", code, out)
+	}
+}
+
+// TestCandidates covers #248's shared set: names from several sources are
+// added once, after the wordlist, and the shared -seeds map is never
+// written to.
+func TestCandidates(t *testing.T) {
+	shared := map[string]struct{}{"seed.example.com": {}}
+	c := &candidates{target: "example.com", entries: []string{"www", "mail"}, seeds: shared}
+	if n := c.add(nil); n != 0 || len(c.seeds) != 1 {
+		t.Fatalf("no names: added %d, seeds %v", n, c.seeds)
+	}
+	if n := c.add([]string{"api", "www", "bad name!"}); n != 1 {
+		t.Errorf("first source added %d, want 1 (api)", n)
+	}
+	if n := c.add([]string{"api", "old", "OLD"}); n != 1 {
+		t.Errorf("second source added %d, want 1 (old)", n)
+	}
+	if want := []string{"www", "mail", "api", "old"}; !slices.Equal(c.entries, want) {
+		t.Errorf("entries = %v, want %v", c.entries, want)
+	}
+	if _, ok := c.seeds["old.example.com"]; !ok || len(shared) != 1 {
+		t.Errorf("seeds = %v (shared %v): want the names added to a copy only", c.seeds, shared)
 	}
 }
 

@@ -51,8 +51,14 @@ func drain(d *dispatcher) []string {
 	}
 }
 
+// A recursive scan can reach one name twice, so it dedupes; a flat scan
+// relies on its entries being unique already and keeps no visited set
+// (#248).
 func TestDispatcherDedupesAndSettlesDuplicates(t *testing.T) {
-	d := testDispatcher(Config{Entries: []string{"www", "mail", "www", "api"}}, 1)
+	if flat := testDispatcher(Config{Entries: []string{"www"}}, 1); flat.visited != nil {
+		t.Error("a non-recursive scan allocated a visited set")
+	}
+	d := testDispatcher(Config{Entries: []string{"www", "mail", "www", "api"}, Recursive: true}, 1)
 	got := drain(d)
 	if want := []string{"www.example.com", "mail.example.com", "api.example.com"}; !slices.Equal(got, want) {
 		t.Fatalf("jobs %v, want %v", got, want)

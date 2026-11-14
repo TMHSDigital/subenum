@@ -24,7 +24,10 @@ const (
 
 // Config holds all parameters needed to run a subdomain scan.
 type Config struct {
-	Domain      string
+	Domain string
+	// Entries are the labels to try, unique and normalized (wordlist.Build
+	// and Prepare guarantee both); a non-recursive scan does not dedupe them
+	// again (#248).
 	Entries     []string
 	Concurrency int
 	Timeout     time.Duration

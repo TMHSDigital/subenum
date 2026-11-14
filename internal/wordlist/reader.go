@@ -74,32 +74,44 @@ func IsComment(line string) bool {
 
 // ReadLines reads every line of path, or of standard input when path is "-".
 func ReadLines(path string) ([]string, error) {
-	var r io.Reader
+	var lines []string
+	err := EachLineOf(path, func(line string) { lines = append(lines, line) })
+	return lines, err
+}
+
+// EachLineOf calls fn with each line of path, or of standard input when
+// path is "-", without holding the file in memory (#248).
+func EachLineOf(path string, fn func(string)) error {
 	if path == Stdin {
-		r = os.Stdin
-	} else {
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = f.Close() }()
-		r = f
+		return EachLine(os.Stdin, fn)
 	}
-	return ReadLinesFrom(r)
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	return EachLine(f, fn)
 }
 
 // ReadLinesFrom is ReadLines for an already open reader, such as the
 // wordlist embedded in the binary.
 func ReadLinesFrom(r io.Reader) ([]string, error) {
 	var lines []string
+	err := EachLine(r, func(line string) { lines = append(lines, line) })
+	return lines, err
+}
+
+// EachLine calls fn with each line of r, as ReadLinesFrom would return it.
+func EachLine(r io.Reader, fn func(string)) error {
 	br := bufio.NewReaderSize(r, 64<<10)
+	first := true
 	for {
 		chunk, isPrefix, err := br.ReadLine()
 		if err == io.EOF {
-			return lines, nil
+			return nil
 		}
 		if err != nil {
-			return lines, err
+			return err
 		}
 		// A line longer than any valid name (a merged list gone wrong, a
 		// binary file) is truncated and drained rather than failing the whole
@@ -109,16 +121,17 @@ func ReadLinesFrom(r io.Reader) ([]string, error) {
 			_, isPrefix, err = br.ReadLine()
 		}
 		if err != nil && err != io.EOF {
-			return lines, err
+			return err
 		}
-		if len(lines) == 0 {
+		if first {
 			// Windows editors often prepend a UTF-8 byte order mark, which
 			// TrimSpace does not remove; it would invalidate the first entry.
 			line = strings.TrimPrefix(line, "\ufeff")
+			first = false
 		}
-		lines = append(lines, line)
+		fn(line)
 		if err == io.EOF {
-			return lines, nil
+			return nil
 		}
 	}
 }
@@ -144,26 +157,52 @@ type Prepared struct {
 
 // Prepare normalizes raw wordlist lines; see Build.
 func Prepare(lines []string) *Prepared {
-	p := &Prepared{}
-	index := make(map[string]int)
+	pr := NewPreparer()
 	for _, line := range lines {
-		if IsComment(line) {
-			continue
-		}
-		entry, ok := Normalize(line)
-		if !ok {
-			p.invalid++
-			continue
-		}
-		if i, exists := index[entry]; exists {
-			p.counts[i]++
-			continue
-		}
-		index[entry] = len(p.entries)
-		p.entries = append(p.entries, entry)
-		p.counts = append(p.counts, 1)
-		p.maxLen = max(p.maxLen, len(entry))
+		pr.Add(line)
 	}
+	return pr.Prepared()
+}
+
+// Preparer builds a Prepared one line at a time, so a large wordlist can be
+// normalized while it is read instead of first being held as raw lines
+// (#248).
+type Preparer struct {
+	p     *Prepared
+	index map[string]int
+}
+
+// NewPreparer returns an empty Preparer.
+func NewPreparer() *Preparer {
+	return &Preparer{p: &Prepared{}, index: make(map[string]int)}
+}
+
+// Add takes one raw wordlist line.
+func (pr *Preparer) Add(line string) {
+	if IsComment(line) {
+		return
+	}
+	entry, ok := Normalize(line)
+	p := pr.p
+	if !ok {
+		p.invalid++
+		return
+	}
+	if i, exists := pr.index[entry]; exists {
+		p.counts[i]++
+		return
+	}
+	pr.index[entry] = len(p.entries)
+	p.entries = append(p.entries, entry)
+	p.counts = append(p.counts, 1)
+	p.maxLen = max(p.maxLen, len(entry))
+}
+
+// Prepared returns the result and releases the Preparer's index; the
+// Preparer must not be used afterwards.
+func (pr *Preparer) Prepared() *Prepared {
+	p := pr.p
+	pr.p, pr.index = nil, nil
 	return p
 }
 

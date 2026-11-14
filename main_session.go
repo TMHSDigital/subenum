@@ -392,14 +392,14 @@ func (s *session) loadInputs() bool {
 		}
 		out.Info("Resuming the interrupted run of: subenum %s", strings.Join(s.args, " "))
 	}
-	wordLines, err := readWordlist(f, &s.in)
+	// Normalized once, while it is read, for every target; per target only
+	// the name-length limit differs (#182, #248).
+	words, err := prepareWordlist(f, &s.in)
 	if err != nil {
 		out.Error("reading wordlist file: %v", err)
 		return false
 	}
-	// Normalized once for every target; per target only the name-length
-	// limit differs (#182).
-	s.words = wordlist.Prepare(wordLines)
+	s.words = words
 	if probe, _, _ := s.words.For(""); len(probe) == 0 {
 		out.Error("wordlist %s has no valid entries", f.wordlists.describe())
 		return false
@@ -629,14 +629,13 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil}
 	s.entryDigests[i] = entryDigest(entries)
 	saved := s.resume.target(target)
-	seeds := s.seeds
 	// Passive sources (-ct, -sources) propose names; each is still looked up
-	// like a wordlist entry (#130, #193).
+	// like a wordlist entry (#130, #193). One set of the entries serves
+	// every source and the zone transfer (#248).
+	cands := &candidates{target: target, entries: entries, seeds: s.seeds}
 	sourceInfo := passiveNames(ctx, s.in.sources, target, saved, out)
 	for _, src := range sourceInfo {
-		var added int
-		entries, added = withCTEntries(entries, src.names, target)
-		seeds = withCTSeeds(seeds, src.names, target)
+		added := cands.add(src.names)
 		if src.fetched {
 			out.Info("%s: %d names under %s, %d of them new candidates", passive.Labels[src.source], len(src.names), target, added)
 		}
@@ -646,13 +645,12 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		// Transferred names are candidates like -ct's: each is still looked
 		// up, so only names that resolve are reported (#85).
 		axfrInfo = zoneTransfer(ctx, s.f, target, saved, out)
-		var added int
-		entries, added = withCTEntries(entries, axfrInfo.names, target)
-		seeds = withCTSeeds(seeds, axfrInfo.names, target)
+		added := cands.add(axfrInfo.names)
 		if len(axfrInfo.allowed) > 0 {
 			out.Info("Zone transfer: %d names under %s, %d of them new candidates", len(axfrInfo.names), target, added)
 		}
 	}
+	entries, seeds := cands.entries, cands.seeds
 	pass := scanPass{domain: target, entries: entries, maxQueries: s.f.maxQueries}
 	var mainSaved *resumePass
 	restoredHits := 0 // permutation results restored from the state

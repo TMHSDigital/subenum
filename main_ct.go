@@ -100,41 +100,50 @@ func sourceByName(sources []targetSource, name string) targetSource {
 	return targetSource{}
 }
 
-// withCTEntries appends the source names that are not already wordlist
-// entries, after them, so the wordlist's own resume positions stay put.
+// candidates gathers a target's candidate entries and -permute seeds as the
+// passive sources and the zone transfer add names to the wordlist's (#248).
+// The set of entries is built once, at the first names, however many
+// sources follow; it used to be rebuilt per source, a map as large as the
+// wordlist each time.
+type candidates struct {
+	target  string
+	entries []string            // the wordlist's, then the new names in order
+	seeds   map[string]struct{} // -seeds names plus every added name, full
+	have    map[string]bool     // entries, once a source has names
+	owned   bool                // seeds is this target's copy, not the shared -seeds map
+}
+
+// add appends the names that are not already entries, after them, so the
+// wordlist's own resume positions stay put, and returns how many were new.
 // Names too long for the target are dropped by wordlist.Build.
-func withCTEntries(entries, names []string, target string) ([]string, int) {
+func (c *candidates) add(names []string) int {
 	if len(names) == 0 {
-		return entries, 0
+		return 0
 	}
-	extra, _, _ := wordlist.Build(names, target)
-	have := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		have[e] = true
+	if c.have == nil {
+		c.have = make(map[string]bool, len(c.entries)+len(names))
+		for _, e := range c.entries {
+			c.have[e] = true
+		}
 	}
-	out := entries
+	extra, _, _ := wordlist.Build(names, c.target)
 	added := 0
 	for _, e := range extra {
-		if !have[e] {
-			out = append(out, e)
+		if !c.have[e] {
+			c.have[e] = true
+			c.entries = append(c.entries, e)
 			added++
 		}
 	}
-	return out, added
-}
-
-// withCTSeeds returns the -seeds names plus the source names, as full
-// names, for the -permute pass.
-func withCTSeeds(seeds map[string]struct{}, names []string, target string) map[string]struct{} {
-	if len(names) == 0 {
-		return seeds
-	}
-	out := make(map[string]struct{}, len(seeds)+len(names))
-	for s := range seeds {
-		out[s] = struct{}{}
+	if !c.owned {
+		own := make(map[string]struct{}, len(c.seeds)+len(names))
+		for s := range c.seeds {
+			own[s] = struct{}{}
+		}
+		c.seeds, c.owned = own, true
 	}
 	for _, n := range names {
-		out[n+"."+target] = struct{}{}
+		c.seeds[n+"."+c.target] = struct{}{}
 	}
-	return out
+	return added
 }

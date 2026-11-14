@@ -43,13 +43,26 @@ type dispatcher struct {
 	pending  int  // dispatched jobs not yet completed
 }
 
+// visitedSet is the dispatcher's visited set: a map for recursive scans,
+// nil otherwise.
+func visitedSet(recursive bool, n int) map[string]struct{} {
+	if !recursive {
+		return nil
+	}
+	return make(map[string]struct{}, n)
+}
+
 func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 	n := len(cfg.Entries)
 	start := min(max(cfg.ResumeFrom, 0), n)
 	d := &dispatcher{
-		cfg:       cfg,
-		n:         n,
-		visited:   make(map[string]struct{}, n),
+		cfg: cfg,
+		n:   n,
+		// Entries are unique (every caller deduplicates them), so only a
+		// recursive scan, whose levels can reach one name twice, needs to
+		// remember what it visited. Without it a multi-million-entry list
+		// skips a map as large as the list (#248).
+		visited:   visitedSet(cfg.Recursive, n),
 		frontier:  []expansion{{parent: cfg.Domain, depth: 1, next: start}},
 		remaining: n - start,
 		start:     start,
@@ -143,11 +156,13 @@ func (d *dispatcher) next() (job, bool) {
 		if e.depth == 1 {
 			root = e.next - 1
 		}
-		if _, dup := d.visited[key]; dup {
-			d.settle(root)
-			continue
+		if d.visited != nil {
+			if _, dup := d.visited[key]; dup {
+				d.settle(root)
+				continue
+			}
+			d.visited[key] = struct{}{}
 		}
-		d.visited[key] = struct{}{}
 		if d.cfg.scope.excluded(name) {
 			d.excluded++
 			d.settle(root)

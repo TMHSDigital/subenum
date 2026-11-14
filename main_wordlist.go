@@ -50,21 +50,29 @@ func (w *wordlistPaths) readsStdin() bool { return countStdin(w.paths) > 0 }
 // describe names the wordlists for notices: the paths, comma-separated.
 func (w *wordlistPaths) describe() string { return strings.Join(w.paths, ", ") }
 
-// readWordlist returns the wordlist lines from every -w file in order, or the
-// bundled list when -w is not set.
-func readWordlist(f cliFlags, in *runtimeInputs) ([]string, error) {
+// prepareWordlist normalizes the lines of every -w file in order, or the
+// bundled list when -w is not set, as it reads them: the raw lines of a
+// multi-million-line list are never all held at once (#248).
+func prepareWordlist(f cliFlags, in *runtimeInputs) (*wordlist.Prepared, error) {
+	pr := wordlist.NewPreparer()
 	if len(f.wordlists.paths) == 0 {
-		return wordlist.ReadLinesFrom(strings.NewReader(data.Subdomains5k))
+		if err := wordlist.EachLine(strings.NewReader(data.Subdomains5k), pr.Add); err != nil {
+			return nil, err
+		}
+		return pr.Prepared(), nil
 	}
-	var lines []string
 	for _, p := range f.wordlists.paths {
-		l, err := in.readLines(p)
+		var err error
+		if p == wordlist.Stdin && in.stdin != nil {
+			err = wordlist.EachLine(in.stdin, pr.Add)
+		} else {
+			err = wordlist.EachLineOf(p, pr.Add)
+		}
 		if err != nil {
 			return nil, err
 		}
-		lines = append(lines, l...)
 	}
-	return lines, nil
+	return pr.Prepared(), nil
 }
 
 // countStdin counts the "-" entries in paths.
