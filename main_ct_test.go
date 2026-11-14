@@ -20,6 +20,7 @@ import (
 // found, the report counts the CT names, and a CT outage is a warning, not
 // a failed scan. Everything runs against local servers.
 func TestE2ECertificateTransparency(t *testing.T) {
+	t.Parallel()
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		if (q.Name == "www.example.com" || q.Name == "legacy-billing.example.com") && q.Type == dnsmessage.TypeA {
 			return dnstest.Reply{A: []string{"192.0.2.10"}}
@@ -71,6 +72,7 @@ func TestE2ECertificateTransparency(t *testing.T) {
 // their names as candidates, and the report has an entry per source, a
 // failed one included. -ct is short for -sources ct.
 func TestE2EPassiveSources(t *testing.T) {
+	t.Parallel()
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		switch q.Name {
 		case "www.example.com", "legacy-billing.example.com", "old-shop.example.com":
@@ -161,6 +163,7 @@ func TestCandidates(t *testing.T) {
 // TestE2ELabRefusesSources: passive sources reach external services, so lab
 // mode refuses them, and simulation ignores them with a note.
 func TestE2ELabRefusesSources(t *testing.T) {
+	t.Parallel()
 	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
 	if code, out := runCLIMerged(t, "-sources", "wayback", "-simulate-zone", zone, "lab.example"); code != exitUsage || !strings.Contains(out, "-sources") {
 		t.Errorf("lab: exit %d\n%s", code, out)
@@ -174,6 +177,7 @@ func TestE2ELabRefusesSources(t *testing.T) {
 // TestE2ESimulateSkipsCT covers #150: simulation mode sends nothing off the
 // machine, so -ct is ignored with a note instead of querying crt.sh.
 func TestE2ESimulateSkipsCT(t *testing.T) {
+	t.Parallel()
 	hit := false
 	ct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hit = true
@@ -194,6 +198,7 @@ func TestE2ESimulateSkipsCT(t *testing.T) {
 
 // TestE2ELabRefusesCT: -ct reaches crt.sh, so lab mode refuses it.
 func TestE2ELabRefusesCT(t *testing.T) {
+	t.Parallel()
 	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
 	if code, out := runCLIMerged(t, "-ct", "-simulate-zone", zone, "lab.example"); code != exitUsage || !strings.Contains(out, "-ct") {
 		t.Errorf("exit %d\n%s", code, out)

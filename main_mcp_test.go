@@ -97,6 +97,7 @@ func reportNames(r mcpReport) []string {
 
 // TestE2EMCPLabScan runs lab_scan against the compiled-in scenarios (#131).
 func TestE2EMCPLabScan(t *testing.T) {
+	t.Parallel()
 	tools, replies := runMCPSession(t, []string{"-max-queries", "100"},
 		mcpCall{"lab_scan", `{"types": ["A", "AAAA", "CNAME"]}`},
 		mcpCall{"lab_scan", `{"scenario": "lab2-wildcard"}`},
@@ -144,6 +145,7 @@ func TestE2EMCPLabScan(t *testing.T) {
 // TestE2EMCPScanAllowList checks that scan enumerates only allow-listed
 // domains, through the operator's resolver and within the operator's cap.
 func TestE2EMCPScanAllowList(t *testing.T) {
+	t.Parallel()
 	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +197,7 @@ func (f fakeSource) Names(context.Context, string) ([]string, error) { return f.
 // TestE2EMCPScanSources checks that scan seeds candidates from the passive
 // sources the operator enabled and only those, reporting each one (#268).
 func TestE2EMCPScanSources(t *testing.T) {
+	t.Parallel()
 	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +244,7 @@ func TestE2EMCPScanSources(t *testing.T) {
 // TestE2EMCPRemediationArgs covers #269: depth recurses, exclude keeps names
 // out, retry_inconclusive retries the failed lookups, and the limits hold.
 func TestE2EMCPRemediationArgs(t *testing.T) {
+	t.Parallel()
 	_, replies := runMCPSession(t, []string{"-max-queries", "500"},
 		mcpCall{"lab_scan", `{"scenario": "lab4-recursive", "words": ["www", "dev", "api", "git", "corp", "vpn"], "depth": 2, "exclude": ["*.corp.lab.example"]}`},
 		mcpCall{"lab_scan", `{"scenario": "lab5-failures", "words": ["www", "backup", "beta"], "retry_inconclusive": true, "auto_rate": true}`},
@@ -276,6 +280,7 @@ func must[T any](v T, err error) T {
 // test does not (#258): each bad call is an isError result, and the server
 // keeps answering after a scan that could not start.
 func TestE2EMCPArgumentErrors(t *testing.T) {
+	t.Parallel()
 	tooMany, _ := json.Marshal(make([]string, maxMCPWords+1))
 	_, replies := runMCPSession(t, []string{"-allow", "lab.example", "-dns-server", "127.0.0.1:9", "-max-queries", "10"},
 		mcpCall{"lab_scan", `{"rate": -1}`},
@@ -458,6 +463,7 @@ func TestMCPLabScenariosDescribed(t *testing.T) {
 // TestE2EMCPStructuredContent: a scan reply carries the report as
 // structuredContent too, equal to the JSON in its text (#270).
 func TestE2EMCPStructuredContent(t *testing.T) {
+	t.Parallel()
 	_, replies := runMCPSession(t, nil, mcpCall{"lab_scan", `{"words": ["www", "nope"]}`})
 	result := replies[0]["result"].(map[string]any)
 	structured, ok := result["structuredContent"].(map[string]any)
@@ -506,6 +512,7 @@ func TestTypeAndFormatListsAgree(t *testing.T) {
 // TestE2EMCPSessionBudget covers #240: -max-calls caps a session's scan
 // calls, so a looping agent cannot multiply -max-queries without end.
 func TestE2EMCPSessionBudget(t *testing.T) {
+	t.Parallel()
 	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
 	if err != nil {
 		t.Fatal(err)
@@ -581,6 +588,7 @@ func TestMCPAllowed(t *testing.T) {
 // TestE2EMCPExplainStats feeds explain_stats a real -stats file and jsonl
 // output from a simulated scan.
 func TestE2EMCPExplainStats(t *testing.T) {
+	t.Parallel()
 	statsFile := filepath.Join(t.TempDir(), "stats.json")
 	var jsonl, stderr bytes.Buffer
 	args := []string{"-simulate", "-hit-rate", "50", "-seed", "1", "-max-queries", "5", "-w", "examples/labs/words.txt", "-stats", statsFile, "-format", "jsonl", "example.com"}

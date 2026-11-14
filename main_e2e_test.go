@@ -112,6 +112,7 @@ func writeFile(t *testing.T, name, content string) string {
 const e2eWords = "www\nmail\napi\ndev\nshop\nblog\n"
 
 func TestE2ESimulateJSON(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-format", "json", "-w", wl, "example.com")
 	if code != 0 {
@@ -129,6 +130,7 @@ func TestE2ESimulateJSON(t *testing.T) {
 }
 
 func TestE2EDomainListSingleJSONArray(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	dl := writeFile(t, "domains.txt", "# targets\na.example\nb.example\n")
 	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-format", "json", "-w", wl, "-dL", dl)
@@ -151,6 +153,7 @@ func TestE2EDomainListSingleJSONArray(t *testing.T) {
 }
 
 func TestE2EStdinWordlistPlainOutput(t *testing.T) {
+	t.Parallel()
 	code, out := runCLI(t, "WWW\nmail\n# comment\n", "-simulate", "-hit-rate", "100", "-progress=false", "-w", "-", "example.com")
 	if code != 0 {
 		t.Fatalf("exit %d", code)
@@ -163,6 +166,7 @@ func TestE2EStdinWordlistPlainOutput(t *testing.T) {
 }
 
 func TestE2ESeedReproducible(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords+"vpn\ncdn\nadmin\nportal\n")
 	args := []string{"-simulate", "-seed", "99", "-hit-rate", "50", "-t", "1", "-progress=false", "-show-records", "-w", wl, "example.com"}
 	_, first := runCLI(t, "", args...)
@@ -173,6 +177,7 @@ func TestE2ESeedReproducible(t *testing.T) {
 }
 
 func TestE2EExitCodes(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	empty := writeFile(t, "empty.txt", "# only comments\n")
 	// The second domain is so long that no wordlist entry fits under it, so
@@ -209,6 +214,7 @@ func TestE2EExitCodes(t *testing.T) {
 // leaves an existing -o file byte-for-byte unchanged, while a run that
 // finishes replaces it.
 func TestE2EFailedRunKeepsOutputFile(t *testing.T) {
+	t.Parallel()
 	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -243,6 +249,7 @@ func TestE2EFailedRunKeepsOutputFile(t *testing.T) {
 // TestE2EBadSeedsLeavesNoTempFile: an unreadable -seeds file fails the run
 // before the -o file is opened, so no temporary file is left beside it (#212).
 func TestE2EBadSeedsLeavesNoTempFile(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, "out.txt")
@@ -270,6 +277,7 @@ func runCLIMerged(t *testing.T, args ...string) (int, string) {
 // stderr merged into a non-terminal, results are never glued onto a progress
 // line. Progress is off by default there and whole lines when requested.
 func TestE2EMergedStreamsHaveNoCarriageReturns(t *testing.T) {
+	t.Parallel()
 	var words strings.Builder
 	for i := 0; i < 20; i++ {
 		fmt.Fprintf(&words, "w%d\n", i)
@@ -315,6 +323,7 @@ func TestE2EMergedStreamsHaveNoCarriageReturns(t *testing.T) {
 // TestE2EDomainFormsGiveIdenticalOutput covers #54: the same target written
 // as Example.COM., example.com, a URL, or via -dL scans identically.
 func TestE2EDomainFormsGiveIdenticalOutput(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	common := []string{"-simulate", "-seed", "7", "-hit-rate", "100", "-progress=false", "-w", wl}
 	scan := func(args ...string) string {
@@ -341,6 +350,7 @@ func TestE2EDomainFormsGiveIdenticalOutput(t *testing.T) {
 // TestE2ECLIPolish covers #58: missing arguments are named before the usage
 // text, and -version prints before any simulation banner.
 func TestE2ECLIPolish(t *testing.T) {
+	t.Parallel()
 	// Without -w the bundled list is used, and the user is told so (#63).
 	// Simulated, so no DNS traffic leaves the test.
 	code, out := runCLIMerged(t, "-simulate", "-hit-rate", "1", "-seed", "1", "example.com")
@@ -360,6 +370,7 @@ func TestE2ECLIPolish(t *testing.T) {
 
 // TestE2EHelpListsExitCodes covers #82: -h documents the exit codes.
 func TestE2EHelpListsExitCodes(t *testing.T) {
+	t.Parallel()
 	code, out := runCLIMerged(t, "-h")
 	if code != 0 || !strings.Contains(out, "Exit codes:") || !strings.Contains(out, "143") {
 		t.Errorf("-h: exit %d, output missing the exit-code table:\n%s", code, out)
@@ -369,6 +380,7 @@ func TestE2EHelpListsExitCodes(t *testing.T) {
 // TestE2ESummary covers #70: jsonl output ends with a schema-versioned
 // summary, and -stats records a verdict even when the scan fails.
 func TestE2ESummary(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-format", "jsonl", "-w", wl, "example.com")
 	if code != 0 {
@@ -426,6 +438,7 @@ func TestE2ESummary(t *testing.T) {
 // TestE2EExclude covers #87: a recursive simulated scan with -exclude never
 // reports names in the excluded branch, and the summary counts them.
 func TestE2EExclude(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", "dev\nwww\napi\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
 	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-recursive", "-depth", "2",
@@ -492,6 +505,7 @@ func startNXServer(t *testing.T) string {
 // TestE2EResolverPool covers #69: -r spreads lookups over the listed
 // resolvers and the summary reports each one's accounting.
 func TestE2EResolverPool(t *testing.T) {
+	t.Parallel()
 	trusted, r1, r2 := startNXServer(t), startNXServer(t), startNXServer(t)
 	wl := writeFile(t, "wl.txt", e2eWords)
 	list := writeFile(t, "resolvers.txt", "# pool\n"+r1+"\n"+r2+"\n")
@@ -544,6 +558,7 @@ func TestE2EResolverPool(t *testing.T) {
 // find is reported removed only once a fresh lookup says NXDOMAIN; one that
 // still resolves (it was not a candidate) or cannot be looked up is not.
 func TestE2EDiff(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	zone := writeFile(t, "now.zone", "www A 192.0.2.10\nmail A 192.0.2.20\ndev A 192.0.2.30\nextra A 192.0.2.40\nlegacy TIMEOUT\n")
 	lab := []string{"-simulate-zone", zone, "-timeout", "200", "-progress=false"}
@@ -642,6 +657,7 @@ func TestE2EDiff(t *testing.T) {
 // TestE2EPermute is #72's done-when: a found api.example.com seeds a second
 // pass that finds a planted api-dev.example.com absent from the wordlist.
 func TestE2EPermute(t *testing.T) {
+	t.Parallel()
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		switch q.Name {
 		case "example.com", "api.example.com", "api-dev.example.com":
@@ -698,6 +714,7 @@ func TestE2EPermute(t *testing.T) {
 // after the scan (and the report counts the retry), and without it the name
 // is listed but not retried.
 func TestE2EInconclusive(t *testing.T) {
+	t.Parallel()
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		switch q.Name {
 		case "example.com", "api.example.com":
@@ -756,6 +773,7 @@ func TestE2EInconclusive(t *testing.T) {
 // or loopback carry internal_address in JSONL and an INTERNAL= marker with
 // -show-records, public ones carry neither, and the report counts them.
 func TestE2EInternalAddresses(t *testing.T) {
+	t.Parallel()
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		if q.Type != dnsmessage.TypeA {
 			return dnstest.Reply{}
@@ -818,6 +836,7 @@ func TestE2EInternalAddresses(t *testing.T) {
 // CNAME to an unlisted host into a provider: hint, and a bad file or
 // -takeover-providers-only without a file is a usage error.
 func TestE2ETakeoverProviders(t *testing.T) {
+	t.Parallel()
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		switch q.Name {
 		case "example.com":
@@ -861,6 +880,7 @@ func TestE2ETakeoverProviders(t *testing.T) {
 // and running `subenum -resume <state>` gives the same final result set as
 // an uninterrupted run with the same seed.
 func TestE2EResume(t *testing.T) {
+	t.Parallel()
 	var words strings.Builder
 	for i := 0; i < 40; i++ {
 		fmt.Fprintf(&words, "host%d\n", i)
@@ -926,6 +946,7 @@ func TestE2EResume(t *testing.T) {
 // TestE2ESilent covers #128: -silent prints bare names on stdout and, on
 // stderr, nothing but the one-line simulation warning.
 func TestE2ESilent(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	args := []string{"-silent", "-simulate", "-seed", "1", "-hit-rate", "100", "-w", wl, "example.com"}
 	code, stdout := runCLI(t, "", args...)

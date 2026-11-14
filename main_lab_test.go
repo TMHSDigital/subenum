@@ -20,6 +20,7 @@ var labTimingArgs = []string{"-timeout", "5000", "-attempts", "3"}
 // TestE2ELabs runs the shipped -simulate-zone scenarios end to end (#76) and
 // checks the answers the Labs page gives for them.
 func TestE2ELabs(t *testing.T) {
+	t.Parallel()
 	const words = "examples/labs/words.txt"
 	lab := func(name string) string { return filepath.Join("examples", "labs", name) }
 	cases := []struct {
@@ -90,6 +91,7 @@ func TestE2ELabs(t *testing.T) {
 
 // TestE2ELabVerdicts checks the run-quality verdicts of the failure labs.
 func TestE2ELabVerdicts(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		zone, verdict string
 		args          []string
@@ -127,6 +129,7 @@ func TestE2ELabVerdicts(t *testing.T) {
 // with a report, a degraded verdict and stopped_by "duration", and a negative
 // budget is a usage error.
 func TestE2EMaxDuration(t *testing.T) {
+	t.Parallel()
 	stats := filepath.Join(t.TempDir(), "run.json")
 	// -rate 10 with 30 words needs about 3 s; the budget is a third of that.
 	code, out := runCLI(t, "", "-progress=false", "-w", "examples/labs/words.txt", "-t", "2", "-rate", "10",
@@ -166,6 +169,7 @@ func TestE2EMaxDuration(t *testing.T) {
 // its previous records, counted in the report and exit code 4. Without the
 // flag, or against a text baseline, only names are compared.
 func TestE2EDiffRecords(t *testing.T) {
+	t.Parallel()
 	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
 	// Lab 1 as it was "last week": blog pointed at the blog host, www had
 	// another address, and shop's alias (and the address behind it) is as
@@ -244,6 +248,7 @@ func TestE2EDiffRecords(t *testing.T) {
 // TestE2ELabTakeoverHint checks lab 1's dangling CNAME: the external target
 // does not exist in the lab, so the result is flagged.
 func TestE2ELabTakeoverHint(t *testing.T) {
+	t.Parallel()
 	args := append([]string{"-progress=false", "-w", "examples/labs/words.txt", "-format", "jsonl"}, labTimingArgs...)
 	code, out := runCLI(t, "", append(args,
 		"-type", "A,AAAA,CNAME", "-simulate-zone", filepath.Join("examples", "labs", "lab1-first-scan.zone"), "lab.example")...)
@@ -268,6 +273,7 @@ func TestE2ELabTakeoverHint(t *testing.T) {
 // delegated subzone, flags the one whose name server does not exist as
 // dangling-ns, and -sarif writes it; MX and TXT records come back too.
 func TestE2ELabDanglingNS(t *testing.T) {
+	t.Parallel()
 	zone := writeFile(t, "ns.zone", strings.Join([]string{
 		"@      A    192.0.2.1",
 		"mail   MX   10 mx1",
@@ -317,6 +323,7 @@ func TestE2ELabDanglingNS(t *testing.T) {
 }
 
 func TestE2ELabFlagConflicts(t *testing.T) {
+	t.Parallel()
 	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
 	resolvers := writeFile(t, "resolvers.txt", "192.0.2.53\n")
 	for _, extra := range [][]string{{"-simulate"}, {"-dns-server", "1.1.1.1:53"}, {"-r", resolvers}} {
@@ -359,6 +366,7 @@ func TestE2ELabRefusesEnvAndConfigResolvers(t *testing.T) {
 // TestE2ESARIF covers #129: lab 1's dangling CNAME becomes a SARIF result
 // with a rule, a location and a stable fingerprint.
 func TestE2ESARIF(t *testing.T) {
+	t.Parallel()
 	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
 	path := filepath.Join(t.TempDir(), "takeovers.sarif")
 	args := append([]string{"-progress=false"}, labTimingArgs...)

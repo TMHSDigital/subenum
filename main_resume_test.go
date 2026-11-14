@@ -76,6 +76,7 @@ func candidatesFor(target string, entries []string, found []string) []string {
 // through the permutation pass, gives the uninterrupted run's result set
 // instead of skipping the permutation pass.
 func TestE2EResumePermute(t *testing.T) {
+	t.Parallel()
 	words := "api\ndev\nwww\nmail\nshop\nblog\nvpn\ncdn\n"
 	wl := writeFile(t, "wl.txt", words)
 	args := []string{"-simulate", "-seed", "11", "-hit-rate", "40", "-progress=false", "-format", "jsonl", "-permute", "-w", wl, "example.com"}
@@ -166,6 +167,7 @@ func TestResumeArgsParsing(t *testing.T) {
 // saved results by up to a worker pool's worth of names, so a resumed scan
 // finds some of them again; they are counted once.
 func TestE2EResumeCountsRefoundNamesOnce(t *testing.T) {
+	t.Parallel()
 	var words strings.Builder
 	for i := 0; i < 20; i++ {
 		fmt.Fprintf(&words, "host%d\n", i)
@@ -199,6 +201,7 @@ func TestE2EResumeCountsRefoundNamesOnce(t *testing.T) {
 // TestE2EResumeKeepsQueryBudget covers #108: a resumed scan gets only what
 // is left of -max-queries, and none once it is spent.
 func TestE2EResumeKeepsQueryBudget(t *testing.T) {
+	t.Parallel()
 	var words strings.Builder
 	for i := 0; i < 50; i++ {
 		fmt.Fprintf(&words, "host%d\n", i)
@@ -241,6 +244,7 @@ func TestE2EResumeRefusesChangedSettings(t *testing.T) {
 // state file that is missing, corrupt or from another version, each refuse
 // to resume with a message saying which.
 func TestE2EResumeRefusesBadState(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", "www\napi\n")
 	args := []string{"-simulate", "-seed", "3", "-progress=false", "-w", wl, "example.com"}
 	changed := writeState(t, resumeState{Args: args, Inputs: map[string]string{wl: "digest-of-the-old-file"}, Targets: []resumeTarget{{Domain: "example.com"}}})
@@ -269,6 +273,7 @@ func TestE2EResumeRefusesBadState(t *testing.T) {
 // names each passive source returned before the interrupt, in the current
 // and the legacy (-ct only) state format, and asks no source again.
 func TestE2EResumeReplaysSourceNames(t *testing.T) {
+	t.Parallel()
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		if q.Name == "legacy.example.com" && q.Type == dnsmessage.TypeA {
 			return dnstest.Reply{A: []string{"192.0.2.10"}}
@@ -428,6 +433,7 @@ func TestSaveResumeStateRecordsFinishedPermutePass(t *testing.T) {
 // permutation pass one level deep, so no name is built from a candidate
 // under another candidate and the pass is not refused.
 func TestE2EPermuteRecursive(t *testing.T) {
+	t.Parallel()
 	words := "api\ndev\nwww\nmail\n"
 	wl := writeFile(t, "wl.txt", words)
 	code, out := runCLI(t, "", "-simulate", "-seed", "5", "-hit-rate", "50", "-progress=false", "-format", "jsonl",

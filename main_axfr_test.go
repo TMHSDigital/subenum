@@ -61,6 +61,7 @@ func runAXFR(t *testing.T, srv *dnstest.Server, args ...string) (int, string) {
 // names the wordlist lacks, each still verified by resolution (gone. is in
 // the zone but does not resolve), and the report names the server.
 func TestE2EZoneTransfer(t *testing.T) {
+	t.Parallel()
 	srv := axfrZone(t, true, "")
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
@@ -94,6 +95,7 @@ func TestE2EZoneTransfer(t *testing.T) {
 // TestE2EZoneTransferRefused: a refusal, the correct configuration, is not
 // an error and leaves the scan to the wordlist.
 func TestE2EZoneTransferRefused(t *testing.T) {
+	t.Parallel()
 	srv := axfrZone(t, false, "nsec3")
 	wl := writeFile(t, "wl.txt", "www\nmail\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
@@ -118,6 +120,7 @@ func TestE2EZoneTransferRefused(t *testing.T) {
 // TestE2EZoneWalkable covers #234: a zone signed with plain NSEC is reported
 // walkable even when its servers refuse transfers, with the probe counted.
 func TestE2EZoneWalkable(t *testing.T) {
+	t.Parallel()
 	srv := axfrZone(t, false, "nsec")
 	wl := writeFile(t, "wl.txt", "www\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
@@ -141,6 +144,7 @@ func TestE2EZoneWalkable(t *testing.T) {
 // TestE2ELabRefusesAXFR: a transfer would go to the zone's real name
 // servers, so lab mode refuses -axfr; simulation ignores it with a note.
 func TestE2ELabRefusesAXFR(t *testing.T) {
+	t.Parallel()
 	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
 	if code, out := runCLIMerged(t, "-axfr", "-simulate-zone", zone, "lab.example"); code != exitUsage || !strings.Contains(out, "-axfr") {
 		t.Errorf("lab: exit %d\n%s", code, out)

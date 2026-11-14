@@ -55,6 +55,7 @@ func parseLogLines(t *testing.T, stderr string) []logLine {
 // is a JSON object, engine notices carry their setting codes and the target,
 // and stdout is byte for byte what the text format prints.
 func TestE2ELogFormatJSON(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	// One worker keeps the result order fixed between the two runs.
 	base := []string{"-simulate", "-seed", "1", "-hit-rate", "100", "-t", "1", "-v", "-max-queries", "3", "-format", "jsonl", "-w", wl, "example.com"}
@@ -114,6 +115,7 @@ func TestE2ELogFormatJSON(t *testing.T) {
 // TestE2ELogFormatJSONErrors: usage errors, including those the flag package
 // reports and a missing domain, are JSON lines too, without the usage text.
 func TestE2ELogFormatJSONErrors(t *testing.T) {
+	t.Parallel()
 	for name, args := range map[string][]string{
 		"unknown flag":   {"-log-format", "json", "-bogus", "example.com"},
 		"missing domain": {"-log-format", "json", "-simulate"},
@@ -161,6 +163,7 @@ func TestE2ELogFormatJSONSilentAndEnv(t *testing.T) {
 // TestE2ELogFormatJSONProgress: explicit -progress under json gives progress
 // events, never carriage-return redraws; without it there are none.
 func TestE2ELogFormatJSONProgress(t *testing.T) {
+	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords)
 	args := []string{"-log-format", "json", "-simulate", "-seed", "1", "-w", wl, "example.com"}
 	_, _, stderr := runCLIStreams(t, args...)

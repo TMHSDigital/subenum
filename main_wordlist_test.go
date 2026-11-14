@@ -12,6 +12,7 @@ import (
 // TestE2EMultipleWordlists covers #199: -w repeats, the files are combined
 // and an entry found in both is scanned once.
 func TestE2EMultipleWordlists(t *testing.T) {
+	t.Parallel()
 	general := writeFile(t, "general.txt", "www\nmail\napi\n")
 	specific := writeFile(t, "specific.txt", "# target-specific\napi\nstaging\nWWW\n")
 	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-w", general, "-w", specific, "example.com")
@@ -28,6 +29,7 @@ func TestE2EMultipleWordlists(t *testing.T) {
 
 // TestE2EMultipleWordlistsWithStdin: "-" stays valid as one of the entries.
 func TestE2EMultipleWordlistsWithStdin(t *testing.T) {
+	t.Parallel()
 	file := writeFile(t, "wl.txt", "www\n")
 	code, out := runCLI(t, "mail\nwww\n", "-simulate", "-hit-rate", "100", "-progress=false", "-w", file, "-w", "-", "example.com")
 	if code != 0 {

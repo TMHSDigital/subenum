@@ -276,6 +276,7 @@ func TestLoadPrevious(t *testing.T) {
 // error a user sees, not a missing -exclude-file, and no simulation banner
 // is printed before it.
 func TestE2EMissingDomainReportedFirst(t *testing.T) {
+	t.Parallel()
 	code, out := runCLIMerged(t, "-simulate", "-exclude-file", "no-such-file.txt")
 	if code != exitUsage || !strings.Contains(out, "missing <domain>") || strings.Contains(out, "exclude-file:") || strings.Contains(out, "SIMULATION MODE") {
 		t.Errorf("exit %d, output:\n%s", code, out)
