@@ -365,8 +365,10 @@ func TestGoneClientStopsQueuedCalls(t *testing.T) {
 	go func() { done <- (&Server{Tools: []Tool{block}}).Serve(context.Background(), in, brokenWriter{}) }()
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("Serve returned %v, want context.Canceled from the failed write", err)
+		// nil when the input's end is read before the failed write cancels
+		// the session; either way the queued call did not run on.
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Errorf("Serve returned %v, want nil or context.Canceled", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve kept running queued calls after its client was gone")
