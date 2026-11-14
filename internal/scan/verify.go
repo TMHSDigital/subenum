@@ -16,7 +16,10 @@ import (
 //
 // Lookups use the trusted resolver (never Pool) or the simulation, and honour
 // Concurrency, Rate, Attempts, Timeout and Types. Names in Exclude are not
-// looked up and are absent from the result. Wildcard answers are not
+// looked up and are absent from the result. MaxQueries caps how many names
+// are looked up and Deadline stops new lookups (#276); names left over are
+// absent from the result too, so the caller can count them unchecked.
+// Wildcard answers are not
 // filtered: a name under a wildcard still resolves, so it is never reported
 // removed. Cancelled lookups report OutcomeCanceled.
 func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Outcome, int64) {
@@ -61,10 +64,15 @@ func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Out
 		})
 	}
 	var undispatched []string
+	dispatched := 0
 	for i, name := range names {
 		if sc.excluded(name) {
 			continue
 		}
+		if (cfg.MaxQueries > 0 && dispatched >= cfg.MaxQueries) || cfg.pastDeadline() {
+			break // out of budget: the rest stay unchecked
+		}
+		dispatched++
 		select {
 		case work <- name:
 			continue

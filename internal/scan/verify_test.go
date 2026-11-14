@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,6 +43,35 @@ func TestVerify(t *testing.T) {
 		if o != dns.OutcomeCanceled && o != dns.OutcomeFound {
 			t.Errorf("cancelled: %s = %v", name, o)
 		}
+	}
+}
+
+// TestVerifyBudget checks that MaxQueries and Deadline bound the lookups
+// (#276) and that names left over are absent, not cancelled or found.
+func TestVerifyBudget(t *testing.T) {
+	var looked int
+	var mu sync.Mutex
+	cfg := Config{
+		Concurrency: 1,
+		MaxQueries:  2,
+		resolveHook: func(context.Context, string) ([]dns.Record, dns.Outcome) {
+			mu.Lock()
+			looked++
+			mu.Unlock()
+			return nil, dns.OutcomeNXDomain
+		},
+	}
+	names := []string{"a.example.com", "b.example.com", "c.example.com", "d.example.com"}
+	got, _ := Verify(context.Background(), cfg, names)
+	if looked != 2 || len(got) != 2 {
+		t.Errorf("MaxQueries 2: %d lookups, %d outcomes (%v), want 2 and 2", looked, len(got), got)
+	}
+
+	looked = 0
+	cfg.MaxQueries = 0
+	cfg.Deadline = time.Now().Add(-time.Second)
+	if got, _ := Verify(context.Background(), cfg, names); looked != 0 || len(got) != 0 {
+		t.Errorf("past deadline: %d lookups, outcomes %v, want none", looked, got)
 	}
 }
 

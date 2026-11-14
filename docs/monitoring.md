@@ -39,6 +39,9 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
   `-recursive` or `-permute`) still resolves, and a name whose lookup fails
   cannot be checked; neither is reported as removed, and stderr says how many
   there were.
+- These checks spend what is left of the run's budgets: `-max-queries` per
+  target, less the names the scan tested, and the `-max-duration` deadline.
+  Names the budget does not reach are counted `unverified`, not removed.
 - With `-stats` (or `-format jsonl`), the run-quality report gains a `diff`
   object with the `added` and `removed` counts, plus `still_resolving` and
   `unverified` when there were any.

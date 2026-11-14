@@ -200,8 +200,27 @@ func emitRemoved(ctx context.Context, s *session, summary *output.Summary) int64
 	if len(missing) == 0 {
 		return 0
 	}
+	// The check spends what is left of the run's budgets (#276): -max-queries
+	// per target, less the names the targets tested, and the -max-duration
+	// deadline. Names it does not reach are counted unverified below.
+	budget := 0
+	if s.f.maxQueries > 0 {
+		left := int64(s.f.maxQueries) * int64(len(summary.Targets))
+		for _, t := range summary.Targets {
+			left -= t.Processed
+		}
+		if left < 1 {
+			out.Info("Note: -diff is not checking removed names because the -max-queries budget is spent")
+			diffSummary.Unverified = len(missing)
+			return 0
+		}
+		budget = int(min(left, int64(len(missing))))
+	}
 	out.Info("Checking %d previous names this run did not find", len(missing))
-	cfg := scanOptions(s.f, &s.in, scanPass{maxQueries: s.f.maxQueries}, nil).Config()
+	if budget > 0 && budget < len(missing) {
+		out.Info("Note: the remaining -max-queries budget covers %d of them", budget)
+	}
+	cfg := scanOptions(s.f, &s.in, scanPass{maxQueries: budget}, nil).Config()
 	cfg.Pool = nil // the trusted resolver decides
 	outcomes, sent := scan.Verify(ctx, cfg, missing)
 	for _, name := range missing {

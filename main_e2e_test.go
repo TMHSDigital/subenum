@@ -564,6 +564,31 @@ func TestE2EDiff(t *testing.T) {
 	if _, out := run("www\nmail\ndev\n", "-diff", prev, "-max-queries", "1"); strings.Contains(out, "- ") {
 		t.Fatalf("degraded run reported removals: %q", out)
 	}
+
+	// The removal check spends only what is left of -max-queries (#276): 3
+	// names tested of 5 leaves 2 of the 4 missing names to check; the other
+	// 2 are unverified, not looked up.
+	stats5 := filepath.Join(dir, "stats5.json")
+	if code, _ := run("www\nmail\ndev\n", "-diff", prev, "-max-queries", "5", "-stats", stats5); code != 4 {
+		t.Fatalf("budgeted diff: exit %d, want 4", code)
+	}
+	summary = output.Summary{}
+	if data, err := os.ReadFile(stats5); err != nil || json.Unmarshal(data, &summary) != nil {
+		t.Fatalf("reading -stats: %v", err)
+	}
+	if d := summary.Diff; d == nil || d.Removed+d.StillResolving+d.Unverified != 4 || d.Removed+d.StillResolving > 2 || d.Unverified < 2 {
+		t.Errorf("budgeted diff summary = %+v, want at most 2 of 4 checked and the rest unverified", d)
+	}
+	// With the budget spent by the scan itself, nothing is looked up.
+	stats3 := filepath.Join(dir, "stats3.json")
+	run("www\nmail\ndev\n", "-diff", prev, "-max-queries", "3", "-stats", stats3)
+	summary = output.Summary{}
+	if data, err := os.ReadFile(stats3); err != nil || json.Unmarshal(data, &summary) != nil {
+		t.Fatalf("reading -stats: %v", err)
+	}
+	if d := summary.Diff; d == nil || d.Unverified != 4 || d.Removed != 0 {
+		t.Errorf("spent budget: diff summary = %+v, want all 4 unverified", d)
+	}
 }
 
 // TestE2EPermute is #72's done-when: a found api.example.com seeds a second
