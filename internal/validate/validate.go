@@ -83,13 +83,21 @@ func checkPort(portStr string) error {
 	return nil
 }
 
+// fullStopReplacer maps the Unicode characters IDNA treats as label separators
+// (UTS #46) onto ASCII dots, so a domain pasted with an ideographic full stop
+// is read as the domain the user meant instead of as one extra label (#281).
+var fullStopReplacer = strings.NewReplacer("。", ".", "．", ".", "｡", ".")
+
+// normalizeFullStops rewrites every IDNA label separator in s to ".".
+func normalizeFullStops(s string) string { return fullStopReplacer.Replace(s) }
+
 // NormalizeDomain turns a target as users type or paste it into the canonical
 // form every entry point scans: trimmed, lowercase, no trailing dot, IDNs in
 // punycode. It also strips a URL scheme and path, a :port and a leading "*.",
 // returning a one-line note for each so the caller can say what it did (#54).
 // The result is checked with Domain.
 func NormalizeDomain(input string) (domain string, notes []string, err error) {
-	s := strings.TrimSpace(input)
+	s := normalizeFullStops(strings.TrimSpace(input))
 	if strings.Contains(s, "@") {
 		return "", nil, fmt.Errorf("%q looks like an email address; pass just the domain", input)
 	}
@@ -114,7 +122,7 @@ func NormalizeDomain(input string) (domain string, notes []string, err error) {
 		s = s[2:]
 		notes = append(notes, fmt.Sprintf("ignoring the leading *. wildcard; scanning %s", s))
 	}
-	s = strings.ToLower(strings.TrimSuffix(s, "."))
+	s = strings.ToLower(strings.TrimRight(s, "."))
 	if !isASCII(s) {
 		ascii, ierr := toASCII(s)
 		if ierr != nil {
@@ -136,6 +144,9 @@ func NormalizeDomain(input string) (domain string, notes []string, err error) {
 func Domain(domain string) error {
 	if len(domain) == 0 {
 		return fmt.Errorf("domain cannot be empty")
+	}
+	if strings.HasSuffix(domain, ".") {
+		return fmt.Errorf("domain cannot end with a dot: %s", domain)
 	}
 	if len(domain) > 253 {
 		return fmt.Errorf("domain exceeds maximum length of 253 characters")
