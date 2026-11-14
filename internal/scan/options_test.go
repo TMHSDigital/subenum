@@ -27,6 +27,9 @@ func TestOptionsValidate(t *testing.T) {
 		{"depth", func(o *Options) { o.Depth = 0 }, "depth"},
 		{"rate", func(o *Options) { o.Rate = -1 }, "rate"},
 		{"max queries", func(o *Options) { o.MaxQueries = -1 }, "max queries"},
+		// Checked once here for every front end, not by each one (#262).
+		{"max duration", func(o *Options) { o.MaxDuration = -time.Second }, "max duration ({max_duration}) must be 0 (unlimited) or positive, got -1s"},
+		{"rate per resolver", func(o *Options) { o.RatePerResolver = -1 }, "rate per resolver ({rate_per_resolver}) must be 0 (unlimited) or a positive integer, got -1"},
 		{"bad resolver live", func(o *Options) { o.DNSServer = "nope" }, "DNS server"},
 		{"bad resolver ignored when simulating", func(o *Options) { o.DNSServer = "nope"; o.Simulate = true }, ""},
 		{"hit rate checked when simulating", func(o *Options) { o.Simulate = true; o.HitRate = 0 }, "hit rate"},

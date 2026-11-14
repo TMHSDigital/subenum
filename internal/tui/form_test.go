@@ -391,7 +391,8 @@ func TestResolverPoolField(t *testing.T) {
 	}
 
 	m.inputs[fieldRatePerResolver].SetValue("-1")
-	if _, errStr := m.validate(); !strings.Contains(errStr, "Rate/Resolver must be 0") {
+	// The range check is scan.Options.Validate's, rendered as the form label (#262).
+	if _, errStr := m.validate(); errStr != "rate per resolver (Rate/Resolver) must be 0 (unlimited) or a positive integer, got -1" {
 		t.Errorf("negative Rate/Resolver: got %q", errStr)
 	}
 	m.inputs[fieldRatePerResolver].SetValue("0")
@@ -420,6 +421,47 @@ func TestWithSettingsSeedsEveryFlaggedField(t *testing.T) {
 			if want := g == f; changed != want {
 				t.Errorf("-%s=%s: field %q changed = %v, want %v", flag, v, formFields[g].name(), changed, want)
 			}
+		}
+	}
+}
+
+// TestOptionsSetsEveryField is the TUI's drift guard of #262: with every form
+// value set, options fills in every scan.Options field except the ones listed
+// in tuiUnmapped, each with the reason. A field added to scan.Options fails
+// here until the form maps it or the list says why it does not.
+func TestOptionsSetsEveryField(t *testing.T) {
+	tuiUnmapped := map[string]string{
+		"Pool":              "beginScan sets it from the pool loadPool built",
+		"AutoRate":          "no form field yet (#274)",
+		"RetryInconclusive": "no form field yet (#274)",
+		"MaxDuration":       "no form field yet (#274)",
+		"Deadline":          "no form field yet (#274)",
+		"TakeoverProviders": "the form has no takeover provider file; the built-in list applies",
+		"ResumeFrom":        "the TUI does not resume interrupted scans",
+		"ResumeParents":     "the TUI does not resume interrupted scans",
+		"Verbose":           "the scan screen shows events itself; there is no debug log",
+		"Logf":              "the scan screen shows events itself; there is no debug log",
+	}
+	v := formValues{
+		domain: "example.com", wordlist: "words.txt", dnsServer: "192.0.2.53:53", resolvers: "pool.txt",
+		ratePerResolver: 5, concurrency: 7, timeoutMs: 700, attempts: 2, hitRate: 40, recordTypes: []string{"A"},
+		recursive: true, depth: 3, rate: 50, maxQueries: 10, exclude: []string{"vpn.example.com"},
+		noAbort: true, simulate: true, force: true,
+	}
+	opts := reflect.ValueOf(v.options([]string{"www"}, 9))
+	for i := range opts.NumField() {
+		name := opts.Type().Field(i).Name
+		_, listed := tuiUnmapped[name]
+		switch zero := opts.Field(i).IsZero(); {
+		case zero && !listed:
+			t.Errorf("scan.Options.%s is never set by the form; map it or list it in tuiUnmapped with a reason", name)
+		case !zero && listed:
+			t.Errorf("scan.Options.%s is set by the form but listed in tuiUnmapped", name)
+		}
+	}
+	for name := range tuiUnmapped {
+		if _, ok := opts.Type().FieldByName(name); !ok {
+			t.Errorf("tuiUnmapped lists %s, which scan.Options does not have", name)
 		}
 	}
 }

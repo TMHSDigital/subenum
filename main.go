@@ -210,15 +210,15 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.dryRun, "dry-run", false, "Print the plan without scanning: candidates after dedupe and -exclude, query and duration estimates, and the resolver preflight (its only DNS query); then exit")
 	fs.Var(&f.wordlists, "w", "Path to a wordlist `file` (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list")
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
-	fs.IntVar(&f.concurrency, "t", 100, "Number of concurrent workers")
-	fs.IntVar(&f.timeoutMs, "timeout", 1000, "DNS lookup timeout in milliseconds")
+	fs.IntVar(&f.concurrency, "t", scan.DefaultConcurrency, "Number of concurrent workers")
+	fs.IntVar(&f.timeoutMs, "timeout", scan.DefaultTimeoutMs, "DNS lookup timeout in milliseconds")
 	fs.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server: ip:port (UDP, TCP fallback), tls://host[:853] (DNS over TLS) or https://host/path (DNS over HTTPS)")
 	fs.BoolVar(&f.verbose, "v", false, "Enable verbose output")
 	fs.BoolVar(&f.showVersion, "version", false, "Show version information")
 	fs.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")
 	fs.BoolVar(&f.silent, "silent", false, "Pipeline mode: bare result names on stdout, and only errors (and a simulation warning) on stderr")
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
-	fs.IntVar(&f.testHitRate, "hit-rate", 15, "In simulation mode, percentage of names that resolve (1-100)")
+	fs.IntVar(&f.testHitRate, "hit-rate", scan.DefaultHitRate, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
 	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file via a local DNS server, so no traffic leaves the machine (see the Labs page)")
 	fs.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
@@ -338,14 +338,6 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 		out.ScanError(err.Error())
 		return "", false
 	}
-	if f.maxDuration < 0 {
-		out.Error("-max-duration must be 0 (unlimited) or positive, got %s", f.maxDuration)
-		return "", false
-	}
-	if f.ratePerRes < 0 {
-		out.Error("-rate-per-resolver must be 0 (unlimited) or positive, got %d", f.ratePerRes)
-		return "", false
-	}
 	if f.diffRecords && f.diff == "" {
 		out.Error("-diff-records compares records against a previous results file; add -diff <file>")
 		return "", false
@@ -383,17 +375,15 @@ func loadPool(f cliFlags, in *runtimeInputs, out *output.Writer) (*dns.Pool, int
 		out.Error("reading -r resolver list: %v", err)
 		return nil, exitFailure
 	}
-	addrs, err := dns.ParseResolverList(lines)
-	if err == nil && len(addrs) == 0 {
-		err = fmt.Errorf("%s lists no resolvers", f.resolvers)
+	pool, err := dns.NewPoolFromLines(lines, time.Duration(f.timeoutMs)*time.Millisecond, f.ratePerRes)
+	if errors.Is(err, dns.ErrNoResolvers) {
+		err = fmt.Errorf("%s %w", f.resolvers, err)
 	}
 	if err != nil {
 		out.Error("-r: %v", err)
 		return nil, exitUsage
 	}
-	out.Info("Resolver pool: %d resolvers; every hit is re-validated against %s", len(addrs), f.dnsServer)
-	pool := dns.NewPool(addrs, time.Duration(f.timeoutMs)*time.Millisecond)
-	pool.SetRatePerResolver(f.ratePerRes)
+	out.Info("Resolver pool: %d resolvers; every hit is re-validated against %s", pool.Size(), f.dnsServer)
 	return pool, exitOK
 }
 
@@ -680,6 +670,7 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		Rate:        f.rate,
 		AutoRate:    f.autoRate,
 		MaxQueries:  p.maxQueries,
+		MaxDuration: f.maxDuration,
 		Deadline:    in.deadline,
 		Exclude:     in.excludes,
 		ResumeFrom:  p.resumeFrom,
@@ -687,11 +678,12 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		RetryInconclusive: f.retryIncon,
 		TakeoverProviders: in.providers,
 		// Names found before an interrupt still need their children expanded.
-		ResumeParents: p.resumeNames,
-		Pool:          in.pool,
-		NoAbort:       f.noAbort,
-		Verbose:       f.verbose,
-		Logf:          logf,
+		ResumeParents:   p.resumeNames,
+		Pool:            in.pool,
+		RatePerResolver: f.ratePerRes,
+		NoAbort:         f.noAbort,
+		Verbose:         f.verbose,
+		Logf:            logf,
 	}
 }
 

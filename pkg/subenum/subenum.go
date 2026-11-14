@@ -575,12 +575,8 @@ func (c Config) options() (scan.Options, error) {
 		return scan.Options{}, fmt.Errorf("subenum: Attempts must not be negative, got %d", c.Attempts)
 	case c.Rate < 0:
 		return scan.Options{}, fmt.Errorf("subenum: Rate must be 0 (unlimited) or positive, got %d", c.Rate)
-	case c.RatePerResolver < 0:
-		return scan.Options{}, fmt.Errorf("subenum: RatePerResolver must be 0 (unlimited) or positive, got %d", c.RatePerResolver)
 	case c.MaxQueries < 0:
 		return scan.Options{}, fmt.Errorf("subenum: MaxQueries must be 0 (unlimited) or positive, got %d", c.MaxQueries)
-	case c.MaxDuration < 0:
-		return scan.Options{}, fmt.Errorf("subenum: MaxDuration must be 0 (unlimited) or positive, got %s", c.MaxDuration)
 	case c.Depth < 0:
 		return scan.Options{}, fmt.Errorf("subenum: Depth must not be negative, got %d", c.Depth)
 	case c.Simulate && c.HitRate != 0 && (c.HitRate < 1 || c.HitRate > 100):
@@ -630,12 +626,14 @@ func (c Config) options() (scan.Options, error) {
 		Rate:        c.Rate,
 		AutoRate:    c.AutoRate,
 		MaxQueries:  c.MaxQueries,
+		MaxDuration: c.MaxDuration,
 		Exclude:     c.Exclude,
 		NoAbort:     c.NoAbort,
 		Verbose:     c.Verbose,
 		Logf:        dns.Logf(c.Logf),
 
 		RetryInconclusive: c.RetryInconclusive,
+		RatePerResolver:   c.RatePerResolver,
 	}
 	if c.MaxDuration > 0 {
 		opts.Deadline = time.Now().Add(c.MaxDuration)
@@ -659,15 +657,14 @@ func (c Config) options() (scan.Options, error) {
 		if c.Simulate {
 			return scan.Options{}, errors.New("subenum: ResolverPool cannot be used with Simulate, which sends no DNS queries")
 		}
-		addrs, err := dns.ParseResolverList(c.ResolverPool)
+		pool, err := dns.NewPoolFromLines(c.ResolverPool, time.Duration(opts.TimeoutMs)*time.Millisecond, c.RatePerResolver)
+		if errors.Is(err, dns.ErrNoResolvers) {
+			return scan.Options{}, errors.New("subenum: ResolverPool lists no resolvers")
+		}
 		if err != nil {
 			return scan.Options{}, fmt.Errorf("subenum: ResolverPool: %w", err)
 		}
-		if len(addrs) == 0 {
-			return scan.Options{}, errors.New("subenum: ResolverPool lists no resolvers")
-		}
-		opts.Pool = dns.NewPool(addrs, time.Duration(opts.TimeoutMs)*time.Millisecond)
-		opts.Pool.SetRatePerResolver(c.RatePerResolver)
+		opts.Pool = pool
 	}
 
 	if err := opts.Validate(); err != nil {

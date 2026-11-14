@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -185,15 +186,13 @@ func loadPool(vals formValues) (*dns.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read resolver pool: %w", err)
 	}
-	addrs, err := dns.ParseResolverList(lines)
-	if err == nil && len(addrs) == 0 {
-		err = fmt.Errorf("%s lists no resolvers", vals.resolvers)
+	pool, err := dns.NewPoolFromLines(lines, time.Duration(vals.timeoutMs)*time.Millisecond, vals.ratePerResolver)
+	if errors.Is(err, dns.ErrNoResolvers) {
+		err = fmt.Errorf("%s %w", vals.resolvers, err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolver pool: %w", err)
 	}
-	pool := dns.NewPool(addrs, time.Duration(vals.timeoutMs)*time.Millisecond)
-	pool.SetRatePerResolver(vals.ratePerResolver)
 	return pool, nil
 }
 

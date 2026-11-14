@@ -8,9 +8,20 @@ import (
 	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
-// Options are the user-facing scan settings. The CLI and the TUI each fill
-// one in from their own inputs, then share Validate and Config, so the two
-// front ends cannot drift apart in what they accept or how they scan (#80).
+// Defaults every front end gives a setting that is not set (#262): the CLI's
+// flag defaults, the TUI form's and pkg/subenum's Default constants, which
+// tests keep equal to these.
+const (
+	DefaultConcurrency = 100
+	DefaultTimeoutMs   = 1000
+	DefaultHitRate     = 15
+)
+
+// Options are the user-facing scan settings. The CLI, the TUI and
+// pkg/subenum each fill one in from their own inputs, then share Validate
+// and Config, so the front ends cannot drift apart in what they accept or
+// how they scan (#80). Each front end has a test that fails when a field
+// here is left unset without a stated reason (#262).
 type Options struct {
 	Domain      string
 	Entries     []string
@@ -28,7 +39,11 @@ type Options struct {
 	Rate        int
 	AutoRate    bool // back off instead of aborting when lookups fail (#220)
 	MaxQueries  int
-	Deadline    time.Time // -max-duration budget's end; zero = none (#190)
+	// MaxDuration is the run's time budget, only checked here: the front end
+	// turns it into Deadline when the run starts, since one budget covers
+	// every target of a run (#190).
+	MaxDuration time.Duration
+	Deadline    time.Time // MaxDuration's end; zero = none (#190)
 	Exclude     []string
 	// RetryInconclusive retries inconclusive lookups once at the end (#217).
 	RetryInconclusive bool
@@ -36,6 +51,9 @@ type Options struct {
 	// non-nil (#219).
 	TakeoverProviders dns.TakeoverProviders
 	Pool              *dns.Pool // -r resolver pool; DNSServer is then the trusted resolver
+	// RatePerResolver is the pool's per-member rate cap, only checked here:
+	// the front end applies it when it builds Pool (dns.NewPoolFromLines).
+	RatePerResolver int
 	// Resume point of an interrupted scan (#73); see Config.
 	ResumeFrom    int
 	ResumeParents []string
@@ -63,6 +81,10 @@ func (o Options) Validate() error {
 		return fmt.Errorf("rate ({rate}) must be 0 (unlimited) or a positive integer, got %d", o.Rate)
 	case o.MaxQueries < 0:
 		return fmt.Errorf("max queries ({max_queries}) must be 0 (unlimited) or a positive integer, got %d", o.MaxQueries)
+	case o.MaxDuration < 0:
+		return fmt.Errorf("max duration ({max_duration}) must be 0 (unlimited) or positive, got %s", o.MaxDuration)
+	case o.RatePerResolver < 0:
+		return fmt.Errorf("rate per resolver ({rate_per_resolver}) must be 0 (unlimited) or a positive integer, got %d", o.RatePerResolver)
 	}
 	if !o.Simulate {
 		if err := validate.DNSServer(o.DNSServer); err != nil {

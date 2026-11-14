@@ -21,6 +21,7 @@ const (
 	SettingHitRate     Setting = "hit_rate"
 	SettingDepth       Setting = "depth"
 	SettingRate        Setting = "rate"
+	SettingRatePerRes  Setting = "rate_per_resolver"
 	SettingMaxQueries  Setting = "max_queries"
 	SettingMaxDuration Setting = "max_duration"
 	SettingExclude     Setting = "exclude"
@@ -48,6 +49,7 @@ var settingTable = []struct {
 	{SettingHitRate, SettingNames{"hit-rate", "HitRate", "Hit Rate (%)"}},
 	{SettingDepth, SettingNames{"depth", "Depth", "Depth"}},
 	{SettingRate, SettingNames{"rate", "Rate", "Rate (qps)"}},
+	{SettingRatePerRes, SettingNames{"rate-per-resolver", "RatePerResolver", "Rate/Resolver"}},
 	{SettingMaxQueries, SettingNames{"max-queries", "MaxQueries", "Max Names"}},
 	{SettingMaxDuration, SettingNames{"max-duration", "MaxDuration", "Max Duration"}},
 	{SettingExclude, SettingNames{"exclude", "Exclude", "Exclude"}},

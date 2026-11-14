@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -130,6 +131,27 @@ func NewPool(addrs []string, timeout time.Duration) *Pool {
 		p.members = append(p.members, &PoolResolver{Addr: a, resolver: newResolver(timeout, a, budget), stats: ResolverStats{Addr: a}})
 	}
 	return p
+}
+
+// ErrNoResolvers is NewPoolFromLines' error for a list that names no
+// resolver; callers say which list it was.
+var ErrNoResolvers = errors.New("lists no resolvers")
+
+// NewPoolFromLines parses a resolver list (see ParseResolverList) and builds
+// its pool with the per-member rate cap perSecond (see SetRatePerResolver).
+// The CLI's -r, the TUI's Resolver Pool and pkg/subenum's ResolverPool all
+// build their pool here (#262).
+func NewPoolFromLines(lines []string, timeout time.Duration, perSecond int) (*Pool, error) {
+	addrs, err := ParseResolverList(lines)
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) == 0 {
+		return nil, ErrNoResolvers
+	}
+	p := NewPool(addrs, timeout)
+	p.SetRatePerResolver(perSecond)
+	return p, nil
 }
 
 // CloseIdleConnections closes the sockets every member keeps for reuse, as

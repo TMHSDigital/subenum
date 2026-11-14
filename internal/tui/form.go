@@ -80,17 +80,17 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.Wordlist }},
 	fieldSimulate: {label: "Simulate", flag: "simulate", kind: toggleField,
 		saved: func(c *savedConfig) any { return &c.Simulate }},
-	fieldHitRate: {setting: scan.SettingHitRate, kind: textField, placeholder: "1–100", def: "15", gate: fieldSimulate,
+	fieldHitRate: {setting: scan.SettingHitRate, kind: textField, placeholder: "1–100", def: strconv.Itoa(scan.DefaultHitRate), gate: fieldSimulate,
 		saved: func(c *savedConfig) any { return &c.HitRate }},
 	fieldDNSServer: {label: "DNS Server", flag: "dns-server", kind: textField, placeholder: "e.g. 8.8.8.8:53", def: validate.DefaultDNSServer,
 		saved: func(c *savedConfig) any { return &c.DNSServer }},
 	fieldResolvers: {label: "Resolver Pool", flag: "r", kind: textField, placeholder: "optional, file of resolver addresses",
 		saved: func(c *savedConfig) any { return &c.Resolvers }},
-	fieldRatePerResolver: {label: "Rate/Resolver", flag: "rate-per-resolver", kind: textField, placeholder: "0 = unlimited", def: "0",
+	fieldRatePerResolver: {setting: scan.SettingRatePerRes, kind: textField, placeholder: "0 = unlimited", def: "0",
 		saved: func(c *savedConfig) any { return &c.RatePerResolver }},
-	fieldConcurrency: {setting: scan.SettingConcurrency, kind: textField, placeholder: "e.g. 100", def: "100",
+	fieldConcurrency: {setting: scan.SettingConcurrency, kind: textField, placeholder: "e.g. 100", def: strconv.Itoa(scan.DefaultConcurrency),
 		saved: func(c *savedConfig) any { return &c.Concurrency }},
-	fieldTimeout: {setting: scan.SettingTimeout, kind: textField, placeholder: "e.g. 1000", def: "1000",
+	fieldTimeout: {setting: scan.SettingTimeout, kind: textField, placeholder: "e.g. 1000", def: strconv.Itoa(scan.DefaultTimeoutMs),
 		saved: func(c *savedConfig) any { return &c.TimeoutMs }},
 	fieldAttempts: {setting: scan.SettingAttempts, kind: textField, placeholder: "e.g. 1", def: "1",
 		saved: func(c *savedConfig) any { return &c.Attempts }},
@@ -411,7 +411,7 @@ func (m *formModel) validate() (formValues, string) {
 	attempts := num(fieldAttempts, "Attempts", 0)
 	// Hit rate only matters in simulation mode, and depth only when
 	// recursive is on; otherwise their fields must not block the scan.
-	hitRate := 15
+	hitRate := scan.DefaultHitRate
 	if m.shown(fieldHitRate) {
 		hitRate = num(fieldHitRate, "Hit rate", 0)
 	}
@@ -422,9 +422,6 @@ func (m *formModel) validate() (formValues, string) {
 	rate := num(fieldRate, "Rate", 0)                    // blank means unlimited
 	maxQueries := num(fieldMaxQueries, "Max queries", 0) // blank means unlimited
 	ratePerResolver := num(fieldRatePerResolver, formFields[fieldRatePerResolver].name(), 0)
-	if err == nil && ratePerResolver < 0 {
-		err = fmt.Errorf("%s must be 0 (unlimited) or positive, got %d", formFields[fieldRatePerResolver].name(), ratePerResolver)
-	}
 	var exclude []string // out-of-scope names, never queried (#87)
 	for _, p := range strings.Split(text(fieldExclude), ",") {
 		if p = strings.TrimSpace(p); p != "" {
@@ -502,6 +499,8 @@ func (v formValues) options(entries []string, seed uint64) scan.Options {
 		MaxQueries:  v.maxQueries,
 		Exclude:     v.exclude,
 		NoAbort:     v.noAbort,
+
+		RatePerResolver: v.ratePerResolver,
 	}
 }
 
