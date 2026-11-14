@@ -7,7 +7,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // TestE2ESIGTERMExits143 covers #82: SIGTERM (container stop, systemd) exits
@@ -19,17 +18,10 @@ func TestE2ESIGTERMExits143(t *testing.T) {
 	}
 	wl := writeFile(t, "wl.txt", words.String())
 
-	ready := make(chan struct{})
-	signalReady = ready
-	t.Cleanup(func() { signalReady = nil })
-	go func() {
-		<-ready
-		time.Sleep(200 * time.Millisecond) // let the scan start
-		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-	}()
-
-	// 200 names at -rate 10 would take 20s; the signal ends it early.
-	code, _ := runCLI(t, "", "-simulate", "-rate", "10", "-progress=false", "-w", wl, "example.com")
+	// 200 names at -rate 10 would take 20s; the signal, sent once the first
+	// result is out rather than after a fixed sleep (#260), ends it early.
+	code, _ := runCLIUntilLines(t, 1, func() { _ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM) },
+		"-simulate", "-hit-rate", "100", "-rate", "10", "-progress=false", "-w", wl, "example.com")
 	if code != 143 {
 		t.Fatalf("exit %d after SIGTERM, want 143", code)
 	}

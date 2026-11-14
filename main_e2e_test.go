@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -50,6 +49,38 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// lineTrigger is a stdout that calls fire once, after n lines have been
+// written, so a test can interrupt a scan partway through by its progress
+// rather than after a wall-clock sleep a slow runner could outlast (#260).
+type lineTrigger struct {
+	lockedBuffer
+	n     int
+	lines int
+	fire  func()
+}
+
+func (w *lineTrigger) Write(p []byte) (int, error) {
+	n, err := w.lockedBuffer.Write(p)
+	w.mu.Lock()
+	before := w.lines
+	w.lines += bytes.Count(p[:n], []byte("\n"))
+	fire := before < w.n && w.lines >= w.n
+	w.mu.Unlock()
+	if fire {
+		w.fire()
+	}
+	return n, err
+}
+
+// runCLIUntilLines runs the CLI like runCLI and calls fire once n lines of
+// its stdout have been written.
+func runCLIUntilLines(t *testing.T, n int, fire func(), args ...string) (int, string) {
+	t.Helper()
+	stdout := &lineTrigger{n: n, fire: fire}
+	code := runWith(runArgs{args: args, stdin: strings.NewReader(""), stdout: stdout, stderr: io.Discard})
+	return code, stdout.String()
 }
 
 func writeFile(t *testing.T, name, content string) string {
@@ -842,16 +873,13 @@ func TestE2EResume(t *testing.T) {
 		t.Fatalf("reference run found only %d names", len(want))
 	}
 
-	// Interrupted run: -rate 20 makes 40 names take ~2s; interrupt at ~1s.
-	ready := make(chan struct{})
-	signalReady, testSignals = ready, make(chan os.Signal, 1)
+	// Interrupted run: -rate 20 makes 40 names take ~2s; interrupt once
+	// three results are out, whatever the runner's speed (#260).
+	signals := make(chan os.Signal, 1)
+	signalReady, testSignals = nil, signals
 	t.Cleanup(func() { signalReady, testSignals = nil, nil })
-	go func() {
-		<-ready
-		time.Sleep(time.Second)
-		testSignals <- os.Interrupt
-	}()
-	code, first := runCLI(t, "", append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")...)
+	code, first := runCLIUntilLines(t, 3, func() { signals <- os.Interrupt },
+		append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")...)
 	signalReady, testSignals = nil, nil
 	if code != 130 {
 		t.Fatalf("interrupted run: exit %d, want 130", code)
