@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/output"
 )
 
 // Shell completions and the man page are generated from the FlagSet, the
@@ -25,10 +28,12 @@ var fileFlags = map[string]bool{
 // completionShells are the shells `subenum completion` writes scripts for.
 var completionShells = []string{"bash", "zsh", "fish", "powershell"}
 
-// valueChoices lists the fixed values some flags accept.
+// valueChoices lists the fixed values some flags accept, from the lists the
+// flags are checked against (#264): every record type, then the common
+// combinations.
 var valueChoices = map[string][]string{
-	"format": {"text", "json", "jsonl", "csv"},
-	"type":   {"A", "AAAA", "CNAME", "A,AAAA", "A,AAAA,CNAME"},
+	"format": output.Formats(),
+	"type":   append(dns.Types(), "A,AAAA", "A,AAAA,CNAME"),
 }
 
 // subcommands are the non-scan words subenum accepts as its first argument.

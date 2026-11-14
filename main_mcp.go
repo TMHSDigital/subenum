@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/labzone"
 	"github.com/TMHSDigital/subenum/internal/mcp"
@@ -246,7 +247,11 @@ func serveLab(scenario string) (*dnsserver.Server, error) {
 	return srv, nil
 }
 
-var recordTypeSchema = json.RawMessage(`{"type": "array", "items": {"enum": ["A", "AAAA", "CNAME", "NS", "MX", "TXT"]}, "description": "Record types to look up; default A and AAAA. CNAME and NS add takeover hints."}`)
+// recordTypeSchema offers every type -type accepts (#264).
+var recordTypeSchema = func() json.RawMessage {
+	enum, _ := json.Marshal(dns.Types())
+	return json.RawMessage(`{"type": "array", "items": {"enum": ` + string(enum) + `}, "description": "Record types to look up; default A and AAAA. CNAME and NS add takeover hints."}`)
+}()
 
 func labScanTool(cfg mcpConfig) mcp.Tool {
 	scenarios, _ := json.Marshal(labScenarios())

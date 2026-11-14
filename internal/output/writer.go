@@ -34,6 +34,10 @@ const (
 	FormatJSONL
 )
 
+// Formats names the output formats -format accepts, for completion and
+// messages (#264). "ndjson" is an accepted alias of jsonl, left out here.
+func Formats() []string { return []string{"text", "json", "jsonl", "csv"} }
+
 // ParseFormat converts a flag string into a Format.
 func ParseFormat(s string) (Format, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {

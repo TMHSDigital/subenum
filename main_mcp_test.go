@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/labzone"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -357,6 +358,35 @@ func TestMCPVerdictMatchesReport(t *testing.T) {
 		if strings.ContainsAny(reason, "{}") || strings.Contains(reason, "MaxDuration") || strings.Contains(reason, "MaxQueries") {
 			t.Errorf("%s: reason %q names a setting the agent does not know", tc.name, reason)
 		}
+	}
+}
+
+// TestTypeAndFormatListsAgree is #264's drift guard: completion and the MCP
+// schema offer exactly the record types and formats the flags accept.
+func TestTypeAndFormatListsAgree(t *testing.T) {
+	for _, typ := range dns.Types() {
+		if !slices.Contains(valueChoices["type"], typ) {
+			t.Errorf("-type completion lacks %s", typ)
+		}
+	}
+	for _, f := range output.Formats() {
+		if _, err := output.ParseFormat(f); err != nil {
+			t.Errorf("output.Formats lists %q, which ParseFormat rejects: %v", f, err)
+		}
+	}
+	if !slices.Equal(valueChoices["format"], output.Formats()) {
+		t.Errorf("-format completion %v, want %v", valueChoices["format"], output.Formats())
+	}
+	var schema struct {
+		Items struct {
+			Enum []string `json:"enum"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(recordTypeSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(schema.Items.Enum, dns.Types()) {
+		t.Errorf("MCP types enum %v, want %v", schema.Items.Enum, dns.Types())
 	}
 }
 

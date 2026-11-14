@@ -32,10 +32,16 @@ func RecordKey(r Record) string { return r.Type + "\x00" + r.Value }
 // the historical LookupHost behavior (A and AAAA).
 var DefaultTypes = []string{"A", "AAAA"}
 
-var supportedTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true, "NS": true, "MX": true, "TXT": true}
+// typeOrder is every record type -type accepts, in the order help and
+// completion list them. It is the one list (#264): Types serves it to the
+// CLI's completion and the MCP schema, and queriesPerType must price each.
+var typeOrder = []string{"A", "AAAA", "CNAME", "NS", "MX", "TXT"}
+
+// Types returns the record types -type accepts, in a fixed order.
+func Types() []string { return slices.Clone(typeOrder) }
 
 // SupportedTypes names the record types -type accepts, for messages.
-const SupportedTypes = "A, AAAA, CNAME, NS, MX, TXT"
+var SupportedTypes = strings.Join(typeOrder, ", ")
 
 // Outcome is a coarse classification of one resolver attempt so callers can
 // tell a definitive negative (NXDOMAIN) apart from an infrastructure failure.
@@ -111,7 +117,7 @@ func ParseTypes(s string) ([]string, error) {
 		if t == "" {
 			continue
 		}
-		if !supportedTypes[t] {
+		if !slices.Contains(typeOrder, t) {
 			return nil, fmt.Errorf("unsupported record type %q (want %s)", part, SupportedTypes)
 		}
 		if !seen[t] {

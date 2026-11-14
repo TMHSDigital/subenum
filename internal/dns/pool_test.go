@@ -82,6 +82,22 @@ func TestQueriesFor(t *testing.T) {
 	}
 }
 
+// TestTypesArePriced: every type -type accepts has a query cost, and no
+// cost is listed for a type it rejects (#264).
+func TestTypesArePriced(t *testing.T) {
+	if len(queriesPerType) != len(Types()) {
+		t.Errorf("queriesPerType prices %d types, Types lists %d", len(queriesPerType), len(Types()))
+	}
+	for _, typ := range Types() {
+		if queriesPerType[typ] < 1 {
+			t.Errorf("type %s has no query cost", typ)
+		}
+		if _, err := ParseTypes(typ); err != nil {
+			t.Errorf("ParseTypes(%s): %v", typ, err)
+		}
+	}
+}
+
 // TestPoolReservesWireQueries resolves through a capped member on a fake
 // clock and checks the slots Resolve books (#236): one per wire query the
 // lookup sends, not one per record type, so default types book two and a
