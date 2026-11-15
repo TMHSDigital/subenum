@@ -216,7 +216,8 @@ type formModel struct {
 	focus   int
 	err     string
 	loading bool // wordlist is loading in the background; ctrl+r is ignored
-	width   int
+	width   int  // terminal size, 0 until the first size message
+	height  int
 }
 
 // newFormModel creates a form, optionally pre-seeded from a saved config.
@@ -272,7 +273,7 @@ func (m *formModel) moveFocus(delta int) {
 func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
+		m.width, m.height = msg.Width, msg.Height
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -311,18 +312,105 @@ func (m formModel) shiftFocus(delta int) (formModel, tea.Cmd) {
 	return m, nil
 }
 
+// View renders the form. On a terminal too short for all of it the logo is
+// dropped, then the field rows scroll to keep the focused one in view; the
+// error or loading line and the key hints are always drawn (#287).
 func (m formModel) View() string {
+	title := titleStyle.Render("Configure Scan") + "\n"
+	header := logo() + "\n\n" + title
+	rows := m.rows()
+	footer := m.footer()
+
+	heights := make([]int, len(rows))
+	total := 0
+	for i, r := range rows {
+		heights[i] = m.lines(r)
+		total += heights[i]
+	}
+	// Before the first size message the height is unknown: draw everything.
+	if m.height <= 0 || m.lines(header)+total+m.lines(footer) <= m.height {
+		return header + strings.Join(rows, "\n") + "\n" + footer
+	}
+	header = title
+	avail := m.height - m.lines(header) - m.lines(footer)
+	if total <= avail {
+		return header + strings.Join(rows, "\n") + "\n" + footer
+	}
+
+	// Two of the lines left say how many fields are off each end.
+	lo, hi := rowWindow(heights, m.focus, max(1, avail-2))
 	var b strings.Builder
+	b.WriteString(header)
+	if lo > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more fields", lo)))
+	}
+	b.WriteString("\n" + strings.Join(rows[lo:hi], "\n") + "\n")
+	if hi < len(rows) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more fields", len(rows)-hi)))
+	}
+	b.WriteString("\n" + footer)
+	return b.String()
+}
 
-	b.WriteString(logo() + "\n\n")
-	b.WriteString(titleStyle.Render("Configure Scan") + "\n")
+// lines counts the terminal lines s takes, a line wider than the terminal
+// wrapping onto the next. A trailing newline does not start another line.
+func (m formModel) lines(s string) int {
+	n := 0
+	for _, l := range strings.Split(strings.TrimSuffix(s, "\n"), "\n") {
+		n++
+		if m.width > 0 {
+			n += max(0, lipgloss.Width(l)-1) / m.width
+		}
+	}
+	return n
+}
 
+// rowWindow picks the rows [lo, hi) to draw in avail lines so that row focus
+// is among them. It keeps to the top of the form while focus fits there, then
+// to the bottom, and otherwise grows the window around focus.
+func rowWindow(heights []int, focus, avail int) (lo, hi int) {
+	used := 0
+	for hi < len(heights) && used+heights[hi] <= avail {
+		used += heights[hi]
+		hi++
+	}
+	if focus < hi {
+		return 0, hi
+	}
+	lo, hi, used = len(heights), len(heights), 0
+	for lo > 0 && used+heights[lo-1] <= avail {
+		lo--
+		used += heights[lo]
+	}
+	if focus >= lo {
+		return lo, hi
+	}
+	lo, hi, used = focus, focus+1, heights[focus]
+	for grew := true; grew; {
+		grew = false
+		if lo > 0 && used+heights[lo-1] <= avail {
+			lo--
+			used += heights[lo]
+			grew = true
+		}
+		if hi < len(heights) && used+heights[hi] <= avail {
+			used += heights[hi]
+			hi++
+			grew = true
+		}
+	}
+	return lo, hi
+}
+
+// rows renders one line per form field, indexed by the field constants.
+func (m formModel) rows() []string {
+	rows := make([]string, 0, fieldCount)
 	for f, spec := range formFields {
 		if !m.shown(f) {
 			gate := formFields[spec.gate].name()
 			// The label's width plus the "> " of a text field, so the hint
 			// lines up with the values.
-			b.WriteString(dimmedRow.Render(fmt.Sprintf("  %-22s(enable %s)", spec.name()+":", gate)) + "\n")
+			rows = append(rows, dimmedRow.Render(fmt.Sprintf("  %-22s(enable %s)", spec.name()+":", gate)))
 			continue
 		}
 		var content string
@@ -336,11 +424,18 @@ func (m formModel) View() string {
 		}
 		lbl := labelStyle.Render(spec.name() + ":")
 		if m.focus == f {
-			b.WriteString(focusedStyle.Render("▸ ") + lbl + content + "\n")
+			rows = append(rows, focusedStyle.Render("▸ ")+lbl+content)
 		} else {
-			b.WriteString("  " + lbl + content + "\n")
+			rows = append(rows, "  "+lbl+content)
 		}
 	}
+	return rows
+}
+
+// footer renders what follows the field rows: the validation error or the
+// loading line, if any, and the key hints.
+func (m formModel) footer() string {
+	var b strings.Builder
 
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("  ✗ "+m.err) + "\n")

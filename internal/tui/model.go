@@ -320,6 +320,8 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 				saved, _ := loadSavedConfig()
 				m.state = stateForm
 				m.form = newFormModel(saved)
+				// No size message follows, and the form scrolls by it (#287).
+				m.form.width, m.form.height = m.width, m.height
 				m.events = nil
 				return m, m.form.initCmd()
 			}

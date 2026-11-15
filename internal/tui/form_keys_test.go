@@ -2,10 +2,12 @@ package tui
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Key handling for the form and the root model (#172).
@@ -241,5 +243,92 @@ func TestModelScanKeys(t *testing.T) {
 	}
 	if !strings.Contains(fm.View().Content, "Configure Scan") {
 		t.Fatal("r after done does not show the form")
+	}
+}
+
+// formLines is the form's view as the lines a terminal shows, colours removed.
+func formLines(m formModel) []string {
+	ansi := regexp.MustCompile("\x1b\\[[0-9;?]*[a-zA-Z]")
+	return strings.Split(ansi.ReplaceAllString(m.View(), ""), "\n")
+}
+
+// On a terminal shorter than the form, the fields scroll: the focused field,
+// the validation error and the key hints stay on screen (#287).
+func TestFormFitsShortTerminal(t *testing.T) {
+	const width, height = 80, 24
+	m := newFormModel(savedConfig{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	m.err = "Domain is required"
+
+	check := func(step string) {
+		t.Helper()
+		lines := formLines(m)
+		if len(lines) > height {
+			t.Fatalf("%s: view is %d lines on a %d-line terminal", step, len(lines), height)
+		}
+		v := strings.Join(lines, "\n")
+		for _, want := range []string{"▸ " + formFields[m.focus].name() + ":", "✗ Domain is required", "ctrl+r run"} {
+			if !strings.Contains(v, want) {
+				t.Fatalf("%s: view lacks %q:\n%s", step, want, v)
+			}
+		}
+	}
+
+	check("start")
+	if v := strings.Join(formLines(m), "\n"); !strings.Contains(v, "more fields") || strings.Contains(v, "Retry Inconclusive") {
+		t.Errorf("the fields below the window are not announced:\n%s", v)
+	}
+	// Every field less the 2 gated ones: that many tabs are back on the domain.
+	for range fieldCount - 2 {
+		m, _ = m.Update(keyTab)
+		check("tab to " + formFields[m.focus].name())
+	}
+	if m.focus != fieldDomain {
+		t.Fatalf("focus = %d after a full round, want the domain", m.focus)
+	}
+	for range fieldCount - 2 {
+		m, _ = m.Update(keyShiftTab)
+		check("shift+tab to " + formFields[m.focus].name())
+	}
+
+	// A value wider than the terminal wraps onto more lines; they are counted.
+	m.focus = fieldExclude
+	m.inputs[fieldExclude].SetValue(strings.Repeat("a.example.com,", 20))
+	rows := 0
+	for _, l := range formLines(m) {
+		rows += max(1, (lipgloss.Width(l)+width-1)/width)
+	}
+	if rows > height {
+		t.Errorf("with a wrapped value the view takes %d terminal lines, want at most %d", rows, height)
+	}
+	check("wrapped value")
+
+	// Much too short for any layout: the focused field is still shown.
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 3})
+	if v := strings.Join(formLines(m), "\n"); !strings.Contains(v, "▸ "+formFields[m.focus].name()+":") {
+		t.Errorf("3-line terminal: the focused field is not shown:\n%s", v)
+	}
+
+	// A terminal tall enough shows the whole form, as does an unknown size.
+	want := strings.Join(formLines(newFormModel(savedConfig{})), "\n")
+	tall, _ := newFormModel(savedConfig{}).Update(tea.WindowSizeMsg{Width: width, Height: 40})
+	if got := strings.Join(formLines(tall), "\n"); got != want {
+		t.Errorf("40-line terminal does not show the whole form:\n%s", got)
+	}
+}
+
+// The form opened by r after a scan knows the terminal size: no resize message
+// follows it (#287).
+func TestFormAfterScanKeepsTerminalSize(t *testing.T) {
+	redirectConfig(t)
+	m := Model{state: stateScan, scanView: newScanViewModel(80, 24, false), width: 80, height: 24}
+	m.scanView.done = true
+	next, _ := m.Update(typeText("r"))
+	fm := next.(Model)
+	if fm.state != stateForm {
+		t.Fatalf("r after done: state=%v", fm.state)
+	}
+	if n := len(formLines(fm.form)); n > 24 {
+		t.Errorf("form after a scan is %d lines on a 24-line terminal", n)
 	}
 }
