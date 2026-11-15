@@ -123,12 +123,16 @@ type SourceSummary struct {
 	Truncated bool `json:"truncated,omitempty"`
 }
 
-// PermutationSummary counts a target's -permute pass.
+// PermutationSummary counts a target's -permute pass. Processed and
+// QueriesSent are the pass's own; the target's queries_sent includes them, and
+// its verdict is the worse of the two passes' (#298).
 type PermutationSummary struct {
-	Seeds      int    `json:"seeds"`
-	Candidates int    `json:"candidates"`
-	Found      int    `json:"found"`
-	Verdict    string `json:"verdict,omitempty"`
+	Seeds       int    `json:"seeds"`
+	Candidates  int    `json:"candidates"`
+	Found       int    `json:"found"`
+	Processed   int64  `json:"processed,omitempty"`
+	QueriesSent int64  `json:"queries_sent,omitempty"`
+	Verdict     string `json:"verdict,omitempty"`
 }
 
 // Outcomes counts how each lookup ended. SERVFAIL and other errors Go's

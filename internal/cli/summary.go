@@ -45,8 +45,27 @@ func targetSummary(domain, status string, res targetResult) output.TargetSummary
 	if p := res.permutation; p != nil && res.done && status != "" && status != "skipped" {
 		t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}
 		if p.pass.done {
-			t.Permutation.Verdict, _ = p.pass.final.Stats.Verdict(status == "interrupted")
+			// The pass is part of the target's scan: its queries count, and a
+			// worse verdict than the main pass's becomes the target's (#298).
+			final := p.pass.final
+			verdict, reason := final.Stats.Verdict(status == "interrupted")
+			t.Permutation.Verdict = verdict
+			t.Permutation.Processed, t.Permutation.QueriesSent = final.Processed, final.Stats.QueriesSent
+			t.QueriesSent += final.Stats.QueriesSent
+			if scan.VerdictRank(verdict) > scan.VerdictRank(t.Verdict) {
+				t.Verdict, t.Reason = verdict, permutationReason+scan.Render(reason, scan.FlagName)
+			}
+		} else if p.candidates > 0 && scan.VerdictRank(t.Verdict) < scan.VerdictRank(scan.VerdictDegraded) {
+			reason := p.pass.err
+			if reason == "" {
+				reason = "it did not run to completion"
+			}
+			t.Verdict, t.Reason = scan.VerdictDegraded, permutationReason+reason
 		}
 	}
 	return t
 }
+
+// permutationReason starts a target's verdict reason when the verdict is the
+// -permute pass's.
+const permutationReason = "permutation pass: "
