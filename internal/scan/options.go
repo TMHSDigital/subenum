@@ -60,6 +60,7 @@ type Options struct {
 	// Resume point of an interrupted scan (#73); see Config.
 	ResumeFrom    int
 	ResumeParents []string
+	RetryPrior    []Pending // see Config (#315)
 	NoAbort       bool
 	Verbose       bool
 	Logf          dns.Logf
@@ -129,5 +130,6 @@ func (o Options) Config() Config {
 
 		ResumeFrom:    o.ResumeFrom,
 		ResumeParents: o.ResumeParents,
+		RetryPrior:    o.RetryPrior,
 	}
 }

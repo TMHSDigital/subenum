@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -384,6 +385,66 @@ func TestE2EMaxDurationSavesResumeState(t *testing.T) {
 	}
 	if sum.Verdict != "complete" || len(sum.Targets) != 1 || sum.Targets[0].SkippedCap != 0 || sum.Targets[0].StoppedBy != "" || sum.Targets[0].Processed < n {
 		t.Errorf("finished scan: verdict %q, targets %+v; want complete with all %d words tested and none skipped", sum.Verdict, sum.Targets, n)
+	}
+}
+
+// TestE2EResumeRetriesEarlierInconclusive covers #315: a name that timed out
+// before an interrupt, whose -retry-inconclusive pass never ran, is retried
+// by the resumed run, and leaves the -inconclusive list once it answers.
+func TestE2EResumeRetriesEarlierInconclusive(t *testing.T) {
+	t.Parallel()
+	words := []string{"flaky"}
+	for i := 0; i < 20; i++ {
+		words = append(words, fmt.Sprintf("host%d", i))
+	}
+	wl := writeFile(t, "wl.txt", strings.Join(words, "\n")+"\n")
+	signals := make(chan os.Signal, 1)
+	var stopped atomic.Bool
+	var once sync.Once
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch {
+		case q.Name == "example.test" && q.Type == dnsmessage.TypeA:
+			return dnstest.Reply{A: []string{"192.0.2.1"}}
+		case q.Name == "flaky.example.test":
+			if !stopped.Load() {
+				return dnstest.Dropped // a timeout, until the run is interrupted
+			}
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.7"}}
+			}
+		case q.Name == "host12.example.test":
+			// Past the first chunk, so flaky is before the resume point.
+			once.Do(func() {
+				stopped.Store(true)
+				signals <- os.Interrupt
+			})
+		}
+		return dnstest.NXDomain
+	})
+	dir := t.TempDir()
+	state, incon, out := filepath.Join(dir, "state.json"), filepath.Join(dir, "incon.txt"), filepath.Join(dir, "results.txt")
+	// One worker in order; a short timeout for the one name that never
+	// answers, two tries for the rest.
+	code, first := runCLIMergedWith(t, runArgs{signals: signals, args: []string{"-dns-server", srv.Addr, "-type", "A", "-progress=false",
+		"-t", "1", "-timeout", "1000", "-attempts", "1", "-retry-inconclusive", "-inconclusive", incon,
+		"-state", state, "-o", out, "-w", wl, "example.test"}})
+	if code != 130 {
+		t.Fatalf("interrupted run: exit %d, want 130\n%s", code, first)
+	}
+	var st resumeState
+	if data, err := os.ReadFile(state); err != nil || json.Unmarshal(data, &st) != nil || len(st.Targets) != 1 ||
+		!slices.Contains(st.Targets[0].Pending, savedPending{Name: "flaky.example.test", Outcome: "timeout"}) {
+		t.Fatalf("the state does not keep flaky for the retry pass (err %v):\n%s", err, data)
+	}
+	code, resumed := runCLIMerged(t, "-resume", state)
+	if code != 0 {
+		t.Fatalf("resumed run: exit %d\n%s", code, resumed)
+	}
+	if data, err := os.ReadFile(out); err != nil || !strings.Contains(string(data), "flaky.example.test") {
+		t.Errorf("the resumed run did not retry and find flaky (err %v):\n%s\n%s", err, data, resumed)
+	}
+	if data, _ := os.ReadFile(incon); strings.Contains(string(data), "flaky") {
+		t.Errorf("flaky is still listed inconclusive:\n%s", data)
 	}
 }
 
@@ -1017,11 +1078,7 @@ func TestResumeStateKeys(t *testing.T) {
 		case reflect.Bool:
 			v.SetBool(true)
 		case reflect.Slice:
-			if v.Type().Elem().Kind() == reflect.String {
-				v.Set(reflect.ValueOf([]string{"a.example.com"}))
-			} else {
-				v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
-			}
+			setOne(v)
 		case reflect.Struct:
 			v.Field(0).SetInt(1) // Repeat: not saved (json:"-")
 		default:
@@ -1041,8 +1098,10 @@ func TestResumeStateKeys(t *testing.T) {
 				Change: "changed", PreviousRecords: []dns.Record{{Type: "A", Value: "192.0.2.2"}},
 				Permutation: true, Sources: []string{"wordlist"},
 			}},
-			Entries:     "00",
-			Permute:     &resumePass{RootDone: 1, Stats: stats, Processed: 1, Total: 1, Found: 1},
+			Pending: []savedPending{{Name: "b.example.com", Outcome: "timeout"}},
+			Entries: "00",
+			Permute: &resumePass{RootDone: 1, Stats: stats, Processed: 1, Total: 1, Found: 1,
+				Pending: []savedPending{{Name: "c.example.com", Outcome: "refused"}}},
 			CT:          []string{"a"},
 			CTFetched:   true,
 			Sources:     map[string][]string{"crtsh": {"a"}},
@@ -1093,8 +1152,10 @@ func TestResumeStateKeys(t *testing.T) {
 		targets targets.axfr targets.axfr_done targets.axfr_servers targets.ct targets.ct_fetched
 		targets.denial targets.domain targets.done targets.entries targets.processed targets.root_done
 		targets.sources targets.sources.* targets.total targets.stats
+		targets.pending targets.pending.name targets.pending.outcome
 		targets.permute targets.permute.found targets.permute.processed targets.permute.root_done
 		targets.permute.total targets.permute.stats
+		targets.permute.pending targets.permute.pending.name targets.permute.pending.outcome
 		targets.results targets.results.change targets.results.internal_address targets.results.permutation
 		targets.results.previous_records targets.results.previous_records.type targets.results.previous_records.value
 		targets.results.records targets.results.records.type targets.results.records.value
@@ -1114,6 +1175,18 @@ func TestResumeStateKeys(t *testing.T) {
 	}
 }
 
+// setOne sets a scan.Stats slice field to one element.
+func setOne(v reflect.Value) {
+	switch v.Type().Elem() {
+	case reflect.TypeFor[string]():
+		v.Set(reflect.ValueOf([]string{"a.example.com"}))
+	case reflect.TypeFor[dns.Record]():
+		v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+	default:
+		v.Set(reflect.Append(reflect.MakeSlice(v.Type(), 0, 1), reflect.New(v.Type().Elem()).Elem()))
+	}
+}
+
 // TestMergeStatsCoversEveryField is the drift guard of #162: a field added to
 // scan.Stats that mergeStats drops fails here. Each field set in either the
 // saved or the resumed run must survive the merge; RootDone, and Aborted and
@@ -1124,8 +1197,9 @@ func TestMergeStatsCoversEveryField(t *testing.T) {
 	for i := range st.NumField() {
 		name := st.Field(i).Name
 		for _, side := range []string{"saved", "resumed"} {
-			// The saved part's Repeat was taken off it (withoutRepeat).
-			if side == "saved" && (name == "RootDone" || name == "Aborted" || name == "Expired" || name == "Repeat") {
+			// The saved part's Repeat was taken off it (withoutRepeat), and
+			// its Pending handed to the resumed part (handOverPending).
+			if side == "saved" && (name == "RootDone" || name == "Aborted" || name == "Expired" || name == "Repeat" || name == "Pending") {
 				continue
 			}
 			var a, b scan.Stats
@@ -1139,11 +1213,7 @@ func TestMergeStatsCoversEveryField(t *testing.T) {
 			case reflect.Bool:
 				v.SetBool(true)
 			case reflect.Slice:
-				if v.Type().Elem().Kind() == reflect.String {
-					v.Set(reflect.ValueOf([]string{"a.example.com"}))
-				} else {
-					v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
-				}
+				setOne(v)
 			case reflect.Struct:
 				v.Field(0).SetInt(1)
 			default:

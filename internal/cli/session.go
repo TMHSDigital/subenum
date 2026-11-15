@@ -753,7 +753,8 @@ func (s *session) restoreTarget(saved *resumeTarget) (mainSaved *resumePass, res
 			restoredHits++
 		}
 	}
-	mainSaved = &resumePass{RootDone: saved.RootDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results) - restoredHits)}
+	mainSaved = &resumePass{RootDone: saved.RootDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results) - restoredHits),
+		Pending: saved.Pending}
 	return mainSaved, restoredHits
 }
 
@@ -767,6 +768,7 @@ func (s *session) mainPass(ctx context.Context, p scanPass, saved *resumePass) t
 			return targetResult{done: true, final: saved.event()}
 		}
 		p.maxQueries = left
+		saved.handOverPending(&p, s.f.retryIncon)
 	}
 	s.refound = 0
 	res := scanTarget(ctx, s, p, s.emitMain)

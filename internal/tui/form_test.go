@@ -482,6 +482,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"ListInconclusive":  "the scan screen shows the counts, not the names (#300)",
 		"ResumeFrom":        "the TUI does not resume interrupted scans",
 		"ResumeParents":     "the TUI does not resume interrupted scans",
+		"RetryPrior":        "the TUI does not resume interrupted scans",
 		"Verbose":           "the scan screen shows events itself; there is no debug log",
 		"Logf":              "the scan screen shows events itself; there is no debug log",
 	}

@@ -125,7 +125,11 @@ func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permut
 	// giving names such as <candidate>.api-dev.<target>, and multiply the
 	// pass past the recursion ceiling (#111).
 	pass := scanPass{domain: target, entries: candidates, maxQueries: s.f.maxQueries, flat: true}
-	if prev := p.prev; prev != nil {
+	if p.prev != nil {
+		// A copy: the saved state keeps its pending names should this pass
+		// stop before it reports (#315).
+		prev := *p.prev
+		p.prev = &prev
 		left, ok := remainingBudget(s.f.maxQueries, prev.Processed)
 		if !ok {
 			out.Info("Permutation pass for %s: the -max-queries budget of %d was spent before the run stopped", target, s.f.maxQueries)
@@ -133,6 +137,7 @@ func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permut
 			return res
 		}
 		pass.resumeFrom, pass.maxQueries = prev.RootDone, left
+		prev.handOverPending(&pass, s.f.retryIncon)
 		out.Info("Resuming the permutation pass for %s at candidate %d of %d", target, prev.RootDone, len(candidates))
 	} else {
 		out.Info("Permutation pass for %s: %d candidates from %d seed names", target, len(candidates), len(rel))

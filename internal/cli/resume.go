@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -48,7 +49,8 @@ type resumeTarget struct {
 	Stats     scan.Stats      `json:"stats"`
 	Processed int64           `json:"processed"`
 	Total     int64           `json:"total"`
-	Results   []output.Result `json:"results"` // names found so far, re-emitted on resume
+	Results   []output.Result `json:"results"`           // names found so far, re-emitted on resume
+	Pending   []savedPending  `json:"pending,omitempty"` // left for -retry-inconclusive (#315)
 	// Entries is the sha256 of the target's normalized wordlist, so a
 	// changed bundled list (a new binary) or -w file refuses to resume (#109).
 	Entries string `json:"entries,omitempty"`
@@ -72,11 +74,61 @@ type resumeTarget struct {
 
 // resumePass is how far an interrupted scan pass got.
 type resumePass struct {
-	RootDone  int        `json:"root_done"`
-	Stats     scan.Stats `json:"stats"`
-	Processed int64      `json:"processed"`
-	Total     int64      `json:"total"`
-	Found     int64      `json:"found"`
+	RootDone  int            `json:"root_done"`
+	Stats     scan.Stats     `json:"stats"`
+	Processed int64          `json:"processed"`
+	Total     int64          `json:"total"`
+	Found     int64          `json:"found"`
+	Pending   []savedPending `json:"pending,omitempty"` // left for -retry-inconclusive (#315)
+}
+
+// savedPending is a name whose lookup was inconclusive and that the stopped
+// run's -retry-inconclusive pass did not get to, with its outcome
+// ("timeout", "refused" or "error"), so the resumed run retries it (#315).
+type savedPending struct {
+	Name    string `json:"name"`
+	Outcome string `json:"outcome"`
+}
+
+// savePending converts the engine's Stats.Pending for the state file.
+func savePending(pending []scan.Pending) []savedPending {
+	var out []savedPending
+	for _, p := range pending {
+		out = append(out, savedPending{Name: p.Name, Outcome: p.Outcome.String()})
+	}
+	return out
+}
+
+// retryPrior converts saved names back for Config.RetryPrior.
+func retryPrior(saved []savedPending) []scan.Pending {
+	var out []scan.Pending
+	for _, p := range saved {
+		o := dns.OutcomeOther
+		switch p.Outcome {
+		case dns.OutcomeTimeout.String():
+			o = dns.OutcomeTimeout
+		case dns.OutcomeRefused.String():
+			o = dns.OutcomeRefused
+		}
+		out = append(out, scan.Pending{Name: p.Name, Outcome: o})
+	}
+	return out
+}
+
+// handOverPending passes the names a saved pass left for its retry pass to
+// the resumed pass, and takes them off the saved inconclusive list: the
+// resumed pass lists the ones it still gets no answer for (#315).
+func (p *resumePass) handOverPending(pass *scanPass, retry bool) {
+	if !retry || len(p.Pending) == 0 {
+		return
+	}
+	pass.retryPrior = retryPrior(p.Pending)
+	handed := make(map[string]bool, len(p.Pending))
+	for _, it := range p.Pending {
+		handed[it.Name] = true
+	}
+	p.Stats.Inconclusive = slices.DeleteFunc(slices.Clone(p.Stats.Inconclusive), func(name string) bool { return handed[name] })
+	p.Pending = nil
 }
 
 // newResumePass records a pass's final event, less what resuming it repeats.
@@ -84,7 +136,8 @@ type resumePass struct {
 // is not recursive, nothing below depth 1 either.
 func newResumePass(ev scan.Event) *resumePass {
 	ev = withoutRepeat(ev)
-	return &resumePass{RootDone: int(ev.Stats.RootDone), Stats: ev.Stats, Processed: ev.Processed, Total: ev.Total, Found: ev.Found}
+	return &resumePass{RootDone: int(ev.Stats.RootDone), Stats: ev.Stats, Processed: ev.Processed, Total: ev.Total, Found: ev.Found,
+		Pending: savePending(ev.Stats.Pending)}
 }
 
 // withoutRepeat drops from a stopped pass's final event the lookups and
@@ -415,7 +468,8 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 		a.Fingerprint = b.Fingerprint
 	}
 	a.RootDone = b.RootDone
-	a.Repeat = b.Repeat // the saved part had its own taken off (withoutRepeat)
+	a.Repeat = b.Repeat   // the saved part had its own taken off (withoutRepeat)
+	a.Pending = b.Pending // the saved part handed its own over (handOverPending)
 	return a
 }
 
@@ -498,10 +552,14 @@ func saveResumeState(s *session) bool {
 			}
 			t.Stats, t.Processed, t.Total = final.Stats, final.Processed, final.Total
 			t.RootDone = int(final.Stats.RootDone)
+			if !t.Done {
+				t.Pending = savePending(final.Stats.Pending)
+			}
 		case saved != nil:
 			// Interrupted during preflight or the wildcard probe, before the
 			// resumed scan reported anything.
 			t.Stats, t.Processed, t.Total, t.RootDone = saved.Stats, saved.Processed, saved.Total, saved.RootDone
+			t.Pending = saved.Pending
 		}
 		if p := res.permutation; p != nil && p.pass.done {
 			t.Permute = newResumePass(p.pass.final)

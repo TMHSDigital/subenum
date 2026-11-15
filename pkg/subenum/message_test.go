@@ -37,6 +37,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"Simulate":      "mapped, but zero here: ResolverPool needs a live scan",
 		"ResumeFrom":    "the library does not resume interrupted scans",
 		"ResumeParents": "the library does not resume interrupted scans",
+		"RetryPrior":    "the library does not resume interrupted scans",
 	}
 	c := Config{
 		Domain: "example.com", Words: []string{"www"}, Concurrency: 7, Timeout: 700 * time.Millisecond,

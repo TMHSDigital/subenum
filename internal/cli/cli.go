@@ -193,10 +193,11 @@ func (in *runtimeInputs) readLines(path string) ([]string, error) {
 type scanPass struct {
 	domain      string
 	entries     []string
-	maxQueries  int      // this pass's -max-queries budget
-	resumeFrom  int      // set while resuming (#73)
-	resumeNames []string // names found before the interrupt
-	flat        bool     // one level deep: -recursive does not apply (#111)
+	maxQueries  int            // this pass's -max-queries budget
+	resumeFrom  int            // set while resuming (#73)
+	resumeNames []string       // names found before the interrupt
+	flat        bool           // one level deep: -recursive does not apply (#111)
+	retryPrior  []scan.Pending // names the stopped run left for its retry pass (#315)
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
@@ -755,8 +756,10 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		Deadline:    in.deadline,
 		Exclude:     in.excludes,
 		ResumeFrom:  p.resumeFrom,
-		// The retry pass belongs to the scan, so a resumed scan runs it too.
+		// The retry pass belongs to the scan, so a resumed scan runs it too,
+		// for the names the stopped run left it as well (#315).
 		RetryInconclusive: f.retryIncon,
+		RetryPrior:        p.retryPrior,
 		// Only the -inconclusive file reads the names (#300).
 		ListInconclusive:  f.inconFile != "",
 		TakeoverProviders: in.providers,

@@ -75,7 +75,11 @@ type Config struct {
 	// recursive scan still has to expand.
 	ResumeFrom    int
 	ResumeParents []string
-	Resolver      *net.Resolver // reused across lookups; nil means scan.Run constructs one
+	// RetryPrior are the names the earlier part of a resumed scan left for
+	// its retry pass (its Stats.Pending); under RetryInconclusive this scan's
+	// retry pass looks them up (#315).
+	RetryPrior []Pending
+	Resolver   *net.Resolver // reused across lookups; nil means scan.Run constructs one
 	// Pool, when set, spreads candidate lookups over several resolvers (#69).
 	// Every pool hit is re-validated against Resolver (the trusted
 	// -dns-server), whose answer is the one reported; preflight and wildcard
@@ -198,6 +202,11 @@ type Stats struct {
 	// Repeat is the part of the counters above that a resume from RootDone
 	// does again; not saved in the state file (#341).
 	Repeat Repeat `json:"-"`
+	// Pending lists, under Config.RetryInconclusive, the inconclusive names
+	// the retry pass did not get to (the scan stopped first) and a resume
+	// does not look up again anyway, for Config.RetryPrior of the resumed
+	// scan (#315). The CLI saves it apart from Stats.
+	Pending []Pending `json:"-"`
 }
 
 // Repeat counts the work of a scan that a resume from its RootDone repeats
@@ -309,6 +318,15 @@ type pendingLookup struct {
 	name    string // a recursive child's full name; "" for a depth-1 name
 	root    int    // index into cfg.Entries for a depth-1 name, else -1
 	outcome dns.Outcome
+	prior   bool // from Config.RetryPrior: an earlier part of a resumed scan looked it up (#315)
+	retried bool // the retry pass looked it up again, still without an answer
+}
+
+// Pending is a name whose lookup was inconclusive and that the retry pass
+// has not looked up again yet, with the outcome it got (#315).
+type Pending struct {
+	Name    string
+	Outcome dns.Outcome
 }
 
 // pendingOf is the list entry for job j, whose lookup ended in o.
@@ -354,26 +372,6 @@ func (l *pendingList) take() []pendingLookup {
 	items := l.items
 	l.items = nil
 	return items
-}
-
-// names empties the list and returns the names it held, sorted, and those
-// of them repeated reports, sorted; nil for a nil list.
-func (l *pendingList) names(cfg *Config, repeated func(pendingLookup) bool) (all, repeats []string) {
-	if l == nil {
-		return nil, nil
-	}
-	items := l.take()
-	all = make([]string, 0, len(items))
-	for _, it := range items {
-		name := it.domain(cfg)
-		all = append(all, name)
-		if repeated(it) {
-			repeats = append(repeats, name)
-		}
-	}
-	sort.Strings(all)
-	sort.Strings(repeats)
-	return all, repeats
 }
 
 func (c *counters) snapshot() Stats {
@@ -735,6 +733,14 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	if cfg.ListInconclusive || cfg.RetryInconclusive {
 		st.pending = &pendingList{}
 	}
+	if cfg.RetryInconclusive {
+		// Names an earlier part of a resumed scan left for its retry pass
+		// (#315). Their first outcome is in that part's counters, so a
+		// recovery here moves it in this part's, which the merge sums.
+		for _, p := range cfg.RetryPrior {
+			st.pending.add(pendingLookup{name: p.Name, root: -1, outcome: p.Outcome, prior: true})
+		}
+	}
 	st.rootStart = min(max(cfg.ResumeFrom, 0), len(cfg.Entries))
 	st.rootOutcome = make([]uint8, len(cfg.Entries)-st.rootStart)
 	st.total.Store(int64(len(cfg.Entries)))
@@ -783,9 +789,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	snap.QueriesSent = queriesSent.Load()
 	snap.Wildcard = wildcardRoot
 	snap.Fingerprint = fingerprint.records()
-	if cfg.ListInconclusive {
-		snap.Inconclusive, repeat.Inconclusive = st.pending.names(&cfg, st.repeated)
-	}
+	st.finishPending(&snap, &repeat)
 	snap.Repeat = repeat
 	if st.auto != nil {
 		snap.RateBackoffs, snap.FinalRate = st.auto.result()
@@ -1002,7 +1006,35 @@ func (s *scanState) recordRepeat(j job, code uint8) {
 // repeated reports whether a resume from the scan's RootDone looks up the
 // inconclusive name it again.
 func (s *scanState) repeated(it pendingLookup) bool {
-	return it.root < 0 || int64(it.root) >= s.stats.rootDone.Load()
+	return !it.prior && (it.root < 0 || int64(it.root) >= s.stats.rootDone.Load())
+}
+
+// finishPending empties the pending list into snap: the inconclusive names
+// and the repeated ones among them, and the names a resumed scan's retry
+// pass must still look up.
+func (s *scanState) finishPending(snap *Stats, repeat *Repeat) {
+	cfg := &s.cfg
+	items := s.pending.take()
+	if cfg.ListInconclusive {
+		all := make([]string, 0, len(items))
+		for _, it := range items {
+			name := it.domain(cfg)
+			all = append(all, name)
+			if s.repeated(it) {
+				repeat.Inconclusive = append(repeat.Inconclusive, name)
+			}
+		}
+		sort.Strings(all)
+		sort.Strings(repeat.Inconclusive)
+		snap.Inconclusive = all
+	}
+	if cfg.RetryInconclusive {
+		for _, it := range items {
+			if !it.retried && !s.repeated(it) {
+				snap.Pending = append(snap.Pending, Pending{Name: it.domain(cfg), Outcome: it.outcome})
+			}
+		}
+	}
 }
 
 // repeat tallies Stats.Repeat once every worker has exited. Every exclusion
@@ -1203,12 +1235,9 @@ func (s *scanState) retryPending(ctx context.Context, workers int) {
 	if ctx.Err() != nil || s.stats.aborted.Load() || s.cfg.pastDeadline() {
 		return
 	}
+	// The list keeps the names the pass does not get to, for Stats.Pending,
+	// and the ones still unanswered after it when something lists them.
 	items := s.pending.take()
-	if !s.cfg.ListInconclusive {
-		// Nothing lists the names the pass leaves unanswered. No worker is
-		// running here, so the field can be cleared without a lock.
-		s.pending = nil
-	}
 	ch := make(chan pendingLookup)
 	var wg sync.WaitGroup
 	for range min(workers, len(items)) {
@@ -1251,7 +1280,10 @@ func (s *scanState) retry(ctx context.Context, it pendingLookup) {
 	}
 	st.retried.Add(1)
 	if inconclusive(outcome) {
-		s.pending.add(it)
+		if cfg.ListInconclusive {
+			it.retried = true
+			s.pending.add(it)
+		}
 		return
 	}
 	st.recovered.Add(1)

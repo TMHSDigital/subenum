@@ -14,6 +14,7 @@ import (
 var engineOnlyStats = map[string]bool{
 	"RootDone": true, // the CLI's -resume point
 	"Repeat":   true, // what a CLI -resume repeats (#341)
+	"Pending":  true, // what a CLI -resume retries (#315)
 }
 
 // bump changes v away from its current value, whatever its kind.
@@ -25,10 +26,13 @@ func bump(t *testing.T, v reflect.Value) {
 	case reflect.Bool:
 		v.SetBool(!v.Bool())
 	case reflect.Slice:
-		if v.Type().Elem().Kind() == reflect.String {
+		switch v.Type().Elem() {
+		case reflect.TypeFor[string]():
 			v.Set(reflect.Append(v, reflect.ValueOf("a.example.com")))
-		} else {
+		case reflect.TypeFor[dns.Record]():
 			v.Set(reflect.Append(v, reflect.ValueOf(dns.Record{Type: "A", Value: "192.0.2.1"})))
+		default:
+			v.Set(reflect.Append(v, reflect.New(v.Type().Elem()).Elem()))
 		}
 	case reflect.Struct:
 		bump(t, v.Field(0))
@@ -63,7 +67,7 @@ func TestStatsCoversEveryEngineField(t *testing.T) {
 	}
 	// engineStats is stats' inverse (#263): every field survives the round
 	// trip, so Stats.Verdict sees what the engine saw.
-	all.RootDone, all.Repeat = 0, scan.Repeat{}
+	all.RootDone, all.Repeat, all.Pending = 0, scan.Repeat{}, nil
 	if back := engineStats(stats(all)); !reflect.DeepEqual(back, all) {
 		t.Errorf("engineStats(stats(s)) = %+v, want %+v", back, all)
 	}
