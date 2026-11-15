@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +49,33 @@ func TestProbeDenial(t *testing.T) {
 		if !strings.HasSuffix(asked, ".example.test") || strings.Count(asked, ".") != 2 {
 			t.Errorf("%q: probed %q, want a random label under example.test", c.denial, asked)
 		}
+	}
+}
+
+// TestProbeDenialRetriesOverTCP covers #305: a truncated UDP answer is asked
+// again over TCP, and the denial records are read from the TCP answer.
+func TestProbeDenialRetriesOverTCP(t *testing.T) {
+	var udp, tcp atomic.Int64
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.TCP {
+			tcp.Add(1)
+		} else {
+			udp.Add(1)
+		}
+		r := dnstest.NXDomain
+		r.Denial = "nsec"
+		r.Truncate = true
+		return r
+	})
+	got, err := ProbeDenial(context.Background(), srv.Addr, "example.test", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != DenialNSEC {
+		t.Errorf("denial = %q, want %q", got, DenialNSEC)
+	}
+	if u, c := udp.Load(), tcp.Load(); u != 1 || c != 1 {
+		t.Errorf("%d UDP and %d TCP queries, want 1 and 1", u, c)
 	}
 }
 

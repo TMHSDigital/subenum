@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"errors"
+	"net"
 	"slices"
 	"testing"
 	"time"
@@ -50,6 +51,16 @@ func TestTransferRefused(t *testing.T) {
 		if !errors.Is(err, ErrTransferRefused) {
 			t.Errorf("%s: err = %v, want ErrTransferRefused", c.name, err)
 		}
+	}
+}
+
+// TestTransferRefusedByClosing covers #305: a server that reads the query
+// and closes the connection without answering has refused the transfer.
+func TestTransferRefusedByClosing(t *testing.T) {
+	addr := tcpServer(t, func(uint16, net.Conn) {})
+	_, err := Transfer(context.Background(), addr, "example.test", 5*time.Second)
+	if !errors.Is(err, ErrTransferRefused) {
+		t.Errorf("err = %v, want ErrTransferRefused", err)
 	}
 }
 
