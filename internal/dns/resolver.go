@@ -152,6 +152,14 @@ func newResolver(timeout time.Duration, dnsServer string, budget *idleBudget) *n
 	r := &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
+			// Go runs A and AAAA lookups in a goroutine of its own, which
+			// keeps retrying after the caller's timeout under a context that
+			// is canceled and has lost the caller's values. A pooled
+			// connection would let such a retry onto the wire unpaced and
+			// uncounted, so a dial under a finished context is refused (#295).
+			if err := dialCtx.Err(); err != nil {
+				return nil, err
+			}
 			if c, ok := dialCtx.Value(queryCounterKey{}).(*atomic.Int64); ok {
 				c.Add(1)
 			}

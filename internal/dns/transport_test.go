@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -131,6 +132,69 @@ func TestDoTReusesConnections(t *testing.T) {
 	}
 	if n := srv.QueriesFor("www.example.com", dnsmessage.TypeA); n != 20 {
 		t.Fatalf("server saw %d A queries, want 20", n)
+	}
+}
+
+// TestDialRefusesDoneContext covers #295: once the dial context is done the
+// Dial hook returns its error instead of a pooled connection, and counts no
+// query.
+func TestDialRefusesDoneContext(t *testing.T) {
+	_, servers := startAllTransports(t)
+	for _, transport := range []string{TransportUDP, TransportTLS} {
+		t.Run(transport, func(t *testing.T) {
+			r := NewResolver(2*time.Second, servers[transport])
+			defer CloseIdleConnections(r)
+			// One lookup leaves a connection in the pool.
+			if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
+				t.Fatal(err)
+			}
+			var sent atomic.Int64
+			ctx, cancel := context.WithCancel(WithQueryCounter(context.Background(), &sent))
+			cancel()
+			c, err := r.Dial(ctx, "udp", "")
+			if c != nil {
+				_ = c.Close()
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("Dial under a canceled context: conn %v, error %v; want context.Canceled", c, err)
+			}
+			if n := sent.Load(); n != 0 {
+				t.Errorf("counted %d queries for a refused dial, want 0", n)
+			}
+		})
+	}
+}
+
+// TestTimedOutLookupSendsNoLateQueries covers #295 end to end: after an A
+// lookup times out, Go's resolver goroutine must not send the name again on
+// a pooled socket, so the server sees exactly the queries that were counted.
+// Go would retry after the system resolver timeout (5s by default), so the
+// test has to wait that long.
+func TestTimedOutLookupSendsNoLateQueries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the system resolver timeout")
+	}
+	t.Parallel()
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Name == "slow.example.com" {
+			return dnstest.Dropped
+		}
+		return dnstest.NXDomain
+	})
+	r := NewResolver(300*time.Millisecond, srv.Addr)
+	defer CloseIdleConnections(r)
+	var sent atomic.Int64
+	ctx := WithQueryCounter(context.Background(), &sent)
+	if _, o := (Lookup{Resolver: r, Timeout: 300 * time.Millisecond, Attempts: 1, Types: []string{"A"}}).Resolve(ctx, "slow.example.com"); o != OutcomeTimeout {
+		t.Fatalf("dropped query: outcome %v, want timeout", o)
+	}
+	time.Sleep(6500 * time.Millisecond)
+	got := srv.QueriesFor("slow.example.com", dnsmessage.TypeA)
+	if got != 1 {
+		t.Errorf("server received %d queries for the timed-out name, want 1", got)
+	}
+	if n := sent.Load(); n != got {
+		t.Errorf("counted %d queries, server received %d", n, got)
 	}
 }
 
