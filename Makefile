@@ -45,7 +45,7 @@ test-short:
 # Regenerate the site's flag table (docs/_includes/flags.md) from the CLI's
 # flags; a test fails CI when it drifts (#64).
 docs-flags:
-	UPDATE_DOCS=1 $(GOTEST) -run '^TestSiteFlagTableUpToDate$$' -count=1 .
+	UPDATE_DOCS=1 $(GOTEST) -run '^TestSiteFlagTableUpToDate$$' -count=1 ./internal/cli
 
 # Dispatcher throughput on a 1M-entry simulated scan; overhead must stay
 # linear in wordlist size (#49).
