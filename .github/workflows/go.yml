@@ -7,6 +7,14 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# GoReleaser builds, signs and uploads releases, so it is pinned like every
+# other tool here rather than floating on "~> v2" (#324). Dependabot does not
+# read action inputs: to bump it, change this one line after checking the
+# GoReleaser release notes; the release-snapshot job runs the new version on
+# that push, before any tag uses it.
+env:
+  GORELEASER_VERSION: v2.20.2
+
 jobs:
   # Two legs: "minimum" proves the go.mod floor (1.26.0) still builds and
   # passes; "stable" is the toolchain releases are built with, and is where
@@ -257,7 +265,7 @@ jobs:
     - name: GoReleaser snapshot
       uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
       with:
-        version: "~> v2"
+        version: ${{ env.GORELEASER_VERSION }}
         args: release --snapshot --clean --skip=sign
 
     - name: Assert static Linux binaries
@@ -300,9 +308,12 @@ jobs:
       attestations: write
 
     steps:
+    # GoReleaser and gh take the token from the environment, so the checkout
+    # keeps no credentials in .git/config (#324).
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         fetch-depth: 0
+        persist-credentials: false
 
     # Release binaries use the latest stable Go so they ship a patched
     # standard library; go.mod's version is only the minimum (#38). No build
@@ -339,7 +350,7 @@ jobs:
     - name: GoReleaser
       uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
       with:
-        version: "~> v2"
+        version: ${{ env.GORELEASER_VERSION }}
         args: release --clean --release-notes=${{ runner.temp }}/notes.md
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
