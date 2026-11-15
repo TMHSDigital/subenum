@@ -134,6 +134,25 @@ func entryDigest(entries []string) string {
 // only change what is printed.
 var unsavedSettings = map[string]bool{"seed": true, "state": true, "v": true, "progress": true, "max-duration": true}
 
+// pacingFlags may be given next to -resume to change how fast the rest of
+// the scan goes, for example after timeouts piled up (#309). They change
+// neither the candidate list nor the wildcard fingerprint, so the saved
+// position keeps its meaning; the value says whether the flag is a boolean.
+var pacingFlags = map[string]bool{
+	"rate": false, "rate-per-resolver": false, "t": false, "timeout": false,
+	"attempts": false, "auto-rate": true, "no-abort": true, "max-duration": false,
+}
+
+// pacingFlagList names the pacing flags for messages, in a fixed order.
+func pacingFlagList() string {
+	names := make([]string, 0, len(pacingFlags))
+	for name := range pacingFlags {
+		names = append(names, "-"+name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // effectiveSettings returns every setting's effective value.
 func effectiveSettings(fs *flag.FlagSet) map[string]string {
 	m := map[string]string{}
@@ -147,12 +166,15 @@ func effectiveSettings(fs *flag.FlagSet) map[string]string {
 
 // checkSettings refuses to resume when a setting differs from the
 // interrupted run, for example because SUBENUM_DEPTH or the config file
-// changed in between: the saved position would mean something else.
+// changed in between: the saved position would mean something else. The
+// pacing flags may differ (#309).
 func (st *resumeState) checkSettings(fs *flag.FlagSet, d *defaultsLoader) error {
 	now := effectiveSettings(fs)
 	names := make([]string, 0, len(st.Settings))
 	for name := range st.Settings {
-		names = append(names, name)
+		if _, pacing := pacingFlags[name]; !pacing {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	for _, name := range names {
@@ -163,15 +185,18 @@ func (st *resumeState) checkSettings(fs *flag.FlagSet, d *defaultsLoader) error 
 	return nil
 }
 
-// resumeArgs looks for -resume in args. When present it must be the only
-// flag; the state file's original arguments are returned in its place.
+// resumeArgs looks for -resume in args. When present the only other flags
+// allowed are the pacing flags; the state file's original arguments are
+// returned in its place, with the pacing flags given applied over them (#309).
 func resumeArgs(args []string) ([]string, *resumeState, error) {
 	idx := -1
 	path := ""
+	var others []string // every argument but -resume and its state file
 scan:
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
+			others = append(others, args[i:]...)
 			break scan // everything after is a positional argument (#166)
 		}
 		if a == "-resume" || a == "--resume" {
@@ -189,7 +214,9 @@ scan:
 		}
 		if ok {
 			idx, path = i, v
+			continue
 		}
+		others = append(others, a)
 	}
 	if idx < 0 {
 		return args, nil, nil
@@ -197,8 +224,9 @@ scan:
 	if path == "" {
 		return nil, nil, fmt.Errorf("-resume needs a state file")
 	}
-	if len(args) > 2 || (len(args) == 2 && path != args[1]) {
-		return nil, nil, fmt.Errorf("-resume takes no other arguments; the state file holds the original ones")
+	overrides, err := pacingOverrides(others)
+	if err != nil {
+		return nil, nil, err
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // the user names their own state file
 	if err != nil {
@@ -212,7 +240,44 @@ scan:
 		return nil, nil, fmt.Errorf("-resume %s: unsupported state version %d", path, st.Version)
 	}
 	st.path = path
-	return st.Args, &st, nil
+	return withOverrides(st.Args, overrides), &st, nil
+}
+
+// pacingOverrides checks that the arguments given next to -resume are all
+// pacing flags, and returns them with each value joined to its flag.
+func pacingOverrides(args []string) ([]string, error) {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, _, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-"), "=")
+		isBool, ok := pacingFlags[name]
+		if !ok || !strings.HasPrefix(a, "-") {
+			return nil, fmt.Errorf("-resume takes only the pacing flags %s next to the state file, which holds the other arguments; got %q", pacingFlagList(), a)
+		}
+		if !isBool && !hasValue {
+			if i+1 == len(args) {
+				return nil, fmt.Errorf("flag needs an argument: -%s", name)
+			}
+			i++
+			a = "-" + name + "=" + args[i]
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// withOverrides applies the pacing flags given next to -resume over the
+// replayed arguments: placed after them, they win, and the next state file
+// records them. They go before a "--", after which they would be positional.
+func withOverrides(args, overrides []string) []string {
+	if len(overrides) == 0 {
+		return args
+	}
+	i := slices.Index(args, "--")
+	if i < 0 {
+		i = len(args)
+	}
+	return slices.Concat(args[:i:i], overrides, args[i:])
 }
 
 // fileDigest returns the sha256 of a file, or "" for none or stdin.

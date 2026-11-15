@@ -166,6 +166,87 @@ func TestResumeArgsParsing(t *testing.T) {
 	}
 }
 
+// TestResumeArgsPacing covers #309: the pacing flags may be given next to
+// -resume and are applied over the replayed arguments, before any "--";
+// every other argument is refused.
+func TestResumeArgsPacing(t *testing.T) {
+	path := writeState(t, resumeState{Args: []string{"-simulate", "-rate", "20", "--", "example.com"}})
+	got, _, err := resumeArgs([]string{"-t", "4", "-resume", path, "--rate=5", "-auto-rate", "-max-duration", "1h"})
+	want := []string{"-simulate", "-rate", "20", "-t=4", "--rate=5", "-auto-rate", "-max-duration=1h", "--", "example.com"}
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("got %q, err %v; want %q", got, err, want)
+	}
+	for _, extra := range [][]string{{"-type", "A"}, {"-w", "words.txt"}, {"example.com"}, {"-rate"}, {"--", "-rate", "5"}} {
+		if _, _, err := resumeArgs(append([]string{"-resume", path}, extra...)); err == nil {
+			t.Errorf("-resume with %q: no error", extra)
+		}
+	}
+}
+
+// TestE2EResumeChangesPacing covers #309: a scan stopped while slow resumes
+// at another rate; the override is checked against nothing frozen, recorded
+// in the next state file, and the scan still finishes complete. Flags that
+// change the candidates stay refused.
+func TestE2EResumeChangesPacing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	state := filepath.Join(dir, "state.json")
+	const n = 120
+	var words strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&words, "host%d\n", i)
+	}
+	wl := writeFile(t, "wl.txt", words.String())
+	base := []string{"-simulate", "-seed", "3", "-hit-rate", "50", "-progress=false", "-format", "jsonl", "-w", wl}
+	names := func(out string) map[string]bool {
+		results, _ := jsonlRecords(t, out)
+		return resultNames(results)
+	}
+	_, ref := runCLI(t, "", append(slices.Clone(base), "example.com")...)
+	want := names(ref)
+
+	// -rate 20 with 120 words needs about 6 s; the budget is 1 s.
+	code, out := runCLIMerged(t, append(slices.Clone(base), "-t", "1", "-rate", "20", "-max-duration", "1s", "-state", state, "example.com")...)
+	if code != 0 {
+		t.Fatalf("first run: exit %d\n%s", code, out)
+	}
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("first run saved no state: %v", err)
+	}
+	// Flags that change the candidate list stay frozen.
+	if code, out := runCLIMerged(t, "-resume", state, "-type", "A"); code != exitUsage || !strings.Contains(out, "pacing flags") {
+		t.Fatalf("-resume -type A: exit %d, want %d\n%s", code, exitUsage, out)
+	}
+
+	// A resumed run at another, still slow rate stops again and records it.
+	if code, out := runCLIMerged(t, "-resume", state, "-rate", "40"); code != 0 {
+		t.Fatalf("resume at -rate 40: exit %d\n%s", code, out)
+	}
+	data, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatalf("resume at -rate 40 saved no state: %v", err)
+	}
+	var st resumeState
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(st.Args, "-rate=40") || st.Settings["rate"] != "40" {
+		t.Fatalf("saved args %q, rate setting %q; want the -rate 40 override recorded", st.Args, st.Settings["rate"])
+	}
+
+	// Unthrottled and with a budget it cannot spend, the scan finishes.
+	code, out = runCLI(t, "", "-resume", state, "-rate", "0", "-t", "8", "-max-duration", "1h")
+	if code != 0 {
+		t.Fatalf("unthrottled resume: exit %d", code)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Errorf("the finished run's state file was not removed (err %v)", err)
+	}
+	if got := names(out); !maps.Equal(got, want) {
+		t.Errorf("resumed scan reported %d names, uninterrupted %d", len(got), len(want))
+	}
+}
+
 // TestE2EResumeCountsRefoundNamesOnce covers #156: the resume point lags the
 // saved results by up to a worker pool's worth of names, so a resumed scan
 // finds some of them again; they are counted once.

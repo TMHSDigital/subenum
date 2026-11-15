@@ -258,7 +258,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.ct, "ct", false, "Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds")
 	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
 	fs.StringVar(&f.stateFile, "state", defaultStateFile, "Where a run that was interrupted, ran out of -max-duration or was aborted saves its state for -resume")
-	fs.String("resume", "", "Resume a run that was interrupted, ran out of -max-duration or was aborted, from its state file (no other arguments)")
+	fs.String("resume", "", "Resume a run that was interrupted, ran out of -max-duration or was aborted, from its state file (no other arguments but the pacing flags -rate, -rate-per-resolver, -t, -timeout, -attempts, -auto-rate, -no-abort and -max-duration)")
 	fs.StringVar(&f.diff, "diff", "", "Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes")
 	fs.BoolVar(&f.diffRecords, "diff-records", false, "With -diff, also report names whose records changed (a re-pointed CNAME, moved addresses), compared over the -type record types; needs a json, jsonl or csv -diff file")
 	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")

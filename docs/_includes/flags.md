@@ -30,7 +30,7 @@
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |
 | `-rate-per-resolver <int>` {% include unreleased.html flag="rate-per-resolver" %} | - | With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited) |
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
-| `-resume <string>` | - | Resume a run that was interrupted, ran out of -max-duration or was aborted, from its state file (no other arguments) |
+| `-resume <string>` | - | Resume a run that was interrupted, ran out of -max-duration or was aborted, from its state file (no other arguments but the pacing flags -rate, -rate-per-resolver, -t, -timeout, -attempts, -auto-rate, -no-abort and -max-duration) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
 | `-retry-inconclusive` {% include unreleased.html flag="retry-inconclusive" %} | - | After each scan, look up once more (against -dns-server) every name that timed out, was refused or failed; names it resolves are reported, but not expanded by -recursive |
 | `-sarif <string>` | - | Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME or NS in -type) |

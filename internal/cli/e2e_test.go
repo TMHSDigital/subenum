@@ -956,8 +956,8 @@ func TestE2EResume(t *testing.T) {
 		t.Fatalf("-o after resume does not hold the full result set (err %v)", err)
 	}
 
-	// Resuming takes no other arguments.
-	if code, _ := runCLI(t, "", "-resume", statePath, "-t", "5"); code != 2 {
+	// Resuming takes no arguments but the pacing flags (#309).
+	if code, _ := runCLI(t, "", "-resume", statePath, "-type", "A"); code != 2 {
 		t.Errorf("-resume with extra arguments: exit %d, want 2", code)
 	}
 }

@@ -307,7 +307,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query), then exit; JSON with `-format json` or `jsonl` |
 | `-version` | n/a | Print version and exit |
 | `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
-| `-resume <file>` | n/a | Resume a run that was interrupted, ran out of `-max-duration` or was aborted, from its state file; takes no other arguments |
+| `-resume <file>` | n/a | Resume a run that was interrupted, ran out of `-max-duration` or was aborted, from its state file; takes no other arguments but the pacing flags (`-rate`, `-t`, `-timeout`, ...) |
 | `-seeds <file>` | n/a | Results file (any `-format`) whose names also seed `-permute`; implies `-permute` |
 | `-state <file>` | `subenum-resume.json` | Where a run that was interrupted, ran out of `-max-duration` or was aborted saves its state for `-resume` |
 
@@ -379,6 +379,8 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 ```bash
 subenum -resume subenum-resume.json
 ```
+
+The only flags `-resume` accepts next to the state file are the pacing flags `-attempts`, `-auto-rate`, `-max-duration`, `-no-abort`, `-rate`, `-rate-per-resolver`, `-t` and `-timeout`: for example `subenum -resume subenum-resume.json -rate 20 -auto-rate` continues a scan that timeouts slowed down at a gentler rate. They apply over the saved command line and are recorded in the next state file. Flags that change which names are queried or how wildcards are detected (`-w`, `-type`, `-dns-server`, `-depth` and the rest) cannot change on a resume.
 
 The resumed run refuses to start if an input file, the wordlist (including the bundled one, which changes with the binary) or an effective setting (for example a `SUBENUM_*` variable or the config file) changed. It re-emits the earlier results (so `-o` and JSON output end up complete), skips targets that had finished, and continues the interrupted one from the first wordlist entry not yet fully looked up; a `-permute` pass resumes from its own position. At most about one worker pool's worth (`-t`) of lookups is repeated, and `-max-queries` covers the whole scan, so a resumed run only gets what is left of it. In recursive mode, names found before the interrupt have their children re-scanned. A resumed run that finishes deletes its state file. A run that `-max-duration` stopped with names untested, or that the reliability guard aborted, saves the same state (its exit code does not change), so `-resume` continues it too: a scheduled job with a time budget can work through a large wordlist over several runs. When `-diff` and `-o` name the same file, a run that saves a resume state leaves that file unchanged, so the resumed run compares against the same baseline and then writes the full results. Runs that read the wordlist or domain list from stdin cannot be resumed.
 
