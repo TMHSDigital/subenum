@@ -208,8 +208,10 @@ func TestE2EZoneTransferNSLookupFails(t *testing.T) {
 		want string
 	}{
 		"servfail": {dnstest.ServFail, "name server lookup failed"},
-		// The resolver reports an answer without NS records as an error too.
-		"no NS": {dnstest.Reply{}, "name server lookup failed"},
+		// The resolver reports an answer without NS records as a not-found
+		// error, which is worded as such (#347).
+		"no NS":    {dnstest.Reply{}, "no name servers found for example.test"},
+		"nxdomain": {dnstest.NXDomain, "no name servers found for example.test"},
 	} {
 		srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 			switch {

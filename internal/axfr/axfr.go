@@ -87,11 +87,16 @@ func Try(ctx context.Context, target string, o Options) Result {
 	servers, err := resolver.LookupNS(lookupCtx, target+".")
 	cancel()
 	res.Queries++
-	if err != nil || len(servers) == 0 {
+	// Go reports an answer without NS records as a not-found error, not as
+	// an empty list, so "no name servers" is told apart by the error (#347).
+	var de *net.DNSError
+	switch {
+	case err == nil && len(servers) > 0:
+	case err == nil || errors.As(err, &de) && de.IsNotFound:
 		res.Err = "no name servers found for " + target
-		if err != nil {
-			res.Err = "name server lookup failed: " + err.Error()
-		}
+		return res
+	default:
+		res.Err = "name server lookup failed: " + err.Error()
 		return res
 	}
 	if len(servers) > MaxServers {
