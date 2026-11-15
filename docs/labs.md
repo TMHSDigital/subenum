@@ -201,9 +201,9 @@ documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
 `2001:db8::/32`) and reserved names such as `lab.example`, so nothing in a
 lab points at a real host.
 
-Scenarios work with every other flag, such as `-dL` (each listed domain gets
+Scenarios work with the other flags, such as `-dL` (each listed domain gets
 the same zone), `-permute`, `-diff`, `-format json` and `-stats`, which
 records the scenario file under `zone`. `-simulate-zone` cannot be combined
-with `-simulate`, `-dns-server`, `-r` or `-ct`, whether they come from the command
-line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
+with `-simulate`, `-dns-server`, `-r`, `-ct`, `-sources` or `-axfr`, whether they
+come from the command line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
 rather than send a query off the machine.
