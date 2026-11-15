@@ -63,7 +63,7 @@ func TestRetryCancelledKeepsNamesPending(t *testing.T) {
 	var calls sync.Map
 	cfg := Config{
 		Domain: "example.com", Entries: []string{"a", "b", "c", "d"}, Concurrency: 1,
-		Timeout: time.Second, Simulate: true, Attempts: 1, RetryInconclusive: true,
+		Timeout: time.Second, Simulate: true, Attempts: 1, RetryInconclusive: true, ListInconclusive: true,
 		resolveHook: func(ctx context.Context, name string) ([]dns.Record, dns.Outcome) {
 			n, _ := calls.LoadOrStore(name, new(atomic.Int32))
 			if n.(*atomic.Int32).Add(1) == 2 {

@@ -477,6 +477,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"Pool":              "beginScan sets it from the pool loadPool built",
 		"Deadline":          "beginScan sets it from MaxDuration when the scan starts",
 		"TakeoverProviders": "the form has no takeover provider file; the built-in list applies",
+		"ListInconclusive":  "the scan screen shows the counts, not the names (#300)",
 		"ResumeFrom":        "the TUI does not resume interrupted scans",
 		"ResumeParents":     "the TUI does not resume interrupted scans",
 		"Verbose":           "the scan screen shows events itself; there is no debug log",

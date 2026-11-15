@@ -633,6 +633,7 @@ func (c Config) options() (scan.Options, error) {
 		Logf:        dns.Logf(c.Logf),
 
 		RetryInconclusive: c.RetryInconclusive,
+		ListInconclusive:  true, // Stats.Inconclusive is part of the API
 		RatePerResolver:   c.RatePerResolver,
 	}
 	if c.MaxDuration > 0 {

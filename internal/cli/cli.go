@@ -683,6 +683,8 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		ResumeFrom:  p.resumeFrom,
 		// The retry pass belongs to the scan, so a resumed scan runs it too.
 		RetryInconclusive: f.retryIncon,
+		// Only the -inconclusive file reads the names (#300).
+		ListInconclusive:  f.inconFile != "",
 		TakeoverProviders: in.providers,
 		// Names found before an interrupt still need their children expanded.
 		ResumeParents:   p.resumeNames,

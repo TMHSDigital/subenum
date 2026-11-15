@@ -47,6 +47,9 @@ type Options struct {
 	Exclude     []string
 	// RetryInconclusive retries inconclusive lookups once at the end (#217).
 	RetryInconclusive bool
+	// ListInconclusive fills Stats.Inconclusive; set it only when something
+	// reads the list, which costs memory per failed lookup (#300).
+	ListInconclusive bool
 	// TakeoverProviders replaces the built-in takeover provider list when
 	// non-nil (#219).
 	TakeoverProviders dns.TakeoverProviders
@@ -121,6 +124,7 @@ func (o Options) Config() Config {
 		Pool:        o.Pool,
 
 		RetryInconclusive: o.RetryInconclusive,
+		ListInconclusive:  o.ListInconclusive,
 		TakeoverProviders: o.TakeoverProviders,
 
 		ResumeFrom:    o.ResumeFrom,

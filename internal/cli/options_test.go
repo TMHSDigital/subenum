@@ -22,7 +22,7 @@ func TestScanOptionsSetsEveryField(t *testing.T) {
 	f := cliFlags{
 		concurrency: 7, timeoutMs: 700, dnsServer: "192.0.2.53:53", testMode: true, testHitRate: 40,
 		seed: 9, force: true, recursive: true, depth: 3, rate: 50, autoRate: true,
-		maxDuration: time.Minute, retryIncon: true, ratePerRes: 5, noAbort: true, verbose: true,
+		maxDuration: time.Minute, retryIncon: true, inconFile: "left.txt", ratePerRes: 5, noAbort: true, verbose: true,
 	}
 	in := &runtimeInputs{
 		maxAttempts: 2, recordTypes: []string{"A"}, excludes: []string{"vpn.example.com"},

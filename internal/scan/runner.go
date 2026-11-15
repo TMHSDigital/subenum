@@ -60,6 +60,11 @@ type Config struct {
 	// The retry goes to the trusted resolver, never the pool. A name it
 	// resolves is reported like any other, but not expanded by Recursive.
 	RetryInconclusive bool
+	// ListInconclusive fills Stats.Inconclusive. Without it the names are
+	// only counted, and kept no longer than the retry pass needs them, so a
+	// scan against a failing resolver does not hold a name per failed
+	// lookup for a list nobody reads (#300).
+	ListInconclusive bool
 	// TakeoverProviders are the takeover-prone services CNAME targets are
 	// matched against; nil is the built-in list (#219).
 	TakeoverProviders dns.TakeoverProviders
@@ -163,7 +168,8 @@ type Stats struct {
 	// then got an answer: their first outcome (timeout, refused, other)
 	// moves to the new one, so the outcome counters still add up to the
 	// names tested. Inconclusive lists, sorted, the names whose lookup is
-	// still a timeout, refusal or failure at the end of the scan.
+	// still a timeout, refusal or failure at the end of the scan; it is nil
+	// without Config.ListInconclusive (#300).
 	Retried      int64
 	Recovered    int64
 	Inconclusive []string
@@ -229,27 +235,54 @@ func inconclusive(o dns.Outcome) bool {
 	return o == dns.OutcomeTimeout || o == dns.OutcomeRefused || o == dns.OutcomeOther
 }
 
-// pendingLookup is a job whose lookup was inconclusive, and that outcome.
+// pendingLookup is a name whose lookup was inconclusive, and that outcome.
+// A depth-1 name is kept as its index into cfg.Entries and rebuilt on
+// demand, so the list does not keep the job's name string alive (#300);
+// only a recursive child, which has no such index, keeps its name.
 type pendingLookup struct {
-	j       job
+	name    string // a recursive child's full name; "" for a depth-1 name
+	root    int    // index into cfg.Entries for a depth-1 name, else -1
 	outcome dns.Outcome
 }
 
+// pendingOf is the list entry for job j, whose lookup ended in o.
+func pendingOf(j job, o dns.Outcome) pendingLookup {
+	if j.root >= 0 {
+		return pendingLookup{root: j.root, outcome: o}
+	}
+	return pendingLookup{name: j.domain, root: -1, outcome: o}
+}
+
+// domain is the name that was looked up.
+func (p pendingLookup) domain(cfg *Config) string {
+	if p.root >= 0 {
+		return cfg.Entries[p.root] + "." + cfg.Domain
+	}
+	return p.name
+}
+
 // pendingList collects the inconclusive lookups of a scan, for the retry
-// pass and Stats.Inconclusive (#217). Workers add to it concurrently.
+// pass and Stats.Inconclusive (#217). Workers add to it concurrently. A nil
+// list collects nothing: the scan has no reader for the names (#300).
 type pendingList struct {
 	mu    sync.Mutex
 	items []pendingLookup
 }
 
-func (l *pendingList) add(j job, o dns.Outcome) {
+func (l *pendingList) add(it pendingLookup) {
+	if l == nil {
+		return
+	}
 	l.mu.Lock()
-	l.items = append(l.items, pendingLookup{j: j, outcome: o})
+	l.items = append(l.items, it)
 	l.mu.Unlock()
 }
 
 // take empties the list and returns what it held.
 func (l *pendingList) take() []pendingLookup {
+	if l == nil {
+		return nil
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	items := l.items
@@ -257,14 +290,17 @@ func (l *pendingList) take() []pendingLookup {
 	return items
 }
 
-// names returns the listed names, sorted.
-func (l *pendingList) names() []string {
-	l.mu.Lock()
-	out := make([]string, 0, len(l.items))
-	for _, it := range l.items {
-		out = append(out, it.j.domain)
+// names empties the list and returns the names it held, sorted; nil for a
+// nil list.
+func (l *pendingList) names(cfg *Config) []string {
+	if l == nil {
+		return nil
 	}
-	l.mu.Unlock()
+	items := l.take()
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.domain(cfg))
+	}
 	sort.Strings(out)
 	return out
 }
@@ -605,7 +641,10 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	st := &scanState{
 		cfg: cfg, maxDepth: maxDepth, limiter: jobLimiter, events: events,
-		cancel: cancel, fp: fingerprint, wc: &wildcardCache{known: make(map[string]bool)}, pending: &pendingList{},
+		cancel: cancel, fp: fingerprint, wc: &wildcardCache{known: make(map[string]bool)},
+	}
+	if cfg.ListInconclusive || cfg.RetryInconclusive {
+		st.pending = &pendingList{}
 	}
 	st.total.Store(int64(len(cfg.Entries)))
 	if cfg.AutoRate {
@@ -649,7 +688,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	snap.QueriesSent = queriesSent.Load()
 	snap.Wildcard = wildcardRoot
 	snap.Fingerprint = fingerprint.records()
-	snap.Inconclusive = st.pending.names()
+	if cfg.ListInconclusive {
+		snap.Inconclusive = st.pending.names(&cfg)
+	}
 	if st.auto != nil {
 		snap.RateBackoffs, snap.FinalRate = st.auto.result()
 	}
@@ -833,7 +874,7 @@ type scanState struct {
 	guardOnce sync.Once
 	fp        *fingerprint
 	wc        *wildcardCache
-	pending   *pendingList // inconclusive lookups (#217)
+	pending   *pendingList // inconclusive lookups (#217); nil when nothing reads them (#300)
 	auto      *autoRate    // the AutoRate controller; nil without AutoRate (#220)
 }
 
@@ -886,7 +927,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 
 	st.add(outcome)
 	if inconclusive(outcome) {
-		s.pending.add(j, outcome)
+		s.pending.add(pendingOf(j, outcome))
 	}
 	s.observe(inconclusive(outcome))
 	s.checkReliability(s.processed.Add(1))
@@ -1007,6 +1048,11 @@ func (s *scanState) retryPending(ctx context.Context, workers int) {
 		return
 	}
 	items := s.pending.take()
+	if !s.cfg.ListInconclusive {
+		// Nothing lists the names the pass leaves unanswered. No worker is
+		// running here, so the field can be cleared without a lock.
+		s.pending = nil
+	}
 	ch := make(chan pendingLookup)
 	var wg sync.WaitGroup
 	for range min(workers, len(items)) {
@@ -1021,7 +1067,7 @@ func (s *scanState) retryPending(ctx context.Context, workers int) {
 	for i, it := range items {
 		if ctx.Err() != nil || s.cfg.pastDeadline() {
 			for _, rest := range items[i:] {
-				s.pending.add(rest.j, rest.outcome)
+				s.pending.add(rest)
 			}
 			break
 		}
@@ -1038,28 +1084,29 @@ func (s *scanState) retryPending(ctx context.Context, workers int) {
 func (s *scanState) retry(ctx context.Context, it pendingLookup) {
 	cfg, st := s.cfg, &s.stats
 	if err := s.limiter.Wait(ctx); err != nil {
-		s.pending.add(it.j, it.outcome)
+		s.pending.add(it)
 		return
 	}
-	records, outcome := cfg.resolve(ctx, it.j.domain, cfg.logf())
+	name := it.domain(&s.cfg)
+	records, outcome := cfg.resolve(ctx, name, cfg.logf())
 	if outcome = settle(ctx, outcome); outcome == dns.OutcomeCanceled {
-		s.pending.add(it.j, it.outcome)
+		s.pending.add(it)
 		return
 	}
 	st.retried.Add(1)
 	if inconclusive(outcome) {
-		s.pending.add(it.j, it.outcome)
+		s.pending.add(it)
 		return
 	}
 	st.recovered.Add(1)
 	st.counter(it.outcome).Add(-1)
-	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, s.fp, it.j.domain, records) {
+	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, s.fp, name, records) {
 		st.wildcardFiltered.Add(1)
 		return
 	}
 	st.add(outcome)
 	if outcome == dns.OutcomeFound {
-		s.report(ctx, it.j.domain, records)
+		s.report(ctx, name, records)
 	}
 }
 

@@ -404,7 +404,7 @@ func TestRunRetryInconclusive(t *testing.T) {
 		calls := &sync.Map{}
 		cfg := Config{
 			Domain: "example.com", Entries: entries, Concurrency: 3, Timeout: time.Second,
-			Simulate: true, Attempts: 1, RetryInconclusive: retry, resolveHook: retryHook(calls),
+			Simulate: true, Attempts: 1, RetryInconclusive: retry, ListInconclusive: true, resolveHook: retryHook(calls),
 		}
 		events := make(chan Event, 64)
 		go Run(context.Background(), cfg, events)
@@ -460,7 +460,7 @@ func TestRunRetryInconclusive(t *testing.T) {
 func TestRunRetryInconclusiveSkippedAfterAbort(t *testing.T) {
 	cfg := Config{
 		Domain: "example.com", Entries: makeEntries(reliabilityMinJobs + 50), Concurrency: 4,
-		Timeout: time.Second, Simulate: true, Attempts: 1, RetryInconclusive: true,
+		Timeout: time.Second, Simulate: true, Attempts: 1, RetryInconclusive: true, ListInconclusive: true,
 		resolveHook: hookOutcome(dns.OutcomeTimeout),
 	}
 	events := make(chan Event, 64)
