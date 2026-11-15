@@ -93,7 +93,7 @@ func TestValidateFlagsDomainListConflicts(t *testing.T) {
 
 	f := base()
 	f.domainList = "d.txt"
-	if _, ok := validateFlags(f, &runtimeInputs{maxAttempts: 1}, []string{"example.com"}, fs, out); ok {
+	if validateArgs(f, []string{"example.com"}, fs, out) {
 		t.Error("domain argument plus -dL should be rejected")
 	}
 	f.wordlists.paths, f.domainList = []string{"-"}, "-"
@@ -335,7 +335,9 @@ func TestTUIOptionsFromFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	opts := tuiOptions(f, fs, pos, d, &stderr)
+	diag := output.New(nil, false, output.FormatText)
+	diag.SetStderr(&stderr)
+	opts := tuiOptions(f, fs, pos, d, diag)
 	if opts.Domain != "example.com" {
 		t.Errorf("Domain = %q, want example.com", opts.Domain)
 	}
@@ -352,7 +354,7 @@ func TestTUIOptionsFromFlags(t *testing.T) {
 	// A bare -tui warns about nothing.
 	f, pos, fs, _ = parseFlagsWith([]string{"-tui"}, d.apply, nil)
 	stderr.Reset()
-	if opts := tuiOptions(f, fs, pos, d, &stderr); opts.Domain != "" || stderr.Len() != 0 {
+	if opts := tuiOptions(f, fs, pos, d, diag); opts.Domain != "" || stderr.Len() != 0 {
 		t.Errorf("bare -tui: Domain %q, stderr %q", opts.Domain, stderr.String())
 	}
 }

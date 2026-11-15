@@ -25,7 +25,7 @@ type Format int
 const (
 	// FormatText is the default human-friendly streaming output.
 	FormatText Format = iota
-	// FormatJSON buffers results and emits a single JSON array at completion.
+	// FormatJSON streams results as array elements; Finish closes the array.
 	FormatJSON
 	// FormatCSV streams "subdomain,type,value" rows with a header.
 	FormatCSV

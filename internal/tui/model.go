@@ -348,8 +348,8 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, svCmd
 	case ev.Kind == scan.EventDone:
 		// Successful completion (including user abort, which still drains and
-		// emits EventDone): finalize structured output so buffered JSON/CSV is
-		// written and partial results are flushed. A JSONL file ends with the
+		// emits EventDone): finalize structured output to close the streamed JSON
+		// array and flush CSV and partial results. A JSONL file ends with the
 		// run-quality summary, as the CLI's does (#118).
 		if m.out != nil {
 			m.out.Summary(m.summary(ev.Event))
@@ -365,7 +365,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // finalizeOutput closes the optional output file. When finish is true the
-// structured writer is finalized first (buffered JSON array emitted, CSV
+// structured writer is finalized first (streamed JSON array closed, CSV
 // flushed) and the file replaces any existing one; when false it is discarded
 // and an existing results file is left untouched (#52).
 // Safe to call when no output file is configured.

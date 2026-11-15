@@ -300,10 +300,9 @@ func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *outpu
 	return true
 }
 
+// validateFlags checks options after validateArgs has checked the domain
+// arguments. configure does that before reading any input files.
 func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag.FlagSet, out *output.Writer) (string, bool) {
-	if !validateArgs(f, positionals, fs, out) {
-		return "", false
-	}
 	if f.wordlists.readsStdin() && f.domainList == wordlist.Stdin {
 		out.Error("-w and -dL cannot both read standard input")
 		return "", false

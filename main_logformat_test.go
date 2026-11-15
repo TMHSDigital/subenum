@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/TMHSDigital/subenum/internal/output"
 )
 
 // runCLIStreams runs the CLI with stdout and stderr captured apart.
@@ -177,4 +180,35 @@ func TestE2ELogFormatJSONProgress(t *testing.T) {
 		t.Errorf("carriage return under -log-format json: %q", stderr)
 	}
 	parseLogLines(t, stderr)
+}
+
+func TestTUIOptionsJSONWarnings(t *testing.T) {
+	d := &defaultsLoader{path: filepath.Join(t.TempDir(), "none.json"), getenv: func(string) string { return "" }}
+	f, pos, fs, err := parseFlagsWith([]string{
+		"-tui", "-log-format", "json", "-w", "first.txt", "-w", "extra.txt",
+		"-stats", "stats.json", "example.com", "other.example.com",
+	}, d.apply, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	diag := output.New(nil, false, output.FormatText)
+	diag.SetStderr(&stderr)
+	diag.SetLogFormat(output.LogJSON)
+	opts := tuiOptions(f, fs, pos, d, diag)
+	if opts.Domain != "example.com" || opts.Settings["w"] != "first.txt" {
+		t.Fatalf("TUI options = %+v", opts)
+	}
+	lines := parseLogLines(t, stderr.String())
+	if len(lines) != 2 {
+		t.Fatalf("diagnostics = %+v, want two warnings", lines)
+	}
+	for i, want := range []string{
+		"the TUI takes one wordlist; using first.txt",
+		"-tui has no form field for -log-format -stats other.example.com; ignored",
+	} {
+		if lines[i].Level != "warn" || lines[i].Kind != "message" || lines[i].Message != want {
+			t.Errorf("diagnostic %d = %+v, want a JSON warning with message %q", i, lines[i], want)
+		}
+	}
 }
