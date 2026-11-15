@@ -146,6 +146,72 @@ func TestExpandHome(t *testing.T) {
 	}
 }
 
+// TestScanViewShowsVerdict covers #312: the finished screen names the
+// run-quality verdict with its reason, adds the skipped and retried counts
+// when there are any, and still fills an 80x24 terminal exactly.
+func TestScanViewShowsVerdict(t *testing.T) {
+	const width, height = 80, 24
+	cases := []struct {
+		name    string
+		stats   scan.Stats
+		aborted bool
+		want    []string
+		absent  []string
+	}{
+		{
+			name:   "complete",
+			stats:  scan.Stats{Found: 2, NXDomain: 8},
+			want:   []string{"Verdict: complete - all 10 lookups got a definitive answer", "Done - processed"},
+			absent: []string{" - skipped", " - retried", " - takeover", "back-offs"},
+		},
+		{
+			name:   "degraded by the time budget",
+			stats:  scan.Stats{Found: 2, NXDomain: 8, Skipped: 40, Expired: true, Retried: 6, Recovered: 2, Takeover: 1, RateBackoffs: 3},
+			want:   []string{"Verdict: degraded - time budget (", "40 candidates not tested", "skipped 40", "retried 6 (recovered 2)", "takeover 1", "rate back-offs 3"},
+			absent: []string{"{max_duration}"},
+		},
+		{
+			name:  "unreliable",
+			stats: scan.Stats{Found: 1, NXDomain: 4, Timeout: 5},
+			want:  []string{"Verdict: unreliable - 5 of 10 lookups failed"},
+		},
+		{
+			name:    "interrupted",
+			stats:   scan.Stats{Found: 2, NXDomain: 8},
+			aborted: true,
+			want:    []string{"Verdict: degraded - interrupted after 10 lookups", "Aborted - processed"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newScanViewModel(width, height, false)
+			m.aborted = tc.aborted
+			m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventDone, Processed: 10, Total: 50, Found: tc.stats.Found, Stats: tc.stats}})
+			view := m.View()
+			for _, want := range tc.want {
+				if !strings.Contains(view, want) {
+					t.Errorf("view missing %q:\n%s", want, view)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(view, absent) {
+					t.Errorf("view has %q:\n%s", absent, view)
+				}
+			}
+			if got := lipgloss.Height(view); got != height {
+				t.Errorf("view is %d lines, want exactly %d", got, height)
+			}
+		})
+	}
+
+	// A scan that stopped before testing a candidate has nothing to grade.
+	m := newScanViewModel(width, height, false)
+	m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true}})
+	if view := m.View(); strings.Contains(view, "Verdict:") {
+		t.Errorf("stopped scan shows a verdict:\n%s", view)
+	}
+}
+
 func TestScanViewSummaryIncludesStats(t *testing.T) {
 	m := newScanViewModel(100, 24, false)
 	m, _ = m.Update(eventMsg{scan.Event{

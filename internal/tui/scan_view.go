@@ -11,6 +11,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
@@ -18,14 +19,14 @@ var (
 	resultStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
-	summaryStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).MarginTop(1)
+	summaryStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
 	wildcardStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 )
 
 const (
 	// chromeLines is the fixed layout around the viewport: logo (2), header
-	// and blank line (2), progress bar (1), the done-state summary with its
-	// top margin (2), and the key hint with its top margin (2).
+	// and blank line (2), progress bar (1), the done-state verdict and
+	// counters (2), and the key hint with its top margin (2).
 	chromeLines = 9
 	// maxShownMessages caps the notices rendered above the viewport; older
 	// ones collapse into a "+N earlier" line so the layout cannot overflow.
@@ -344,16 +345,20 @@ func (m scanViewModel) View() string {
 		)) + "\n")
 		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
 	case m.done && (m.aborted || m.stopped):
+		if !m.stopped {
+			b.WriteString(m.verdictLine() + "\n")
+		}
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
 			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
-		)) + "\n")
+		)+m.extraCounts()) + "\n")
 		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
 	case m.done:
+		b.WriteString(m.verdictLine() + "\n")
 		b.WriteString(summaryStyle.Render(fmt.Sprintf(
 			"Done - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
-		)) + "\n")
+		)+m.extraCounts()) + "\n")
 		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
 	default:
 		status := fmt.Sprintf("  %d/%d processed  •  %d found", m.processed, m.total, m.found)
@@ -365,6 +370,44 @@ func (m scanViewModel) View() string {
 	}
 
 	return b.String()
+}
+
+// verdictLine renders the run-quality verdict and its reason, the ones the
+// output file's summary carries, colored by rank and cut to the terminal
+// width so it stays one line (#312).
+func (m scanViewModel) verdictLine() string {
+	status := "ok"
+	if m.aborted {
+		status = "interrupted"
+	}
+	t := report.Target("", status, "", true, scan.Event{Stats: m.stats}, settingLabel)
+	style := resultStyle
+	switch scan.VerdictRank(t.Verdict) {
+	case 1:
+		style = wildcardStyle
+	case 2:
+		style = errorStyle
+	}
+	return style.Bold(true).MaxWidth(max(1, m.width)).Render("Verdict: " + t.Verdict + " - " + t.Reason)
+}
+
+// extraCounts is the tail of the finished counters line: the run facts
+// that are only worth showing when they are not zero.
+func (m scanViewModel) extraCounts() string {
+	var s string
+	if m.stats.Skipped > 0 {
+		s += fmt.Sprintf(" - skipped %d", m.stats.Skipped)
+	}
+	if m.stats.Retried > 0 {
+		s += fmt.Sprintf(" - retried %d (recovered %d)", m.stats.Retried, m.stats.Recovered)
+	}
+	if m.stats.Takeover > 0 {
+		s += fmt.Sprintf(" - takeover %d", m.stats.Takeover)
+	}
+	if m.stats.RateBackoffs > 0 {
+		s += fmt.Sprintf(" - rate back-offs %d", m.stats.RateBackoffs)
+	}
+	return s
 }
 
 // failed reports whether the finished scan failed, mirroring the CLI exit
