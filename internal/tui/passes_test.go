@@ -78,7 +78,7 @@ func TestSourcesAndPermuteFields(t *testing.T) {
 	if !reflect.DeepEqual(vals.sources, []string{"ct", "wayback"}) || !vals.permute {
 		t.Errorf("sources %q, permute %v; want ct and wayback in their running order, and permute on", vals.sources, vals.permute)
 	}
-	if err := saveConfig(vals); err != nil {
+	if err := saveConfig(vals.saved); err != nil {
 		t.Fatal(err)
 	}
 	saved, _ := loadSavedConfig()
@@ -214,8 +214,11 @@ func TestSourcesNotAskedInSimulation(t *testing.T) {
 	redirectConfig(t)
 	urls, hits := sourceServers(t)
 	vals := formValues{
-		domain: "example.com", dnsServer: "8.8.8.8:53", concurrency: 4, timeoutMs: 1000, attempts: 1,
-		hitRate: 100, recordTypes: []string{"A"}, depth: 1, simulate: true, sources: []string{"ct", "wayback"}, permute: true,
+		Options: scan.Options{
+			Domain: "example.com", DNSServer: "8.8.8.8:53", Concurrency: 4, TimeoutMs: 1000, Attempts: 1,
+			HitRate: 100, Types: []string{"A"}, Depth: 1, Simulate: true,
+		},
+		sources: []string{"ct", "wayback"}, permute: true,
 		wordlist: filepath.Join(t.TempDir(), "wl.txt"),
 	}
 	if err := os.WriteFile(vals.wordlist, []byte("www\n"), 0o644); err != nil {
@@ -256,7 +259,7 @@ func TestFailedSourceDoesNotStopTheScan(t *testing.T) {
 		t.Errorf("entries %q, from %v; want the wordlist's names alone", entries, from)
 	}
 
-	m := Model{scanView: newScanViewModel(120, 40, false), lookups: lookups, vals: formValues{domain: "example.com"}}
+	m := Model{scanView: newScanViewModel(120, 40, false), lookups: lookups, vals: formValues{Options: scan.Options{Domain: "example.com"}}}
 	if tg := m.summary(scan.Event{Kind: scan.EventDone}).Targets[0]; len(tg.Sources) != 1 || tg.Sources[0].Error == "" {
 		t.Errorf("report sources = %+v, want the failed lookup's error", tg.Sources)
 	}
@@ -273,7 +276,7 @@ func TestPermutationPassStates(t *testing.T) {
 		if setup != nil {
 			setup(&sv)
 		}
-		return Model{state: stateScan, scanView: sv, vals: formValues{domain: "example.com", permute: true}, foundBy: map[string]int{}}
+		return Model{state: stateScan, scanView: sv, vals: formValues{Options: scan.Options{Domain: "example.com"}, permute: true}, foundBy: map[string]int{}}
 	}
 	update := func(m Model, msgs ...tea.Msg) Model {
 		for _, msg := range msgs {

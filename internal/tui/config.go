@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -75,42 +74,14 @@ func loadSavedConfig() (savedConfig, bool) {
 	return sc, true
 }
 
-func saveConfig(fv formValues) error {
+// saveConfig writes sc, the form as validate remembered it, to last.json.
+func saveConfig(sc savedConfig) error {
 	p, err := configPath()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
-	}
-	sc := savedConfig{
-		Domain:          fv.domain,
-		Wordlist:        fv.wordlist,
-		DNSServer:       fv.dnsServer,
-		Resolvers:       fv.resolvers,
-		RatePerResolver: fv.ratePerResolver,
-		Concurrency:     fv.concurrency,
-		TimeoutMs:       fv.timeoutMs,
-		Attempts:        fv.attempts,
-		HitRate:         fv.hitRate,
-		Types:           strings.Join(fv.recordTypes, ","),
-		Depth:           fv.depth,
-		Rate:            fv.rate,
-		MaxQueries:      fv.maxQueries,
-		Exclude:         strings.Join(fv.exclude, ","),
-		Output:          fv.outputFile,
-		Format:          fv.formatName,
-		Simulate:        fv.simulate,
-		Force:           fv.force,
-		Recursive:       fv.recursive,
-		NoAbort:         fv.noAbort,
-
-		AutoRate:          fv.autoRate,
-		MaxDuration:       durationText(fv.maxDuration),
-		RetryInconclusive: fv.retryIncon,
-
-		Sources: strings.Join(fv.sources, ","),
-		Permute: fv.permute,
 	}
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {

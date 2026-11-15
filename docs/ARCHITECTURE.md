@@ -217,7 +217,7 @@ tools/wordlist-gen.go          - Standalone wordlist generator
 
 *   **Purpose**: Remember the last-used TUI form values across sessions so users don't have to re-type domain, wordlist path, and scan parameters every time.
 *   **Implementation**:
-    *   `savedConfig` struct mirrors the form values with JSON tags.
+    *   `savedConfig` struct mirrors the form values with JSON tags. The form's `validate` fills one by looping over `formFields`, each row storing its value through its `saved` pointer, so no field is copied by hand.
     *   `configPath()` - returns `os.UserConfigDir()/subenum/last.json` (e.g. `~/.config/subenum/last.json` on Linux, `%AppData%\subenum\last.json` on Windows).
     *   `saveConfig` - marshals the form values to JSON, writes them to a temporary file in the same directory, and renames it into place, so a second instance reading at the same moment never sees half-written JSON. It is called when a scan starts; errors are discarded so a write failure never blocks the scan.
     *   `loadSavedConfig` - reads and unmarshals the file. It reports `false` if the file doesn't exist or is unreadable, causing `newFormModel` to fall back to hardcoded defaults.

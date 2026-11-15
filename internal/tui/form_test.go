@@ -56,8 +56,8 @@ func TestValidateHitRateOnlyWhenSimulate(t *testing.T) {
 	if errStr != "" {
 		t.Errorf("live mode should ignore hit rate, got error %q", errStr)
 	}
-	if vals.hitRate < 1 || vals.hitRate > 100 {
-		t.Errorf("live mode should set a sane default hit rate, got %d", vals.hitRate)
+	if vals.HitRate < 1 || vals.HitRate > 100 {
+		t.Errorf("live mode should set a sane default hit rate, got %d", vals.HitRate)
 	}
 
 	sim := newFormModel(savedConfig{})
@@ -129,8 +129,8 @@ func TestValidateDepthGatedOnRecursive(t *testing.T) {
 	if errStr != "" {
 		t.Errorf("recursive OFF should ignore depth, got %q", errStr)
 	}
-	if vals.depth != 1 {
-		t.Errorf("expected default depth 1 when recursive off, got %d", vals.depth)
+	if vals.Depth != 1 {
+		t.Errorf("expected default depth 1 when recursive off, got %d", vals.Depth)
 	}
 
 	// Recursive ON: bad depth is rejected.
@@ -152,8 +152,8 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	if vals.maxQueries != 2500 || !vals.noAbort || vals.force {
-		t.Errorf("got maxQueries=%d noAbort=%v force=%v", vals.maxQueries, vals.noAbort, vals.force)
+	if vals.MaxQueries != 2500 || !vals.NoAbort || vals.Force {
+		t.Errorf("got maxQueries=%d noAbort=%v force=%v", vals.MaxQueries, vals.NoAbort, vals.Force)
 	}
 
 	m.inputs[fieldMaxQueries].SetValue("-1")
@@ -179,8 +179,8 @@ func TestValidateNormalizesDomain(t *testing.T) {
 		if errStr != "" {
 			t.Fatalf("%q: unexpected error %q", in, errStr)
 		}
-		if vals.domain != "example.com" {
-			t.Errorf("%q: domain = %q, want example.com", in, vals.domain)
+		if vals.Domain != "example.com" {
+			t.Errorf("%q: domain = %q, want example.com", in, vals.Domain)
 		}
 	}
 }
@@ -233,8 +233,7 @@ func TestAutoRateDurationRetryFields(t *testing.T) {
 	if !opts.AutoRate || !opts.RetryInconclusive || opts.MaxDuration != 90*time.Minute {
 		t.Errorf("options: AutoRate %v, RetryInconclusive %v, MaxDuration %s", opts.AutoRate, opts.RetryInconclusive, opts.MaxDuration)
 	}
-	saved := savedConfig{AutoRate: vals.autoRate, MaxDuration: durationText(vals.maxDuration), RetryInconclusive: vals.retryIncon}
-	again := newFormModel(saved)
+	again := newFormModel(vals.saved)
 	if !again.toggles[fieldAutoRate] || !again.toggles[fieldRetryIncon] || again.inputs[fieldMaxDuration].Value() != "1h30m0s" {
 		t.Errorf("reloaded form: auto rate %v, retry %v, max duration %q", again.toggles[fieldAutoRate], again.toggles[fieldRetryIncon], again.inputs[fieldMaxDuration].Value())
 	}
@@ -249,8 +248,8 @@ func TestAutoRateDurationRetryFields(t *testing.T) {
 		}
 	}
 	m.inputs[fieldMaxDuration].SetValue("")
-	if vals, errStr := m.validate(); errStr != "" || vals.maxDuration != 0 {
-		t.Errorf("blank max duration: %q, %s; want no error and no budget", errStr, vals.maxDuration)
+	if vals, errStr := m.validate(); errStr != "" || vals.MaxDuration != 0 {
+		t.Errorf("blank max duration: %q, %s; want no error and no budget", errStr, vals.MaxDuration)
 	}
 }
 
@@ -409,8 +408,8 @@ func TestResolverPoolField(t *testing.T) {
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	if vals.resolvers != good || vals.ratePerResolver != 3 {
-		t.Fatalf("resolvers=%q ratePerResolver=%d", vals.resolvers, vals.ratePerResolver)
+	if vals.resolvers != good || vals.RatePerResolver != 3 {
+		t.Fatalf("resolvers=%q ratePerResolver=%d", vals.resolvers, vals.RatePerResolver)
 	}
 	pool, err := loadPool(vals)
 	if err != nil || pool == nil || len(pool.Stats()) != 2 {
@@ -419,7 +418,7 @@ func TestResolverPoolField(t *testing.T) {
 
 	// Simulation sends no DNS queries, so no pool is built, as with -r.
 	sim := vals
-	sim.simulate = true
+	sim.Simulate = true
 	if pool, err := loadPool(sim); pool != nil || err != nil {
 		t.Errorf("simulate: loadPool = %v, %v; want no pool", pool, err)
 	}
@@ -471,9 +470,10 @@ func TestWithSettingsSeedsEveryFlaggedField(t *testing.T) {
 }
 
 // TestOptionsSetsEveryField is the TUI's drift guard of #262: with every form
-// value set, options fills in every scan.Options field except the ones listed
-// in tuiUnmapped, each with the reason. A field added to scan.Options fails
-// here until the form maps it or the list says why it does not.
+// row set, validate and options fill in every scan.Options field except the
+// ones listed in tuiUnmapped, each with the reason. A field added to
+// scan.Options fails here until the form maps it or the list says why it does
+// not.
 func TestOptionsSetsEveryField(t *testing.T) {
 	tuiUnmapped := map[string]string{
 		"Pool":              "beginScan sets it from the pool loadPool built",
@@ -485,11 +485,10 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"Verbose":           "the scan screen shows events itself; there is no debug log",
 		"Logf":              "the scan screen shows events itself; there is no debug log",
 	}
-	v := formValues{
-		domain: "example.com", wordlist: "words.txt", dnsServer: "192.0.2.53:53", resolvers: "pool.txt",
-		ratePerResolver: 5, concurrency: 7, timeoutMs: 700, attempts: 2, hitRate: 40, recordTypes: []string{"A"},
-		recursive: true, depth: 3, rate: 50, autoRate: true, maxQueries: 10, maxDuration: time.Minute,
-		exclude: []string{"vpn.example.com"}, noAbort: true, retryIncon: true, simulate: true, force: true,
+	m := filledForm(t)
+	v, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
 	}
 	opts := reflect.ValueOf(v.options([]string{"www"}, 9))
 	for i := range opts.NumField() {

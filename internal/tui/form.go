@@ -61,7 +61,8 @@ const (
 
 // formField describes one form row. The form is built, navigated, rendered,
 // labelled, seeded and saved from formFields, so adding a field is one
-// constant and one entry (plus reading it in validate).
+// constant, one entry and one savedConfig field, plus reading it in validate:
+// into scan.Options if the engine takes it, else into formValues.
 type formField struct {
 	// setting is the engine setting this field sets, if any; its row label
 	// and flag then come from scan's setting table (#160).
@@ -481,9 +482,38 @@ func expandHome(path string) string {
 	return filepath.Join(home, path[1:])
 }
 
+// remembered is the form as last.json keeps it, built from formFields: every
+// toggle, and every text field trimmed, or its default when it is blank or
+// hidden. validate then stores the fields it normalizes as it read them.
+func (m *formModel) remembered() savedConfig {
+	var sc savedConfig
+	for f, spec := range formFields {
+		if spec.kind == toggleField {
+			spec.set(&sc, strconv.FormatBool(m.toggles[f]))
+			continue
+		}
+		v := strings.TrimSpace(m.inputs[f].Value())
+		if v == "" || !m.shown(f) {
+			v = spec.def
+		}
+		spec.set(&sc, v)
+	}
+	return sc
+}
+
 // validate checks all inputs and returns a scan config or an error string.
 func (m *formModel) validate() (formValues, string) {
 	text := func(f int) string { return m.inputs[f].Value() }
+	// What the next session's form shows is the value the scan ran with, not
+	// the text as typed: keep stores a field's normalized value.
+	saved := m.remembered()
+	keep := func(f int, v string) { formFields[f].set(&saved, v) }
+	// A file path, with a leading "~" expanded.
+	path := func(f int) string {
+		p := expandHome(strings.TrimSpace(text(f)))
+		keep(f, p)
+		return p
+	}
 
 	rawDomain := strings.TrimSpace(text(fieldDomain))
 	if rawDomain == "" {
@@ -495,9 +525,10 @@ func (m *formModel) validate() (formValues, string) {
 	if err != nil {
 		return formValues{}, err.Error()
 	}
+	keep(fieldDomain, domain)
 	// An empty Wordlist field scans with the bundled list, the way a missing
 	// -w does on the command line (#288).
-	wl := expandHome(strings.TrimSpace(text(fieldWordlist)))
+	wl := path(fieldWordlist)
 	// The TUI owns stdin, so reading a wordlist from it would block forever (#55).
 	if wl == wordlist.Stdin {
 		return formValues{}, "Wordlist from standard input (-) is not supported in the TUI; enter a file path"
@@ -507,11 +538,12 @@ func (m *formModel) validate() (formValues, string) {
 	if err != nil {
 		return formValues{}, formFields[fieldSources].name() + ": " + err.Error()
 	}
+	keep(fieldSources, strings.Join(sources, ","))
 	dnsServer := strings.TrimSpace(text(fieldDNSServer))
 	if dnsServer == "" {
 		dnsServer = validate.DefaultDNSServer
 	}
-	resolvers := expandHome(strings.TrimSpace(text(fieldResolvers)))
+	resolvers := path(fieldResolvers)
 	if resolvers == wordlist.Stdin {
 		return formValues{}, "Resolver pool from standard input (-) is not supported in the TUI; enter a file path"
 	}
@@ -521,12 +553,14 @@ func (m *formModel) validate() (formValues, string) {
 	num := func(f int, name string, blank int) int {
 		s := strings.TrimSpace(text(f))
 		if err != nil || s == "" {
+			keep(f, strconv.Itoa(blank))
 			return blank
 		}
 		n, perr := strconv.Atoi(s)
 		if perr != nil {
 			err = fmt.Errorf("%s must be a whole number, got %q", name, text(f))
 		}
+		keep(f, strconv.Itoa(n))
 		return n
 	}
 	concurrency := num(fieldConcurrency, "Concurrency", 0)
@@ -558,6 +592,8 @@ func (m *formModel) validate() (formValues, string) {
 			exclude = append(exclude, p)
 		}
 	}
+	keep(fieldMaxDuration, durationText(maxDuration))
+	keep(fieldExclude, strings.Join(exclude, ","))
 	if err != nil {
 		return formValues{}, err.Error()
 	}
@@ -566,10 +602,11 @@ func (m *formModel) validate() (formValues, string) {
 	if err != nil {
 		return formValues{}, err.Error()
 	}
+	keep(fieldTypes, strings.Join(recordTypes, ","))
 
 	// Output file is optional; the format applies only to that file and is
 	// validated even when no file is set so a typo is caught early.
-	outputFile := expandHome(strings.TrimSpace(text(fieldOutput)))
+	outputFile := path(fieldOutput)
 	formatStr := strings.TrimSpace(text(fieldFormat))
 	if formatStr == "" {
 		formatStr = "text"
@@ -580,96 +617,65 @@ func (m *formModel) validate() (formValues, string) {
 	}
 
 	v := formValues{
-		domain:          domain,
-		wordlist:        wl,
-		sources:         sources,
-		dnsServer:       dnsServer,
-		resolvers:       resolvers,
-		ratePerResolver: ratePerResolver,
-		concurrency:     concurrency,
-		timeoutMs:       timeout,
-		attempts:        attempts,
-		hitRate:         hitRate,
-		recordTypes:     recordTypes,
-		recursive:       m.toggles[fieldRecursive],
-		depth:           depth,
-		permute:         m.toggles[fieldPermute],
-		rate:            rate,
-		autoRate:        m.toggles[fieldAutoRate],
-		maxQueries:      maxQueries,
-		maxDuration:     maxDuration,
-		exclude:         exclude,
-		noAbort:         m.toggles[fieldNoAbort],
-		retryIncon:      m.toggles[fieldRetryIncon],
-		outputFile:      outputFile,
-		format:          format,
-		formatName:      formatStr,
-		simulate:        m.toggles[fieldSimulate],
-		force:           m.toggles[fieldForce],
+		Options: scan.Options{
+			Domain:      domain,
+			Concurrency: concurrency,
+			TimeoutMs:   timeout,
+			DNSServer:   dnsServer,
+			Simulate:    m.toggles[fieldSimulate],
+			HitRate:     hitRate,
+			Attempts:    attempts,
+			Force:       m.toggles[fieldForce],
+			Types:       recordTypes,
+			Recursive:   m.toggles[fieldRecursive],
+			Depth:       depth,
+			Rate:        rate,
+			AutoRate:    m.toggles[fieldAutoRate],
+			MaxQueries:  maxQueries,
+			MaxDuration: maxDuration,
+			Exclude:     exclude,
+			NoAbort:     m.toggles[fieldNoAbort],
+
+			RatePerResolver:   ratePerResolver,
+			RetryInconclusive: m.toggles[fieldRetryIncon],
+		},
+		wordlist:   wl,
+		sources:    sources,
+		resolvers:  resolvers,
+		permute:    m.toggles[fieldPermute],
+		outputFile: outputFile,
+		format:     format,
+		saved:      saved,
 	}
-	if err := v.options(nil, 0).Validate(); err != nil {
+	if err := v.Validate(); err != nil {
 		return formValues{}, scan.Render(err.Error(), settingLabel)
 	}
 	return v, ""
 }
 
-// options maps the form onto the scan options the CLI also builds, so both
-// front ends share one validator and one Config builder (#80).
+// options is the scan options for one pass over entries. They are the type
+// the CLI also builds, so both front ends share one validator and one Config
+// builder (#80).
 func (v formValues) options(entries []string, seed uint64) scan.Options {
-	return scan.Options{
-		Domain:      v.domain,
-		Entries:     entries,
-		Concurrency: v.concurrency,
-		TimeoutMs:   v.timeoutMs,
-		DNSServer:   v.dnsServer,
-		Simulate:    v.simulate,
-		HitRate:     v.hitRate,
-		Seed:        seed,
-		Attempts:    v.attempts,
-		Force:       v.force,
-		Types:       v.recordTypes,
-		Recursive:   v.recursive,
-		Depth:       v.depth,
-		Rate:        v.rate,
-		AutoRate:    v.autoRate,
-		MaxQueries:  v.maxQueries,
-		MaxDuration: v.maxDuration,
-		Exclude:     v.exclude,
-		NoAbort:     v.noAbort,
-
-		RatePerResolver:   v.ratePerResolver,
-		RetryInconclusive: v.retryIncon,
-	}
+	opts := v.Options
+	opts.Entries, opts.Seed = entries, seed
+	return opts
 }
 
 // settingLabel names an engine setting as its form field (#100).
 func settingLabel(s scan.Setting) string { return scan.Label(s) }
 
+// formValues is a validated form: the scan options it sets, the values the
+// engine does not take, and the form as last.json remembers it.
 type formValues struct {
-	domain          string
-	wordlist        string
-	sources         []string // passive sources asked before the scan, in passive.Known order
-	dnsServer       string
-	resolvers       string // resolver pool file; "" means the single DNS server
-	ratePerResolver int
-	concurrency     int
-	timeoutMs       int
-	attempts        int
-	hitRate         int
-	recordTypes     []string
-	recursive       bool
-	depth           int
-	permute         bool // a second pass over permutations of the names found
-	rate            int
-	autoRate        bool
-	maxQueries      int
-	maxDuration     time.Duration // 0 = unlimited; beginScan turns it into the deadline
-	exclude         []string
-	noAbort         bool
-	retryIncon      bool
-	outputFile      string
-	format          output.Format
-	formatName      string
-	simulate        bool
-	force           bool
+	// Options holds the engine settings. Entries and Seed are set per pass by
+	// options, Pool and Deadline by beginScan; MaxDuration 0 means unlimited.
+	scan.Options
+	wordlist   string
+	sources    []string // passive sources asked before the scan, in passive.Known order
+	resolvers  string   // resolver pool file; "" means the single DNS server
+	permute    bool     // a second pass over permutations of the names found
+	outputFile string
+	format     output.Format
+	saved      savedConfig // what saveConfig writes for the next session
 }

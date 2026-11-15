@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"runtime"
 	"testing"
 )
@@ -20,68 +21,153 @@ func redirectConfig(t *testing.T) {
 	}
 }
 
+// filledForm returns a form with every toggle ON and every text field set to
+// a value that is not its default and that validate keeps as typed, so a saved
+// and reloaded form shows it unchanged. A new text field needs a value here.
+func filledForm(t *testing.T) formModel {
+	t.Helper()
+	texts := map[int]string{
+		fieldDomain: "example.com", fieldWordlist: "words.txt", fieldSources: "ct,wayback",
+		fieldHitRate: "40", fieldDNSServer: "192.0.2.53:53", fieldResolvers: "pool.txt",
+		fieldRatePerResolver: "5", fieldConcurrency: "7", fieldTimeout: "700", fieldAttempts: "2",
+		fieldTypes: "A,CNAME", fieldDepth: "3", fieldRate: "50", fieldMaxQueries: "10",
+		fieldMaxDuration: "1h30m0s", fieldExclude: "vpn.example.com,*.corp.example.com",
+		fieldOutput: "out.json", fieldFormat: "json",
+	}
+	m := newFormModel(savedConfig{})
+	for f, spec := range formFields {
+		if spec.kind == toggleField {
+			m.toggles[f] = true
+			continue
+		}
+		v, ok := texts[f]
+		if !ok {
+			t.Fatalf("no test value for the %s field; add one to filledForm", spec.name())
+		}
+		if v == m.inputs[f].Value() {
+			t.Fatalf("the test value for the %s field is its default, %q", spec.name(), v)
+		}
+		m.inputs[f].SetValue(v)
+	}
+	return m
+}
+
+// savedJSON validates the form, saves it and returns last.json as written.
+func savedJSON(t *testing.T, m formModel) string {
+	t.Helper()
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	if err := saveConfig(vals.saved); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	p, err := configPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// TestSaveLoadConfigRoundTrip covers #307: every form row, set to something
+// other than its default, survives validate, saveConfig, loadSavedConfig and a
+// new form. A field that is not remembered fails here.
 func TestSaveLoadConfigRoundTrip(t *testing.T) {
 	redirectConfig(t)
 
-	fv := formValues{
-		domain:          "example.com",
-		wordlist:        "wl.txt",
-		dnsServer:       "1.1.1.1:53",
-		resolvers:       "resolvers.txt",
-		ratePerResolver: 7,
-		concurrency:     200,
-		timeoutMs:       500,
-		attempts:        3,
-		hitRate:         42,
-		recordTypes:     []string{"A", "CNAME"},
-		recursive:       true,
-		depth:           4,
-		rate:            25,
-		maxQueries:      5000,
-		noAbort:         true,
-		outputFile:      "out.json",
-		formatName:      "json",
-		simulate:        true,
-		force:           true,
-	}
-
-	if err := saveConfig(fv); err != nil {
-		t.Fatalf("saveConfig: %v", err)
-	}
-
+	m := filledForm(t)
+	savedJSON(t, m)
 	sc, ok := loadSavedConfig()
 	if !ok {
 		t.Fatal("loadSavedConfig returned ok=false after saveConfig")
 	}
+	again := newFormModel(sc)
+	for f, spec := range formFields {
+		if got, want := again.inputs[f].Value(), m.inputs[f].Value(); got != want {
+			t.Errorf("%s came back as %q, want %q", spec.name(), got, want)
+		}
+		if again.toggles[f] != m.toggles[f] {
+			t.Errorf("%s came back %v, want %v", spec.name(), again.toggles[f], m.toggles[f])
+		}
+	}
+}
 
-	if sc.Domain != fv.domain || sc.Wordlist != fv.wordlist || sc.DNSServer != fv.dnsServer {
-		t.Errorf("string fields did not round-trip: %+v", sc)
+// TestSavedConfigFile pins last.json byte for byte (#307): the keys and their
+// order, and the values as validate normalizes them, with a hidden or blank
+// field saved as its default.
+func TestSavedConfigFile(t *testing.T) {
+	sparse := newFormModel(savedConfig{})
+	for f, v := range map[int]string{
+		fieldDomain: "https://Example.COM./", fieldSources: "wayback, ct", fieldHitRate: "55", fieldDNSServer: " ",
+		fieldConcurrency: " 050 ", fieldTypes: "cname, a", fieldDepth: "4", fieldRate: "",
+		fieldMaxDuration: " 20m ", fieldExclude: " vpn.example.com , ,*.corp.example.com", fieldFormat: "",
+	} {
+		sparse.inputs[f].SetValue(v)
 	}
-	if sc.Concurrency != fv.concurrency || sc.TimeoutMs != fv.timeoutMs || sc.Attempts != fv.attempts {
-		t.Errorf("numeric scan fields did not round-trip: %+v", sc)
-	}
-	if sc.HitRate != fv.hitRate || sc.Depth != fv.depth || sc.Rate != fv.rate {
-		t.Errorf("hit-rate/depth/rate did not round-trip: %+v", sc)
-	}
-	if sc.Types != "A,CNAME" {
-		t.Errorf("Types = %q, want %q", sc.Types, "A,CNAME")
-	}
-	if sc.Output != "out.json" || sc.Format != "json" {
-		t.Errorf("output/format did not round-trip: %+v", sc)
-	}
-	if !sc.Simulate || !sc.Force || !sc.Recursive {
-		t.Errorf("toggle fields did not round-trip: %+v", sc)
-	}
-	if sc.MaxQueries != 5000 || !sc.NoAbort {
-		t.Errorf("max-queries/no-abort did not round-trip: %+v", sc)
-	}
-	m := newFormModel(sc)
-	if got := m.inputs[fieldMaxQueries].Value(); got != "5000" || !m.toggles[fieldNoAbort] {
-		t.Errorf("form not seeded from saved max-queries/no-abort: %q, %v", got, m.toggles[fieldNoAbort])
-	}
-	// The resolver pool is remembered in last.json too (#195).
-	if m.inputs[fieldResolvers].Value() != "resolvers.txt" || m.inputs[fieldRatePerResolver].Value() != "7" {
-		t.Errorf("form not seeded from saved resolver pool: %q, %q", m.inputs[fieldResolvers].Value(), m.inputs[fieldRatePerResolver].Value())
+	for name, tc := range map[string]struct {
+		form formModel
+		want string
+	}{
+		"every row set": {filledForm(t), `{
+  "domain": "example.com",
+  "wordlist": "words.txt",
+  "dns_server": "192.0.2.53:53",
+  "resolvers": "pool.txt",
+  "rate_per_resolver": 5,
+  "concurrency": 7,
+  "timeout_ms": 700,
+  "attempts": 2,
+  "hit_rate": 40,
+  "types": "A,CNAME",
+  "depth": 3,
+  "rate": 50,
+  "max_queries": 10,
+  "exclude": "vpn.example.com,*.corp.example.com",
+  "output": "out.json",
+  "format": "json",
+  "simulate": true,
+  "force": true,
+  "recursive": true,
+  "no_abort": true,
+  "auto_rate": true,
+  "max_duration": "1h30m0s",
+  "retry_inconclusive": true,
+  "sources": "ct,wayback",
+  "permute": true
+}`},
+		"normalized, hidden and blank rows": {sparse, `{
+  "domain": "example.com",
+  "wordlist": "",
+  "dns_server": "8.8.8.8:53",
+  "concurrency": 50,
+  "timeout_ms": 1000,
+  "attempts": 1,
+  "hit_rate": 15,
+  "types": "CNAME,A",
+  "depth": 1,
+  "rate": 0,
+  "max_queries": 0,
+  "exclude": "vpn.example.com,*.corp.example.com",
+  "output": "",
+  "format": "text",
+  "simulate": false,
+  "force": false,
+  "recursive": false,
+  "no_abort": false,
+  "max_duration": "20m0s",
+  "sources": "ct,wayback"
+}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			redirectConfig(t)
+			if got := savedJSON(t, tc.form); got != tc.want {
+				t.Errorf("last.json:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -23,8 +23,11 @@ func runTUIScan(t *testing.T, format output.Format, formatName string, types []s
 	t.Setenv("HOME", cfg)
 	path := filepath.Join(t.TempDir(), "out."+formatName)
 	vals := formValues{
-		domain: "example.com", dnsServer: "8.8.8.8:53", concurrency: 4, timeoutMs: 1000, attempts: 1,
-		hitRate: 100, recordTypes: types, depth: 1, outputFile: path, format: format, formatName: formatName, simulate: true,
+		Options: scan.Options{
+			Domain: "example.com", DNSServer: "8.8.8.8:53", Concurrency: 4, TimeoutMs: 1000, Attempts: 1,
+			HitRate: 100, Types: types, Depth: 1, Simulate: true,
+		},
+		outputFile: path, format: format,
 	}
 	m := New(Options{Version: "test"})
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30}) // as a terminal sends first

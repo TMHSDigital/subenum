@@ -149,7 +149,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.form.err = ""
 			m.form.loading = true
-			m.form.asking = len(vals.sources) > 0 && !vals.simulate
+			m.form.asking = len(vals.sources) > 0 && !vals.Simulate
 			// Load the wordlist off the event loop so a large list cannot
 			// freeze the UI (#55); beginScan runs when it arrives.
 			return m, loadWordlistCmd(vals, m.opts)
@@ -190,9 +190,9 @@ func loadWordlistCmd(vals formValues, o Options) tea.Cmd {
 		msg := wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err, pool: pool, poolErr: poolErr}
 		// The sources are asked only for a scan that will start, and never in
 		// simulation mode, which sends nothing off the machine (#274).
-		if err == nil && poolErr == nil && len(entries) > 0 && !vals.simulate && len(vals.sources) > 0 {
-			msg.lookups = fetchSources(context.Background(), vals.domain, vals.sources, o)
-			msg.entries, msg.from = mergeSources(vals.domain, entries, msg.lookups)
+		if err == nil && poolErr == nil && len(entries) > 0 && !vals.Simulate && len(vals.sources) > 0 {
+			msg.lookups = fetchSources(context.Background(), vals.Domain, vals.sources, o)
+			msg.entries, msg.from = mergeSources(vals.Domain, entries, msg.lookups)
 		}
 		return msg
 	}
@@ -202,14 +202,14 @@ func loadWordlistCmd(vals formValues, o Options) tea.Cmd {
 // field is empty, the way the CLI treats a missing -w (#288).
 func loadWordlist(vals formValues) (entries []string, skipped int, err error) {
 	if vals.wordlist != "" {
-		entries, _, skipped, err = wordlist.LoadWordlist(vals.wordlist, vals.domain)
+		entries, _, skipped, err = wordlist.LoadWordlist(vals.wordlist, vals.Domain)
 		return entries, skipped, err
 	}
 	pr := wordlist.NewPreparer()
 	if err := wordlist.EachLine(strings.NewReader(data.Subdomains5k), pr.Add); err != nil {
 		return nil, 0, err
 	}
-	entries, _, skipped = pr.Prepared().For(vals.domain)
+	entries, _, skipped = pr.Prepared().For(vals.Domain)
 	return entries, skipped, nil
 }
 
@@ -217,14 +217,14 @@ func loadWordlist(vals formValues) (entries []string, skipped int, err error) {
 // does for -r (#195). It returns nil without a file, and in simulation mode,
 // which sends no DNS queries.
 func loadPool(vals formValues) (*dns.Pool, error) {
-	if vals.resolvers == "" || vals.simulate {
+	if vals.resolvers == "" || vals.Simulate {
 		return nil, nil
 	}
 	lines, err := wordlist.ReadLines(vals.resolvers)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read resolver pool: %w", err)
 	}
-	pool, err := dns.NewPoolFromLines(lines, time.Duration(vals.timeoutMs)*time.Millisecond, vals.ratePerResolver)
+	pool, err := dns.NewPoolFromLines(lines, time.Duration(vals.TimeoutMs)*time.Millisecond, vals.RatePerResolver)
 	if errors.Is(err, dns.ErrNoResolvers) {
 		err = fmt.Errorf("%s %w", vals.resolvers, err)
 	}
@@ -254,11 +254,11 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.outFile = f
-		m.out = output.NewFile(f.Writer, vals.simulate, vals.format)
+		m.out = output.NewFile(f.Writer, vals.Simulate, vals.format)
 		m.out.SetSeed(seed)
 		// Same file shape as the CLI's: a takeover column when CNAME
 		// records are requested (#118).
-		m.out.SetTakeoverColumn(dns.HintsTakeover(vals.recordTypes))
+		m.out.SetTakeoverColumn(dns.HintsTakeover(vals.Types))
 		// With sources or a permutation pass, each result says what proposed
 		// it, as the CLI's do.
 		m.out.SetSourcesColumn(len(vals.sources) > 0 || vals.permute)
@@ -268,23 +268,23 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 	m.entries, m.names, m.pool, m.deadline = entries, nil, pool, time.Time{}
 
 	m.state = stateScan
-	m.scanView = newScanViewModel(m.width, m.height, vals.simulate)
-	m.scanView.noAbort = vals.noAbort
+	m.scanView = newScanViewModel(m.width, m.height, vals.Simulate)
+	m.scanView.noAbort = vals.NoAbort
 	m.scanView.permute = vals.permute
 	// Same facts the CLI prints: the seed that reproduces a simulation, and
 	// how many wordlist entries were dropped (#80).
-	if vals.simulate {
+	if vals.Simulate {
 		m.scanView.seed = seed
 	}
 	if skipped > 0 {
 		m.scanView.addMessage(wildcardStyle.Render(fmt.Sprintf("⚠ Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)))
 	}
 
-	if vals.resolvers != "" && vals.simulate {
+	if vals.resolvers != "" && vals.Simulate {
 		m.scanView.addMessage(dimStyle.Render("Note: the resolver pool is ignored in simulation mode, which sends no DNS queries"))
 	}
 
-	if len(vals.sources) > 0 && vals.simulate {
+	if len(vals.sources) > 0 && vals.Simulate {
 		m.scanView.addMessage(dimStyle.Render("Note: the passive sources are ignored in simulation mode, which sends nothing off the machine"))
 	}
 	// Same lines as the CLI's: what each source gave, or why the scan runs
@@ -298,7 +298,7 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 		case l.truncated != "":
 			m.scanView.addMessage(wildcardStyle.Render("⚠ " + l.truncated))
 		}
-		m.scanView.addMessage(dimStyle.Render(fmt.Sprintf("%s: %d names under %s, %d of them new candidates", label, len(l.names), vals.domain, l.added)))
+		m.scanView.addMessage(dimStyle.Render(fmt.Sprintf("%s: %d names under %s, %d of them new candidates", label, len(l.names), vals.Domain, l.added)))
 	}
 
 	// Same notice as the CLI's, so the TUI user knows which list ran (#288).
@@ -308,16 +308,16 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 
 	opts := vals.options(entries, seed)
 	opts.Pool = pool
-	if vals.maxDuration > 0 {
+	if vals.MaxDuration > 0 {
 		// The budget starts with the scan, as -max-duration's starts when the
 		// CLI's scans do (#274).
-		m.deadline = time.Now().Add(vals.maxDuration)
+		m.deadline = time.Now().Add(vals.MaxDuration)
 		opts.Deadline = m.deadline
 	}
 	cfg := opts.Config()
 
 	// Persist form values for next session (best-effort).
-	_ = saveConfig(vals)
+	_ = saveConfig(vals.saved)
 
 	events := make(chan scan.Event, 128)
 	m.events = events
@@ -395,7 +395,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The main pass finished and a permutation pass follows (#274): its
 		// candidates are built off the event loop, and beginPermutation runs
 		// when they arrive.
-		return m, tea.Batch(svCmd, permutationCmd(m.vals.domain, m.entries, m.names, m.from))
+		return m, tea.Batch(svCmd, permutationCmd(m.vals.Domain, m.entries, m.names, m.from))
 	case ev.Kind == scan.EventDone && ev.Stopped && m.scanView.main == nil:
 		// The scan stopped before testing candidates (an early error such as a
 		// wildcard zone without Force, #99): close the file without finalizing,
@@ -428,7 +428,7 @@ func (m *Model) record(r scan.Result) {
 		res.Permutation, res.Sources = true, fromPermute
 	case len(m.vals.sources) > 0 || m.vals.permute:
 		res.Sources = fromWordlist
-		if list, ok := m.from[strings.TrimSuffix(strings.ToLower(r.Subdomain), "."+m.vals.domain)]; ok {
+		if list, ok := m.from[strings.TrimSuffix(strings.ToLower(r.Subdomain), "."+m.vals.Domain)]; ok {
 			res.Sources = list
 		}
 		if m.vals.permute {
@@ -528,10 +528,10 @@ func (m *Model) summary(final scan.Event) output.Summary {
 	s := report.New(report.Run{
 		Version:   m.opts.Version,
 		Started:   m.started,
-		Simulated: m.vals.simulate,
+		Simulated: m.vals.Simulate,
 		Seed:      m.seed,
-		Resolver:  m.vals.dnsServer,
-		RateLimit: m.vals.rate,
+		Resolver:  m.vals.DNSServer,
+		RateLimit: m.vals.Rate,
 	})
 	status := "ok"
 	switch {
@@ -540,7 +540,7 @@ func (m *Model) summary(final scan.Event) output.Summary {
 	case m.scanView.aborted:
 		status = "interrupted"
 	}
-	t := report.Target(m.vals.domain, status, "", true, final, settingLabel)
+	t := report.Target(m.vals.Domain, status, "", true, final, settingLabel)
 	for _, l := range m.lookups {
 		t.Sources = append(t.Sources, output.SourceSummary{Name: l.name, Names: len(l.names), Found: m.foundBy[l.name], Error: l.err, Truncated: l.truncated != ""})
 		if l.name == "ct" {
