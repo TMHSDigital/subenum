@@ -846,7 +846,9 @@ func explainTarget(p func(string, ...any), t output.TargetSummary) {
 		if t.StoppedBy == "duration" {
 			budget = "-max-duration"
 		}
-		p("  %d names were not tested because %s ran out; raise it, or continue with -resume.", t.SkippedCap, budget)
+		// No resume state is written for a run that ends on a budget (only an
+		// interrupted run saves one), so -resume is not offered here (#320).
+		p("  %d names were not tested because %s ran out; raise it and run the scan again.", t.SkippedCap, budget)
 	}
 	if t.Wildcard {
 		p("  The domain answers every name (a wildcard), so subenum dropped %d answers matching the wildcard; a real name that answers the same way is dropped too.", o.WildcardFiltered)

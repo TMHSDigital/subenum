@@ -612,6 +612,10 @@ func TestE2EMCPExplainStats(t *testing.T) {
 				t.Errorf("call %d: %q lacks %q (isError %v)", i, text, want, isErr)
 			}
 		}
+		// A capped run writes no resume state, so the advice must not offer -resume (#320).
+		if text, _ := toolText(t, replies[i]); !strings.Contains(text, "raise it and run the scan again") || strings.Contains(text, "-resume") {
+			t.Errorf("call %d: capped-run advice should only say to raise the budget and rerun: %q", i, text)
+		}
 	}
 	if text, isErr := toolText(t, replies[2]); !isErr || !strings.Contains(text, "not a subenum run-quality report") {
 		t.Errorf("non-summary input: %q (isError %v)", text, isErr)
