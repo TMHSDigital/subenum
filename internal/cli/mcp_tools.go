@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/TMHSDigital/subenum/internal/diff"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/mcp"
 	"github.com/TMHSDigital/subenum/internal/passive"
@@ -436,4 +437,96 @@ func explainStatsTool() mcp.Tool {
 			return mcp.Result{Text: explainSummary(s)}
 		},
 	}
+}
+
+// diffArgs are diff's arguments. TestMCPInputSchemasMatchArgs keeps them and
+// the tool's input schema in step.
+type diffArgs struct {
+	Previous string   `json:"previous"`
+	Current  string   `json:"current"`
+	Types    []string `json:"types"`
+}
+
+// diffTool compares two result sets as `subenum diff -records` does (#333),
+// without a DNS query. Like explain_stats it takes contents, not paths, and
+// the transport's message limit bounds them.
+func diffTool() mcp.Tool {
+	results := "a scan or lab_scan report (or its results array), or the contents of a subenum results file in any format (json, jsonl, csv or text)"
+	return mcp.Tool{
+		Name:        "diff",
+		Title:       "Compare two result sets",
+		Description: "Compare two subenum result sets without sending a DNS query: names added, names missing, and names whose records changed. Address changes behind a CNAME are not counted, so CDN rotation is not reported as a change. Pass contents, not paths.",
+		InputSchema: inputSchema(schemaObject{
+			{"previous", map[string]any{"type": "string", "description": "The earlier results: " + results + "."}},
+			{"current", map[string]any{"type": "string", "description": "The later results: " + results + "."}},
+			{"types", map[string]any{"type": "array", "items": map[string]any{"enum": dns.Types()}, "description": "Record types to compare for changed names; default every type."}},
+		}, "previous", "current"),
+		OutputSchema: mcpDiffSchema,
+		Annotations:  mcp.Annotations{ReadOnlyHint: true},
+		Call: func(_ context.Context, raw json.RawMessage) mcp.Result {
+			var args diffArgs
+			if err := strictUnmarshal(raw, &args); err != nil {
+				return mcp.Errorf("invalid arguments: %v", err)
+			}
+			var types []string // every type
+			if len(args.Types) > 0 {
+				var err error
+				if types, err = dns.ParseTypes(strings.Join(args.Types, ",")); err != nil {
+					return mcp.Errorf("types: %v", err)
+				}
+			}
+			prev, err := parseMCPResults(args.Previous)
+			if err != nil {
+				return mcp.Errorf("previous: %v", err)
+			}
+			cur, err := parseMCPResults(args.Current)
+			if err != nil {
+				return mcp.Errorf("current: %v", err)
+			}
+			return mcpDiff(prev, cur, types).result()
+		},
+	}
+}
+
+// parseMCPResults reads a result set for diff: a scan or lab_scan report, its
+// results array, or a results file in any output format.
+func parseMCPResults(text string) (baseline, error) {
+	trimmed := []byte(strings.TrimSpace(strings.TrimPrefix(text, string(rune(0xFEFF)))))
+	var raw json.RawMessage
+	switch {
+	case bytes.HasPrefix(trimmed, []byte("{")):
+		var report map[string]json.RawMessage
+		if json.Unmarshal(trimmed, &report) == nil {
+			raw = report["results"]
+		}
+	case bytes.HasPrefix(trimmed, []byte("[")):
+		// A report's results have "name"; a -format json file's "subdomain".
+		var items []map[string]json.RawMessage
+		if json.Unmarshal(trimmed, &items) == nil && len(items) > 0 {
+			if _, ok := items[0]["name"]; ok {
+				raw = trimmed
+			}
+		}
+	}
+	if raw == nil {
+		return parseBaseline(trimmed)
+	}
+	var results []mcpResult
+	if err := json.Unmarshal(raw, &results); err != nil {
+		return baseline{}, fmt.Errorf("reading the report's results: %w", err)
+	}
+	b := baseline{names: map[string]struct{}{}, records: map[string][]dns.Record{}, hasRecords: true}
+	for _, r := range results {
+		name := diff.Name(r.Name)
+		if name == "" {
+			continue
+		}
+		b.names[name] = struct{}{}
+		for _, rec := range r.Records {
+			if typ, value, ok := strings.Cut(rec, " "); ok {
+				b.records[name] = append(b.records[name], dns.Record{Type: typ, Value: value})
+			}
+		}
+	}
+	return b, nil
 }

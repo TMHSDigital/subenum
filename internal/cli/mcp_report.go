@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/mcp"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
@@ -133,6 +134,92 @@ func (r *mcpReport) result() mcp.Result {
 	}
 	return mcp.Result{Text: string(b), IsError: r.Error != "", Structured: r}
 }
+
+// mcpDiffReport is what diff returns, as JSON (#333).
+type mcpDiffReport struct {
+	Added           []mcpDiffName `json:"added"`
+	Missing         []mcpDiffName `json:"missing"`
+	Changed         []mcpDiffName `json:"changed"`
+	RecordsCompared bool          `json:"records_compared"`
+	Notes           []string      `json:"notes"`
+}
+
+// mcpDiffName is one name diff reports, with its records in mcpResult's
+// "TYPE value" form: current records for added and changed names, previous
+// records for missing ones.
+type mcpDiffName struct {
+	Name            string   `json:"name"`
+	Records         []string `json:"records"`
+	PreviousRecords []string `json:"previous_records,omitempty"`
+}
+
+// mcpDiff compares two result sets for the diff tool.
+func mcpDiff(prev, cur baseline, types []string) *mcpDiffReport {
+	d := compareBaselines(prev, cur, true, types)
+	strs := func(recs []dns.Record) []string {
+		out := []string{}
+		for _, r := range recs {
+			out = append(out, r.Type+" "+r.Value)
+		}
+		return out
+	}
+	list := func(names []string, records map[string][]dns.Record, previous map[string][]dns.Record) []mcpDiffName {
+		out := []mcpDiffName{}
+		for _, name := range names {
+			n := mcpDiffName{Name: name, Records: strs(records[name])}
+			if previous != nil {
+				n.PreviousRecords = strs(previous[name])
+			}
+			out = append(out, n)
+		}
+		return out
+	}
+	r := &mcpDiffReport{
+		Added:           list(d.added, cur.records, nil),
+		Missing:         list(d.missing, prev.records, nil),
+		Changed:         list(d.changed, cur.records, prev.records),
+		RecordsCompared: d.compared,
+		Notes: []string{"Missing names were in previous but not in current. Nothing was looked up, so they are unverified: " +
+			"a name may be missing because the later scan did not try it or did not complete, not because it is gone."},
+	}
+	if !d.compared {
+		r.Notes = append(r.Notes, "Records were not compared because a result set has none (text format): changed is empty.")
+	}
+	return r
+}
+
+func (r *mcpDiffReport) result() mcp.Result {
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return mcp.Errorf("encoding the report: %v", err)
+	}
+	return mcp.Result{Text: string(b), Structured: r}
+}
+
+// mcpDiffSchema is diff's outputSchema: mcpDiffReport as JSON Schema.
+// TestMCPDiffSchemaCoversTheReport keeps the two in step.
+var mcpDiffSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "added": {"type": "array", "items": ` + mcpDiffNameSchema + `, "description": "names in current but not in previous"},
+    "missing": {"type": "array", "items": ` + mcpDiffNameSchema + `, "description": "names in previous but not in current; unverified, since nothing was looked up"},
+    "changed": {"type": "array", "items": ` + mcpDiffNameSchema + `, "description": "names in both whose records differ"},
+    "records_compared": {"type": "boolean", "description": "false when a result set has no records, so changed is empty"},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["added", "missing", "changed", "records_compared", "notes"]
+}`)
+
+// mcpDiffNameSchema is mcpDiffName as JSON Schema.
+const mcpDiffNameSchema = `{
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "records": {"type": "array", "items": {"type": "string"}, "description": "\"TYPE value\": current records, or previous ones for a missing name"},
+        "previous_records": {"type": "array", "items": {"type": "string"}, "description": "changed names only"}
+      },
+      "required": ["name", "records"]
+    }`
 
 // mcpReportSchema is the outputSchema of scan and lab_scan: mcpReport as
 // JSON Schema (#270). TestMCPReportSchemaCoversTheReport keeps the two in

@@ -59,6 +59,11 @@ func loadBaseline(path string) (baseline, error) {
 	if err != nil {
 		return baseline{}, err
 	}
+	return parseBaseline(data)
+}
+
+// parseBaseline is loadBaseline on a results file's contents.
+func parseBaseline(data []byte) (baseline, error) {
 	b := baseline{names: map[string]struct{}{}, records: map[string][]dns.Record{}}
 	add := func(name string, records ...dns.Record) string {
 		name = diff.Name(name)
@@ -187,12 +192,54 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	out.SetPlain(true)
 	out.SetDiff(true)
 	out.SetShowRecords(*records)
-	compare := *records
-	if compare && (!prev.hasRecords || !cur.hasRecords) {
+	d := compareBaselines(prev, cur, *records, types)
+	if *records && !d.compared {
 		out.Info("Note: -records needs JSON, JSONL or CSV files; comparing names only")
-		compare = false
 	}
 
+	emit := func(name, change string, recs, previous []dns.Record) {
+		if recs == nil {
+			recs = []dns.Record{}
+		}
+		out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: recs}, Change: change, PreviousRecords: previous})
+	}
+	for _, name := range d.added {
+		emit(name, "added", cur.records[name], nil)
+	}
+	for _, name := range d.changed {
+		emit(name, "changed", cur.records[name], prev.records[name])
+	}
+	for _, name := range d.missing {
+		emit(name, "missing", prev.records[name], nil)
+	}
+	if err := out.Finish(); err != nil {
+		out.Error("writing output: %v", err)
+		return exitFailure
+	}
+	summary := fmt.Sprintf("%d added, %d missing", len(d.added), len(d.missing))
+	if d.compared {
+		summary += fmt.Sprintf(", %d changed", len(d.changed))
+	}
+	out.Info("%s", summary)
+	if len(d.added)+len(d.missing)+len(d.changed) > 0 {
+		return exitChanges
+	}
+	return exitOK
+}
+
+// baselineDiff is how two results files differ, each list sorted: names only
+// in current, names only in previous, and names in both whose records differ.
+// compared says whether records were compared at all.
+type baselineDiff struct {
+	added, missing, changed []string
+	compared                bool
+}
+
+// compareBaselines compares two results files (subenum diff and the MCP diff
+// tool). With records, names in both are compared record by record over types
+// (every type when empty), as -diff-records does, when both files have
+// records.
+func compareBaselines(prev, cur baseline, records bool, types []string) baselineDiff {
 	sorted := func(m map[string]struct{}) []string {
 		names := make([]string, 0, len(m))
 		for name := range m {
@@ -201,47 +248,20 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		sort.Strings(names)
 		return names
 	}
-	emit := func(name, change string, recs, previous []dns.Record) {
-		if recs == nil {
-			recs = []dns.Record{}
-		}
-		out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: recs}, Change: change, PreviousRecords: previous})
-	}
-	var added, missing, changed int
+	d := baselineDiff{compared: records && prev.hasRecords && cur.hasRecords}
 	for _, name := range sorted(cur.names) {
-		if _, ok := prev.names[name]; !ok {
-			added++
-			emit(name, "added", cur.records[name], nil)
-		}
-	}
-	if compare {
-		for _, name := range sorted(cur.names) {
-			old, ok := prev.records[name]
-			if _, seen := prev.names[name]; seen && ok && diff.RecordsChanged(old, cur.records[name], types) {
-				changed++
-				emit(name, "changed", cur.records[name], old)
-			}
+		if _, seen := prev.names[name]; !seen {
+			d.added = append(d.added, name)
+		} else if old, ok := prev.records[name]; d.compared && ok && diff.RecordsChanged(old, cur.records[name], types) {
+			d.changed = append(d.changed, name)
 		}
 	}
 	for _, name := range sorted(prev.names) {
 		if _, ok := cur.names[name]; !ok {
-			missing++
-			emit(name, "missing", prev.records[name], nil)
+			d.missing = append(d.missing, name)
 		}
 	}
-	if err := out.Finish(); err != nil {
-		out.Error("writing output: %v", err)
-		return exitFailure
-	}
-	summary := fmt.Sprintf("%d added, %d missing", added, missing)
-	if compare {
-		summary += fmt.Sprintf(", %d changed", changed)
-	}
-	out.Info("%s", summary)
-	if added+missing+changed > 0 {
-		return exitChanges
-	}
-	return exitOK
+	return d
 }
 
 // observe records a found name and says how it differs from the baseline:

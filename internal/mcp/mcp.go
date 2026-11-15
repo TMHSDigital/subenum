@@ -26,7 +26,7 @@ const ProtocolVersion = "2025-06-18"
 var supportedVersions = []string{ProtocolVersion, "2025-03-26", "2024-11-05"}
 
 // maxMessage bounds one incoming line. explain_stats takes a whole -stats
-// file as an argument, so it is generous.
+// file as an argument, and diff two results files, so it is generous.
 const maxMessage = 16 << 20
 
 // JSON-RPC error codes.

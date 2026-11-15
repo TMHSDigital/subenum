@@ -58,12 +58,12 @@ internal/cli/config.go         - config file and SUBENUM_* environment defaults,
 internal/cli/ct.go             - -ct / -sources: passive source names as extra candidates
 internal/cli/axfr.go           - -axfr: zone transfer names as extra candidates, with resume and messages
 internal/axfr/axfr.go          - Try: AXFR from each name server and the denial probe (-axfr, subenum.ProbeZone)
-internal/cli/diff.go           - -diff / -diff-records: compare against a previous results file; runDiff: the diff subcommand
+internal/cli/diff.go           - -diff / -diff-records: compare against a previous results file; runDiff: the diff subcommand; compareBaselines, shared with the MCP diff tool
 internal/cli/dryrun.go         - -dry-run: print the scan plan and its cost without sending queries
 internal/cli/lab.go            - -simulate-zone: serve a lab scenario on a loopback DNS server
 internal/cli/mcp.go            - subenum mcp: its flags, the server, and the lab scenarios lab_scan serves
-internal/cli/mcp_tools.go      - the lab_scan, scan and explain_stats tools: input schemas, argument checks, the allow-list and caps
-internal/cli/mcp_report.go     - the scan report the tools return, its verdict and its outputSchema
+internal/cli/mcp_tools.go      - the lab_scan, scan, explain_stats and diff tools: input schemas, argument checks, the allow-list and caps
+internal/cli/mcp_report.go     - the scan and diff reports the tools return, the scan verdict and their outputSchemas
 internal/cli/permute.go        - -permute / -seeds: the permutation pass
 internal/cli/resume.go         - -resume / -state: save and replay an interrupted run
 internal/cli/results.go        - resultLog: a target's results, kept for -permute seeds and -diff

@@ -47,6 +47,19 @@ the contents of a `-stats` file, or `-format jsonl` output, which ends with the
 same summary. It says how far the results can be trusted, why, and what to
 change next time.
 
+**`diff`** compares two result sets without sending a DNS query, as
+[`subenum diff -records`](monitoring.html) does. `previous` and `current` each
+take a `scan` or `lab_scan` report (or its `results` array) or the contents of
+a results file in any output format; `types` limits which record types count
+for a change. It returns `added`, `missing` and `changed` names with their
+records (and `previous_records` for a changed name), as `structuredContent`
+too. When either side has a CNAME, only the CNAME targets are compared, so CDN
+address rotation is not reported as a change. Names in `previous` but not in
+`current` are called missing, not removed: nothing was looked up, so they are
+unverified. A text-format result set has no records, so `records_compared` is
+then false and `changed` is empty. Like `explain_stats`, it takes contents,
+not paths, and one call is bounded by the server's 16 MiB message limit.
+
 `lab_scan` and `scan` return JSON with the names found and their records, how
 every lookup ended, any notices, and the scan's verdict. Both declare it as an
 `outputSchema`, and send it as `structuredContent` as well as text, so a client
@@ -70,7 +83,7 @@ these stays within `max_queries` and `-max-duration`.
 ## Running it
 
 ```bash
-subenum mcp                                   # lab_scan and explain_stats only
+subenum mcp                                   # lab_scan, explain_stats and diff only
 subenum mcp -allow example.com,example.org    # adds scan, for these domains
 ```
 

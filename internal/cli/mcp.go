@@ -118,7 +118,7 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 	fs.SetOutput(stderr)
 	var allow, sources string
 	var timeoutMs int
-	fs.StringVar(&allow, "allow", "", "Comma-separated domains the scan tool may enumerate, each with its subdomains. Without it only lab_scan and explain_stats are offered")
+	fs.StringVar(&allow, "allow", "", "Comma-separated domains the scan tool may enumerate, each with its subdomains. Without it only lab_scan, explain_stats and diff are offered")
 	fs.StringVar(&cfg.dnsServer, "dns-server", DefaultDNSServer, "Resolver for live scans: ip:port, tls://host or https://host/path")
 	fs.IntVar(&cfg.maxQueries, "max-queries", defaultMCPMaxQueries, "Most candidate names one tool call may test; a call can ask for fewer")
 	fs.IntVar(&cfg.rate, "rate", defaultMCPRate, "DNS queries per second for live scans")
@@ -129,7 +129,7 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(stderr, "Usage: %s mcp [flags]\n\n", ProgramName)
 		_, _ = fmt.Fprintln(stderr, "Serves subenum to AI agents over the Model Context Protocol (stdio).")
-		_, _ = fmt.Fprintln(stderr, "Tools: lab_scan (local lab zones only), scan (domains in -allow only), explain_stats.")
+		_, _ = fmt.Fprintln(stderr, "Tools: lab_scan (local lab zones only), scan (domains in -allow only), explain_stats, diff.")
 		_, _ = fmt.Fprintln(stderr, "Only allow domains you own or have permission to test.")
 		_, _ = fmt.Fprintln(stderr)
 		fs.PrintDefaults()
@@ -209,8 +209,9 @@ func mcpServer(cfg mcpConfig) *mcp.Server {
 		instructions += "Live scanning is off: the operator allowed no domains. "
 	}
 	instructions += "Every scan returns a verdict: when it is not \"complete\", a name missing from the results may still exist. " +
-		"explain_stats explains a run-quality report from the subenum command line (-stats)."
-	tools = append(tools, explainStatsTool())
+		"explain_stats explains a run-quality report from the subenum command line (-stats). " +
+		"diff compares two result sets (a scan report or a results file) without a DNS query: use it to say what changed since an earlier scan."
+	tools = append(tools, explainStatsTool(), diffTool())
 	return &mcp.Server{Name: ProgramName, Version: resolveVersion(), Instructions: instructions, Tools: tools}
 }
 

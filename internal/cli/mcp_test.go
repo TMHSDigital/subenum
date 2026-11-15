@@ -110,7 +110,7 @@ func TestE2EMCPLabScan(t *testing.T) {
 		mcpCall{"lab_scan", `{"resolver": "203.0.113.1"}`},
 		mcpCall{"scan", `{"domain": "lab.example"}`},
 	)
-	if want := []string{"lab_scan", "explain_stats"}; !slices.Equal(tools, want) {
+	if want := []string{"lab_scan", "explain_stats", "diff"}; !slices.Equal(tools, want) {
 		t.Errorf("tools without -allow = %v, want %v", tools, want)
 	}
 
@@ -167,7 +167,7 @@ func TestE2EMCPScanAllowList(t *testing.T) {
 		mcpCall{"scan", `{"domain": "lab.example", "max_queries": 4}`},
 		mcpCall{"scan", `{"domain": "lab.example", "dns_server": "203.0.113.1"}`},
 	)
-	if want := []string{"lab_scan", "scan", "explain_stats"}; !slices.Equal(tools, want) {
+	if want := []string{"lab_scan", "scan", "explain_stats", "diff"}; !slices.Equal(tools, want) {
 		t.Errorf("tools = %v, want %v", tools, want)
 	}
 	if r := mcpReportOf(t, replies[0]); !slices.Equal(reportNames(r), []string{"mail", "www"}) || r.Verdict != "complete" || r.Rate != 1000 {
@@ -609,6 +609,7 @@ func TestMCPInputSchemasMatchArgs(t *testing.T) {
 		// that passes one gets "sources are off" rather than "unknown field".
 		{"scan without -sources", scanTool(noSources), scanArgs{}, "sources"},
 		{"explain_stats", explainStatsTool(), explainStatsArgs{}, ""},
+		{"diff", diffTool(), diffArgs{}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema struct {
@@ -833,6 +834,122 @@ func TestMCPAllowed(t *testing.T) {
 	}
 	if allowed(nil, "example.com") {
 		t.Error("an empty allow-list allowed a domain")
+	}
+}
+
+// TestE2EMCPDiff covers #333: diff compares a results file with a scan
+// report, reports a re-pointed alias or a new address as changed but not
+// address rotation behind a CNAME, and calls absent names missing.
+func TestE2EMCPDiff(t *testing.T) {
+	t.Parallel()
+	quote := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	previous := quote(`[
+  {"subdomain": "www.example.com", "records": [{"type": "A", "value": "192.0.2.1"}]},
+  {"subdomain": "cdn.example.com", "records": [{"type": "CNAME", "value": "x.cdn.example."}, {"type": "A", "value": "192.0.2.5"}]},
+  {"subdomain": "alias.example.com", "records": [{"type": "CNAME", "value": "a.example."}]},
+  {"subdomain": "old.example.com", "records": [{"type": "A", "value": "192.0.2.9"}]}
+]`)
+	current := quote(`{"domain": "example.com", "verdict": "complete", "results": [
+  {"name": "www.example.com", "records": ["A 192.0.2.2"]},
+  {"name": "cdn.example.com", "records": ["CNAME x.cdn.example.", "A 192.0.2.99"]},
+  {"name": "alias.example.com", "records": ["CNAME b.example."]},
+  {"name": "new.example.com", "records": ["AAAA 2001:db8::1"]}
+]}`)
+	_, labReplies := runMCPSession(t, nil, mcpCall{"lab_scan", `{"words": ["www", "mail"]}`})
+	labReport, _ := toolText(t, labReplies[0])
+
+	_, replies := runMCPSession(t, nil,
+		mcpCall{"diff", `{"previous": ` + previous + `, "current": ` + current + `}`},
+		mcpCall{"diff", `{"previous": ` + previous + `, "current": ` + current + `, "types": ["CNAME"]}`},
+		mcpCall{"diff", `{"previous": "www.lab.example\nold.lab.example\n", "current": ` + quote(labReport) + `}`},
+		mcpCall{"diff", `{"previous": "", "current": "", "types": ["SOA"]}`},
+		mcpCall{"diff", `{"previous": "", "current": "{\"results\": 3}"}`},
+	)
+	diffOf := func(i int) mcpDiffReport {
+		t.Helper()
+		text, isErr := toolText(t, replies[i])
+		var r mcpDiffReport
+		if err := json.Unmarshal([]byte(text), &r); isErr || err != nil {
+			t.Fatalf("call %d: not a diff report (isError %v): %s", i, isErr, text)
+		}
+		structured := replies[i]["result"].(map[string]any)["structuredContent"]
+		var fromText any
+		_ = json.Unmarshal([]byte(text), &fromText)
+		if !reflect.DeepEqual(structured, fromText) {
+			t.Errorf("call %d: structuredContent %v differs from the text %v", i, structured, fromText)
+		}
+		return r
+	}
+	names := func(ns []mcpDiffName) []string {
+		out := []string{}
+		for _, n := range ns {
+			out = append(out, n.Name)
+		}
+		return out
+	}
+
+	r := diffOf(0)
+	if got := names(r.Added); !slices.Equal(got, []string{"new.example.com"}) {
+		t.Errorf("added = %v", got)
+	}
+	if got := names(r.Missing); !slices.Equal(got, []string{"old.example.com"}) || !slices.Equal(r.Missing[0].Records, []string{"A 192.0.2.9"}) {
+		t.Errorf("missing = %+v", r.Missing)
+	}
+	// cdn's address rotated behind an unchanged CNAME: not a change.
+	if got := names(r.Changed); !slices.Equal(got, []string{"alias.example.com", "www.example.com"}) || !r.RecordsCompared {
+		t.Errorf("changed = %v (records_compared %v), want alias and www", got, r.RecordsCompared)
+	}
+	if c := r.Changed[0]; !slices.Equal(c.Records, []string{"CNAME b.example."}) || !slices.Equal(c.PreviousRecords, []string{"CNAME a.example."}) {
+		t.Errorf("alias change = %+v", c)
+	}
+	if len(r.Notes) == 0 || !strings.Contains(r.Notes[0], "unverified") {
+		t.Errorf("notes %q do not say missing names are unverified", r.Notes)
+	}
+
+	if got := names(diffOf(1).Changed); !slices.Equal(got, []string{"alias.example.com"}) {
+		t.Errorf("changed over CNAME only = %v, want alias", got)
+	}
+
+	r = diffOf(2)
+	if !slices.Equal(names(r.Missing), []string{"old.lab.example"}) || !slices.Equal(names(r.Added), []string{"mail.lab.example"}) || r.RecordsCompared {
+		t.Errorf("text vs lab_scan report: %+v, want mail added, old missing, no record comparison", r)
+	}
+
+	for i, want := range map[int]string{3: "types:", 4: "current: reading the report's results"} {
+		if text, isErr := toolText(t, replies[i]); !isErr || !strings.Contains(text, want) {
+			t.Errorf("call %d: %q (isError %v), want an error containing %q", i, text, isErr, want)
+		}
+	}
+}
+
+// TestMCPDiffSchemaCoversTheReport keeps diff's outputSchema and
+// mcpDiffReport in step, as TestMCPReportSchemaCoversTheReport does for scan.
+func TestMCPDiffSchemaCoversTheReport(t *testing.T) {
+	var schema map[string]any
+	if err := json.Unmarshal(mcpDiffSchema, &schema); err != nil {
+		t.Fatalf("outputSchema is not JSON: %v", err)
+	}
+	props := func(s map[string]any) map[string]any { return s["properties"].(map[string]any) }
+	check := func(where string, typ reflect.Type, schemaProps map[string]any) {
+		t.Helper()
+		var fields, keys []string
+		for i := range typ.NumField() {
+			name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+			fields = append(fields, name)
+		}
+		for k := range schemaProps {
+			keys = append(keys, k)
+		}
+		slices.Sort(fields)
+		slices.Sort(keys)
+		if !slices.Equal(fields, keys) {
+			t.Errorf("%s: fields %v, schema properties %v", where, fields, keys)
+		}
+	}
+	top := props(schema)
+	check("report", reflect.TypeOf(mcpDiffReport{}), top)
+	for _, list := range []string{"added", "missing", "changed"} {
+		check(list+"[]", reflect.TypeOf(mcpDiffName{}), props(top[list].(map[string]any)["items"].(map[string]any)))
 	}
 }
 
