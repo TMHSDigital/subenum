@@ -216,6 +216,43 @@ jobs:
         grep -q '"change":"removed"' "${{ steps.diff.outputs.changes }}"
         grep -q 'gone.lab.example' "${{ steps.diff.outputs.changes }}"
 
+  # The action's default install path, as users get it: download the latest
+  # release, check it against checksums.txt and its attestation, unpack it
+  # (#325). The action job above builds from source and never reaches that
+  # branch. Pushes to main only, since it needs a published release and the
+  # network. A fresh job with no Go setup and no earlier build, so the scan
+  # can only run the binary the release install put on PATH. The permissions
+  # match the monitoring guide's example workflow. The scan uses -simulate
+  # rather than a lab zone file from this checkout, whose format can be
+  # newer than the release.
+  action-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+    - name: Scan with the latest release
+      id: scan
+      uses: ./
+      with:
+        version: latest
+        domain: lab.example
+        args: -simulate
+
+    - name: Check the scan
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "${{ steps.scan.outputs.verdict }}" = complete
+        test "${{ steps.scan.outputs.found }}" -ge 1
+        test -s "${{ steps.scan.outputs.results }}"
+
   # Builds the Dockerfile for both published platforms without pushing, so a
   # broken image is caught on the PR rather than during a release.
   docker:
