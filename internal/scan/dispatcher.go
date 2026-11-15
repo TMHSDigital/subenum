@@ -49,6 +49,11 @@ type dispatcher struct {
 	capped   bool
 	expired  bool // the budget that capped admission was the deadline
 	pending  int  // dispatched jobs not yet completed
+
+	// rootOutcome is the scan's per-entry repeat codes from start on
+	// (scanState.rootOutcome); the dispatcher marks the entries out of
+	// scope, the workers the rest. Nil in tests that need no Stats.Repeat.
+	rootOutcome []uint8
 }
 
 // visitedSet is the dispatcher's set of generated candidates: a map for a
@@ -344,6 +349,9 @@ func (d *dispatcher) next() (job, bool) {
 		}
 		if d.cfg.scope.excluded(name) {
 			d.excluded++
+			if root >= 0 && d.rootOutcome != nil {
+				d.rootOutcome[root-d.start] = repeatExcluded
+			}
 			d.settle(root)
 			continue
 		}

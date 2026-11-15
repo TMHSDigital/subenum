@@ -387,6 +387,81 @@ func TestE2EMaxDurationSavesResumeState(t *testing.T) {
 	}
 }
 
+// TestE2EResumeCountsEachNameOnce covers #341: a run stopped by
+// -max-duration and resumed until it finishes reports the counts of an
+// uninterrupted run. Before, the stop counted every excluded name past it and
+// the resume counted them again, and names looked up in a chunk reported
+// after the stop were counted by both runs.
+func TestE2EResumeCountsEachNameOnce(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const n = 120
+	var words strings.Builder
+	var exclude []string
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&words, "host%d\n", i)
+		if i%10 == 3 {
+			exclude = append(exclude, fmt.Sprintf("host%d.example.com", i))
+		}
+	}
+	wl := writeFile(t, "wl.txt", words.String())
+	type counts struct {
+		Processed, Total, Found int64
+		Outcomes                output.Outcomes
+	}
+	run := func(stats string, extra ...string) (int, string, counts) {
+		t.Helper()
+		args := append([]string{"-simulate", "-seed", "5", "-hit-rate", "30", "-progress=false", "-t", "4",
+			"-w", wl, "-exclude", strings.Join(exclude, ","), "-stats", stats}, extra...)
+		code, out := runCLIMerged(t, append(args, "example.com")...)
+		return code, out, readCounts(t, stats)
+	}
+	_, _, want := run(filepath.Join(dir, "full.json"))
+	if want.Outcomes.Excluded != int64(len(exclude)) || want.Processed != n-int64(len(exclude)) {
+		t.Fatalf("uninterrupted run: %+v, want %d excluded and the rest processed", want, len(exclude))
+	}
+
+	// -rate 50 with 108 names needs about 2 s, so a 400 ms budget stops the
+	// run, and each resume, several times.
+	stats, state := filepath.Join(dir, "stats.json"), filepath.Join(dir, "state.json")
+	code, out, _ := run(stats, "-rate", "50", "-max-duration", "400ms", "-state", state)
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("the stopped run (exit %d) saved no resume state: %v\n%s", code, err, out)
+	}
+	var got counts
+	for i := 0; ; i++ {
+		if i == 30 {
+			t.Fatal("the scan did not finish in 30 resumed runs")
+		}
+		code, out = runCLIMerged(t, "-resume", state, "-rate", "50", "-max-duration", "400ms")
+		got = readCounts(t, stats)
+		if got.Processed > got.Total || got.Outcomes.Excluded > want.Outcomes.Excluded {
+			t.Fatalf("resumed run %d: %+v; processed above the total, or more excluded than %d\n%s", i, got, want.Outcomes.Excluded, out)
+		}
+		if _, err := os.Stat(state); err != nil {
+			break // the run that finished removed its state
+		}
+	}
+	if code != 0 || got != want {
+		t.Errorf("resumed to the end: exit %d, %+v; want exit 0 and the uninterrupted run's %+v\n%s", code, got, want, out)
+	}
+}
+
+// readCounts reads the one target's counts from a -stats report.
+func readCounts(t *testing.T, path string) (c struct {
+	Processed, Total, Found int64
+	Outcomes                output.Outcomes
+}) {
+	t.Helper()
+	var s output.Summary
+	if data, err := os.ReadFile(path); err != nil || json.Unmarshal(data, &s) != nil || len(s.Targets) != 1 {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	tg := s.Targets[0]
+	c.Processed, c.Total, c.Found, c.Outcomes = tg.Processed, tg.Total, tg.Found, tg.Outcomes
+	return c
+}
+
 // TestE2EResumeDiffOntoOutputFile covers #297: with -diff and -o on one
 // file, a run that stops and saves a resume state leaves the file alone, so
 // the resumed run reports the same diff and exit code as an uninterrupted
@@ -947,6 +1022,8 @@ func TestResumeStateKeys(t *testing.T) {
 			} else {
 				v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
 			}
+		case reflect.Struct:
+			v.Field(0).SetInt(1) // Repeat: not saved (json:"-")
 		default:
 			t.Fatalf("scan.Stats.%s: unhandled kind %s", sv.Type().Field(i).Name, v.Kind())
 		}
@@ -1047,7 +1124,8 @@ func TestMergeStatsCoversEveryField(t *testing.T) {
 	for i := range st.NumField() {
 		name := st.Field(i).Name
 		for _, side := range []string{"saved", "resumed"} {
-			if side == "saved" && (name == "RootDone" || name == "Aborted" || name == "Expired") {
+			// The saved part's Repeat was taken off it (withoutRepeat).
+			if side == "saved" && (name == "RootDone" || name == "Aborted" || name == "Expired" || name == "Repeat") {
 				continue
 			}
 			var a, b scan.Stats
@@ -1066,6 +1144,8 @@ func TestMergeStatsCoversEveryField(t *testing.T) {
 				} else {
 					v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
 				}
+			case reflect.Struct:
+				v.Field(0).SetInt(1)
 			default:
 				t.Fatalf("scan.Stats.%s: unhandled kind %s", name, v.Kind())
 			}

@@ -79,9 +79,35 @@ type resumePass struct {
 	Found     int64      `json:"found"`
 }
 
-// newResumePass records a pass's final event.
+// newResumePass records a pass's final event, less what resuming it repeats.
+// A pass that finished has nothing past its RootDone and, as a -permute pass
+// is not recursive, nothing below depth 1 either.
 func newResumePass(ev scan.Event) *resumePass {
+	ev = withoutRepeat(ev)
 	return &resumePass{RootDone: int(ev.Stats.RootDone), Stats: ev.Stats, Processed: ev.Processed, Total: ev.Total, Found: ev.Found}
+}
+
+// withoutRepeat drops from a stopped pass's final event the lookups and
+// exclusions the resumed pass does again (scan.Repeat), so the two parts,
+// merged, count each name once (#341). Found names stay: the resumed pass
+// finds them again and withoutRefound takes them off its side, as before.
+func withoutRepeat(ev scan.Event) scan.Event {
+	r, s := ev.Stats.Repeat, &ev.Stats
+	s.NXDomain = max(s.NXDomain-r.NXDomain, 0)
+	s.Timeout = max(s.Timeout-r.Timeout, 0)
+	s.Refused = max(s.Refused-r.Refused, 0)
+	s.Other = max(s.Other-r.Other, 0)
+	s.WildcardFiltered = max(s.WildcardFiltered-r.WildcardFiltered, 0)
+	s.Excluded = max(s.Excluded-r.Excluded, 0)
+	ev.Processed = max(ev.Processed-(r.Processed-r.Found), 0)
+	if len(r.Inconclusive) > 0 {
+		s.Inconclusive = slices.DeleteFunc(slices.Clone(s.Inconclusive), func(name string) bool {
+			_, repeated := slices.BinarySearch(r.Inconclusive, name)
+			return repeated
+		})
+	}
+	s.Repeat = scan.Repeat{}
+	return ev
 }
 
 // event is the saved pass as a final event, for a pass with nothing left.
@@ -106,6 +132,7 @@ func withoutRefound(ev scan.Event, n int) scan.Event {
 	d := int64(n)
 	ev.Found = max(ev.Found-d, 0)
 	ev.Processed = max(ev.Processed-d, 0)
+	ev.Total = max(ev.Total-d, 0) // merge adds the saved part's processed, which has them (#341)
 	ev.Stats.Found = max(ev.Stats.Found-d, 0)
 	return ev
 }
@@ -388,6 +415,7 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 		a.Fingerprint = b.Fingerprint
 	}
 	a.RootDone = b.RootDone
+	a.Repeat = b.Repeat // the saved part had its own taken off (withoutRepeat)
 	return a
 }
 
@@ -456,10 +484,20 @@ func saveResumeState(s *session) bool {
 		if res.axfr.done && (scanned || (saved != nil && saved.AXFRDone)) {
 			t.AXFR, t.AXFRServers, t.AXFRDone, t.Denial = res.axfr.names, res.axfr.allowed, true, string(res.axfr.denial)
 		}
+		// A target is finished only if its scan (and any -permute pass)
+		// completed before the interrupt, with nothing left by -max-duration.
+		t.Done = s.status[i] == report.StatusOK && res.done && !res.unfinished() &&
+			(res.permutation == nil || res.permutation.candidates == 0 || (res.permutation.pass.done && !res.permutation.pass.unfinished()))
 		switch {
 		case res.done:
-			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total
-			t.RootDone = int(res.final.Stats.RootDone)
+			final := res.final
+			if !t.Done {
+				// The resumed run scans the main pass again from RootDone,
+				// and re-expands every saved parent (#341).
+				final = withoutRepeat(final)
+			}
+			t.Stats, t.Processed, t.Total = final.Stats, final.Processed, final.Total
+			t.RootDone = int(final.Stats.RootDone)
 		case saved != nil:
 			// Interrupted during preflight or the wildcard probe, before the
 			// resumed scan reported anything.
@@ -470,10 +508,6 @@ func saveResumeState(s *session) bool {
 		} else if saved != nil {
 			t.Permute = saved.Permute
 		}
-		// A target is finished only if its scan (and any -permute pass)
-		// completed before the interrupt, with nothing left by -max-duration.
-		t.Done = s.status[i] == report.StatusOK && res.done && !res.unfinished() &&
-			(res.permutation == nil || res.permutation.candidates == 0 || (res.permutation.pass.done && !res.permutation.pass.unfinished()))
 		st.Targets = append(st.Targets, t)
 	}
 	if err := writeResumeState(f.stateFile, st); err != nil {

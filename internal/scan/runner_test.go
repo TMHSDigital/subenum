@@ -625,6 +625,10 @@ func TestRunDeadlineStopsAdmission(t *testing.T) {
 			if done.Total != c.wantProcessed {
 				t.Errorf("total %d, want %d: skipped names are not part of it", done.Total, c.wantProcessed)
 			}
+			// What a resume repeats is every lookup at or past RootDone (#341).
+			if r := done.Stats.Repeat; done.Stats.RootDone+r.Processed != done.Processed || r.Processed != r.NXDomain {
+				t.Errorf("RootDone %d, repeat %+v: want RootDone plus the repeated lookups to be the %d processed", done.Stats.RootDone, r, done.Processed)
+			}
 			if !strings.Contains(notice, "time budget reached ({max_duration})") {
 				t.Errorf("notice %q, want the time budget named", notice)
 			}

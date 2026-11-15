@@ -194,6 +194,57 @@ type Stats struct {
 	// without AutoRate.
 	RateBackoffs int64 `json:"RateBackoffs"`
 	FinalRate    int64 `json:"FinalRate"`
+
+	// Repeat is the part of the counters above that a resume from RootDone
+	// does again; not saved in the state file (#341).
+	Repeat Repeat `json:"-"`
+}
+
+// Repeat counts the work of a scan that a resume from its RootDone repeats
+// (#341): the wordlist entries at or past RootDone that were looked up or
+// found out of scope (a chunk reported late, or names past a budget stop),
+// and every lookup and exclusion below depth 1, since a resumed recursive
+// scan expands every saved parent again. A stopped scan's counters, less
+// these, plus the resumed scan's, count each name once.
+type Repeat struct {
+	Processed        int64 // lookups, wildcard-filtered ones included
+	Found            int64
+	NXDomain         int64
+	Timeout          int64
+	Refused          int64
+	Other            int64
+	WildcardFiltered int64
+	Excluded         int64
+	// Inconclusive lists the names of Stats.Inconclusive that are repeated.
+	Inconclusive []string
+}
+
+// Repeat codes: how one name ended, for Stats.Repeat (#341).
+const (
+	repeatNone uint8 = iota
+	repeatExcluded
+	repeatWildcard
+	repeatFound
+	repeatNXDomain
+	repeatTimeout
+	repeatRefused
+	repeatOther
+	repeatCodes
+)
+
+// repeatCode is the repeat code of a lookup outcome.
+func repeatCode(o dns.Outcome) uint8 {
+	switch o {
+	case dns.OutcomeFound:
+		return repeatFound
+	case dns.OutcomeNXDomain:
+		return repeatNXDomain
+	case dns.OutcomeTimeout:
+		return repeatTimeout
+	case dns.OutcomeRefused:
+		return repeatRefused
+	}
+	return repeatOther
 }
 
 // Sum returns the number of classified queries (found + negatives + failures +
@@ -305,19 +356,24 @@ func (l *pendingList) take() []pendingLookup {
 	return items
 }
 
-// names empties the list and returns the names it held, sorted; nil for a
-// nil list.
-func (l *pendingList) names(cfg *Config) []string {
+// names empties the list and returns the names it held, sorted, and those
+// of them repeated reports, sorted; nil for a nil list.
+func (l *pendingList) names(cfg *Config, repeated func(pendingLookup) bool) (all, repeats []string) {
 	if l == nil {
-		return nil
+		return nil, nil
 	}
 	items := l.take()
-	out := make([]string, 0, len(items))
+	all = make([]string, 0, len(items))
 	for _, it := range items {
-		out = append(out, it.domain(cfg))
+		name := it.domain(cfg)
+		all = append(all, name)
+		if repeated(it) {
+			repeats = append(repeats, name)
+		}
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(all)
+	sort.Strings(repeats)
+	return all, repeats
 }
 
 func (c *counters) snapshot() Stats {
@@ -679,6 +735,8 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	if cfg.ListInconclusive || cfg.RetryInconclusive {
 		st.pending = &pendingList{}
 	}
+	st.rootStart = min(max(cfg.ResumeFrom, 0), len(cfg.Entries))
+	st.rootOutcome = make([]uint8, len(cfg.Entries)-st.rootStart)
 	st.total.Store(int64(len(cfg.Entries)))
 	if cfg.AutoRate {
 		sent := queriesSent.Load
@@ -707,8 +765,12 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	cfg.ResumeParents = st.gateResumeParents(ctx, workers)
 	// The dispatcher hands out candidates and closes jobs once every
 	// dispatched job has completed, or ctx is cancelled (see dispatcher).
-	go newDispatcher(cfg, maxDepth).run(ctx, workers, jobs, enqueue, completed, &st.total, &st.stats, events)
+	disp := newDispatcher(cfg, maxDepth)
+	disp.rootOutcome = st.rootOutcome // it marks the entries out of scope
+	go disp.run(ctx, workers, jobs, enqueue, completed, &st.total, &st.stats, events)
 	st.runWorkers(ctx, workers, jobs, completed)
+	// Before the retry pass, which runs only when nothing is left to resume.
+	repeat := st.repeat()
 	if cfg.RetryInconclusive {
 		st.retryPending(ctx, workers)
 	}
@@ -722,8 +784,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	snap.Wildcard = wildcardRoot
 	snap.Fingerprint = fingerprint.records()
 	if cfg.ListInconclusive {
-		snap.Inconclusive = st.pending.names(&cfg)
+		snap.Inconclusive, repeat.Inconclusive = st.pending.names(&cfg, st.repeated)
 	}
+	snap.Repeat = repeat
 	if st.auto != nil {
 		snap.RateBackoffs, snap.FinalRate = st.auto.result()
 	}
@@ -915,6 +978,55 @@ type scanState struct {
 	wc        *wildcardCache
 	pending   *pendingList // inconclusive lookups (#217); nil when nothing reads them (#300)
 	auto      *autoRate    // the AutoRate controller; nil without AutoRate (#220)
+
+	// For Stats.Repeat (#341): how each wordlist entry from rootStart on
+	// ended (a repeat code, written by the one worker that looked it up, or
+	// by the dispatcher for one out of scope), and per code the lookups below
+	// depth 1.
+	rootStart   int
+	rootOutcome []uint8
+	deep        [repeatCodes]atomic.Int64
+}
+
+// recordRepeat notes how job j ended, for Stats.Repeat.
+func (s *scanState) recordRepeat(j job, code uint8) {
+	if j.root < 0 {
+		s.deep[code].Add(1)
+		return
+	}
+	if i := j.root - s.rootStart; i >= 0 && i < len(s.rootOutcome) {
+		s.rootOutcome[i] = code
+	}
+}
+
+// repeated reports whether a resume from the scan's RootDone looks up the
+// inconclusive name it again.
+func (s *scanState) repeated(it pendingLookup) bool {
+	return it.root < 0 || int64(it.root) >= s.stats.rootDone.Load()
+}
+
+// repeat tallies Stats.Repeat once every worker has exited. Every exclusion
+// is repeated but those of entries before RootDone.
+func (s *scanState) repeat() Repeat {
+	var n [repeatCodes]int64
+	for code := range n {
+		n[code] = s.deep[code].Load()
+	}
+	from := int(s.stats.rootDone.Load()) - s.rootStart
+	var kept int64
+	for i, code := range s.rootOutcome {
+		switch {
+		case i >= from:
+			n[code]++
+		case code == repeatExcluded:
+			kept++
+		}
+	}
+	r := Repeat{Found: n[repeatFound], NXDomain: n[repeatNXDomain], Timeout: n[repeatTimeout],
+		Refused: n[repeatRefused], Other: n[repeatOther], WildcardFiltered: n[repeatWildcard]}
+	r.Processed = r.Found + r.NXDomain + r.Timeout + r.Refused + r.Other + r.WildcardFiltered
+	r.Excluded = max(s.stats.excluded.Load()-kept, 0)
+	return r
 }
 
 // handoffPerWorker sizes the jobs and completed buffers, per worker (#184).
@@ -959,12 +1071,14 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 
 	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, s.fp, j.domain, records) {
 		st.wildcardFiltered.Add(1)
+		s.recordRepeat(j, repeatWildcard)
 		s.observe(false)
 		s.checkReliability(s.processed.Add(1))
 		return true
 	}
 
 	st.add(outcome)
+	s.recordRepeat(j, repeatCode(outcome))
 	if inconclusive(outcome) {
 		s.pending.add(pendingOf(j, outcome))
 	}
