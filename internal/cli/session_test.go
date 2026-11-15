@@ -63,7 +63,7 @@ func TestE2EResumeSkipsFinishedTarget(t *testing.T) {
 		t.Errorf("results = %v, want each of %v once", seen, want)
 	}
 	for _, msg := range []string{
-		"a.example was finished before the interrupt; 3 results restored",
+		"a.example was finished before the run stopped; 3 results restored",
 		fmt.Sprintf("Resuming b.example at wordlist entry 2 of %d (2 results restored)", len(entries)),
 	} {
 		if !strings.Contains(stderr, msg) {

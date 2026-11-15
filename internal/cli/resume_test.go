@@ -594,7 +594,7 @@ func TestE2EResumeRefusesBadState(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ path, want string }{
-		{changed, "changed since the interrupted run"},
+		{changed, "changed since the stopped run"},
 		{corrupt, "-resume " + corrupt + ":"},
 		{future, "unsupported state version 999"},
 		{filepath.Join(dir, "missing.json"), "reading -resume state"},

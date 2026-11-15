@@ -128,7 +128,7 @@ func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permut
 	if prev := p.prev; prev != nil {
 		left, ok := remainingBudget(s.f.maxQueries, prev.Processed)
 		if !ok {
-			out.Info("Permutation pass for %s: the -max-queries budget of %d was spent before the interrupt", target, s.f.maxQueries)
+			out.Info("Permutation pass for %s: the -max-queries budget of %d was spent before the run stopped", target, s.f.maxQueries)
 			res.pass = targetResult{done: true, final: prev.event()}
 			return res
 		}

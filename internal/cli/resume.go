@@ -182,7 +182,7 @@ func (st *resumeState) checkSettings(fs *flag.FlagSet, d *defaultsLoader) error 
 	sort.Strings(names)
 	for _, name := range names {
 		if v, ok := now[name]; ok && v != st.Settings[name] {
-			return fmt.Errorf("-%s is %q now but was %q in the interrupted run (now set by %s); start a new scan instead of resuming", name, v, st.Settings[name], d.describe(fs, name))
+			return fmt.Errorf("-%s is %q now but was %q in the stopped run (now set by %s); start a new scan instead of resuming", name, v, st.Settings[name], d.describe(fs, name))
 		}
 	}
 	return nil
@@ -323,7 +323,7 @@ func (st *resumeState) checkInputs(f cliFlags) error {
 	}
 	for path, want := range st.Inputs {
 		if now[path] != want {
-			return fmt.Errorf("%s changed since the interrupted run; start a new scan instead of resuming", path)
+			return fmt.Errorf("%s changed since the stopped run; start a new scan instead of resuming", path)
 		}
 	}
 	return nil

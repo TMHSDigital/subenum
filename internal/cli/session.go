@@ -420,7 +420,7 @@ func (s *session) loadInputs() bool {
 			out.Error("cannot resume: %v", err)
 			return false
 		}
-		out.Info("Resuming the interrupted run of: subenum %s", strings.Join(s.args, " "))
+		out.Info("Resuming the stopped run of: subenum %s", strings.Join(s.args, " "))
 	}
 	// Normalized once, while it is read, for every target; per target only
 	// the name-length limit differs (#182, #248).
@@ -440,7 +440,7 @@ func (s *session) loadInputs() bool {
 		for _, target := range s.targets {
 			if t := s.resume.target(target); t != nil && !t.Done && t.Entries != "" {
 				if entries, _, _ := s.words.For(target); entryDigest(entries) != t.Entries {
-					out.Error("cannot resume: the wordlist for %s changed since the interrupted run (a different -w file or subenum version); start a new scan instead", target)
+					out.Error("cannot resume: the wordlist for %s changed since the stopped run (a different -w file or subenum version); start a new scan instead", target)
 					return false
 				}
 			}
@@ -698,7 +698,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	if saved != nil {
 		mainSaved, restoredHits = s.restoreTarget(saved)
 		if saved.Done {
-			out.Info("%s was finished before the interrupt; %d results restored", target, len(saved.Results))
+			out.Info("%s was finished before the run stopped; %d results restored", target, len(saved.Results))
 			// The report keeps what the finished run found (#315).
 			res := targetResult{done: true, final: mainSaved.event(), sources: sourceInfo, axfr: axfrInfo, foundBy: s.foundBy}
 			if s.f.permute {
@@ -763,7 +763,7 @@ func (s *session) mainPass(ctx context.Context, p scanPass, saved *resumePass) t
 	if saved != nil {
 		left, ok := remainingBudget(s.f.maxQueries, saved.Processed)
 		if !ok {
-			s.out.Info("%s: the -max-queries budget of %d was spent before the interrupt", p.domain, s.f.maxQueries)
+			s.out.Info("%s: the -max-queries budget of %d was spent before the run stopped", p.domain, s.f.maxQueries)
 			return targetResult{done: true, final: saved.event()}
 		}
 		p.maxQueries = left
