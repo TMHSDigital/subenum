@@ -168,6 +168,7 @@ subenum/
 ├── tools/
 │   ├── wordlist-gen.go         # Custom wordlist generator utility
 │   ├── wordlist-gen_test.go    # Generator tests
+│   ├── licenses/               # THIRD_PARTY_LICENSES generator, run at release time
 │   └── README.md               # Wordlist generator docs
 ├── .gitattributes              # Line-ending normalization rules
 ├── .gitignore

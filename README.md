@@ -182,7 +182,7 @@ go build -buildvcs=false -o subenum
 <details>
 <summary><strong>Pre-built binaries</strong></summary>
 
-Download the archive for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page: `subenum_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). Each archive holds the static binary, `LICENSE`, `README.md`, `CHANGELOG.md`, shell completions (`completions/`) and the man page (`man/`).
+Download the archive for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page: `subenum_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). Each archive holds the static binary, `LICENSE`, `THIRD_PARTY_LICENSES` (the licence notices of the Go standard library and the modules linked into the binary), `README.md`, `CHANGELOG.md`, shell completions (`completions/`) and the man page (`man/`).
 
 Platforms: Linux (amd64, arm64, 386) &middot; macOS (amd64, arm64) &middot; Windows (amd64, arm64) &middot; FreeBSD (amd64, arm64)
 
@@ -739,7 +739,8 @@ subenum/
 │   └── wordlist/               # Wordlist reading, sanitizing and dedup
 ├── pkg/subenum/                # Public Go library API
 ├── tools/
-│   └── wordlist-gen.go
+│   ├── wordlist-gen.go
+│   └── licenses/               # Release-time third-party licence notices
 ├── main.go                     # Entry point: calls internal/cli
 ├── action.yml                  # GitHub Action
 ├── .goreleaser.yaml            # Release archives, completions, man page

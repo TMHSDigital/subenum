@@ -120,6 +120,7 @@ internal/tui/config.go         - Session persistence (load/save <user config dir
 pkg/subenum/subenum.go         - Scan, Run, DefaultWords, Permutations: the embeddable API
 pkg/subenum/diff.go            - Diff, Changes: compare two sets of results
 tools/wordlist-gen.go          - Standalone wordlist generator
+tools/licenses/main.go         - THIRD_PARTY_LICENSES for release archives and the image
 ```
 
 ## 2. Key Components / Modules

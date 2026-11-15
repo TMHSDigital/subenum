@@ -32,11 +32,17 @@ COPY examples/labs/*.zone examples/labs/words.txt examples/labs/labs.go ./exampl
 # Build the binary with optimizations
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o subenum -ldflags="-w -s -X main.Version=${VERSION}" .
 
+# Licence notices of the Go standard library and every linked module (#326).
+COPY tools/licenses/main.go ./tools/licenses/
+RUN go run ./tools/licenses -o THIRD_PARTY_LICENSES
+
 FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
 
 WORKDIR /home/nonroot
 
 COPY --from=builder /app/subenum /usr/local/bin/subenum
+COPY LICENSE /usr/share/doc/subenum/
+COPY --from=builder /app/THIRD_PARTY_LICENSES /usr/share/doc/subenum/
 COPY examples/ ./examples/
 
 VOLUME ["/data"]
