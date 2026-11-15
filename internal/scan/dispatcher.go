@@ -70,21 +70,29 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		watermark: start,
 	}
 	// Resumed recursive scans re-expand the names found before the
-	// interrupt, whose children may not all have been tested (#73).
+	// interrupt, whose children may not all have been tested (#73). Run
+	// passes only the ones a live scan would expand (see gateResumeParents).
 	if cfg.Recursive {
-		rootLabels := strings.Count(cfg.Domain, ".") + 1
 		for _, p := range cfg.ResumeParents {
-			p = strings.ToLower(strings.TrimSuffix(p, "."))
-			if !strings.HasSuffix(p, "."+cfg.Domain) {
-				continue
-			}
-			if depth := strings.Count(p, ".") + 1 - rootLabels; depth >= 1 && depth < maxDepth {
-				d.frontier = append(d.frontier, expansion{parent: p, depth: depth + 1})
+			if name, depth, ok := resumeParent(cfg, p, maxDepth); ok {
+				d.frontier = append(d.frontier, expansion{parent: name, depth: depth + 1})
 				d.remaining += n
 			}
 		}
 	}
 	return d
+}
+
+// resumeParent normalizes a name found before an interrupt and reports its
+// depth below the target and whether a resumed scan may expand it: it must
+// lie under the target and above the depth limit.
+func resumeParent(cfg Config, p string, maxDepth int) (name string, depth int, ok bool) {
+	name = strings.ToLower(strings.TrimSuffix(p, "."))
+	if !strings.HasSuffix(name, "."+cfg.Domain) {
+		return name, 0, false
+	}
+	depth = strings.Count(name, ".") - strings.Count(cfg.Domain, ".")
+	return name, depth, depth >= 1 && depth < maxDepth
 }
 
 // settle marks wordlist entry i as done and advances the resume watermark.

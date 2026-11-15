@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests no longer flake under load: lab end-to-end runs use a 5 s timeout with 3 attempts and fail with a clear message if the lab 2 wildcard probe times out, the resolver-pool spread test counts lookups per member instead of timing the scan (the timing view is now `BenchmarkPoolSpreadsLoad`), and CI runs tests in shuffled order (#167).
 
 ### Fixed
+- A resumed `-recursive` scan checks each name found before the interrupt for wildcard DNS before expanding it, as a live scan does. A wildcard subzone, or one whose check was inconclusive, is skipped with the same notice instead of reporting every wordlist entry under it as a result, so an interrupted-then-resumed scan reports the same names as an uninterrupted one (#296).
 - The TUI no longer requires a wordlist file: an empty **Wordlist** field scans with the bundled top-5000 list, as a missing `-w` does on the command line, and the scan view says which list ran. The field no longer pre-fills `examples/sample_wordlist.txt`, which only exists inside a checkout, so `subenum -tui` from an installed binary works on the first run (#288).
 - On Windows, `-o NUL`, `-stats NUL` and `-sarif NUL` no longer fail with "Incorrect function" and exit 1: device and pipe targets are opened without truncation (#208, thanks @bfs2021).
 - An unreadable `-seeds` file no longer leaves a hidden `.<name>.tmp` file beside the `-o` path (kept locked on Windows until exit): seeds are read before the output file is opened (#212).

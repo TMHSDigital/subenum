@@ -632,6 +632,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	st.enqueue = enqueue
 
 	stopTicker := st.startTicker(ctx)
+	cfg.ResumeParents = st.gateResumeParents(ctx, workers)
 	// The dispatcher hands out candidates and closes jobs once every
 	// dispatched job has completed, or ctx is cancelled (see dispatcher).
 	go newDispatcher(cfg, maxDepth).run(ctx, workers, jobs, enqueue, completed, &st.total, &st.stats, events)
@@ -896,23 +897,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 
 	s.report(ctx, j.domain, records)
 
-	if cfg.Recursive && j.depth < maxDepth {
-		// The wildcard probe would query inside the branch, so an out-of-scope
-		// subtree is not probed; the dispatcher counts its children as excluded.
-		if !cfg.Simulate && cfg.resolveHook == nil && !cfg.scope.subtreeExcluded(j.domain) {
-			isWild, err := s.wc.isWildcard(ctx, cfg, j.domain)
-			if ctx.Err() != nil {
-				return true
-			}
-			if err != nil {
-				s.events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "skipping recursive expansion of " + j.domain + ": wildcard check failed: " + err.Error()}
-				return true
-			}
-			if isWild {
-				s.events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "wildcard DNS at " + j.domain + "; skipping recursive expansion"}
-				return true
-			}
-		}
+	if cfg.Recursive && j.depth < maxDepth && s.expandable(ctx, j.domain) {
 		// Hand the parent to the dispatcher, which generates its children.
 		select {
 		case s.enqueue <- j:
@@ -920,6 +905,70 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 		}
 	}
 	return true
+}
+
+// expandable reports whether a recursive scan may expand a found parent. A
+// wildcard branch, or one whose wildcard check was inconclusive, is skipped
+// with a notice.
+func (s *scanState) expandable(ctx context.Context, parent string) bool {
+	cfg := s.cfg
+	// The wildcard probe would query inside the branch, so an out-of-scope
+	// subtree is not probed; the dispatcher counts its children as excluded.
+	if cfg.Simulate || cfg.resolveHook != nil || cfg.scope.subtreeExcluded(parent) {
+		return true
+	}
+	isWild, err := s.wc.isWildcard(ctx, cfg, parent)
+	if ctx.Err() != nil {
+		return false
+	}
+	if err != nil {
+		s.events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "skipping recursive expansion of " + parent + ": wildcard check failed: " + err.Error()}
+		return false
+	}
+	if isWild {
+		s.events <- Event{Kind: EventNotice, Notice: NoticeSkip, Message: "wildcard DNS at " + parent + "; skipping recursive expansion"}
+		return false
+	}
+	return true
+}
+
+// gateResumeParents returns the resumed parents the dispatcher may expand:
+// the ones in range (see resumeParent) that pass the same check as a parent
+// found by this run (#296). The checks run on up to workers goroutines.
+func (s *scanState) gateResumeParents(ctx context.Context, workers int) []string {
+	if !s.cfg.Recursive {
+		return nil
+	}
+	var parents []string
+	for _, p := range s.cfg.ResumeParents {
+		if name, _, ok := resumeParent(s.cfg, p, s.maxDepth); ok {
+			parents = append(parents, name)
+		}
+	}
+	keep := make([]bool, len(parents))
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(workers, len(parents)) {
+		wg.Go(func() {
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(parents) || ctx.Err() != nil {
+					return
+				}
+				// Past the time budget nothing is probed: the dispatcher
+				// counts the children as skipped.
+				keep[i] = s.cfg.pastDeadline() || s.expandable(ctx, parents[i])
+			}
+		})
+	}
+	wg.Wait()
+	gated := parents[:0]
+	for i, p := range parents {
+		if keep[i] {
+			gated = append(gated, p)
+		}
+	}
+	return gated
 }
 
 // report counts a found name and sends it as a result.
