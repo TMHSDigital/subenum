@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -100,19 +102,32 @@ func TestE2ELabs(t *testing.T) {
 // TestE2ELabVerdicts checks the run-quality verdicts of the failure labs.
 func TestE2ELabVerdicts(t *testing.T) {
 	t.Parallel()
+	// Lab 3 refuses past 40 queries in a wall-clock second. Its own 30 words
+	// send about 60 queries, which a loaded machine can spread over two
+	// seconds and so stay under the limit (#289). 150 names send about 300,
+	// more than a fifth of them refused unless the run takes over 6 s, and
+	// stay under the reliability guard's 200 lookups, so it does not abort.
+	var burst strings.Builder
+	burst.WriteString("www\nmail\napi\ntest\n")
+	for i := range 146 {
+		fmt.Fprintf(&burst, "filler%d\n", i)
+	}
+	burstWords := writeFile(t, "burst.txt", burst.String())
 	for _, c := range []struct {
 		zone, verdict string
+		words         string // the -w file; empty for the labs' own words
 		args          []string
 	}{
 		// One attempt: a retry lands in a later one-second window and gets
 		// answered, which on a slow machine turns the verdict into degraded.
-		{zone: "lab3-rate-limit.zone", verdict: "unreliable", args: []string{"-timeout", "5000", "-attempts", "1"}},
+		{zone: "lab3-rate-limit.zone", verdict: "unreliable", words: burstWords, args: []string{"-timeout", "5000", "-attempts", "1"}},
 		{zone: "lab3-rate-limit.zone", verdict: "complete", args: append([]string{"-rate", "30"}, labTimingArgs...)},
 		{zone: "lab5-failures.zone", verdict: "degraded", args: labSlowTimingArgs},
 	} {
 		t.Run(c.zone+strings.Join(c.args, ""), func(t *testing.T) {
 			stats := filepath.Join(t.TempDir(), "run.json")
-			args := append([]string{"-progress=false", "-w", "examples/labs/words.txt", "-stats", stats,
+			words := cmp.Or(c.words, "examples/labs/words.txt")
+			args := append([]string{"-progress=false", "-w", words, "-stats", stats,
 				"-simulate-zone", filepath.Join("examples", "labs", c.zone)}, c.args...)
 			if code, out := runCLI(t, "", append(args, "lab.example")...); code != 0 {
 				t.Fatalf("exit %d\n%s", code, out)
