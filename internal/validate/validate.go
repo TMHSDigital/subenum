@@ -55,7 +55,7 @@ func DNSServer(server string) error {
 			return fmt.Errorf("invalid DNS-over-TLS host: %s", host)
 		}
 		_, portStr, _ := net.SplitHostPort(hostport)
-		return checkPort(portStr)
+		return Port(portStr)
 	case strings.HasPrefix(server, "https://"):
 		u, err := url.Parse(server)
 		if err != nil || u.Host == "" {
@@ -72,10 +72,11 @@ func DNSServer(server string) error {
 	if net.ParseIP(host) == nil {
 		return fmt.Errorf("invalid IP address: %s", host)
 	}
-	return checkPort(portStr)
+	return Port(portStr)
 }
 
-func checkPort(portStr string) error {
+// Port reports whether portStr is a decimal port number in 1-65535.
+func Port(portStr string) error {
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
 		return fmt.Errorf("invalid port: %s (must be 1-65535)", portStr)

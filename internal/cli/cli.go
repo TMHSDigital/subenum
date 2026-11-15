@@ -775,8 +775,10 @@ func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Even
 // (#116). fromRetries reports that the value came from -retries, so the
 // caller can print the deprecation warning.
 func effectiveAttempts(attempts, retries int, attemptsSrc, retriesSrc string) (n int, fromRetries bool, err error) {
-	attemptsSet := attempts != 0
-	retriesSet := retries != 0
+	// "Given" comes from the source, not the value: 0 is the flag default, and
+	// an explicit 0 must reach Options.Validate instead of passing as unset.
+	attemptsSet := attemptsSrc != sourceDefault
+	retriesSet := retriesSrc != sourceDefault
 	if attemptsSet && retriesSet {
 		switch ra, rr := sourceRank[attemptsSrc], sourceRank[retriesSrc]; {
 		case ra > rr:

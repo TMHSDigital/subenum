@@ -146,6 +146,17 @@ func TestEffectiveAttempts(t *testing.T) {
 	if err != nil || got != 3 {
 		t.Errorf("-retries=3: got %d, err %v; want 3, nil", got, err)
 	}
+	got, err = resolve(0, 0, fl, d)
+	if err != nil || got != 0 {
+		t.Errorf("explicit -attempts=0: got %d, err %v; want 0 so Options.Validate rejects it", got, err)
+	}
+	got, err = resolve(0, 0, sourceConfig, d)
+	if err != nil || got != 0 {
+		t.Errorf("config attempts=0: got %d, err %v; want 0 so Options.Validate rejects it", got, err)
+	}
+	if _, err = resolve(0, 3, fl, fl); err == nil {
+		t.Error("explicit -attempts=0 with -retries=3: want the cannot-use-both error")
+	}
 	_, err = resolve(5, 3, fl, fl)
 	if err == nil {
 		t.Error("both set: expected error, got nil")
