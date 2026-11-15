@@ -61,11 +61,14 @@ internal/axfr/axfr.go          - Try: AXFR from each name server and the denial 
 internal/cli/diff.go           - -diff / -diff-records: compare against a previous results file; runDiff: the diff subcommand
 internal/cli/dryrun.go         - -dry-run: print the scan plan and its cost without sending queries
 internal/cli/lab.go            - -simulate-zone: serve a lab scenario on a loopback DNS server
-internal/cli/mcp.go            - subenum mcp: the lab_scan, scan and explain_stats tools, the allow-list and caps
+internal/cli/mcp.go            - subenum mcp: its flags, the server, and the lab scenarios lab_scan serves
+internal/cli/mcp_tools.go      - the lab_scan, scan and explain_stats tools: input schemas, argument checks, the allow-list and caps
+internal/cli/mcp_report.go     - the scan report the tools return, its verdict and its outputSchema
 internal/cli/permute.go        - -permute / -seeds: the permutation pass
 internal/cli/resume.go         - -resume / -state: save and replay an interrupted run
 internal/cli/results.go        - resultLog: a target's results, kept for -permute seeds and -diff
 internal/cli/summary.go        - assemble the run-quality report (-stats, JSONL summary line)
+internal/cli/explain.go        - parseSummary, explainSummary: a run-quality report in plain language (explain_stats)
 internal/cli/wordlist.go       - prepareWordlist: the -w file, or the bundled list when -w is not given
 internal/scan/options.go       - Options: user-facing settings shared by CLI and TUI (Validate, Config)
 internal/scan/runner.go        - Scan engine: Config, Event/EventKind/NoticeKind, Stats, Run

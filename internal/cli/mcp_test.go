@@ -16,6 +16,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/labzone"
+	"github.com/TMHSDigital/subenum/internal/mcp"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -574,6 +575,65 @@ func TestMCPReportSchemaCoversTheReport(t *testing.T) {
 	check("results[]", reflect.TypeOf(mcpResult{}), props(top["results"].(map[string]any)["items"].(map[string]any)))
 	check("outcomes", reflect.TypeOf(mcpOutcomes{}), props(top["outcomes"].(map[string]any)))
 	check("sources[]", reflect.TypeOf(mcpSource{}), props(top["sources"].(map[string]any)["items"].(map[string]any)))
+}
+
+// TestMCPInputSchemasMatchArgs is #330's drift guard on the input side:
+// each tool's inputSchema properties are exactly the JSON names of its
+// argument struct, embedded remediation included. Arguments are decoded
+// strictly, so a property the struct lacks would fail every call that uses
+// it, and a field the schema lacks would be one no agent can discover.
+func TestMCPInputSchemasMatchArgs(t *testing.T) {
+	argNames := func(v any) []string {
+		var names []string
+		for _, f := range reflect.VisibleFields(reflect.TypeOf(v)) {
+			if f.Anonymous {
+				continue // its fields are listed after it
+			}
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		return names
+	}
+	withSources := mcpConfig{maxQueries: 10, allow: []string{"example.com"}, sources: []string{"ct"}}
+	noSources := mcpConfig{maxQueries: 10, allow: []string{"example.com"}}
+	for _, tc := range []struct {
+		name string
+		tool mcp.Tool
+		args any
+		omit string // a field the schema leaves out in this configuration
+	}{
+		{"lab_scan", labScanTool(withSources), labScanArgs{}, ""},
+		{"scan", scanTool(withSources), scanArgs{}, ""},
+		// Without -sources the schema offers no sources argument; a call
+		// that passes one gets "sources are off" rather than "unknown field".
+		{"scan without -sources", scanTool(noSources), scanArgs{}, "sources"},
+		{"explain_stats", explainStatsTool(), explainStatsArgs{}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var schema struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+				Required   []string                   `json:"required"`
+			}
+			if err := json.Unmarshal(tc.tool.InputSchema, &schema); err != nil {
+				t.Fatalf("inputSchema is not JSON: %v", err)
+			}
+			var props []string
+			for name := range schema.Properties {
+				props = append(props, name)
+			}
+			slices.Sort(props)
+			want := slices.DeleteFunc(argNames(tc.args), func(n string) bool { return n == tc.omit })
+			if !slices.Equal(props, want) {
+				t.Errorf("inputSchema properties %v, argument struct fields %v", props, want)
+			}
+			for _, name := range schema.Required {
+				if _, ok := schema.Properties[name]; !ok {
+					t.Errorf("required %q is not a property", name)
+				}
+			}
+		})
+	}
 }
 
 // TestMCPLabScenariosDescribed covers #275: lab_scan's schema tells the
