@@ -108,7 +108,13 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 	if _, err := conn.Write(query); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, 65535)
+	// A UDP answer is at most the payload the query advertises, as in Go's
+	// resolver; a stream answer gets exactly the length its prefix gives. No
+	// 64 KiB buffer per lookup (#321).
+	var buf []byte
+	if packet {
+		buf = make([]byte, ednsPayload)
+	}
 	for {
 		var reply []byte
 		if packet {
@@ -122,7 +128,7 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 			if _, err := io.ReadFull(conn, lenb[:]); err != nil {
 				return nil, err
 			}
-			reply = buf[:binary.BigEndian.Uint16(lenb[:])]
+			reply = make([]byte, binary.BigEndian.Uint16(lenb[:]))
 			if _, err := io.ReadFull(conn, reply); err != nil {
 				return nil, err
 			}
@@ -145,6 +151,9 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 	}
 }
 
+// ednsPayload is the UDP answer size cnameQuery advertises, Go's resolver's.
+const ednsPayload = 1232
+
 // cnameQuery builds a recursive CNAME query with an EDNS(0) OPT record
 // advertising 1232-byte UDP answers, as Go's resolver sends.
 func cnameQuery(id uint16, qname dnsmessage.Name) ([]byte, error) {
@@ -160,7 +169,7 @@ func cnameQuery(id uint16, qname dnsmessage.Name) ([]byte, error) {
 		return nil, err
 	}
 	var opt dnsmessage.ResourceHeader
-	if err := opt.SetEDNS0(1232, dnsmessage.RCodeSuccess, false); err != nil {
+	if err := opt.SetEDNS0(ednsPayload, dnsmessage.RCodeSuccess, false); err != nil {
 		return nil, err
 	}
 	if err := b.OPTResource(opt, dnsmessage.OPTResource{}); err != nil {

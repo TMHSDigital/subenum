@@ -112,16 +112,12 @@ func TestWaybackTruncated(t *testing.T) {
 // and drops duplicates, invalid names and names already present.
 func TestMerge(t *testing.T) {
 	entries := []string{"www", "mail"}
-	have := map[string]bool{"www": true, "mail": true}
-	got, added := Merge(entries, have, []string{"API", "www", "bad_name!", "dev.api", "api", strings.Repeat("a", 64)}, "example.com")
-	if want := []string{"www", "mail", "api", "dev.api"}; !slices.Equal(got, want) || added != 2 {
-		t.Errorf("Merge = %q, %d; want %q, 2", got, added, want)
+	got, added := Merge(entries, []string{"API", "www", "bad_name!", "dev.api", "api", strings.Repeat("a", 64)}, "example.com")
+	if want := []string{"www", "mail", "api", "dev.api"}; !slices.Equal(got, want) || !slices.Equal(added, []string{"api", "dev.api"}) {
+		t.Errorf("Merge = %q, %q; want %q, [api dev.api]", got, added, want)
 	}
-	if !have["api"] || !have["dev.api"] {
-		t.Errorf("have = %v; want the new names recorded", have)
-	}
-	if got, added := Merge(got, have, []string{"api"}, "example.com"); len(got) != 4 || added != 0 {
-		t.Errorf("a repeated merge added %d: %q", added, got)
+	if got, added := Merge(got, []string{"api"}, "example.com"); len(got) != 4 || len(added) != 0 {
+		t.Errorf("a repeated merge added %q: %q", added, got)
 	}
 }
 

@@ -105,14 +105,12 @@ func sourceByName(sources []targetSource, name string) targetSource {
 
 // candidates gathers a target's candidate entries and -permute seeds as the
 // passive sources and the zone transfer add names to the wordlist's (#248).
-// The set of entries is built once, at the first names, however many
-// sources follow; it used to be rebuilt per source, a map as large as the
-// wordlist each time.
+// No map as large as the wordlist is built: each source's names are checked
+// against the entries in one pass (#321).
 type candidates struct {
 	target  string
 	entries []string            // the wordlist's, then the new names in order
 	seeds   map[string]struct{} // -seeds names plus every added name, full
-	have    map[string]bool     // entries, once a source has names
 	owned   bool                // seeds is this target's copy, not the shared -seeds map
 
 	// Provenance (#273): from has every name a source proposed, as a bit per
@@ -142,27 +140,27 @@ func (c *candidates) add(source string, names []string) int {
 	if len(names) == 0 {
 		return 0
 	}
-	if c.have == nil {
-		c.have = make(map[string]bool, len(c.entries)+len(names))
-		for _, e := range c.entries {
-			c.have[e] = true
-		}
+	if c.from == nil {
 		c.labels, c.from = []string{sourceWordlist}, map[string]uint8{}
 	}
-	// Before the merge, while have still tells a wordlist entry from a name
-	// only an earlier source had (those are in from).
+	var added []string
+	c.entries, added = passive.Merge(c.entries, names, c.target)
+	fresh := make(map[string]struct{}, len(added))
+	for _, n := range added {
+		fresh[n] = struct{}{}
+	}
+	// A proposed name that was already an entry and that no earlier source
+	// had (those are in from) is a wordlist entry.
 	bit := uint8(1) << len(c.labels)
 	c.labels = append(c.labels, source)
 	proposed, _, _ := wordlist.Build(names, c.target)
 	for _, n := range proposed {
 		mask, seen := c.from[n]
-		if !seen && c.have[n] {
+		if _, isNew := fresh[n]; !seen && !isNew {
 			mask = 1
 		}
 		c.from[n] = mask | bit
 	}
-	var added int
-	c.entries, added = passive.Merge(c.entries, c.have, names, c.target)
 	if !c.owned {
 		own := make(map[string]struct{}, len(c.seeds)+len(names))
 		for s := range c.seeds {
@@ -173,7 +171,7 @@ func (c *candidates) add(source string, names []string) int {
 	for _, n := range names {
 		c.seeds[n+"."+c.target] = struct{}{}
 	}
-	return added
+	return len(added)
 }
 
 // sourcesOf names what proposed a main-pass result (#273). A name no source

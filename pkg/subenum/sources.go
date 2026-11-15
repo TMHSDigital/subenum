@@ -65,10 +65,6 @@ func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, do
 		})
 	}
 	wg.Wait()
-	have := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		have[e] = true
-	}
 	for i, a := range answers {
 		var tr *passive.Truncated
 		switch {
@@ -81,7 +77,7 @@ func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, do
 				Message: fmt.Sprintf("Sources[%d]: %v; scanning without its names", i, a.err)})
 			continue
 		}
-		entries, _ = passive.Merge(entries, have, a.names, domain)
+		entries, _ = passive.Merge(entries, a.names, domain)
 	}
 	return entries
 }

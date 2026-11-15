@@ -76,29 +76,32 @@ func fetchSources(ctx context.Context, domain string, sources []string, o Option
 // proposed (relative to domain) with who had it, the wordlist first; names
 // missing from it are the wordlist's alone.
 func mergeSources(domain string, entries []string, lookups []sourceLookup) (merged []string, from map[string][]string) {
-	var have map[string]bool
 	for i := range lookups {
 		l := &lookups[i]
 		if len(l.names) == 0 {
 			continue
 		}
-		if have == nil {
-			have = make(map[string]bool, len(entries)+len(l.names))
-			for _, e := range entries {
-				have[e] = true
-			}
+		if from == nil {
 			from = map[string][]string{}
 		}
-		// Before the merge, while have still tells a wordlist entry from a
-		// name only an earlier source had (those are in from).
+		var added []string
+		entries, added = passive.Merge(entries, l.names, domain)
+		l.added = len(added)
+		fresh := make(map[string]struct{}, len(added))
+		for _, n := range added {
+			fresh[n] = struct{}{}
+		}
+		// A proposed name that was already an entry and that no earlier
+		// source had (those are in from) is a wordlist entry. No map as large
+		// as the wordlist is built (#321).
 		proposed, _, _ := wordlist.Build(l.names, domain)
 		for _, n := range proposed {
-			if _, seen := from[n]; !seen && have[n] {
+			_, seen := from[n]
+			if _, isNew := fresh[n]; !seen && !isNew {
 				from[n] = fromWordlist
 			}
 			from[n] = append(slices.Clip(from[n]), l.name)
 		}
-		entries, l.added = passive.Merge(entries, have, l.names, domain)
 	}
 	return entries, from
 }

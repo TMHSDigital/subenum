@@ -69,16 +69,15 @@ func mainPassNames(results []output.Result) []string {
 // to target) that are not wordlist entries or seeds themselves, in a stable
 // order. Candidates whose full name would pass the 253-character limit are
 // dropped and counted in tooLong: they would otherwise fail as "other" and
-// count against the reliability guard (#111).
+// count against the reliability guard (#111). The permutations are checked
+// against entries in one pass, with no map as large as the wordlist (#321).
 func permutationCandidates(target string, entries, rel []string) (candidates []string, tooLong int) {
-	skip := make(map[string]bool, len(entries)+len(rel))
-	for _, e := range entries {
-		skip[e] = true
-	}
+	skip := make(map[string]bool, len(rel))
 	for _, s := range rel {
 		skip[s] = true
 	}
-	candidates, _, tooLong = wordlist.Build(permute.Generate(rel, permute.Words, skip), target)
+	generated := wordlist.NotIn(permute.Generate(rel, permute.Words, skip), entries)
+	candidates, _, tooLong = wordlist.Build(generated, target)
 	return candidates, tooLong
 }
 

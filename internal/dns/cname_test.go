@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -400,6 +401,39 @@ func TestCNAMEInvalidNameSendsNoQuery(t *testing.T) {
 	}
 	if w, q := writes.Load(), queries.Load(); w != 0 || q != 0 {
 		t.Errorf("invalid names: %d writes and %d queries on the wire, want 0", w, q)
+	}
+}
+
+// TestCNAMEReadBuffer covers #321: a CNAME lookup reads a UDP answer into a
+// buffer sized for the advertised EDNS(0) payload and a TCP answer into its
+// announced length, not a 64 KiB buffer per lookup.
+func TestCNAMEReadBuffer(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Name == "big.example.com" {
+			return dnstest.Reply{CNAME: "edge.example.net", Truncate: true} // UDP, then TCP
+		}
+		return dnstest.Reply{CNAME: "ghost.example.net"}
+	})
+	r := NewResolver(time.Second, srv.Addr)
+	for _, name := range []string{"blog.example.com.", "big.example.com."} {
+		lookup := func() {
+			if _, err := lookupCNAME(contextWithTimeout(t, 5*time.Second), r, name); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		}
+		lookup() // warm up
+		const runs = 20
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		for range runs {
+			lookup()
+		}
+		runtime.ReadMemStats(&after)
+		// The client and the in-process server together; a 64 KiB read
+		// buffer alone would be far over this.
+		if per := (after.TotalAlloc - before.TotalAlloc) / runs; per > 16<<10 {
+			t.Errorf("%s: %d bytes allocated per lookup, want at most 16 KiB", name, per)
+		}
 	}
 }
 

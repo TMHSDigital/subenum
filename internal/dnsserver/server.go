@@ -84,6 +84,10 @@ type Options struct {
 	Serial bool
 	// IPv6 listens on [::1] instead of 127.0.0.1.
 	IPv6 bool
+	// CountNames keeps a count per name and type for QueriesFor. Tests set
+	// it (internal/dnstest does); a lab scan leaves it off, since the map
+	// would grow with every candidate (#321).
+	CountNames bool
 }
 
 // Server is a running DNS server.
@@ -99,7 +103,7 @@ type Server struct {
 
 	total  atomic.Int64
 	mu     sync.Mutex
-	counts map[countKey]int64
+	counts map[countKey]int64 // nil unless Options.CountNames
 
 	closers []io.Closer
 	// wg covers every goroutine the server starts: listeners, stream
@@ -141,7 +145,10 @@ func Listen(opts Options, h Handler) (*Server, error) {
 		}
 		return nil, err
 	}
-	s := &Server{Addr: ln.Addr().String(), counts: map[countKey]int64{}, closers: []io.Closer{ln, pc}, conns: map[net.Conn]struct{}{}}
+	s := &Server{Addr: ln.Addr().String(), closers: []io.Closer{ln, pc}, conns: map[net.Conn]struct{}{}}
+	if opts.CountNames {
+		s.counts = map[countKey]int64{}
+	}
 
 	s.wg.Add(2)
 	go func() {
@@ -247,7 +254,11 @@ func (s *Server) Queries() int64 { return s.total.Load() }
 
 // QueriesFor returns how many queries for name and qtype the server has
 // received. name is matched case-insensitively, with or without a trailing dot.
+// It panics unless the server was started with Options.CountNames.
 func (s *Server) QueriesFor(name string, qtype dnsmessage.Type) int64 {
+	if s.counts == nil {
+		panic("dnsserver: QueriesFor needs Options.CountNames")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.counts[countKey{normalize(name), qtype}]
@@ -422,9 +433,11 @@ func (s *Server) handle(msg []byte, tcp bool, h Handler) []byte {
 	}
 	q := Query{Name: normalize(question.Name.String()), Type: question.Type, TCP: tcp}
 	s.total.Add(1)
-	s.mu.Lock()
-	s.counts[countKey{q.Name, q.Type}]++
-	s.mu.Unlock()
+	if s.counts != nil {
+		s.mu.Lock()
+		s.counts[countKey{q.Name, q.Type}]++
+		s.mu.Unlock()
+	}
 
 	r := h(q)
 	if r.Delay > 0 {

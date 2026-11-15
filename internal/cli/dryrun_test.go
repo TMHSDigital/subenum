@@ -81,7 +81,7 @@ func TestDryRunPreflight(t *testing.T) {
 		{"servfail", dnsserver.ServFail, exitFailure, "error", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, err := dnsserver.Listen(dnsserver.Options{}, func(dnsserver.Query) dnsserver.Reply { return tc.reply })
+			srv, err := dnsserver.Listen(dnsserver.Options{CountNames: true}, func(dnsserver.Query) dnsserver.Reply { return tc.reply })
 			if err != nil {
 				t.Fatal(err)
 			}

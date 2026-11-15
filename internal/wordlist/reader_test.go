@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+// TestNotIn covers #321: the names missing from entries, in order, once each.
+func TestNotIn(t *testing.T) {
+	for _, tc := range []struct {
+		names, entries, want []string
+	}{
+		{[]string{"api", "www", "dev", "api"}, []string{"www", "mail"}, []string{"api", "dev"}},
+		{[]string{"www"}, []string{"www", "mail"}, nil},
+		{nil, []string{"www"}, nil},
+		{[]string{"b", "a"}, nil, []string{"b", "a"}},
+	} {
+		if got := NotIn(tc.names, tc.entries); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("NotIn(%v, %v) = %v, want %v", tc.names, tc.entries, got, tc.want)
+		}
+	}
+}
+
 func TestSanitizeLine(t *testing.T) {
 	tests := []struct {
 		in   string

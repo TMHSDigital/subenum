@@ -107,7 +107,7 @@ internal/dnstest/dnstest.go    - Start, StartWith, StartTLS: test helpers around
 internal/validate/validate.go  - DNSServer, Domain, NormalizeDomain, DefaultDNSServer
 internal/validate/punycode.go  - IDN to punycode (A-label) conversion
 internal/cliargs/cliargs.go    - Parse: flags anywhere on the command line, "--" terminator
-internal/wordlist/reader.go    - ReadLines, ReadLinesFrom, Normalize, Build, Prepare / Prepared.For, LoadWordlist
+internal/wordlist/reader.go    - ReadLines, ReadLinesFrom, Normalize, Build, Prepare / Prepared.For, NotIn, LoadWordlist
 internal/tui/model.go          - Root Bubble Tea model (form -> scan state machine)
 internal/tui/form.go           - Config form screen (textinput fields + toggles)
 internal/tui/scan_view.go      - Live results screen (viewport + progress bar)

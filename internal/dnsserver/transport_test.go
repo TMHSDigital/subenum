@@ -160,7 +160,7 @@ func postDoH(t *testing.T, client *http.Client, url string, msg []byte) []byte {
 // only through RootCAs, and Close returns promptly once the client is gone.
 func TestListenTLSReusesConnection(t *testing.T) {
 	var sawStream atomic.Bool
-	srv, err := Listen(Options{}, func(Query) Reply { return Reply{A: []string{"192.0.2.9"}} })
+	srv, err := Listen(Options{CountNames: true}, func(Query) Reply { return Reply{A: []string{"192.0.2.9"}} })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestDoHHandler(t *testing.T) {
 // or without the trailing dot.
 func TestQueriesForCountsEveryTransport(t *testing.T) {
 	h := func(Query) Reply { return Reply{A: []string{"192.0.2.1"}} }
-	srv, err := Listen(Options{}, h)
+	srv, err := Listen(Options{CountNames: true}, h)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -291,6 +291,34 @@ func (p *Prepared) For(domain string) (entries []string, duplicates, skipped int
 	return entries, duplicates, skipped
 }
 
+// NotIn returns the names that are not in entries, in their order and
+// without repeats. The set it builds holds the names, not the entries, so
+// checking a few source names or permutations against a large wordlist costs
+// one pass over it and no map as large as it (#321).
+func NotIn(names, entries []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	left := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		left[n] = struct{}{}
+	}
+	for _, e := range entries {
+		if len(left) == 0 {
+			return nil
+		}
+		delete(left, e)
+	}
+	var out []string
+	for _, n := range names {
+		if _, ok := left[n]; ok {
+			delete(left, n)
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // LoadWordlist reads a wordlist (path "-" means standard input) and builds it
 // for domain; see Build.
 func LoadWordlist(path, domain string) (entries []string, duplicates, skipped int, err error) {

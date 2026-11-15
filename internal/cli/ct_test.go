@@ -3,11 +3,13 @@ package cli
 import (
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -217,6 +219,45 @@ func TestCandidates(t *testing.T) {
 	}
 	if _, ok := c.seeds["old.example.com"]; !ok || len(shared) != 1 {
 		t.Errorf("seeds = %v (shared %v): want the names added to a copy only", c.seeds, shared)
+	}
+}
+
+// TestCandidatesNoWordlistSizedMap covers #321: merging a few source names
+// or permutations into a large wordlist checks them against the entries
+// without building a map as large as the wordlist.
+func TestCandidatesNoWordlistSizedMap(t *testing.T) {
+	const size = 200_000 // a map of these would take several MB
+	entries := make([]string, size, size+64)
+	for i := range entries {
+		entries[i] = fmt.Sprintf("w%d", i)
+	}
+	allocated := func(fn func()) uint64 {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		fn()
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	const limit = 1 << 20
+
+	c := &candidates{target: "example.com", entries: entries}
+	var added int
+	if b := allocated(func() { added = c.add("ct", []string{"api", "w7", "dev"}) }); b > limit {
+		t.Errorf("candidates.add allocated %d bytes, want at most %d", b, limit)
+	}
+	if added != 2 || len(c.entries) != size+2 {
+		t.Errorf("added %d (%d entries), want 2 (%d)", added, len(c.entries), size+2)
+	}
+	if got := c.sourcesOf("w7.example.com"); !slices.Equal(got, []string{"wordlist", "ct"}) {
+		t.Errorf("sources of w7 = %v, want [wordlist ct]", got)
+	}
+
+	var perms []string
+	if b := allocated(func() { perms, _ = permutationCandidates("example.com", entries, []string{"api"}) }); b > limit {
+		t.Errorf("permutationCandidates allocated %d bytes, want at most %d", b, limit)
+	}
+	if len(perms) == 0 || slices.Contains(perms, "api") {
+		t.Errorf("permutations = %v", perms)
 	}
 }
 

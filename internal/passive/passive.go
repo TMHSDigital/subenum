@@ -85,23 +85,17 @@ func New(name string, opts Options) (Source, error) {
 	return nil, fmt.Errorf("unknown source %q", name)
 }
 
-// Merge appends to entries the names that are not already in have, after
+// Merge appends to entries the names that are not already among them, after
 // them, so the entries' own order (and a resumed scan's positions) stays
-// put, and records them in have. Names are relative to domain; wordlist.Build
-// normalises them and drops invalid ones and ones too long for domain. It
-// returns the entries and how many names were new. The CLI and pkg/subenum
-// share it, so both merge sources the same way (#265).
-func Merge(entries []string, have map[string]bool, names []string, domain string) ([]string, int) {
+// put. Names are relative to domain; wordlist.Build normalises them and
+// drops invalid ones and ones too long for domain. It returns the entries
+// and the names that were new. It looks the names up with one pass over
+// entries and no map as large as them (#321). The CLI and pkg/subenum share
+// it, so both merge sources the same way (#265).
+func Merge(entries, names []string, domain string) (merged, added []string) {
 	extra, _, _ := wordlist.Build(names, domain)
-	added := 0
-	for _, e := range extra {
-		if !have[e] {
-			have[e] = true
-			entries = append(entries, e)
-			added++
-		}
-	}
-	return entries, added
+	added = wordlist.NotIn(extra, entries)
+	return append(entries, added...), added
 }
 
 // ctSource reports a crt.sh answer cut off at its read limit as Truncated,

@@ -79,6 +79,44 @@ func TestCloseWaitsForHandlers(t *testing.T) {
 	}
 }
 
+// TestCountNamesOptIn covers #321: a server keeps a count per name only when
+// Options.CountNames asks for it, so a lab scan over a large wordlist does
+// not hold one entry per candidate. The total is always kept.
+func TestCountNamesOptIn(t *testing.T) {
+	for _, count := range []bool{false, true} {
+		srv, err := Listen(Options{CountNames: count}, func(Query) Reply { return Reply{A: []string{"192.0.2.1"}} })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var d net.Dialer
+		c, err := d.DialContext(context.Background(), "udp", srv.Addr)
+		if err != nil {
+			srv.Close()
+			t.Fatal(err)
+		}
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, err := c.Write(query(t, "www.example.com.")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Read(make([]byte, 512)); err != nil {
+			t.Fatalf("CountNames %v: no answer: %v", count, err)
+		}
+		_ = c.Close()
+		srv.Close()
+		if n := srv.Queries(); n != 1 {
+			t.Errorf("CountNames %v: Queries = %d, want 1", count, n)
+		}
+		if got := len(srv.counts); count && got != 1 || !count && got != 0 {
+			t.Errorf("CountNames %v: %d names counted", count, got)
+		}
+		if count {
+			if n := srv.QueriesFor("WWW.example.com.", dnsmessage.TypeA); n != 1 {
+				t.Errorf("QueriesFor = %d, want 1", n)
+			}
+		}
+	}
+}
+
 // TestCloseStreamsAfter: a server can close each stream connection after n
 // answers, like servers with a per-connection query limit.
 func TestCloseStreamsAfter(t *testing.T) {
