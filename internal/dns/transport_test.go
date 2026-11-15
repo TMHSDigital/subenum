@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
+	"weak"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -216,13 +218,48 @@ func TestDoTDiscardsClosedConnections(t *testing.T) {
 		if _, _, err := (Lookup{Resolver: r, Timeout: timeout, Types: []string{"A"}}).ResolveTypes(ctx, "www.example.com"); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(5 * time.Millisecond) // let the server's close arrive
+		waitPooledClosed(t, r, timeout)
 	}
 	if opened := srv.Connections() - before; opened != 10 {
 		t.Errorf("10 lookups opened %d connections, want 10", opened)
 	}
 	if sent.Load() != 10 {
 		t.Errorf("counted %d queries, want 10", sent.Load())
+	}
+}
+
+// waitPooledClosed waits until each DoT connection r keeps for reuse has
+// read the server's close, then puts it back in the pool. The next lookup's
+// alive probe then finds it closed, instead of racing the close with its
+// one-millisecond read, which a loaded machine can lose (#289).
+func waitPooledClosed(t *testing.T, r *net.Resolver, timeout time.Duration) {
+	t.Helper()
+	v, ok := pooledDialers.Load(weak.Make(r))
+	if !ok {
+		t.Fatal("the resolver has no pooled dialer")
+	}
+	d := v.(*dotDialer)
+	var seen []idleConn
+drain:
+	for {
+		select {
+		case ic := <-d.idle:
+			if err := ic.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+				t.Fatal(err)
+			}
+			var b [1]byte
+			n, err := ic.conn.Read(b[:])
+			var ne net.Error
+			if n > 0 || err == nil || (errors.As(err, &ne) && ne.Timeout()) {
+				t.Fatalf("pooled connection: read %d byte(s), %v; want the server's close", n, err)
+			}
+			seen = append(seen, ic)
+		default:
+			break drain
+		}
+	}
+	for _, ic := range seen {
+		d.idle <- ic
 	}
 }
 
