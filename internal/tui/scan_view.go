@@ -77,6 +77,13 @@ type scanViewModel struct {
 	simMode      bool
 	seed         uint64 // simulation seed, shown so a TUI run can be reproduced
 
+	// The permutation pass (#274). permute says one follows the main pass;
+	// main is the main pass's last event once it has finished, and perm the
+	// pass itself once there are seeds for it.
+	permute bool
+	main    *scan.Event
+	perm    *permutationPass
+
 	eta     *output.ETA // time-left estimator, as on the CLI progress line (#191)
 	etaText string      // "" until the estimate has warmed up
 }
@@ -260,6 +267,10 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 		if ev.Result.Internal != "" {
 			line += wildcardStyle.Render("  internal: " + ev.Result.Internal)
 		}
+		if m.perm != nil {
+			m.perm.found++
+			line += dimStyle.Render("  permutation")
+		}
 		m.results = append(m.results, resultLine{name: strings.ToLower(ev.Result.Subdomain), takeover: ev.Result.Takeover != "", line: line})
 		if len(m.results) > maxResultLines {
 			// Evict in chunks so the copy cost is amortized across results.
@@ -276,6 +287,9 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 		m.processed = ev.Processed
 		m.total = ev.Total
 		m.found = ev.Found
+		if m.main != nil {
+			m.found += m.main.Found // the bar is the pass's, the count the scan's
+		}
 		m.etaText = ""
 		if m.eta == nil {
 			m.eta = &output.ETA{}
@@ -296,14 +310,34 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 		}
 
 	case scan.EventDone:
-		m.done = true
-		if ev.Stopped {
-			m.stopped = true
-		} else {
+		switch {
+		case m.main != nil:
+			// The permutation pass ended. The counters are both passes'; one
+			// that stopped before its candidates leaves the main pass's.
+			m.done = true
+			m.processed, m.total, m.found = m.main.Processed, m.main.Total, m.main.Found
+			if p := m.perm; p != nil && !ev.Stopped {
+				p.done, p.final = true, ev
+				m.processed += ev.Processed
+				m.total += ev.Total
+				m.found += ev.Found
+				m.stats = addStats(m.main.Stats, ev.Stats)
+			}
+		case ev.Stopped:
+			m.done, m.stopped = true, true
+		default:
 			m.processed = ev.Processed
 			m.total = ev.Total
 			m.found = ev.Found
 			m.stats = ev.Stats
+			// With Permute on, a finished main pass is followed by the
+			// permutation pass, unless the user or the reliability guard
+			// stopped the scan, as on the command line.
+			if m.permute && !m.aborted && (m.errText == "" || m.noAbort) {
+				m.main = &ev
+			} else {
+				m.done = true
+			}
 		}
 		m.refresh()
 	}
@@ -318,7 +352,11 @@ func (m scanViewModel) View() string {
 		mode = fmt.Sprintf("SIMULATION, seed %d", m.seed)
 	}
 	b.WriteString(logo() + "\n")
-	b.WriteString(headerStyle.Render(fmt.Sprintf("Scanning [%s mode]", mode)) + "\n\n")
+	stage := ""
+	if m.main != nil && !m.done {
+		stage = " - permutation pass"
+	}
+	b.WriteString(headerStyle.Render(fmt.Sprintf("Scanning [%s mode]%s", mode, stage)) + "\n\n")
 
 	// Extra messages (wildcard, errors), capped so the layout cannot overflow.
 	if mv := m.messagesView(); mv != "" {
@@ -380,7 +418,12 @@ func (m scanViewModel) verdictLine() string {
 	if m.aborted {
 		status = "interrupted"
 	}
-	t := report.Target("", status, "", true, scan.Event{Stats: m.stats}, settingLabel)
+	stats := m.stats
+	if m.main != nil {
+		stats = m.main.Stats // m.stats may count the permutation pass too
+	}
+	t := report.Target("", status, "", true, scan.Event{Stats: stats}, settingLabel)
+	m.perm.summarize(&t, m.aborted, m.errText)
 	style := resultStyle
 	switch scan.VerdictRank(t.Verdict) {
 	case 1:
@@ -415,7 +458,7 @@ func (m scanViewModel) extraCounts() string {
 // that ended without EventDone after an error (preflight failure, wildcard
 // abort) is a failure, not a user abort (#55).
 func (m scanViewModel) failed() bool {
-	return m.done && m.errText != "" && (m.stopped || !m.noAbort)
+	return m.done && m.errText != "" && (m.stopped || !m.noAbort || m.perm.unfinished())
 }
 
 type wordlistLoadedMsg struct {
@@ -425,4 +468,8 @@ type wordlistLoadedMsg struct {
 	err     error
 	pool    *dns.Pool // built from the Resolver Pool file, if one is set (#195)
 	poolErr error     // the pool file could not be read or parsed
+	// The passive sources' answers, already merged into entries, and who
+	// proposed each of their names (#274).
+	lookups []sourceLookup
+	from    map[string][]string
 }

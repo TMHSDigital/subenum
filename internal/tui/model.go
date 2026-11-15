@@ -14,6 +14,7 @@ import (
 	"github.com/TMHSDigital/subenum/data"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -46,6 +47,15 @@ type Model struct {
 	vals    formValues // the running scan's settings, for its report
 	seed    uint64
 	started time.Time
+
+	// What the Sources and Permute fields add around the scan (#274).
+	lookups  []sourceLookup      // the passive sources asked, in order
+	from     map[string][]string // who proposed each name a source had
+	foundBy  map[string]int      // results per source that proposed them
+	entries  []string            // the main pass's candidates, not permuted again
+	names    []string            // the main pass's results: permutation seeds
+	pool     *dns.Pool           // the resolver pool, for the permutation pass too
+	deadline time.Time           // Max Duration's end, shared by both passes
 }
 
 // Options configure the TUI.
@@ -60,6 +70,9 @@ type Options struct {
 	// Domain is the domain argument given with -tui; it pre-fills the
 	// Domain field when set (#195).
 	Domain string
+	// SourceURLs replace the passive sources' endpoints, by source name;
+	// tests point them at local servers.
+	SourceURLs map[string]string
 }
 
 // New creates the root model starting on the form screen.
@@ -136,9 +149,10 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.form.err = ""
 			m.form.loading = true
+			m.form.asking = len(vals.sources) > 0 && !vals.simulate
 			// Load the wordlist off the event loop so a large list cannot
 			// freeze the UI (#55); beginScan runs when it arrives.
-			return m, loadWordlistCmd(vals)
+			return m, loadWordlistCmd(vals, m.opts)
 		}
 
 	case wordlistLoadedMsg:
@@ -155,7 +169,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.err = msg.poolErr.Error()
 			return m, nil
 		}
-		return m.beginScan(msg.cfg, msg.entries, msg.skipped, msg.pool)
+		return m.beginScan(msg)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -167,13 +181,20 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// loadWordlistCmd reads and normalizes the wordlist, and builds the resolver
-// pool, in a tea.Cmd goroutine.
-func loadWordlistCmd(vals formValues) tea.Cmd {
+// loadWordlistCmd reads and normalizes the wordlist, builds the resolver
+// pool and asks the passive sources, in a tea.Cmd goroutine.
+func loadWordlistCmd(vals formValues, o Options) tea.Cmd {
 	return func() tea.Msg {
 		entries, skipped, err := loadWordlist(vals)
 		pool, poolErr := loadPool(vals)
-		return wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err, pool: pool, poolErr: poolErr}
+		msg := wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err, pool: pool, poolErr: poolErr}
+		// The sources are asked only for a scan that will start, and never in
+		// simulation mode, which sends nothing off the machine (#274).
+		if err == nil && poolErr == nil && len(entries) > 0 && !vals.simulate && len(vals.sources) > 0 {
+			msg.lookups = fetchSources(context.Background(), vals.domain, vals.sources, o)
+			msg.entries, msg.from = mergeSources(vals.domain, entries, msg.lookups)
+		}
+		return msg
 	}
 }
 
@@ -213,7 +234,8 @@ func loadPool(vals formValues) (*dns.Pool, error) {
 	return pool, nil
 }
 
-func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *dns.Pool) (tea.Model, tea.Cmd) {
+func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
+	vals, entries, skipped, pool := loaded.cfg, loaded.entries, loaded.skipped, loaded.pool
 	// Create the context up front so cancel is always assigned to the model
 	// before any early return. This satisfies static analysis tools that
 	// require the cancellation function to be demonstrably reachable.
@@ -237,12 +259,18 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 		// Same file shape as the CLI's: a takeover column when CNAME
 		// records are requested (#118).
 		m.out.SetTakeoverColumn(dns.HintsTakeover(vals.recordTypes))
+		// With sources or a permutation pass, each result says what proposed
+		// it, as the CLI's do.
+		m.out.SetSourcesColumn(len(vals.sources) > 0 || vals.permute)
 	}
 	m.vals, m.seed, m.started = vals, seed, time.Now()
+	m.lookups, m.from, m.foundBy = loaded.lookups, loaded.from, map[string]int{}
+	m.entries, m.names, m.pool, m.deadline = entries, nil, pool, time.Time{}
 
 	m.state = stateScan
 	m.scanView = newScanViewModel(m.width, m.height, vals.simulate)
 	m.scanView.noAbort = vals.noAbort
+	m.scanView.permute = vals.permute
 	// Same facts the CLI prints: the seed that reproduces a simulation, and
 	// how many wordlist entries were dropped (#80).
 	if vals.simulate {
@@ -256,6 +284,23 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 		m.scanView.addMessage(dimStyle.Render("Note: the resolver pool is ignored in simulation mode, which sends no DNS queries"))
 	}
 
+	if len(vals.sources) > 0 && vals.simulate {
+		m.scanView.addMessage(dimStyle.Render("Note: the passive sources are ignored in simulation mode, which sends nothing off the machine"))
+	}
+	// Same lines as the CLI's: what each source gave, or why the scan runs
+	// without its names (#274).
+	for _, l := range m.lookups {
+		label := passive.Labels[l.name]
+		switch {
+		case !l.fetched:
+			m.scanView.addMessage(wildcardStyle.Render(fmt.Sprintf("⚠ %s; scanning without %s names", l.err, label)))
+			continue
+		case l.truncated != "":
+			m.scanView.addMessage(wildcardStyle.Render("⚠ " + l.truncated))
+		}
+		m.scanView.addMessage(dimStyle.Render(fmt.Sprintf("%s: %d names under %s, %d of them new candidates", label, len(l.names), vals.domain, l.added)))
+	}
+
 	// Same notice as the CLI's, so the TUI user knows which list ran (#288).
 	if vals.wordlist == "" {
 		m.scanView.addMessage(dimStyle.Render("Note: empty wordlist field: using the bundled top-5000 list (SecLists)"))
@@ -266,7 +311,8 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 	if vals.maxDuration > 0 {
 		// The budget starts with the scan, as -max-duration's starts when the
 		// CLI's scans do (#274).
-		opts.Deadline = time.Now().Add(vals.maxDuration)
+		m.deadline = time.Now().Add(vals.maxDuration)
+		opts.Deadline = m.deadline
 	}
 	cfg := opts.Config()
 
@@ -330,6 +376,9 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case permutationReadyMsg:
+		return m.beginPermutation(msg)
 	}
 
 	var svCmd tea.Cmd
@@ -342,7 +391,12 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, svCmd
 	}
 	switch {
-	case ev.Kind == scan.EventDone && ev.Stopped:
+	case ev.Kind == scan.EventDone && !m.scanView.done:
+		// The main pass finished and a permutation pass follows (#274): its
+		// candidates are built off the event loop, and beginPermutation runs
+		// when they arrive.
+		return m, tea.Batch(svCmd, permutationCmd(m.vals.domain, m.entries, m.names, m.from))
+	case ev.Kind == scan.EventDone && ev.Stopped && m.scanView.main == nil:
 		// The scan stopped before testing candidates (an early error such as a
 		// wildcard zone without Force, #99): close the file without finalizing,
 		// mirroring the CLI, which skips Finish so no empty JSON array is written.
@@ -352,18 +406,93 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Successful completion (including user abort, which still drains and
 		// emits EventDone): finalize structured output to close the streamed JSON
 		// array and flush CSV and partial results. A JSONL file ends with the
-		// run-quality summary, as the CLI's does (#118).
-		if m.out != nil {
-			m.out.Summary(m.summary(ev.Event))
-		}
-		m.reportOutputErr(m.finalizeOutput(true))
+		// run-quality summary, as the CLI's does (#118). A permutation pass
+		// that stopped early still leaves the main pass's results to write.
+		m.finishOutput(ev.Event)
 		return m, svCmd
-	case ev.Kind == scan.EventResult && m.out != nil:
-		m.out.Emit(output.Result{Result: ev.Result})
+	case ev.Kind == scan.EventResult:
+		m.record(ev.Result)
 	}
 	// A kind this view does not know yet must not stall the scan: the
 	// listener is re-armed for it like any other event (#165).
 	return m, tea.Batch(svCmd, listenForEvents(m.events))
+}
+
+// record keeps a result for the permutation pass's seeds and writes it to
+// the output file, saying what proposed it when the scan has sources or a
+// permutation pass (#274).
+func (m *Model) record(r scan.Result) {
+	res := output.Result{Result: r}
+	switch permuting := m.scanView.main != nil; {
+	case permuting:
+		res.Permutation, res.Sources = true, fromPermute
+	case len(m.vals.sources) > 0 || m.vals.permute:
+		res.Sources = fromWordlist
+		if list, ok := m.from[strings.TrimSuffix(strings.ToLower(r.Subdomain), "."+m.vals.domain)]; ok {
+			res.Sources = list
+		}
+		if m.vals.permute {
+			m.names = append(m.names, r.Subdomain)
+		}
+	}
+	for _, src := range res.Sources {
+		m.foundBy[src]++
+	}
+	if m.out != nil {
+		m.out.Emit(res)
+	}
+}
+
+// beginPermutation starts the permutation pass over the candidates built
+// from the main pass's results: a second scan with the same settings, one
+// level deep. With nothing to scan, or after ctrl+c, the scan ends here.
+func (m Model) beginPermutation(msg permutationReadyMsg) (tea.Model, tea.Cmd) {
+	sv := &m.scanView
+	if sv.main == nil || sv.done {
+		return m, nil
+	}
+	if msg.seeds > 0 {
+		sv.perm = &permutationPass{seeds: msg.seeds, candidates: len(msg.candidates)}
+	}
+	if len(msg.candidates) == 0 || sv.aborted {
+		sv.done = true
+		m.finishOutput(*sv.main)
+		return m, nil
+	}
+	if msg.tooLong > 0 {
+		sv.addMessage(dimStyle.Render(fmt.Sprintf("Permutation pass: skipped %d candidates longer than 253 characters", msg.tooLong)))
+	}
+	sv.addMessage(dimStyle.Render(fmt.Sprintf("Permutation pass: %d candidates from %d seed names", len(msg.candidates), msg.seeds)))
+	sv.processed, sv.total, sv.eta, sv.etaText = 0, int64(len(msg.candidates)), nil, ""
+
+	// Under Recursive, children of a found permutation would be built from
+	// the candidate list itself, so the pass is flat, as the CLI's is (#111).
+	opts := m.vals.options(msg.candidates, m.seed)
+	opts.Recursive, opts.Depth = false, 1
+	opts.Pool, opts.Deadline = m.pool, m.deadline
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if m.cancel != nil {
+		m.cancel() // the main pass's context; it has ended
+	}
+	m.cancel = cancel
+	events := make(chan scan.Event, 128)
+	m.events = events
+	go scan.Run(ctx, opts.Config(), events)
+	return m, listenForEvents(events)
+}
+
+// finishOutput writes the run-quality summary and closes the output file
+// once the scan, with its permutation pass if it has one, has ended. final
+// is the event that ended it.
+func (m *Model) finishOutput(final scan.Event) {
+	if main := m.scanView.main; main != nil {
+		final = *main // the report's counts are the main pass's (#298)
+	}
+	if m.out != nil {
+		m.out.Summary(m.summary(final))
+	}
+	m.reportOutputErr(m.finalizeOutput(true))
 }
 
 // finalizeOutput closes the optional output file. When finish is true the
@@ -411,7 +540,15 @@ func (m *Model) summary(final scan.Event) output.Summary {
 	case m.scanView.aborted:
 		status = "interrupted"
 	}
-	report.Finish(&s, []output.TargetSummary{report.Target(m.vals.domain, status, "", true, final, settingLabel)}, time.Since(m.started))
+	t := report.Target(m.vals.domain, status, "", true, final, settingLabel)
+	for _, l := range m.lookups {
+		t.Sources = append(t.Sources, output.SourceSummary{Name: l.name, Names: len(l.names), Found: m.foundBy[l.name], Error: l.err, Truncated: l.truncated != ""})
+		if l.name == "ct" {
+			t.CTNames, t.CTError = len(l.names), l.err
+		}
+	}
+	m.scanView.perm.summarize(&t, m.scanView.aborted, m.scanView.errText)
+	report.Finish(&s, []output.TargetSummary{t}, time.Since(m.started))
 	return s
 }
 

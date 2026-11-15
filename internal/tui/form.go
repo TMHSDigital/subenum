@@ -14,6 +14,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/validate"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -24,6 +25,7 @@ import (
 const (
 	fieldDomain = iota
 	fieldWordlist
+	fieldSources // -sources passive sources (#274)
 	fieldSimulate
 	fieldHitRate // only reachable when Simulate is ON
 	fieldDNSServer
@@ -34,7 +36,8 @@ const (
 	fieldAttempts
 	fieldTypes
 	fieldRecursive
-	fieldDepth // only reachable when Recursive is ON
+	fieldDepth   // only reachable when Recursive is ON
+	fieldPermute // -permute (#274)
 	fieldRate
 	fieldAutoRate // -auto-rate (#274)
 	fieldMaxQueries
@@ -82,6 +85,8 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.Domain }},
 	fieldWordlist: {label: "Wordlist", flag: "w", kind: textField, placeholder: "empty = bundled top-5000 list",
 		saved: func(c *savedConfig) any { return &c.Wordlist }},
+	fieldSources: {label: "Sources", flag: "sources", kind: textField, placeholder: "optional, " + strings.Join(passive.Known, ","),
+		saved: func(c *savedConfig) any { return &c.Sources }},
 	fieldSimulate: {label: "Simulate", flag: "simulate", kind: toggleField,
 		saved: func(c *savedConfig) any { return &c.Simulate }},
 	fieldHitRate: {setting: scan.SettingHitRate, kind: textField, placeholder: "1–100", def: strconv.Itoa(scan.DefaultHitRate), gate: fieldSimulate,
@@ -104,6 +109,8 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.Recursive }},
 	fieldDepth: {setting: scan.SettingDepth, kind: textField, placeholder: "e.g. 2", def: "1", gate: fieldRecursive,
 		saved: func(c *savedConfig) any { return &c.Depth }},
+	fieldPermute: {label: "Permute", flag: "permute", kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.Permute }},
 	fieldRate: {setting: scan.SettingRate, kind: textField, placeholder: "0 = unlimited", def: "0",
 		saved: func(c *savedConfig) any { return &c.Rate }},
 	fieldAutoRate: {label: "Auto Rate", flag: "auto-rate", kind: toggleField,
@@ -216,6 +223,7 @@ type formModel struct {
 	focus   int
 	err     string
 	loading bool // wordlist is loading in the background; ctrl+r is ignored
+	asking  bool // the load also asks the passive sources (#274)
 	width   int  // terminal size, 0 until the first size message
 	height  int
 }
@@ -441,7 +449,11 @@ func (m formModel) footer() string {
 		b.WriteString("\n" + errorStyle.Render("  ✗ "+m.err) + "\n")
 	}
 	if m.loading {
-		b.WriteString("\n" + dimStyle.Render("  Loading wordlist...") + "\n")
+		note := "  Loading wordlist..."
+		if m.asking {
+			note = "  Loading wordlist and asking the passive sources..."
+		}
+		b.WriteString("\n" + dimStyle.Render(note) + "\n")
 	}
 
 	b.WriteString(hintStyle.Render("\n  tab/↑↓ navigate  •  space toggle  •  ctrl+r run  •  ctrl+c quit"))
@@ -489,6 +501,11 @@ func (m *formModel) validate() (formValues, string) {
 	// The TUI owns stdin, so reading a wordlist from it would block forever (#55).
 	if wl == wordlist.Stdin {
 		return formValues{}, "Wordlist from standard input (-) is not supported in the TUI; enter a file path"
+	}
+	// Same parser as -sources, so the form takes the names the CLI does (#274).
+	sources, err := passive.ParseList(text(fieldSources))
+	if err != nil {
+		return formValues{}, formFields[fieldSources].name() + ": " + err.Error()
 	}
 	dnsServer := strings.TrimSpace(text(fieldDNSServer))
 	if dnsServer == "" {
@@ -565,6 +582,7 @@ func (m *formModel) validate() (formValues, string) {
 	v := formValues{
 		domain:          domain,
 		wordlist:        wl,
+		sources:         sources,
 		dnsServer:       dnsServer,
 		resolvers:       resolvers,
 		ratePerResolver: ratePerResolver,
@@ -575,6 +593,7 @@ func (m *formModel) validate() (formValues, string) {
 		recordTypes:     recordTypes,
 		recursive:       m.toggles[fieldRecursive],
 		depth:           depth,
+		permute:         m.toggles[fieldPermute],
 		rate:            rate,
 		autoRate:        m.toggles[fieldAutoRate],
 		maxQueries:      maxQueries,
@@ -629,6 +648,7 @@ func settingLabel(s scan.Setting) string { return scan.Label(s) }
 type formValues struct {
 	domain          string
 	wordlist        string
+	sources         []string // passive sources asked before the scan, in passive.Known order
 	dnsServer       string
 	resolvers       string // resolver pool file; "" means the single DNS server
 	ratePerResolver int
@@ -639,6 +659,7 @@ type formValues struct {
 	recordTypes     []string
 	recursive       bool
 	depth           int
+	permute         bool // a second pass over permutations of the names found
 	rate            int
 	autoRate        bool
 	maxQueries      int

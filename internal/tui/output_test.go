@@ -29,7 +29,7 @@ func runTUIScan(t *testing.T, format output.Format, formatName string, types []s
 	m := New(Options{Version: "test"})
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30}) // as a terminal sends first
 	m = sized.(Model)
-	next, _ := m.beginScan(vals, []string{"www", "api", "mail"}, 0, nil)
+	next, _ := m.beginScan(wordlistLoadedMsg{cfg: vals, entries: []string{"www", "api", "mail"}})
 	m = next.(Model)
 	if m.state != stateScan {
 		t.Fatalf("scan did not start: %s", m.form.err)

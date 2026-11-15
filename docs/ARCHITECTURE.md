@@ -108,6 +108,7 @@ internal/wordlist/reader.go    - ReadLines, ReadLinesFrom, Normalize, Build, Pre
 internal/tui/model.go          - Root Bubble Tea model (form -> scan state machine)
 internal/tui/form.go           - Config form screen (textinput fields + toggles)
 internal/tui/scan_view.go      - Live results screen (viewport + progress bar)
+internal/tui/passes.go         - Sources and Permute: passive-source lookups before the scan, the permutation pass after it
 internal/tui/logo.go           - Styled wordmark
 internal/tui/config.go         - Session persistence (load/save <user config dir>/subenum/last.json)
 pkg/subenum/subenum.go         - Scan, Run, DefaultWords, Permutations: the embeddable API

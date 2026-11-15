@@ -89,8 +89,8 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 
 	m.focus = fieldRecursive
 	m.moveFocus(+1)
-	if m.focus != fieldRate {
-		t.Errorf("recursive OFF: expected Rate after Recursive (Depth skipped), got %d", m.focus)
+	if m.focus != fieldPermute {
+		t.Errorf("recursive OFF: expected Permute after Recursive (Depth skipped), got %d", m.focus)
 	}
 
 	// Gates on: the previously skipped fields are now reachable.
@@ -331,6 +331,7 @@ func TestFormViewRows(t *testing.T) {
 	want := []string{
 		"▸ Domain*:            > e.g. example.com",
 		"  Wordlist:           > empty = bundled top-5000 list",
+		"  Sources:            > optional, ct,wayback",
 		"  Simulate:           OFF",
 		"  Hit Rate (%):         (enable Simulate)",
 		"  DNS Server:         > 8.8.8.8:53",
@@ -342,6 +343,7 @@ func TestFormViewRows(t *testing.T) {
 		"  Record Types:       > A,AAAA",
 		"  Recursive:          OFF",
 		"  Depth:                (enable Recursive)",
+		"  Permute:            OFF",
 		"  Rate (qps):         > 0",
 		"  Auto Rate:          OFF",
 		"  Max Names:          > 0",

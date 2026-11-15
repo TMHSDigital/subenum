@@ -151,6 +151,7 @@ subenum/
 │   │   ├── model.go            # Root Bubble Tea model (form → scan state machine)
 │   │   ├── form.go             # Config form screen (textinput fields + toggles)
 │   │   ├── scan_view.go        # Live results screen (viewport + progress bar)
+│   │   ├── passes.go           # Sources and Permute: source lookups before the scan, the permutation pass after it
 │   │   ├── logo.go             # Styled wordmark
 │   │   ├── config.go           # Session persistence: load/save <user config dir>/subenum/last.json
 │   │   └── *_test.go           # Model, form, scan view and config tests

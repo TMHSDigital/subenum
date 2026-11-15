@@ -36,6 +36,10 @@ type savedConfig struct {
 	AutoRate          bool   `json:"auto_rate,omitempty"`
 	MaxDuration       string `json:"max_duration,omitempty"`
 	RetryInconclusive bool   `json:"retry_inconclusive,omitempty"`
+	// Sources is -sources as a comma-separated list, and Permute is -permute
+	// (#274).
+	Sources string `json:"sources,omitempty"`
+	Permute bool   `json:"permute,omitempty"`
 }
 
 // durationText is how a max duration is saved: "" for none, so the form
@@ -104,6 +108,9 @@ func saveConfig(fv formValues) error {
 		AutoRate:          fv.autoRate,
 		MaxDuration:       durationText(fv.maxDuration),
 		RetryInconclusive: fv.retryIncon,
+
+		Sources: strings.Join(fv.sources, ","),
+		Permute: fv.permute,
 	}
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {
