@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -126,6 +130,118 @@ func loadBaseline(path string) (baseline, error) {
 		}
 	}
 	return b, nil
+}
+
+const diffUsage = "Usage: subenum diff [-records] [-type A,AAAA,CNAME] [-format text|json|jsonl|csv] <previous> <current>"
+
+// runDiff is `subenum diff` (#310): it compares two saved results files, in
+// any output format, without sending a DNS query. Names only in current are
+// "added", names only in previous "missing" (not "removed": nothing was
+// looked up to show they are gone), and with -records names in both whose
+// records differ are "changed", compared as -diff-records does. It exits
+// exitChanges when anything differs.
+func runDiff(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("diff", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	records := fs.Bool("records", false, "Also report names in both files whose records differ (needs JSON, JSONL or CSV files)")
+	typeList := fs.String("type", "", "With -records, compare only these record types (default: every type)")
+	formatStr := fs.String("format", "text", "Output format: text, json, jsonl or csv")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stderr, diffUsage)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitUsage
+	}
+	if fs.NArg() != 2 {
+		_, _ = fmt.Fprintln(stderr, diffUsage)
+		return exitUsage
+	}
+	format, err := output.ParseFormat(*formatStr)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+		return exitUsage
+	}
+	var types []string // every type
+	if strings.TrimSpace(*typeList) != "" {
+		if types, err = dns.ParseTypes(*typeList); err != nil {
+			_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+			return exitUsage
+		}
+	}
+	var files [2]baseline
+	for i, path := range fs.Args() {
+		if files[i], err = loadBaseline(path); err != nil {
+			_, _ = fmt.Fprintf(stderr, "Error: reading %s: %v\n", path, err)
+			return exitFailure
+		}
+	}
+	prev, cur := files[0], files[1]
+
+	out := output.New(nil, false, format)
+	out.SetStdout(stdout)
+	out.SetStderr(stderr)
+	out.SetPlain(true)
+	out.SetDiff(true)
+	out.SetShowRecords(*records)
+	compare := *records
+	if compare && (!prev.hasRecords || !cur.hasRecords) {
+		out.Info("Note: -records needs JSON, JSONL or CSV files; comparing names only")
+		compare = false
+	}
+
+	sorted := func(m map[string]struct{}) []string {
+		names := make([]string, 0, len(m))
+		for name := range m {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return names
+	}
+	emit := func(name, change string, recs, previous []dns.Record) {
+		if recs == nil {
+			recs = []dns.Record{}
+		}
+		out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: recs}, Change: change, PreviousRecords: previous})
+	}
+	var added, missing, changed int
+	for _, name := range sorted(cur.names) {
+		if _, ok := prev.names[name]; !ok {
+			added++
+			emit(name, "added", cur.records[name], nil)
+		}
+	}
+	if compare {
+		for _, name := range sorted(cur.names) {
+			old, ok := prev.records[name]
+			if _, seen := prev.names[name]; seen && ok && diff.RecordsChanged(old, cur.records[name], types) {
+				changed++
+				emit(name, "changed", cur.records[name], old)
+			}
+		}
+	}
+	for _, name := range sorted(prev.names) {
+		if _, ok := cur.names[name]; !ok {
+			missing++
+			emit(name, "missing", prev.records[name], nil)
+		}
+	}
+	if err := out.Finish(); err != nil {
+		out.Error("writing output: %v", err)
+		return exitFailure
+	}
+	summary := fmt.Sprintf("%d added, %d missing", added, missing)
+	if compare {
+		summary += fmt.Sprintf(", %d changed", changed)
+	}
+	out.Info("%s", summary)
+	if added+missing+changed > 0 {
+		return exitChanges
+	}
+	return exitOK
 }
 
 // observe records a found name and says how it differs from the baseline:

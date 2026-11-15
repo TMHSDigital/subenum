@@ -58,7 +58,7 @@ const (
 	exitFailure = 1 // a scan, the wordlist, the domain list or the output file failed
 	exitUsage   = 2 // invalid flags or arguments
 	exitPartial = 3 // -dL: some targets failed while others completed
-	exitChanges = 4 // -diff: names were added or removed (or, with -diff-records, changed) since the previous run
+	exitChanges = 4 // -diff: names were added or removed (or, with -diff-records, changed) since the previous run; subenum diff: the files differ
 )
 
 const exitCodesHelp = `Exit codes:
@@ -66,7 +66,7 @@ const exitCodesHelp = `Exit codes:
   1    a scan, the wordlist, the domain list or the output file failed
   2    invalid flags or arguments
   3    -dL: some targets failed while others completed
-  4    -diff: names were added or removed (or, with -diff-records, changed) since the previous run
+  4    -diff: names were added or removed (or, with -diff-records, changed) since the previous run; subenum diff: the files differ
   130  interrupted (SIGINT, Ctrl+C); partial results are kept
   143  terminated (SIGTERM); partial results are kept
 `

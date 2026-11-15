@@ -37,7 +37,7 @@ var valueChoices = map[string][]string{
 }
 
 // subcommands are the non-scan words subenum accepts as its first argument.
-var subcommands = []string{"completion", "man", "mcp"}
+var subcommands = []string{"completion", "diff", "man", "mcp"}
 
 type flagInfo struct {
 	name, arg, usage string
@@ -55,13 +55,15 @@ func flagInfos() []flagInfo {
 	return out
 }
 
-// runSubcommand handles `completion`, `man` and the hidden `generate-assets`.
-// ok is false when args[0] is not a subcommand.
+// runSubcommand handles `completion`, `diff`, `man` and the hidden
+// `generate-assets`. ok is false when args[0] is not a subcommand.
 func runSubcommand(args []string, stdout, stderr io.Writer) (code int, ok bool) {
 	if len(args) == 0 {
 		return 0, false
 	}
 	switch args[0] {
+	case "diff":
+		return runDiff(args[1:], stdout, stderr), true
 	case "completion":
 		if len(args) != 2 {
 			_, _ = fmt.Fprintln(stderr, "Usage: subenum completion bash|zsh|fish|powershell")
@@ -250,10 +252,12 @@ func writeManPage(w io.Writer) {
 	p(".SH NAME\nsubenum \\- subdomain enumeration you can trust\n")
 	p(".SH SYNOPSIS\n.B subenum\n[\\fIoptions\\fR] \\fIdomain\\fR\n.br\n.B subenum\n[\\fIoptions\\fR] \\fB\\-dL\\fR \\fIdomains_file\\fR\n")
 	p(".br\n.B subenum completion\n\\fBbash\\fR|\\fBzsh\\fR|\\fBfish\\fR|\\fBpowershell\\fR\n.br\n.B subenum man\n")
+	p(".br\n.B subenum diff\n[\\fB\\-records\\fR] [\\fB\\-type\\fR \\fItypes\\fR] [\\fB\\-format\\fR \\fIformat\\fR] \\fIprevious\\fR \\fIcurrent\\fR\n")
 	p(".br\n.B subenum mcp\n[\\fB\\-allow\\fR \\fIdomains\\fR] [\\fIflags\\fR]\n")
 	p(".SH DESCRIPTION\n%s\n.PP\n%s\n",
 		line("subenum brute-forces subdomains by resolving a wordlist against a target domain with a concurrent worker pool. Resolved names go to stdout; progress, diagnostics and a per-query breakdown go to stderr. Without -w it uses a built-in list of the 5,000 most common subdomain labels."),
 		line("Only scan domains you own or have explicit written permission to test."))
+	p(".PP\n%s\n", line("subenum diff compares two saved results files in any output format without sending DNS queries: + for names only in current, - for names only in previous (missing, not proven removed), and with -records ~ for names whose records differ. It exits 4 when anything differs."))
 	p(".SH OPTIONS\n")
 	for _, f := range flagInfos() {
 		if f.arg != "" {

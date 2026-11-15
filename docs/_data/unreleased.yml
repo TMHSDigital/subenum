@@ -6,6 +6,7 @@
 # subcommands (#245)
 commands:
   - mcp
+  - diff
 flags:
   - auto-rate
   - axfr

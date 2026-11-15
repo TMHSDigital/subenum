@@ -61,6 +61,8 @@ type Result struct {
 	scan.Result
 	// Change is "added" or "removed" in -diff mode (#84), or "changed" with
 	// -diff-records when a name's records differ from the baseline (#189).
+	// `subenum diff` says "missing" instead of "removed": it looks nothing up
+	// (#310).
 	Change string `json:"change,omitempty"`
 	// PreviousRecords are the baseline's records of a "changed" name.
 	PreviousRecords []dns.Record `json:"previous_records,omitempty"`
@@ -157,7 +159,7 @@ func (w *Writer) SetDiff(on bool) { w.diff = on }
 
 func diffPrefix(change string) string {
 	switch change {
-	case "removed":
+	case "removed", "missing":
 		return "- "
 	case "changed":
 		return "~ "

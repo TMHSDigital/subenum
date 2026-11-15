@@ -392,7 +392,7 @@ The resumed run refuses to start if an input file, the wordlist (including the b
 | `1` | A scan, the wordlist, the domain list or the output file failed |
 | `2` | Invalid flags or arguments |
 | `3` | `-dL`: some targets failed while others completed |
-| `4` | `-diff`: names were added or removed (or, with `-diff-records`, changed) since the previous run |
+| `4` | `-diff`: names were added or removed (or, with `-diff-records`, changed) since the previous run; `subenum diff`: the two files differ |
 | `130` | Interrupted (SIGINT, `Ctrl+C`); partial results are kept |
 | `143` | Terminated (SIGTERM); partial results are kept |
 
@@ -496,6 +496,8 @@ subenum -permute -format jsonl -o results.jsonl example.com
 ```bash
 subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl example.com
 ```
+
+To compare two results files you already have, without scanning, use `subenum diff previous.jsonl current.jsonl`: `+` for names only in the second file, `-` for names only in the first (missing, not proven gone, since nothing is looked up), and with `-records` `~` for names whose records differ. `-type` limits the record comparison and `-format` picks the output format; the exit code is `4` when the files differ.
 
 ### Subdomain takeover hints
 

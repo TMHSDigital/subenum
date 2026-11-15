@@ -11,12 +11,15 @@ subenum [flags] <domain>
 subenum [flags] -dL domains.txt
 subenum completion bash|zsh|fish|powershell
 subenum man
+subenum diff [-records] [-type A,AAAA,CNAME] [-format text|json|jsonl|csv] <previous> <current>
 subenum mcp [-allow domains] [flags]
 ```
 
 Flags may appear before or after the domain. The domain is normalized to its host name before scanning: a URL's scheme and path, a `:port` and a leading `*.` are removed and an internationalized name becomes punycode, so `https://app.example.com/login` scans `app.example.com`, not `example.com`.
 
 `completion` prints a shell completion script and `man` prints the man page, both generated from the same flags; release archives ship them under `completions/` and `man/`. `mcp`{% include unreleased.html command="mcp" %} serves subenum to AI agents over the Model Context Protocol, within the domains, resolver and budgets you give it; see [AI agents (MCP)](mcp.html) for its flags.
+
+`diff`{% include unreleased.html command="diff" %} compares two saved results files, in any format subenum writes, without sending a DNS query. It prints `+ name` for names only in `<current>` and `- name` for names only in `<previous>` (`change` is `added` or `missing` in JSON, JSONL and CSV). A missing name is not proven gone, since nothing is looked up; `-diff` during a scan checks each one with a fresh lookup first. `-records` also prints `~ name` (`changed`) for names in both files whose records differ, compared as `-diff-records` does over the `-type` record types (every type by default); it needs JSON, JSONL or CSV files, and compares names only otherwise. The exit code is `4` when the files differ.
 
 ## Flags
 
@@ -32,7 +35,7 @@ Flags may appear before or after the domain. The domain is normalized to its hos
 | `1` | Failure |
 | `2` | Invalid arguments or configuration |
 | `3` | Some `-dL` targets failed |
-| `4` | `-diff` found added or removed names (or, with `-diff-records`, changed records) |
+| `4` | `-diff` found added or removed names (or, with `-diff-records`, changed records); `subenum diff` found differences |
 | `130` | Interrupted (Ctrl+C) |
 | `143` | Terminated (SIGTERM) |
 

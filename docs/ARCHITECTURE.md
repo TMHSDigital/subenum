@@ -52,11 +52,11 @@ Files, by role:
 main.go                        - Entry point: passes the injected Version to cli.Main
 internal/cli/cli.go            - CLI entry point: run, flag parsing and validation, scanTarget, exit codes
 internal/cli/session.go        - runWith and the session: per-run state, the -dL target loop, -tui dispatch
-internal/cli/completion.go     - completion and man subcommands
+internal/cli/completion.go     - completion and man subcommands; dispatches diff
 internal/cli/config.go         - config file and SUBENUM_* environment defaults, -print-config
 internal/cli/ct.go             - -ct / -sources: passive source names as extra candidates
 internal/cli/axfr.go           - -axfr: zone transfer names as extra candidates
-internal/cli/diff.go           - -diff / -diff-records: compare against a previous results file
+internal/cli/diff.go           - -diff / -diff-records: compare against a previous results file; runDiff: the diff subcommand
 internal/cli/dryrun.go         - -dry-run: print the scan plan and its cost without sending queries
 internal/cli/lab.go            - -simulate-zone: serve a lab scenario on a loopback DNS server
 internal/cli/mcp.go            - subenum mcp: the lab_scan, scan and explain_stats tools, the allow-list and caps
@@ -283,7 +283,7 @@ The tool listens for `SIGINT` and `SIGTERM`. On the first signal it cancels the 
 *   `1` - a scan, the wordlist, the domain list or the output file failed.
 *   `2` - invalid flags or arguments.
 *   `3` - `-dL`: some targets failed while others completed.
-*   `4` - `-diff`: names were added or removed (or, with `-diff-records`, changed) since the previous run.
+*   `4` - `-diff`: names were added or removed (or, with `-diff-records`, changed) since the previous run; `subenum diff`: the two files differ.
 *   `130` - interrupted (SIGINT, Ctrl+C); partial results are kept.
 *   `143` - terminated (SIGTERM); partial results are kept.
 
