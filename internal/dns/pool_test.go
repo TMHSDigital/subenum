@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +19,21 @@ func TestParseResolverList(t *testing.T) {
 	}
 	if _, err := ParseResolverList([]string{"resolver.example.com"}); err == nil {
 		t.Fatal("hostname accepted; resolvers must be IP addresses")
+	}
+}
+
+func TestParseResolverListRejectsBadPorts(t *testing.T) {
+	for _, line := range []string{"9.9.9.9:abc", "9.9.9.9:99999", "9.9.9.9:0", "9.9.9.9:-1"} {
+		_, err := ParseResolverList([]string{"1.1.1.1", line})
+		if err == nil {
+			t.Fatalf("%q accepted; want a port error", line)
+		}
+		if !strings.Contains(err.Error(), line) {
+			t.Fatalf("%q: error does not name the offending line: %v", line, err)
+		}
+		if !strings.Contains(err.Error(), "1-65535") {
+			t.Fatalf("%q: error does not state the port range: %v", line, err)
+		}
 	}
 }
 

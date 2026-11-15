@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
 // Pool health thresholds (#69).
@@ -112,6 +114,9 @@ func ParseResolverList(lines []string) ([]string, error) {
 		host, port, err := net.SplitHostPort(s)
 		if err != nil || net.ParseIP(host) == nil || port == "" {
 			return nil, fmt.Errorf("invalid resolver %q: want ip or ip:port", line)
+		}
+		if err := validate.Port(port); err != nil {
+			return nil, fmt.Errorf("invalid resolver %q: %w", line, err)
 		}
 		if !seen[s] {
 			seen[s] = true
