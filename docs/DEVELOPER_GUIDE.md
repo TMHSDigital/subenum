@@ -66,6 +66,7 @@ subenum/
 │   │   ├── codeql.yml          # Weekly CodeQL security analysis
 │   │   ├── devcontainer.yml    # Builds the dev container and runs checks in it
 │   │   └── pages.yml           # GitHub Pages deployment
+│   ├── SECURITY.md             # Vulnerability disclosure policy
 │   ├── ISSUE_TEMPLATE/
 │   │   ├── bug_report.yml      # Structured bug report form
 │   │   ├── feature_request.yml # Feature proposal form
@@ -102,6 +103,7 @@ subenum/
 │   ├── demo.sh                 # Quick demo script
 │   └── labs/                   # -simulate-zone scenarios and wordlist for docs/labs.md
 ├── internal/
+│   ├── cli/                    # The command: flags, session, config, diff, resume, permute, labs, MCP, and its tests
 │   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/
 │   │   ├── ct.go               # Certificate Transparency (crt.sh) client for -ct
@@ -169,26 +171,7 @@ subenum/
 ├── .gitignore
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
 ├── .goreleaser.yaml            # Release archives, completions, man page
-├── main.go                     # CLI entry point: run, flag parsing and validation, exit codes
-├── main_session.go             # runWith and the per-run session: the -dL target loop
-├── main_completion.go          # completion and man subcommands
-├── main_config.go              # Config file and SUBENUM_* environment defaults, -print-config
-├── main_ct.go                  # -ct / -sources: passive source names as candidates
-├── main_axfr.go                # -axfr: zone transfer names as candidates
-├── main_diff.go                # -diff / -diff-records against a previous results file
-├── main_dryrun.go              # -dry-run: the scan plan and its cost, no queries sent
-├── main_lab.go                 # -simulate-zone: serve a lab scenario locally
-├── main_mcp.go                 # subenum mcp: MCP tools, allow-list and caps
-├── main_permute.go             # -permute / -seeds: the permutation pass
-├── main_resume.go              # -resume / -state: save and replay an interrupted run
-├── main_results.go             # resultLog: a target's results, kept for -permute seeds and -diff
-├── main_summary.go             # Run-quality report assembly (-stats, JSONL summary line)
-├── main_wordlist.go            # -w file or the bundled wordlist
-├── main_test.go                # CLI-level tests: validation, flag logic
-├── main_e2e_test.go            # End-to-end runWith tests: -dL, stdin, formats, exit codes
-├── main_docs_test.go           # Doc checks: README and site flag tables cover the CLI
-├── main_signal_unix_test.go    # SIGTERM exit code test (Unix only)
-├── main_*_test.go              # Config, CT, diff, exit, lab and resume tests
+├── main.go                     # Entry point: calls internal/cli (keeps go install at the module root)
 ├── action.yml                  # GitHub Action
 ├── CITATION.cff                # Citation metadata
 ├── go.mod / go.sum             # Go module (Bubble Tea TUI is linked into every binary)
@@ -197,7 +180,6 @@ subenum/
 ├── Makefile                    # Build, test, lint, simulate, Docker targets
 ├── CHANGELOG.md                # Versioned release history
 ├── README.md                   # Project overview
-├── SECURITY.md                 # Vulnerability disclosure policy
 └── LICENSE                     # GNU General Public License v3.0
 ```
 

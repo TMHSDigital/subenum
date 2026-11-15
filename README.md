@@ -683,6 +683,7 @@ subenum/
 │   │   ├── codeql.yml          # Weekly CodeQL security analysis
 │   │   ├── devcontainer.yml    # Builds the dev container and runs checks in it
 │   │   └── pages.yml           # GitHub Pages deployment
+│   ├── SECURITY.md             # Vulnerability disclosure policy
 │   ├── ISSUE_TEMPLATE/         # bug_report.yml, feature_request.yml, config.yml
 │   ├── scripts/                # check-links.py, release-notes.sh
 │   ├── dependabot.yml
@@ -703,6 +704,7 @@ subenum/
 │   ├── advanced_usage.md
 │   └── demo.sh
 ├── internal/
+│   ├── cli/                    # The command and its subsystems (config, diff, resume, permute, CT, labs, MCP, ...)
 │   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/                     # Certificate Transparency (crt.sh) client for -ct
 │   ├── diff/                   # Result comparison shared by -diff and subenum.Diff
@@ -722,7 +724,7 @@ subenum/
 ├── pkg/subenum/                # Public Go library API
 ├── tools/
 │   └── wordlist-gen.go
-├── main.go, main_*.go          # CLI entry point and its subsystems (config, diff, resume, permute, CT, labs, ...)
+├── main.go                     # Entry point: calls internal/cli
 ├── action.yml                  # GitHub Action
 ├── .goreleaser.yaml            # Release archives, completions, man page
 ├── go.mod
@@ -732,7 +734,6 @@ subenum/
 ├── .golangci.yml               # golangci-lint v2 configuration
 ├── CHANGELOG.md
 ├── CITATION.cff
-├── SECURITY.md
 └── LICENSE                     # GNU General Public License v3.0
 ```
 
@@ -757,6 +758,6 @@ See [DEVELOPER_GUIDE.md](./docs/DEVELOPER_GUIDE.md) for build setup, testing, an
 
 <div align="center">
 
-[GPL-3.0 License](./LICENSE) &nbsp;&middot;&nbsp; [Security Policy](./SECURITY.md) &nbsp;&middot;&nbsp; [TM Hospitality Strategies](https://github.com/TMHSDigital)
+[GPL-3.0 License](./LICENSE) &nbsp;&middot;&nbsp; [Security Policy](./.github/SECURITY.md) &nbsp;&middot;&nbsp; [TM Hospitality Strategies](https://github.com/TMHSDigital)
 
 </div>

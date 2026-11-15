@@ -49,21 +49,22 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 Files, by role:
 
 ```
-main.go                        - CLI entry point: run, flag parsing and validation, scanTarget, exit codes
-main_session.go                - runWith and the session: per-run state, the -dL target loop, -tui dispatch
-main_completion.go             - completion and man subcommands
-main_config.go                 - config file and SUBENUM_* environment defaults, -print-config
-main_ct.go                     - -ct / -sources: passive source names as extra candidates
-main_axfr.go                   - -axfr: zone transfer names as extra candidates
-main_diff.go                   - -diff / -diff-records: compare against a previous results file
-main_dryrun.go                 - -dry-run: print the scan plan and its cost without sending queries
-main_lab.go                    - -simulate-zone: serve a lab scenario on a loopback DNS server
-main_mcp.go                    - subenum mcp: the lab_scan, scan and explain_stats tools, the allow-list and caps
-main_permute.go                - -permute / -seeds: the permutation pass
-main_resume.go                 - -resume / -state: save and replay an interrupted run
-main_results.go                - resultLog: a target's results, kept for -permute seeds and -diff
-main_summary.go                - assemble the run-quality report (-stats, JSONL summary line)
-main_wordlist.go               - prepareWordlist: the -w file, or the bundled list when -w is not given
+main.go                        - Entry point: passes the injected Version to cli.Main
+internal/cli/cli.go            - CLI entry point: run, flag parsing and validation, scanTarget, exit codes
+internal/cli/session.go        - runWith and the session: per-run state, the -dL target loop, -tui dispatch
+internal/cli/completion.go     - completion and man subcommands
+internal/cli/config.go         - config file and SUBENUM_* environment defaults, -print-config
+internal/cli/ct.go             - -ct / -sources: passive source names as extra candidates
+internal/cli/axfr.go           - -axfr: zone transfer names as extra candidates
+internal/cli/diff.go           - -diff / -diff-records: compare against a previous results file
+internal/cli/dryrun.go         - -dry-run: print the scan plan and its cost without sending queries
+internal/cli/lab.go            - -simulate-zone: serve a lab scenario on a loopback DNS server
+internal/cli/mcp.go            - subenum mcp: the lab_scan, scan and explain_stats tools, the allow-list and caps
+internal/cli/permute.go        - -permute / -seeds: the permutation pass
+internal/cli/resume.go         - -resume / -state: save and replay an interrupted run
+internal/cli/results.go        - resultLog: a target's results, kept for -permute seeds and -diff
+internal/cli/summary.go        - assemble the run-quality report (-stats, JSONL summary line)
+internal/cli/wordlist.go       - prepareWordlist: the -w file, or the bundled list when -w is not given
 internal/scan/options.go       - Options: user-facing settings shared by CLI and TUI (Validate, Config)
 internal/scan/runner.go        - Scan engine: Config, Event/EventKind/NoticeKind, Stats, Run
 internal/scan/dispatcher.go    - dispatcher: lazy candidate generation in chunks, budgets, resume watermark
@@ -116,10 +117,10 @@ tools/wordlist-gen.go          - Standalone wordlist generator
 
 ## 2. Key Components / Modules
 
-### 2.1. Argument Parsing (`main.go`, `internal/validate`)
+### 2.1. Argument Parsing (`internal/cli/cli.go`, `internal/validate`)
 
 *   **Purpose**: This component is responsible for processing the command-line arguments provided by the user when `subenum` is executed. It extracts the target domain (or a `-dL` domain list), the wordlist path, and every scan, output, and tuning option.
-*   **Implementation**: `run()` only calls `runWith(runArgs)`, which takes the arguments, stdin, stdout and stderr as injected values so tests can drive the whole CLI in-process. Per-run state lives in a `session` (`main_session.go`) whose methods are the run's phases: `parse`, `configure`, `loadInputs`, `openOutputs`, `scanAll` (which calls `scanOneTarget` per target) and `finish`. `cliFlags` holds only parsed flag values; what the run derives from them (attempts, record types, excludes, the resolver pool, the `-max-duration` deadline) is in `runtimeInputs`, and each pass over a target is a `scanPass`. `runWith` first handles the `completion` and `man` subcommands and `-resume`, then builds a `flag.FlagSet` with `parseFlagsWith`, which binds every flag into a `cliFlags` struct and applies config-file and environment defaults (see section 5). The standard `flag` package stops at the first non-flag argument, so `cliargs.Parse` (`internal/cliargs`, shared with `tools/wordlist-gen.go`) re-parses around each positional; flags written after the domain are honored, and everything after a `--` terminator is positional. `runWith` then:
+*   **Implementation**: `run()` only calls `runWith(runArgs)`, which takes the arguments, stdin, stdout and stderr as injected values so tests can drive the whole CLI in-process. Per-run state lives in a `session` (`internal/cli/session.go`) whose methods are the run's phases: `parse`, `configure`, `loadInputs`, `openOutputs`, `scanAll` (which calls `scanOneTarget` per target) and `finish`. `cliFlags` holds only parsed flag values; what the run derives from them (attempts, record types, excludes, the resolver pool, the `-max-duration` deadline) is in `runtimeInputs`, and each pass over a target is a `scanPass`. `runWith` first handles the `completion` and `man` subcommands and `-resume`, then builds a `flag.FlagSet` with `parseFlagsWith`, which binds every flag into a `cliFlags` struct and applies config-file and environment defaults (see section 5). The standard `flag` package stops at the first non-flag argument, so `cliargs.Parse` (`internal/cliargs`, shared with `tools/wordlist-gen.go`) re-parses around each positional; flags written after the domain are honored, and everything after a `--` terminator is positional. `runWith` then:
     *   handles `-tui` (launches `tui.Start` with the form pre-filled from the domain and the flags it has fields for, warning about the rest), `-print-config` and `-version` first;
     *   parses `-format` (`output.ParseFormat`), `-type` (`dns.ParseTypes`), and merges `-attempts` with the deprecated `-retries` (`effectiveAttempts`);
     *   calls `validateFlags`, which checks that a target is present, that a positional domain and `-dL` are not both given, and that `-w` and `-dL` do not both read stdin (`-w` may repeat, but only one entry may be `-`). Numeric ranges and the resolver address are checked by `scan.Options.Validate`, the same validator the TUI uses. The positional domain is canonicalized with `validate.NormalizeDomain`.
@@ -170,7 +171,7 @@ tools/wordlist-gen.go          - Standalone wordlist generator
 ### 2.4. Concurrency Management (`internal/scan`)
 
 *   **Purpose**: To efficiently perform DNS lookups for a large number of potential subdomains, `subenum` employs a worker pool pattern. This allows multiple DNS queries to be in flight concurrently, significantly speeding up the enumeration process compared to sequential lookups.
-*   **Implementation**: The scan engine lives in `internal/scan/runner.go` as `scan.Run`, which takes a context, a `scan.Config`, and an events channel. Both the CLI (`scanTarget` in `main.go`) and the TUI call it.
+*   **Implementation**: The scan engine lives in `internal/scan/runner.go` as `scan.Run`, which takes a context, a `scan.Config`, and an events channel. Both the CLI (`scanTarget` in `internal/cli/cli.go`) and the TUI call it.
     *   **`scan.Options` / `scan.Config`**: `Options` holds the user-facing settings (timeout in milliseconds, attempts, rate, and so on). Its `Validate` method checks ranges and the resolver address, and its `Config` method builds the `scan.Config` the engine runs on. The CLI, the TUI and `pkg/subenum` each fill in an `Options`, so they cannot drift apart in what they accept, and each has a test that fails when an `Options` field is left unset without a listed reason. `scan.DefaultConcurrency`, `DefaultTimeoutMs` and `DefaultHitRate` are the defaults all three use.
     *   **`scan.Event` / `scan.EventKind`**: Typed events emitted on the channel: `EventResult` (a `scan.Result`: subdomain, records, simulated flag, takeover hint and internal address scope), `EventProgress`, `EventNotice`, `EventError`, and `EventDone`. An `EventNotice` carries a `scan.NoticeKind` (`NoticeWildcard`, `NoticeCap`, `NoticeCeiling`, `NoticeSkip`, `NoticeRate`) so consumers can style or filter notices without parsing the message. `EventDone` carries a `scan.Stats` snapshot with per-outcome counters (found, nxdomain, timeout, refused, other, wildcard-filtered).
     *   **Preflight and wildcard check**: Before any candidate is dispatched, `scan.Run` resolves the apex (with retries) and runs `Lookup.FingerprintWildcard`; see the Data Flow section.
@@ -301,14 +302,14 @@ Each subsystem below is small and documented in its source; this section says wh
 
 | Subsystem | Where | Summary |
 | --- | --- | --- |
-| Run-quality verdict | `internal/scan/verdict.go`, `internal/report`, `main_summary.go` | Grades each finished scan, and the run (the worst target), as `complete`, `degraded` or `unreliable` with a reason (5.1). |
+| Run-quality verdict | `internal/scan/verdict.go`, `internal/report`, `internal/cli/summary.go` | Grades each finished scan, and the run (the worst target), as `complete`, `degraded` or `unreliable` with a reason (5.1). |
 | Scope (`-exclude`) | `internal/scan/scope.go` | Out-of-scope names are never queried or expanded (5.2). |
-| Resume state (`-resume`, `-state`) | `main_resume.go` | An interrupted run saves its state; `-resume` replays it and continues (5.3). |
-| Permutation pass (`-permute`, `-seeds`) | `internal/permute`, `main_permute.go` | A second scan over variations of the names found (5.4). |
-| CT seeding (`-ct`) | `internal/ct`, `main_ct.go` | Adds names from Certificate Transparency logs as candidates (5.5). |
-| Lab mode (`-simulate-zone`) | `internal/labzone`, `internal/dnsserver`, `main_lab.go` | Serves a scenario file on a loopback DNS server (5.6). |
+| Resume state (`-resume`, `-state`) | `internal/cli/resume.go` | An interrupted run saves its state; `-resume` replays it and continues (5.3). |
+| Permutation pass (`-permute`, `-seeds`) | `internal/permute`, `internal/cli/permute.go` | A second scan over variations of the names found (5.4). |
+| CT seeding (`-ct`) | `internal/ct`, `internal/cli/ct.go` | Adds names from Certificate Transparency logs as candidates (5.5). |
+| Lab mode (`-simulate-zone`) | `internal/labzone`, `internal/dnsserver`, `internal/cli/lab.go` | Serves a scenario file on a loopback DNS server (5.6). |
 | SARIF (`-sarif`) | `internal/output/sarif.go`, `internal/dns/takeover.go` | Writes takeover candidates as SARIF 2.1.0 (5.7). |
-| Config and environment defaults | `main_config.go` | Flag > environment > config file > built-in default (5.8). |
+| Config and environment defaults | `internal/cli/config.go` | Flag > environment > config file > built-in default (5.8). |
 | Go API | `pkg/subenum` | The engine as a library (5.9). |
 
 ### 5.1. Run-Quality Verdict
@@ -341,7 +342,7 @@ With `-ct`, `ct.Client.Names` makes one HTTPS request per target to crt.sh (no A
 
 ### 5.8. Configuration Precedence
 
-`main_config.go` fills flag defaults from a JSON config file (`$SUBENUM_CONFIG`, else `<user config dir>/subenum/config.json`) and from `SUBENUM_*` environment variables named after the flag (`-dns-server` is `SUBENUM_DNS_SERVER`). Precedence, highest first: command-line flag > environment > config file > built-in default. Mode and action flags (`-tui`, `-version`, `-print-config`, `-dry-run`, `-resume`, `-h`) are never taken from defaults. `-print-config` prints every setting's effective value and its source. An invalid config value is a usage error, except under `-version`, `-print-config` and `-tui`, which only warn so the value can be found and fixed. The TUI pre-fills its form from the same environment and config values.
+`internal/cli/config.go` fills flag defaults from a JSON config file (`$SUBENUM_CONFIG`, else `<user config dir>/subenum/config.json`) and from `SUBENUM_*` environment variables named after the flag (`-dns-server` is `SUBENUM_DNS_SERVER`). Precedence, highest first: command-line flag > environment > config file > built-in default. Mode and action flags (`-tui`, `-version`, `-print-config`, `-dry-run`, `-resume`, `-h`) are never taken from defaults. `-print-config` prints every setting's effective value and its source. An invalid config value is a usage error, except under `-version`, `-print-config` and `-tui`, which only warn so the value can be found and fixed. The TUI pre-fills its form from the same environment and config values.
 
 ### 5.9. Go API (`pkg/subenum`)
 

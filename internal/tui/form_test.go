@@ -186,7 +186,7 @@ func TestValidateNormalizesDomain(t *testing.T) {
 }
 
 // TestFormBuildsSharedConfig covers #80: the TUI builds its scan.Config with
-// the shared scan.Options builder. main_test.go asserts the CLI produces this
+// the shared scan.Options builder. internal/cli/cli_test.go asserts the CLI produces this
 // same Config from the equivalent flags.
 func TestFormBuildsSharedConfig(t *testing.T) {
 	m := newFormModel(savedConfig{})

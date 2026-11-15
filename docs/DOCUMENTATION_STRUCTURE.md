@@ -33,7 +33,7 @@ Where each piece of subenum's documentation lives and who it is for. The files u
 | File | What it covers |
 |---|---|
 | [`CHANGELOG.md`](../CHANGELOG.md) | Changes per release (Keep a Changelog); each release's notes come from its section |
-| [`SECURITY.md`](../SECURITY.md) | Supported versions and how to report a vulnerability |
+| [`.github/SECURITY.md`](../.github/SECURITY.md) | Supported versions and how to report a vulnerability |
 | [`LICENSE`](../LICENSE) | GPL-3.0 |
 | [`CITATION.cff`](../CITATION.cff) | How to cite subenum |
 
