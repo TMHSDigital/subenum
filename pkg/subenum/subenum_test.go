@@ -477,7 +477,7 @@ func TestMaxDuration(t *testing.T) {
 // while Run still reports the warning.
 func TestNoAbortScanSucceedsDespiteFailingLookups(t *testing.T) {
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
-		if strings.HasPrefix(q.Name, "bad") {
+		if strings.HasPrefix(q.Name, "bad-") {
 			return dnstest.Refused
 		}
 		return dnstest.NXDomain
@@ -485,7 +485,7 @@ func TestNoAbortScanSucceedsDespiteFailingLookups(t *testing.T) {
 	words := make([]string, 0, 300)
 	for i := range 300 {
 		if i%2 == 0 {
-			words = append(words, fmt.Sprintf("bad%d", i))
+			words = append(words, fmt.Sprintf("bad-%d", i))
 		} else {
 			words = append(words, fmt.Sprintf("ok%d", i))
 		}
@@ -759,7 +759,7 @@ func TestRecursiveWildcardBranchNotice(t *testing.T) {
 // slows the scan down with a NoticeRate instead of stopping it.
 func TestAutoRateNotice(t *testing.T) {
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
-		if strings.HasPrefix(q.Name, "bad") {
+		if strings.HasPrefix(q.Name, "bad-") {
 			return dnstest.Refused
 		}
 		return dnstest.NXDomain
@@ -767,7 +767,7 @@ func TestAutoRateNotice(t *testing.T) {
 	// Failures first, so the first window AutoRate judges is a bad one.
 	words := make([]string, 0, 400)
 	for i := range 300 {
-		words = append(words, fmt.Sprintf("bad%d", i))
+		words = append(words, fmt.Sprintf("bad-%d", i))
 	}
 	for i := range 100 {
 		words = append(words, fmt.Sprintf("ok%d", i))
