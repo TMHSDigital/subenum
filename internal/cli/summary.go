@@ -32,7 +32,7 @@ func buildSummary(s *session, elapsed time.Duration) output.Summary {
 	return sum
 }
 
-func targetSummary(domain, status string, res targetResult) output.TargetSummary {
+func targetSummary(domain string, status report.Status, res targetResult) output.TargetSummary {
 	t := report.Target(domain, status, res.err, res.done, res.final, scan.FlagName)
 	ct := sourceByName(res.sources, "ct")
 	t.CTNames, t.CTError = len(ct.names), ct.err
@@ -43,13 +43,13 @@ func targetSummary(domain, status string, res targetResult) output.TargetSummary
 	t.AXFRFound = res.foundBy[sourceAXFR]
 	t.ZoneDenial = string(res.axfr.denial)
 	t.QueriesSent += res.axfr.queries // the NS and address lookups and the transfers (#85)
-	if p := res.permutation; p != nil && res.done && status != "" && status != "skipped" {
+	if p := res.permutation; p != nil && res.done && status != report.StatusNotRun && status != report.StatusSkipped {
 		t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}
 		if p.pass.done {
 			// The pass is part of the target's scan: its queries count, and a
 			// worse verdict than the main pass's becomes the target's (#298).
 			final := p.pass.final
-			verdict, reason := final.Stats.Verdict(status == "interrupted")
+			verdict, reason := final.Stats.Verdict(status == report.StatusInterrupted)
 			t.Permutation.Verdict = verdict
 			t.Permutation.Processed, t.Permutation.QueriesSent = final.Processed, final.Stats.QueriesSent
 			t.QueriesSent += final.Stats.QueriesSent

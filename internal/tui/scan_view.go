@@ -415,9 +415,9 @@ func (m scanViewModel) View() string {
 // output file's summary carries, colored by rank and cut to the terminal
 // width so it stays one line (#312).
 func (m scanViewModel) verdictLine() string {
-	status := "ok"
+	status := report.StatusOK
 	if m.aborted {
-		status = "interrupted"
+		status = report.StatusInterrupted
 	}
 	stats := m.stats
 	if m.main != nil {

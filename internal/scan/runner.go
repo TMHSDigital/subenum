@@ -110,6 +110,12 @@ func (c Config) lookup(logf dns.Logf) dns.Lookup {
 	return dns.Lookup{Resolver: c.Resolver, Timeout: c.Timeout, Attempts: c.Attempts, Types: c.Types, Logf: logf}
 }
 
+// live reports whether lookups go to real resolvers: neither simulated nor
+// replaced by the test hook (#331).
+func (c Config) live() bool {
+	return !c.Simulate && c.resolveHook == nil
+}
+
 // resolve is the one lookup of a name that the scan workers, Verify and the
 // wildcard near-miss probes share (#163): the test hook when set, else the
 // simulation, else the trusted resolver with retries. The resolver pool is not
@@ -140,32 +146,37 @@ func settle(ctx context.Context, o dns.Outcome) dns.Outcome {
 }
 
 // Stats is a snapshot of per-outcome query counters. Populated on EventDone.
+//
+// The CLI's -resume state file stores Stats as JSON, so the tags are a file
+// format: they spell the field names as they were when the format was fixed,
+// and renaming a field must keep its tag (or bump the state file's version)
+// (#331).
 type Stats struct {
-	Found            int64
-	NXDomain         int64
-	Timeout          int64
-	Refused          int64
-	Other            int64
-	WildcardFiltered int64
+	Found            int64 `json:"Found"`
+	NXDomain         int64 `json:"NXDomain"`
+	Timeout          int64 `json:"Timeout"`
+	Refused          int64 `json:"Refused"`
+	Other            int64 `json:"Other"`
+	WildcardFiltered int64 `json:"WildcardFiltered"`
 
 	// Run facts for the quality report (#70); not part of Sum.
-	QueriesSent int64 // DNS queries dialed, retries included (0 when simulated)
-	Skipped     int64 // candidates not tested because -max-queries or -max-duration was reached
-	Excluded    int64 // candidates not tested because -exclude put them out of scope
-	PoolHits    int64 // names a pool resolver said exist (-r)
-	Confirmed   int64 // pool hits the trusted resolver confirmed
-	Unconfirmed int64 // pool hits the trusted resolver said do not exist
-	Takeover    int64 // results flagged as subdomain-takeover candidates
-	Internal    int64 // results with a non-public address (Result.Internal, #218)
+	QueriesSent int64 `json:"QueriesSent"` // DNS queries dialed, retries included (0 when simulated)
+	Skipped     int64 `json:"Skipped"`     // candidates not tested because -max-queries or -max-duration was reached
+	Excluded    int64 `json:"Excluded"`    // candidates not tested because -exclude put them out of scope
+	PoolHits    int64 `json:"PoolHits"`    // names a pool resolver said exist (-r)
+	Confirmed   int64 `json:"Confirmed"`   // pool hits the trusted resolver confirmed
+	Unconfirmed int64 `json:"Unconfirmed"` // pool hits the trusted resolver said do not exist
+	Takeover    int64 `json:"Takeover"`    // results flagged as subdomain-takeover candidates
+	Internal    int64 `json:"Internal"`    // results with a non-public address (Result.Internal, #218)
 	// RootDone is the resume point: every wordlist entry before this index
 	// has been fully looked up (#73). Entries at or after it may also be
 	// done; resuming repeats at most one chunk (maxChunk jobs) per worker,
 	// since workers report their jobs a chunk at a time (#184).
-	RootDone    int64
-	Aborted     bool         // the reliability guard cancelled the scan
-	Expired     bool         // Deadline (-max-duration) stopped admission; Skipped counts what it left
-	Wildcard    bool         // the root domain is a wildcard (scanned under -force)
-	Fingerprint []dns.Record // final wildcard fingerprint, empty when none
+	RootDone    int64        `json:"RootDone"`
+	Aborted     bool         `json:"Aborted"`     // the reliability guard cancelled the scan
+	Expired     bool         `json:"Expired"`     // Deadline (-max-duration) stopped admission; Skipped counts what it left
+	Wildcard    bool         `json:"Wildcard"`    // the root domain is a wildcard (scanned under -force)
+	Fingerprint []dns.Record `json:"Fingerprint"` // final wildcard fingerprint, empty when none
 
 	// Inconclusive lookups (#217). Retried counts the names the
 	// RetryInconclusive pass looked up again, and Recovered the ones that
@@ -174,15 +185,15 @@ type Stats struct {
 	// names tested. Inconclusive lists, sorted, the names whose lookup is
 	// still a timeout, refusal or failure at the end of the scan; it is nil
 	// without Config.ListInconclusive (#300).
-	Retried      int64
-	Recovered    int64
-	Inconclusive []string
+	Retried      int64    `json:"Retried"`
+	Recovered    int64    `json:"Recovered"`
+	Inconclusive []string `json:"Inconclusive"`
 
 	// AutoRate (#220): how many times the rate was halved, and the rate in
 	// queries per second when the scan ended (0 = unlimited). Both are 0
 	// without AutoRate.
-	RateBackoffs int64
-	FinalRate    int64
+	RateBackoffs int64 `json:"RateBackoffs"`
+	FinalRate    int64 `json:"FinalRate"`
 }
 
 // Sum returns the number of classified queries (found + negatives + failures +
@@ -429,7 +440,7 @@ const nearMissProbes = 2
 // cost no extra queries.
 func isWildcardAnswer(ctx context.Context, cfg Config, fp *fingerprint, name string, records []dns.Record) bool {
 	covered, overlaps := fp.match(records)
-	if covered || !overlaps || cfg.Simulate || cfg.resolveHook != nil {
+	if covered || !overlaps || !cfg.live() {
 		return covered
 	}
 	parent := name
@@ -628,7 +639,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	defer dns.CloseIdleConnections(cfg.Resolver)
 	defer cfg.Pool.CloseIdleConnections()
 	var jobLimiter *dns.RateLimiter
-	if cfg.Simulate || cfg.resolveHook != nil {
+	if !cfg.live() {
 		jobLimiter = limiter
 	} else {
 		ctx = dns.WithLimiter(ctx, limiter)
@@ -756,7 +767,7 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 			maxDepth, len(cfg.Entries), ceiling, consider)}
 	}
 
-	if !cfg.Simulate && cfg.resolveHook == nil {
+	if cfg.live() {
 		// Retried like any other lookup, so one dropped packet cannot abort a
 		// scan that -attempts would otherwise complete (#57).
 		_, outcome := cfg.resolve(ctx, cfg.Domain, nil)
@@ -777,7 +788,10 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 
 	fp = newFingerprint(nil)
 
-	// Wildcard detection (skip in simulation mode).
+	// Wildcard detection (skip in simulation mode). It checks Simulate alone,
+	// not live(): the probes go through the trusted resolver, which the test
+	// hook does not replace, so a hooked scan without Simulate still probes
+	// Resolver (tests point it at a local server, or set Simulate too).
 	if !cfg.Simulate {
 		isWildcard, probed, err := cfg.lookup(nil).FingerprintWildcard(ctx, cfg.Domain)
 		if ctx.Err() != nil {
@@ -922,7 +936,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 
 	var outcome dns.Outcome
 	var records []dns.Record
-	if cfg.Pool != nil && !cfg.Simulate && cfg.resolveHook == nil {
+	if cfg.Pool != nil && cfg.live() {
 		records, outcome = resolveViaPool(ctx, cfg, j.domain, st)
 	} else {
 		records, outcome = cfg.resolve(ctx, j.domain, cfg.logf())
@@ -972,7 +986,7 @@ func (s *scanState) expandable(ctx context.Context, parent string) bool {
 	cfg := s.cfg
 	// The wildcard probe would query inside the branch, so an out-of-scope
 	// subtree is not probed; the dispatcher counts its children as excluded.
-	if cfg.Simulate || cfg.resolveHook != nil || cfg.scope.subtreeExcluded(parent) {
+	if !cfg.live() || cfg.scope.subtreeExcluded(parent) {
 		return true
 	}
 	isWild, err := s.wc.isWildcard(ctx, cfg, parent)
@@ -1039,13 +1053,15 @@ func (s *scanState) report(ctx context.Context, name string, records []dns.Recor
 	// with the trusted resolver, unless it is out of scope (#316). Simulated
 	// records are never checked.
 	takeover := ""
-	if !cfg.Simulate && cfg.resolveHook == nil {
+	if cfg.live() {
 		takeover = cfg.takeover.Hint(ctx, cfg.lookup(nil), records)
 	}
 	if takeover != "" {
 		s.stats.takeover.Add(1)
 	}
 	// Simulated addresses are invented (in 10.0.0.0/8), so they say nothing.
+	// Simulate alone, not live(): the check sends nothing, so a hooked scan's
+	// records are checked like live ones.
 	internal := ""
 	if !cfg.Simulate {
 		internal = dns.InternalScope(records)

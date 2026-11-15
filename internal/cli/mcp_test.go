@@ -526,9 +526,9 @@ func TestMCPVerdictMatchesReport(t *testing.T) {
 		c := tc.c
 		pub := subenum.Stats{Found: c.found, NXDomain: c.nx, Timeout: c.timeout, Skipped: c.skipped, Expired: c.expired, Aborted: c.aborted, Wildcard: c.wildcard}
 		eng := scan.Stats{Found: c.found, NXDomain: c.nx, Timeout: c.timeout, Skipped: c.skipped, Expired: c.expired, Aborted: c.aborted, Wildcard: c.wildcard}
-		status := "ok"
+		status := report.StatusOK
 		if tc.interrupted {
-			status = "interrupted"
+			status = report.StatusInterrupted
 		}
 		rep := report.Target("x.example", status, "", true, scan.Event{Kind: scan.EventDone, Stats: eng}, scan.FieldName)
 		want := tc.want

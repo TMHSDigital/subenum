@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
@@ -436,7 +437,7 @@ func saveResumeState(s *session) bool {
 		saved := prev.target(domain)
 		// A target finished before the interrupt was not scanned again, so
 		// its saved state, sources and zone transfer included, stands (#315).
-		if saved != nil && (s.status[i] == "" || s.status[i] == "skipped" || saved.Done) {
+		if saved != nil && (s.status[i] == report.StatusNotRun || s.status[i] == report.StatusSkipped || saved.Done) {
 			st.Targets = append(st.Targets, *saved)
 			continue
 		}
@@ -469,7 +470,7 @@ func saveResumeState(s *session) bool {
 		}
 		// A target is finished only if its scan (and any -permute pass)
 		// completed before the interrupt, with nothing left by -max-duration.
-		t.Done = s.status[i] == "ok" && res.done && !res.unfinished() &&
+		t.Done = s.status[i] == report.StatusOK && res.done && !res.unfinished() &&
 			(res.permutation == nil || res.permutation.candidates == 0 || (res.permutation.pass.done && !res.permutation.pass.unfinished()))
 		st.Targets = append(st.Targets, t)
 	}
@@ -487,13 +488,5 @@ func writeResumeState(path string, st resumeState) error {
 	if err != nil {
 		return err
 	}
-	f, err := output.CreateFile(path)
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(append(data, '\n'))
-	if cerr := f.Close(werr == nil); werr == nil {
-		werr = cerr
-	}
-	return werr
+	return output.WriteFile(path, append(data, '\n'))
 }

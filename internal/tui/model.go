@@ -532,12 +532,12 @@ func (m *Model) summary(final scan.Event) output.Summary {
 		Resolver:  m.vals.DNSServer,
 		RateLimit: m.vals.Rate,
 	})
-	status := "ok"
+	status := report.StatusOK
 	switch {
 	case m.scanView.failed():
-		status = "failed"
+		status = report.StatusFailed
 	case m.scanView.aborted:
-		status = "interrupted"
+		status = report.StatusInterrupted
 	}
 	t := report.Target(m.vals.Domain, status, "", true, final, settingLabel)
 	for _, l := range m.lookups {

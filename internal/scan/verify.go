@@ -32,7 +32,7 @@ func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Out
 	// simulated and hooked lookups take one slot per name, as in Run.
 	limiter := dns.NewRateLimiter(cfg.Rate)
 	var nameLimiter *dns.RateLimiter
-	if cfg.Simulate || cfg.resolveHook != nil {
+	if !cfg.live() {
 		nameLimiter = limiter
 	} else {
 		ctx = dns.WithLimiter(ctx, limiter)

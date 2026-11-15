@@ -21,6 +21,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
@@ -655,7 +656,7 @@ func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 	saveResumeState(&session{
 		f: f, out: out, resume: prev,
 		targets:      []string{"a.example", "b.example", "c.example"},
-		status:       []string{"interrupted", "", "ok"},
+		status:       []report.Status{report.StatusInterrupted, report.StatusNotRun, report.StatusOK},
 		entryDigests: []string{"d1", "", "d3"},
 		results:      []targetResult{{}, {}, {done: true}},
 		runs:         []resultLog{{names: []string{"x.a.example"}}, {}, {}},
@@ -689,7 +690,7 @@ func TestSaveResumeStateKeepsFailedSources(t *testing.T) {
 	saveResumeState(&session{
 		f: f, out: output.New(nil, false, output.FormatText),
 		targets:      []string{"a.example"},
-		status:       []string{"interrupted"},
+		status:       []report.Status{report.StatusInterrupted},
 		entryDigests: []string{"d1"},
 		results: []targetResult{{done: true, sources: []targetSource{
 			{source: "ct", err: "crt.sh: 502 Bad Gateway"},
@@ -741,7 +742,7 @@ func TestSaveResumeStateRetriesLookupsCutShort(t *testing.T) {
 		saveResumeState(&session{
 			f: f, out: output.New(nil, false, output.FormatText), resume: tc.prev,
 			targets:      []string{"a.example"},
-			status:       []string{"interrupted"},
+			status:       []report.Status{report.StatusInterrupted},
 			entryDigests: []string{"d1"},
 			results:      []targetResult{tc.res},
 			runs:         []resultLog{{}},
@@ -838,7 +839,7 @@ func TestSaveResumeStateRecordsFinishedPermutePass(t *testing.T) {
 	saveResumeState(&session{
 		f: f, out: output.New(nil, false, output.FormatText),
 		targets:      []string{"a.example"},
-		status:       []string{"interrupted"},
+		status:       []report.Status{report.StatusInterrupted},
 		entryDigests: []string{"d1"},
 		results: []targetResult{{
 			done:        true,
@@ -915,6 +916,115 @@ func TestPermutationCandidatesRespectNameLength(t *testing.T) {
 		if n := len(c) + 1 + len(target); n > 253 {
 			t.Errorf("candidate %s is %d characters long", c, n)
 		}
+	}
+}
+
+// TestResumeStateKeys pins the state file's JSON keys (#331): renaming a
+// field of resumeState, or of a type it stores such as scan.Stats, changes
+// the format a newer binary reads back. A change here needs a
+// resumeStateVersion bump, or a tag that keeps the old key.
+func TestResumeStateKeys(t *testing.T) {
+	var stats scan.Stats
+	sv := reflect.ValueOf(&stats).Elem()
+	for i := range sv.NumField() {
+		switch v := sv.Field(i); v.Kind() {
+		case reflect.Int64:
+			v.SetInt(1)
+		case reflect.Bool:
+			v.SetBool(true)
+		case reflect.Slice:
+			if v.Type().Elem().Kind() == reflect.String {
+				v.Set(reflect.ValueOf([]string{"a.example.com"}))
+			} else {
+				v.Set(reflect.ValueOf([]dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+			}
+		default:
+			t.Fatalf("scan.Stats.%s: unhandled kind %s", sv.Type().Field(i).Name, v.Kind())
+		}
+	}
+	st := resumeState{
+		Version:  resumeStateVersion,
+		Args:     []string{"example.com"},
+		Inputs:   map[string]string{"words.txt": "00"},
+		Settings: map[string]string{"t": "100"},
+		Targets: []resumeTarget{{
+			Domain: "example.com", Done: true, RootDone: 1, Stats: stats, Processed: 1, Total: 1,
+			Results: []output.Result{{
+				Result: scan.Result{Subdomain: "a.example.com", Records: []dns.Record{{Type: "A", Value: "192.0.2.1"}},
+					Simulated: true, Takeover: "dangling", Internal: "private"},
+				Change: "changed", PreviousRecords: []dns.Record{{Type: "A", Value: "192.0.2.2"}},
+				Permutation: true, Sources: []string{"wordlist"},
+			}},
+			Entries:     "00",
+			Permute:     &resumePass{RootDone: 1, Stats: stats, Processed: 1, Total: 1, Found: 1},
+			CT:          []string{"a"},
+			CTFetched:   true,
+			Sources:     map[string][]string{"crtsh": {"a"}},
+			AXFR:        []string{"a"},
+			AXFRServers: []string{"ns"},
+			AXFRDone:    true,
+			Denial:      "nsec",
+		}},
+	}
+	data, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	// Keys of the maps that hold user data (file names, settings, sources)
+	// are values, not format; only their position is recorded.
+	dataMaps := map[string]bool{"inputs": true, "settings": true, "targets.sources": true}
+	var keys []string
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if dataMaps[path] {
+				keys = append(keys, path+".*")
+				return
+			}
+			for k, e := range v {
+				p := k
+				if path != "" {
+					p = path + "." + k
+				}
+				keys = append(keys, p)
+				walk(p, e)
+			}
+		case []any:
+			for _, e := range v {
+				walk(path, e)
+			}
+		}
+	}
+	walk("", doc)
+	slices.Sort(keys)
+	keys = slices.Compact(keys)
+	want := strings.Fields(`args inputs inputs.* settings settings.* version
+		targets targets.axfr targets.axfr_done targets.axfr_servers targets.ct targets.ct_fetched
+		targets.denial targets.domain targets.done targets.entries targets.processed targets.root_done
+		targets.sources targets.sources.* targets.total targets.stats
+		targets.permute targets.permute.found targets.permute.processed targets.permute.root_done
+		targets.permute.total targets.permute.stats
+		targets.results targets.results.change targets.results.internal_address targets.results.permutation
+		targets.results.previous_records targets.results.previous_records.type targets.results.previous_records.value
+		targets.results.records targets.results.records.type targets.results.records.value
+		targets.results.simulated targets.results.sources targets.results.subdomain targets.results.takeover_candidate`)
+	// scan.Stats is stored twice, for the target and for its -permute pass.
+	statsKeys := strings.Fields(`Aborted Confirmed Excluded Expired FinalRate Fingerprint Fingerprint.type
+		Fingerprint.value Found Inconclusive Internal NXDomain Other PoolHits QueriesSent RateBackoffs
+		Recovered Refused Retried RootDone Skipped Takeover Timeout Unconfirmed Wildcard WildcardFiltered`)
+	for _, prefix := range []string{"targets.stats.", "targets.permute.stats."} {
+		for _, k := range statsKeys {
+			want = append(want, prefix+k)
+		}
+	}
+	slices.Sort(want)
+	if !slices.Equal(keys, want) {
+		t.Errorf("resume state keys changed; bump resumeStateVersion or keep the old keys.\ngot:  %q\nwant: %q", keys, want)
 	}
 }
 

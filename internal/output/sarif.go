@@ -169,13 +169,5 @@ func WriteSARIF(path, version string, results []Result) error {
 	if err != nil {
 		return err
 	}
-	f, err := CreateFile(path)
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(append(data, '\n'))
-	if cerr := f.Close(werr == nil); werr == nil {
-		werr = cerr
-	}
-	return werr
+	return WriteFile(path, append(data, '\n'))
 }

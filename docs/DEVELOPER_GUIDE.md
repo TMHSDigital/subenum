@@ -257,7 +257,7 @@ func TestGuideResolveOutcomes(t *testing.T) {
 }
 ```
 
-Scan-engine tests in `internal/scan` can avoid DNS entirely by setting the unexported `resolveHook` field of `scan.Config`, or by running with `Simulate` set; see `runner_test.go`.
+Scan-engine tests in `internal/scan` can avoid DNS entirely by setting the unexported `resolveHook` field of `scan.Config`, or by running with `Simulate` set; see `runner_test.go`. The hook replaces candidate lookups only: wildcard probes still go to `Resolver`, so a hooked test also sets `Simulate` or points the resolver at a local server (`Config.live` reports whether a scan sends real lookups).
 
 ## Debugging Tips
 

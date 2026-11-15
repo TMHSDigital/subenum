@@ -19,6 +19,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
+	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/tui"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -56,7 +57,7 @@ type session struct {
 	restored      map[string]bool // names re-emitted from a -resume state
 	refound       int             // restored names a resumed pass found again (#156)
 
-	status        []string
+	status        []report.Status
 	results       []targetResult
 	runs          []resultLog // results per target, for -resume state
 	entryDigests  []string    // per target, for -resume state
@@ -577,7 +578,7 @@ func (s *session) emitPermutation(ev scan.Event) { s.emitResult(ev, true) }
 // array and CSV has a single header.
 func (s *session) scanAll(ctx context.Context) {
 	n := len(s.targets)
-	s.status = make([]string, n)
+	s.status = make([]report.Status, n)
 	s.results = make([]targetResult, n)
 	s.runs = make([]resultLog, n)
 	s.entryDigests = make([]string, n)
@@ -595,11 +596,7 @@ func (s *session) scanAll(ctx context.Context) {
 	if n > 1 {
 		s.out.Info("Targets:")
 		for i, target := range s.targets {
-			st := s.status[i]
-			if st == "" {
-				st = "not run"
-			}
-			s.out.Info("  %-8s %s", st, target)
+			s.out.Info("  %-8s %s", s.status[i].Label(), target)
 		}
 	}
 }
@@ -628,7 +625,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	if len(entries) == 0 {
 		out.Error("no valid wordlist entries for %s", target)
 		s.anyFailed = true
-		s.status[i] = "failed"
+		s.status[i] = report.StatusFailed
 		s.results[i] = targetResult{failed: true, err: "no valid wordlist entries"}
 		s.failedTargets++
 		return true
@@ -677,7 +674,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			s.results[i] = res
 			s.runs[i] = s.targetResults
 			s.anyDone = true
-			s.status[i] = "ok"
+			s.status[i] = report.StatusOK
 			return true
 		}
 		pass.resumeFrom, pass.resumeNames = saved.RootDone, s.targetResults.mainPassNames()
@@ -752,18 +749,18 @@ func (s *session) recordTarget(i int, res targetResult) (next bool) {
 	s.runs[i] = s.targetResults
 	s.anyDone = s.anyDone || res.done
 	s.anyFailed = s.anyFailed || res.failed
-	s.status[i] = "ok"
+	s.status[i] = report.StatusOK
 	switch {
 	case res.failed:
-		s.status[i] = "failed"
+		s.status[i] = report.StatusFailed
 		s.failedTargets++
 	case s.signalCode.Load() != 0:
-		s.status[i] = "interrupted"
+		s.status[i] = report.StatusInterrupted
 	}
 	if res.resolverAbort && i < len(s.targets)-1 {
 		s.out.Error("resolver %s looks overloaded; skipping the %d remaining targets (use -no-abort to continue)", s.f.dnsServer, len(s.targets)-1-i)
 		for j := i + 1; j < len(s.targets); j++ {
-			s.status[j] = "skipped"
+			s.status[j] = report.StatusSkipped
 			s.failedTargets++
 		}
 		return false

@@ -90,6 +90,28 @@ func TestFileDiscardKeepsTarget(t *testing.T) {
 	noTempFiles(t, dir)
 }
 
+// TestWriteFile covers the helper the side files share (#331): it replaces
+// an existing file without leaving a temporary file, and fails cleanly when
+// the file cannot be created.
+func TestWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(path, []byte("new\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "new\n" {
+		t.Fatalf("file after WriteFile = %q", got)
+	}
+	noTempFiles(t, dir)
+	if err := WriteFile(filepath.Join(dir, "missing", "state.json"), []byte("x")); err == nil {
+		t.Fatal("WriteFile in a missing directory succeeded")
+	}
+	noTempFiles(t, dir)
+}
+
 func TestCreateFileMissingDirectory(t *testing.T) {
 	if _, err := CreateFile(filepath.Join(t.TempDir(), "missing", "results.txt")); err == nil {
 		t.Fatal("CreateFile in a missing directory succeeded")

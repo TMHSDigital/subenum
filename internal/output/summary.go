@@ -175,36 +175,19 @@ func (w *Writer) Summary(s Summary) {
 // WriteNamesFile writes names to path, one per line, atomically
 // (-inconclusive, #217).
 func WriteNamesFile(path string, names []string) error {
-	f, err := CreateFile(path)
-	if err != nil {
-		return err
-	}
 	var b strings.Builder
 	for _, n := range names {
 		b.WriteString(n)
 		b.WriteByte('\n')
 	}
-	_, werr := f.Write([]byte(b.String()))
-	if cerr := f.Close(werr == nil); werr == nil {
-		werr = cerr
-	}
-	return werr
+	return WriteFile(path, []byte(b.String()))
 }
 
 // WriteSummaryFile writes s as indented JSON to path, atomically.
 func WriteSummaryFile(path string, s Summary) error {
-	f, err := CreateFile(path)
-	if err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
-		_ = f.Close(false)
 		return err
 	}
-	_, werr := f.Write(append(data, '\n'))
-	if cerr := f.Close(werr == nil); werr == nil {
-		werr = cerr
-	}
-	return werr
+	return WriteFile(path, append(data, '\n'))
 }

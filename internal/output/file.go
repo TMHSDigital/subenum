@@ -57,6 +57,20 @@ func CreateFile(path string) (*File, error) {
 	return &File{Writer: bufio.NewWriter(f), path: path, f: f, tmp: true}, nil
 }
 
+// WriteFile writes data to path the way CreateFile does: atomically, so a
+// failed write leaves an existing file unchanged (#331).
+func WriteFile(path string, data []byte) error {
+	f, err := CreateFile(path)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(werr == nil); werr == nil {
+		werr = cerr
+	}
+	return werr
+}
+
 // createTemp is os.CreateTemp with mode 0666, so the umask applies the way
 // it does to os.Create; os.CreateTemp always creates 0600.
 func createTemp(dir, prefix string) (*os.File, error) {

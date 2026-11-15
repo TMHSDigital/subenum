@@ -88,7 +88,10 @@ func saveConfig(sc savedConfig) error {
 		return err
 	}
 	// Write a temp file and rename it into place, so a second instance
-	// reading at the same moment never sees half-written JSON (#80).
+	// reading at the same moment never sees half-written JSON (#80). Not
+	// output.WriteFile on purpose: os.CreateTemp makes the file 0600 whatever
+	// the umask, since the saved form can name the user's files and resolvers
+	// (#331).
 	tmp, err := os.CreateTemp(filepath.Dir(p), ".last-*.json")
 	if err != nil {
 		return err

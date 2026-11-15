@@ -45,25 +45,53 @@ func New(r Run) output.Summary {
 	return s
 }
 
-// Target summarizes one domain's scan. status is "ok", "failed",
-// "interrupted", "skipped" or "" (never run); done reports whether the scan
+// Status is how a target's scan ended (#331). The zero value is a target
+// that never ran.
+type Status string
+
+// The target statuses.
+const (
+	StatusNotRun      Status = ""
+	StatusOK          Status = "ok"
+	StatusFailed      Status = "failed"
+	StatusInterrupted Status = "interrupted"
+	// StatusSkipped is a target left out after an earlier target's
+	// reliability abort.
+	StatusSkipped Status = "skipped"
+)
+
+// Label is the status as the terminal's Targets table shows it.
+func (s Status) Label() string {
+	if s == StatusNotRun {
+		return "not run"
+	}
+	return string(s)
+}
+
+// Value is the status as the report's status field writes it
+// (output.TargetSummary.Status).
+func (s Status) Value() string {
+	if s == StatusNotRun {
+		return "not_run"
+	}
+	return string(s)
+}
+
+// Target summarizes one domain's scan. done reports whether the scan
 // finished, with final as its last event. name renders the settings the
 // verdict reason refers to, in the caller's terms (#100).
-func Target(domain, status, errMsg string, done bool, final scan.Event, name func(scan.Setting) string) output.TargetSummary {
+func Target(domain string, status Status, errMsg string, done bool, final scan.Event, name func(scan.Setting) string) output.TargetSummary {
 	t := target(domain, status, errMsg, done, final)
 	t.Reason = scan.Render(t.Reason, name)
 	return t
 }
 
-func target(domain, status, errMsg string, done bool, final scan.Event) output.TargetSummary {
-	t := output.TargetSummary{Domain: domain, Status: status, Error: errMsg}
+func target(domain string, status Status, errMsg string, done bool, final scan.Event) output.TargetSummary {
+	t := output.TargetSummary{Domain: domain, Status: status.Value(), Error: errMsg}
 	switch {
-	case status == "" || status == "skipped":
-		if t.Status == "" {
-			t.Status = "not_run"
-		}
+	case status == StatusNotRun || status == StatusSkipped:
 		t.Verdict, t.Reason = scan.VerdictUnreliable, "not scanned"
-		if status == "skipped" {
+		if status == StatusSkipped {
 			t.Reason = "not scanned: an earlier target's resolver looked overloaded"
 		}
 		return t
@@ -103,7 +131,7 @@ func target(domain, status, errMsg string, done bool, final scan.Event) output.T
 	if st.Wildcard {
 		t.Fingerprint = st.Fingerprint
 	}
-	t.Verdict, t.Reason = st.Verdict(status == "interrupted")
+	t.Verdict, t.Reason = st.Verdict(status == StatusInterrupted)
 	if st.Wildcard && t.Verdict == scan.VerdictComplete {
 		t.Reason += fmt.Sprintf("; wildcard zone, %d answers filtered by fingerprint", st.WildcardFiltered)
 	}

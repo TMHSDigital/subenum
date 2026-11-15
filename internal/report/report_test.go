@@ -8,6 +8,31 @@ import (
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
+// TestStatusRenderings pins how each target status is shown in the terminal
+// and written to the report (#331).
+func TestStatusRenderings(t *testing.T) {
+	for _, tc := range []struct {
+		s            Status
+		label, value string
+	}{
+		{StatusNotRun, "not run", "not_run"},
+		{StatusOK, "ok", "ok"},
+		{StatusFailed, "failed", "failed"},
+		{StatusInterrupted, "interrupted", "interrupted"},
+		{StatusSkipped, "skipped", "skipped"},
+	} {
+		if got := tc.s.Label(); got != tc.label {
+			t.Errorf("Status(%q).Label() = %q, want %q", tc.s, got, tc.label)
+		}
+		if got := tc.s.Value(); got != tc.value {
+			t.Errorf("Status(%q).Value() = %q, want %q", tc.s, got, tc.value)
+		}
+		if got := target("x.example", tc.s, "", false, scan.Event{}).Status; got != tc.value {
+			t.Errorf("target status %q: report says %q, want %q", tc.s, got, tc.value)
+		}
+	}
+}
+
 // TestTargetReportsEveryStatsField is the drift guard of #162: a field added
 // to scan.Stats that the run-quality report ignores fails here, unless it is
 // listed as deliberately unreported.

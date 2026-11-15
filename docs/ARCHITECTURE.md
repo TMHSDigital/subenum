@@ -90,12 +90,12 @@ internal/dns/takeover.go       - TakeoverProvider, TakeoverHint, HintsTakeover (
 internal/dns/scope.go          - AddressScope, InternalScope: non-public address scopes (private, loopback, cgnat, ...)
 internal/dns/simulate.go       - Simulation.Resolve (seeded synthetic DNS)
 internal/output/writer.go      - Thread-safe Writer (results to stdout, diagnostics to stderr)
-internal/output/file.go        - File: atomically replaced -o results file
+internal/output/file.go        - File: atomically replaced -o results file; WriteFile for the side files
 internal/output/summary.go     - Summary / TargetSummary, WriteSummaryFile
 internal/output/sarif.go       - WriteSARIF: takeover candidates as SARIF 2.1.0
 internal/output/eta.go         - ETA: progress estimate over a sliding window, FormatETA
 internal/output/log.go         - -log-format: text or JSON diagnostics on stderr (ParseLogFormat, SetLogFormat)
-internal/report/report.go      - New, Target, Finish: the run-quality report
+internal/report/report.go      - New, Target, Finish: the run-quality report; Status, a target's status
 internal/permute/permute.go    - Generate: permutations of found names
 internal/diff/diff.go          - Name, RecordsChanged: the comparison behind -diff-records and subenum.Diff
 internal/ct/ct.go              - Client.Names: crt.sh lookup
