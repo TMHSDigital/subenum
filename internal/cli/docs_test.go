@@ -17,28 +17,54 @@ var readmeFlagsFile = "README.md"
 // siteUnreleasedFile lists what the site tags "unreleased" (#213).
 var siteUnreleasedFile = filepath.Join("docs", "_data", "unreleased.yml")
 
-// unreleasedFlags reads the `flags:` list of the site's unreleased.yml: the
-// two-space "- name" items under that key, with no YAML dependency.
-func unreleasedFlags(data string) map[string]bool {
-	names := make(map[string]bool)
-	inFlags := false
+// unreleasedList reads one list of the site's unreleased.yml in file order:
+// the two-space "- name" items under key, with no YAML dependency.
+func unreleasedList(data, key string) []string {
+	var items []string
+	inList := false
 	for _, line := range strings.Split(strings.ReplaceAll(data, "\r\n", "\n"), "\n") {
 		switch {
 		case strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "":
 		case !strings.HasPrefix(line, " "):
-			inFlags = strings.TrimSpace(line) == "flags:"
-		case inFlags:
-			if name, ok := strings.CutPrefix(strings.TrimSpace(line), "- "); ok {
-				names[strings.TrimSpace(name)] = true
+			inList = strings.TrimSpace(line) == key+":"
+		case inList:
+			if item, ok := strings.CutPrefix(strings.TrimSpace(line), "- "); ok {
+				items = append(items, strings.TrimSpace(item))
 			}
 		}
+	}
+	return items
+}
+
+// unreleasedFlags reads the `flags:` list of the site's unreleased.yml.
+func unreleasedFlags(data string) map[string]bool {
+	names := make(map[string]bool)
+	for _, name := range unreleasedList(data, "flags") {
+		names[name] = true
 	}
 	return names
 }
 
+// unreleasedValues reads the `values:` list of the site's unreleased.yml,
+// "flag=VALUE" items for new values of a flag that is itself released (#306),
+// as the values of each flag in file order. An item without "=" is kept under
+// the empty flag name for the caller to reject.
+func unreleasedValues(data string) map[string][]string {
+	values := make(map[string][]string)
+	for _, item := range unreleasedList(data, "values") {
+		name, value, _ := strings.Cut(item, "=")
+		if value == "" {
+			name, value = "", item
+		}
+		values[name] = append(values[name], value)
+	}
+	return values
+}
+
 // flagsMarkdown renders every flag as a Markdown table, sorted by name. Flags
-// in unreleased get the site's "unreleased" tag.
-func flagsMarkdown(fs *flag.FlagSet, unreleased map[string]bool) string {
+// in unreleased get the site's "unreleased" tag, and a flag with values in
+// unreleasedVals gets a tagged note naming them after its description.
+func flagsMarkdown(fs *flag.FlagSet, unreleased map[string]bool, unreleasedVals map[string][]string) string {
 	var b strings.Builder
 	b.WriteString("<!-- Generated from subenum's flags by `make docs-flags`; do not edit. -->\n\n")
 	b.WriteString("| Flag | Default | Description |\n| :--- | :--- | :--- |\n")
@@ -65,7 +91,11 @@ func flagsMarkdown(fs *flag.FlagSet, unreleased map[string]bool) string {
 		if unreleased[fl.Name] {
 			tag = fmt.Sprintf(` {%% include unreleased.html flag=%q %%}`, fl.Name)
 		}
-		fmt.Fprintf(&b, "| `%s`%s | %s | %s |\n", code(flagCol), tag, text.Replace(def), text.Replace(usage))
+		note := ""
+		if vals := unreleasedVals[fl.Name]; len(vals) > 0 {
+			note = fmt.Sprintf(` %s: {%% include unreleased.html value=%q %%}`, strings.Join(vals, ", "), fl.Name+"="+vals[0])
+		}
+		fmt.Fprintf(&b, "| `%s`%s | %s | %s%s |\n", code(flagCol), tag, text.Replace(def), text.Replace(usage), note)
 	})
 	return b.String()
 }
@@ -84,7 +114,22 @@ func TestSiteFlagTableUpToDate(t *testing.T) {
 			t.Fatalf("%s lists -%s, which is not a CLI flag", siteUnreleasedFile, name)
 		}
 	}
-	want := flagsMarkdown(fs, unreleased)
+	unreleasedVals := unreleasedValues(string(data))
+	for name, vals := range unreleasedVals {
+		fl := fs.Lookup(name)
+		if fl == nil {
+			t.Fatalf("%s lists values %v for -%s, which is not a CLI flag (want flag=VALUE)", siteUnreleasedFile, vals, name)
+		}
+		if unreleased[name] {
+			t.Fatalf("%s lists -%s under both flags: and values:; a new flag needs only flags:", siteUnreleasedFile, name)
+		}
+		for _, v := range vals {
+			if !strings.Contains(fl.Usage, v) {
+				t.Fatalf("%s lists %s=%s, but the -%s usage text does not name %s", siteUnreleasedFile, name, v, name, v)
+			}
+		}
+	}
+	want := flagsMarkdown(fs, unreleased, unreleasedVals)
 	if os.Getenv("UPDATE_DOCS") == "1" {
 		if err := os.WriteFile(siteFlagsFile, []byte(want), 0o644); err != nil { //nolint:gosec // a docs file
 			t.Fatal(err)
@@ -110,6 +155,72 @@ func TestUnreleasedFlags(t *testing.T) {
 	}
 	if len(unreleasedFlags("flags:\naction:\n  - changed\n")) != 0 {
 		t.Fatal("an empty flags: list should tag nothing")
+	}
+}
+
+// TestUnreleasedValues reads the values: list per flag, and the flag table
+// names those values in a tagged note without tagging the flag itself (#306).
+func TestUnreleasedValues(t *testing.T) {
+	data := "flags:\r\n  - dry-run\r\nvalues:\r\n  - type=NS\r\n  - type=MX\r\n  - bare\r\nlibrary:\r\n  - Diff\r\n"
+	got := unreleasedValues(data)
+	if len(got) != 2 || strings.Join(got["type"], ",") != "NS,MX" || strings.Join(got[""], ",") != "bare" {
+		t.Fatalf("unreleasedValues = %v, want type: NS, MX and the malformed item under \"\"", got)
+	}
+	if len(unreleasedValues("flags:\n  - dry-run\nvalues:\n")) != 0 {
+		t.Fatal("an empty values: list should tag nothing")
+	}
+
+	fs := flag.NewFlagSet("t", flag.ContinueOnError)
+	fs.String("type", "A", "Record types: A, NS, MX")
+	table := flagsMarkdown(fs, nil, map[string][]string{"type": {"NS", "MX"}})
+	want := "| `-type <string>` | A | Record types: A, NS, MX NS, MX: {% include unreleased.html value=\"type=NS\" %} |\n"
+	if !strings.HasSuffix(table, want) {
+		t.Fatalf("flag table row:\n%s\nwant suffix:\n%s", table, want)
+	}
+	if plain := flagsMarkdown(fs, nil, nil); strings.Contains(plain, "unreleased") {
+		t.Fatalf("no unreleased values, but the table has a tag:\n%s", plain)
+	}
+}
+
+// TestSiteUnreleasedValueTags fails when a page tags a flag value that
+// unreleased.yml does not list, which the site would silently leave untagged
+// (#306). TestSiteFlagTableUpToDate checks the list itself against the CLI.
+// An empty list is the state after a release, when leftover tags render
+// nothing, as leftover flag tags do.
+func TestSiteUnreleasedValueTags(t *testing.T) {
+	data, err := os.ReadFile(siteUnreleasedFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := make(map[string]bool)
+	for _, item := range unreleasedList(string(data), "values") {
+		listed[item] = true
+	}
+	if len(listed) == 0 {
+		return
+	}
+	pages, err := filepath.Glob(filepath.Join("docs", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const tag = `include unreleased.html value="`
+	for _, page := range pages {
+		contents, err := os.ReadFile(page) //nolint:gosec // a docs file
+		if err != nil {
+			t.Fatal(err)
+		}
+		rest := string(contents)
+		for {
+			_, after, ok := strings.Cut(rest, tag)
+			if !ok {
+				break
+			}
+			value, tail, _ := strings.Cut(after, `"`)
+			rest = tail
+			if !listed[value] {
+				t.Errorf("%s tags value %q, which %s does not list", page, value, siteUnreleasedFile)
+			}
+		}
 	}
 }
 

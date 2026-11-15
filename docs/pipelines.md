@@ -60,7 +60,8 @@ jq -r 'select(.type != "summary") | .subdomain' results.jsonl | httpx -silent
 ## Takeover candidates first
 
 With CNAME lookups, subenum marks names whose alias target does not resolve or
-points at a takeover-prone service; with NS lookups, names delegated to a name
+points at a takeover-prone service; with NS lookups
+(`-type NS`{% include unreleased.html value="type=NS" %}), names delegated to a name
 server that does not exist (`dangling-ns`). Send those to a closer look before the
 rest:
 

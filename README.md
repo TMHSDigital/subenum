@@ -256,6 +256,8 @@ make help           # list all targets
 
 ### CLI flags
 
+This table describes `main`, which can be ahead of the latest release: a release binary rejects a flag or value added since. The website's [CLI reference](https://tmhsdigital.github.io/subenum/cli/) tags what is not released yet.
+
 | Flag | Default | Description |
 | :--- | :---: | :--- |
 | `-w <file>` | bundled top-5000 | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin. Repeat it to combine lists (`-w general.txt -w target.txt`); entries found in more than one are scanned once. Omit it to use the built-in list (see [Choosing a wordlist](#choosing-a-wordlist)) |

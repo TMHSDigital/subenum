@@ -34,7 +34,7 @@ for _, r := range results {
 }
 ```
 
-`Takeover` is a lead to check by hand: `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, or `dangling-ns` for a delegation to a name server that does not resolve. `Internal`{% include unreleased.html library="Internal" %} names the non-public scope (`private`, `loopback`, `link-local`, `cgnat`, `unspecified`) of an address a public name answers with, and is empty when every address is public.
+`Takeover` is a lead to check by hand: `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, or `dangling-ns`{% include unreleased.html value="type=NS" %} for a delegation to a name server that does not resolve. `Internal`{% include unreleased.html library="Internal" %} names the non-public scope (`private`, `loopback`, `link-local`, `cgnat`, `unspecified`) of an address a public name answers with, and is empty when every address is public.
 
 Every zero value in `Config` takes the same default as the CLI, so `Config{Domain: "example.com"}` is a complete configuration that uses the bundled 5,000-word list.
 
@@ -101,7 +101,7 @@ for _, c := range changes.Changed {
 | `Timeout` | `1s` | Bound on one lookup of one record type. |
 | `Attempts` | `1` | Tries per name. Only failures are retried, never NXDOMAIN. |
 | `Rate` | unlimited | Queries per second on the wire, counting every type, retry and probe. |
-| `Types` | `A`, `AAAA` | Record types: `A`, `AAAA`, `CNAME`, and on main also `NS`, `MX` and `TXT`. `CNAME` and `NS` populate `Result.Takeover`. |
+| `Types` | `A`, `AAAA` | Record types: `A`, `AAAA`, `CNAME`, `NS`{% include unreleased.html value="type=NS" %}, `MX`{% include unreleased.html value="type=MX" %} and `TXT`{% include unreleased.html value="type=TXT" %}. `CNAME` and `NS` populate `Result.Takeover`. |
 | `Recursive`, `Depth` | off, `1` | Enumerate again under each name found. |
 | `MaxQueries` | unlimited | Cap on candidate names tested. |
 | `MaxDuration`{% include unreleased.html library="MaxDuration" %} | unlimited | Time budget from the start of `Run`. Then no new names are tested and the rest are counted in `Stats.Skipped`, with `Stats.Expired` set. |

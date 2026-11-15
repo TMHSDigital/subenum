@@ -233,12 +233,15 @@ commit `previous.jsonl` to a branch or store it in object storage instead.
 
 ## Takeover candidates in code scanning
 
-Add `-type A,AAAA,CNAME,NS -sarif takeovers.sarif` to the scan and upload the file
-after it, and every dangling or takeover-prone CNAME, and every delegation to a
-name server that does not exist (`dangling-ns`), becomes an alert in the
+Add `-type A,AAAA,CNAME -sarif takeovers.sarif` to the scan and upload the file
+after it, and every dangling or takeover-prone CNAME becomes an alert in the
 repository's Security tab, where it can be triaged and dismissed. Alerts are
-fingerprinted per name, so a candidate seen every week stays one alert. The
-job needs `security-events: write`:
+fingerprinted per name, so a candidate seen every week stays one alert. With
+`NS`{% include unreleased.html value="type=NS" %} in the list as well
+(`-type A,AAAA,CNAME,NS`), so does every delegation to a name server that does
+not exist (`dangling-ns`); a release that does not have `NS` yet rejects it, so
+add it only once the pinned `SUBENUM_VERSION` does. The job needs
+`security-events: write`:
 
 ```yaml
       - name: Upload takeover candidates
