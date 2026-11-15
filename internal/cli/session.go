@@ -668,7 +668,13 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		mainSaved, restoredHits = s.restoreTarget(saved)
 		if saved.Done {
 			out.Info("%s was finished before the interrupt; %d results restored", target, len(saved.Results))
-			s.results[i] = targetResult{done: true, final: mainSaved.event()}
+			// The report keeps what the finished run found (#315).
+			res := targetResult{done: true, final: mainSaved.event(), sources: sourceInfo, axfr: axfrInfo, foundBy: s.foundBy}
+			if s.f.permute {
+				res.permutation = finishedPermutation(permuteInput{target: target, entries: entries, found: s.targetResults.mainPassNames(),
+					seeds: seeds, prev: saved.Permute, restoredHits: restoredHits})
+			}
+			s.results[i] = res
 			s.runs[i] = s.targetResults
 			s.anyDone = true
 			s.status[i] = "ok"

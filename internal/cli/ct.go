@@ -43,6 +43,11 @@ func passiveNames(ctx context.Context, sources []string, target string, saved *r
 			res[i].names, res[i].fetched = names, true
 			continue
 		}
+		if saved != nil && saved.Done {
+			// The target is not scanned again, so its candidates are not
+			// needed: no lookup (#315).
+			continue
+		}
 		src, err := passive.New(name, opts)
 		if err != nil { // ParseList admitted only known names
 			res[i].err = err.Error()

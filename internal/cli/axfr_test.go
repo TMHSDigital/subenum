@@ -18,6 +18,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/axfr"
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 // axfrZone serves example.test from one local server: ns1 is its name server
@@ -356,6 +357,70 @@ func TestE2EResumeReusesZoneTransfer(t *testing.T) {
 	}
 	if tg := axfrSummary(t, stats).Targets[0]; !slices.Equal(tg.AXFRAllowed, []string{"ns1.example.test"}) || tg.AXFRNames != 2 {
 		t.Errorf("report axfr_allowed = %q, axfr_names = %d; want the saved ns1.example.test and 2", tg.AXFRAllowed, tg.AXFRNames)
+	}
+}
+
+// TestResumeFinishedTargetKeepsDetails covers #315: the report of a resumed
+// run keeps the zone transfer and -permute pass of a target that finished
+// before the interrupt, and the target triggers no new transfer, even when
+// its state lacks one.
+func TestResumeFinishedTargetKeepsDetails(t *testing.T) {
+	t.Parallel()
+	for name, axfrDone := range map[string]bool{"transfer saved": true, "transfer missing": false} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+				switch q.Type {
+				case dnsmessage.TypeAXFR:
+					return dnstest.Reply{Transfer: []string{"other.example.test"}}
+				case dnsmessage.TypeNS:
+					return dnstest.Reply{NS: []string{"ns1.example.test"}}
+				}
+				return dnstest.NXDomain
+			})
+			_, port, err := net.SplitHostPort(srv.Addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wl := writeFile(t, "wl.txt", "www\n")
+			stats := filepath.Join(t.TempDir(), "run.json")
+			args := append(localArgs("-axfr", "-permute", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl), "example.test")
+			permuted := scan.Stats{NXDomain: 7}
+			target := resumeTarget{
+				Domain: "example.test", Done: true, RootDone: 1, Processed: 1, Total: 1, Stats: scan.Stats{Found: 1},
+				Results: []output.Result{{Result: scan.Result{Subdomain: "www.example.test"}}},
+				Permute: &resumePass{RootDone: 7, Stats: permuted, Processed: 7, Total: 7},
+			}
+			if axfrDone {
+				target.AXFRDone, target.AXFR, target.AXFRServers = true, []string{"zt1", "zt2"}, []string{"ns1.example.test"}
+			}
+			path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{target}})
+			code, out := runCLIMergedWith(t, runArgs{axfrPort: port, args: []string{"-resume", path}})
+			if code != 0 {
+				t.Fatalf("exit %d\n%s", code, out)
+			}
+			if ns, axfr := srv.QueriesFor("example.test", dnsmessage.TypeNS), srv.QueriesFor("example.test", dnsmessage.TypeAXFR); ns != 0 || axfr != 0 {
+				t.Errorf("the finished target caused %d NS and %d AXFR queries, want none", ns, axfr)
+			}
+			tg := axfrSummary(t, stats).Targets[0]
+			wantAllowed, wantNames := []string(nil), 0
+			if axfrDone {
+				wantAllowed, wantNames = []string{"ns1.example.test"}, 2
+			}
+			if !slices.Equal(tg.AXFRAllowed, wantAllowed) || tg.AXFRNames != wantNames {
+				t.Errorf("report axfr_allowed = %q, axfr_names = %d; want %q and %d", tg.AXFRAllowed, tg.AXFRNames, wantAllowed, wantNames)
+			}
+			// The seeds are the found name and, as in the live run, the
+			// transferred names, which are also candidates.
+			seeds := []string{"www"}
+			if axfrDone {
+				seeds = append(seeds, "zt1", "zt2")
+			}
+			want, _ := permutationCandidates("example.test", seeds, seeds)
+			if p := tg.Permutation; p == nil || p.Seeds != len(seeds) || p.Candidates != len(want) || p.Processed != 7 || p.Verdict != scan.VerdictComplete {
+				t.Errorf("report permutation = %+v; want %d seeds, %d candidates, 7 processed, complete", p, len(seeds), len(want))
+			}
+		})
 	}
 }
 

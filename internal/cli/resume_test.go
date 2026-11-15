@@ -640,21 +640,25 @@ func TestE2EResumeReplaysSourceNames(t *testing.T) {
 
 // TestSaveResumeStateKeepsEarlierPosition covers #109: a resumed target
 // interrupted again before its scan reported progress, and a target the run
-// never reached, keep their saved resume points.
+// never reached, keep their saved resume points; so does a target finished
+// before the first interrupt, with its sources and zone transfer (#315).
 func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
+	finished := resumeTarget{Domain: "c.example", Done: true, RootDone: 9, Processed: 9, Sources: map[string][]string{"ct": {"dev"}},
+		AXFR: []string{"zt"}, AXFRServers: []string{"ns1.c.example"}, AXFRDone: true, Permute: &resumePass{RootDone: 4}}
 	prev := &resumeState{Targets: []resumeTarget{
 		{Domain: "a.example", RootDone: 40, Processed: 40, Stats: scan.Stats{NXDomain: 38}, Results: []output.Result{{Result: scan.Result{Subdomain: "x.a.example"}}}},
 		{Domain: "b.example", RootDone: 7, Processed: 7, Permute: &resumePass{RootDone: 3}},
+		finished,
 	}}
 	f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json")}
 	out := output.New(nil, false, output.FormatText)
 	saveResumeState(&session{
 		f: f, out: out, resume: prev,
-		targets:      []string{"a.example", "b.example"},
-		status:       []string{"interrupted", ""},
-		entryDigests: []string{"d1", ""},
-		results:      []targetResult{{}, {}},
-		runs:         []resultLog{{names: []string{"x.a.example"}}, {}},
+		targets:      []string{"a.example", "b.example", "c.example"},
+		status:       []string{"interrupted", "", "ok"},
+		entryDigests: []string{"d1", "", "d3"},
+		results:      []targetResult{{}, {}, {done: true}},
+		runs:         []resultLog{{names: []string{"x.a.example"}}, {}, {}},
 	})
 	data, err := os.ReadFile(f.stateFile)
 	if err != nil {
@@ -670,6 +674,9 @@ func TestSaveResumeStateKeepsEarlierPosition(t *testing.T) {
 	}
 	if b.RootDone != 7 || b.Permute == nil || b.Permute.RootDone != 3 {
 		t.Errorf("unreached target lost its state: %+v", b)
+	}
+	if c := st.Targets[2]; !reflect.DeepEqual(c, finished) {
+		t.Errorf("finished target saved as %+v, want its earlier state %+v", c, finished)
 	}
 }
 

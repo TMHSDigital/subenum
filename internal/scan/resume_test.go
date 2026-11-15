@@ -81,6 +81,45 @@ func TestResumeMatchesUninterruptedRun(t *testing.T) {
 	}
 }
 
+// TestResumeMultiLabelParentDepth covers #315: a parent found through a
+// multi-label entry is at level 1 whatever its label count, so a resumed
+// scan expands it, and its children, as far as an uninterrupted run does.
+func TestResumeMultiLabelParentDepth(t *testing.T) {
+	zone := map[string]bool{"dev.api.example.com": true, "x.dev.api.example.com": true, "x.x.dev.api.example.com": true}
+	addr, stop := startUDPDNS(t, func(name string, _ uint16) ([4]byte, bool) {
+		return [4]byte{192, 0, 2, 5}, zone[name]
+	})
+	defer stop()
+	for _, tc := range []struct {
+		depth   int
+		parents []string
+	}{
+		{2, []string{"dev.api.example.com"}},
+		{3, []string{"dev.api.example.com", "x.dev.api.example.com"}},
+	} {
+		cfg := Config{
+			Domain: "example.com", Entries: []string{"dev.api", "x"},
+			Concurrency: 2, Timeout: time.Second, Attempts: 1, Types: []string{"A"},
+			Recursive: true, Depth: tc.depth,
+			Resolver: dns.NewResolver(time.Second, addr), DNSServer: addr,
+		}
+		want, _ := runCollect(t, cfg, 0)
+		if len(want) != tc.depth {
+			t.Fatalf("depth %d: uninterrupted run found %v", tc.depth, want)
+		}
+		// Interrupted after the whole wordlist, with the parents found.
+		cfg.ResumeFrom = len(cfg.Entries)
+		cfg.ResumeParents = tc.parents
+		rest, _ := runCollect(t, cfg, 0)
+		for _, p := range tc.parents {
+			rest[p] = true
+		}
+		if !maps.Equal(rest, want) {
+			t.Errorf("depth %d: resumed run and its parents give %v, uninterrupted %v", tc.depth, rest, want)
+		}
+	}
+}
+
 // TestResumeSkipsWildcardParent covers #296: a parent found before the
 // interrupt goes through the same wildcard check on resume as a parent found
 // by a live run, so a wildcard subzone is skipped with a notice both times

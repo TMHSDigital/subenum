@@ -88,6 +88,10 @@ type Config struct {
 
 	scope    *scope             // built from Exclude by Run
 	takeover *dns.TakeoverCache // one CNAME-target lookup per target per scan (#121)
+	// resumeDepth is each resumed parent's recursion level (see
+	// resumeDepths), found by Run before the parents are gated, so a
+	// parent's level does not depend on which of its ancestors pass.
+	resumeDepth map[string]int
 }
 
 // logf returns the verbose logger for lookups, or nil when Verbose is off.
@@ -647,6 +651,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		failed = fatal
 		return
 	}
+	cfg.resumeDepth = resumeDepths(cfg)
 
 	st := &scanState{
 		cfg: cfg, maxDepth: maxDepth, limiter: jobLimiter, events: events,

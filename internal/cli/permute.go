@@ -82,6 +82,22 @@ func permutationCandidates(target string, entries, rel []string) (candidates []s
 	return candidates, tooLong
 }
 
+// finishedPermutation is the -permute pass of a target finished before the
+// interrupt, rebuilt from the state without scanning: the same seeds and
+// candidates runPermutationPass would count, and the saved pass (#315).
+func finishedPermutation(p permuteInput) *permutationResult {
+	rel := relativeSeeds(p.target, p.found, p.seeds)
+	if len(rel) == 0 {
+		return nil
+	}
+	candidates, _ := permutationCandidates(p.target, p.entries, rel)
+	res := &permutationResult{seeds: len(rel), candidates: len(candidates), found: p.restoredHits}
+	if p.prev != nil {
+		res.pass = targetResult{done: true, final: p.prev.event()}
+	}
+	return res
+}
+
 // runPermutationPass scans the permutations of a target's found names as a
 // second, fully guarded scan (preflight, wildcard filtering, -rate,
 // -max-queries, -exclude). Candidates already in the wordlist or found are

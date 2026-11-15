@@ -87,9 +87,12 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 	// interrupt, whose children may not all have been tested (#73). Run
 	// passes only the ones a live scan would expand (see gateResumeParents).
 	if cfg.Recursive {
+		if d.cfg.resumeDepth == nil {
+			d.cfg.resumeDepth = resumeDepths(cfg)
+		}
 		d.expanded = make(map[string]struct{})
 		for _, p := range cfg.ResumeParents {
-			if name, depth, ok := resumeParent(cfg, p, maxDepth); ok && d.markExpanded(name) {
+			if name, depth, ok := resumeParent(d.cfg, p, maxDepth); ok && d.markExpanded(name) {
 				d.frontier = append(d.frontier, expansion{parent: name, depth: depth + 1})
 				d.remaining += n
 			}
@@ -113,14 +116,81 @@ func (d *dispatcher) markExpanded(parent string) bool {
 
 // resumeParent normalizes a name found before an interrupt and reports its
 // depth below the target and whether a resumed scan may expand it: it must
-// lie under the target and above the depth limit.
+// lie under the target and above the depth limit. The depth is the recursion
+// level resumeDepths found; a name it could not place keeps its label count.
 func resumeParent(cfg Config, p string, maxDepth int) (name string, depth int, ok bool) {
 	name = strings.ToLower(strings.TrimSuffix(p, "."))
 	if !strings.HasSuffix(name, "."+cfg.Domain) {
 		return name, 0, false
 	}
-	depth = strings.Count(name, ".") - strings.Count(cfg.Domain, ".")
+	depth, known := cfg.resumeDepth[name]
+	if !known {
+		depth = strings.Count(name, ".") - strings.Count(cfg.Domain, ".")
+	}
 	return name, depth, depth >= 1 && depth < maxDepth
+}
+
+// resumeDepths finds the recursion level of each resumed parent, by name
+// (#315). A live scan's level is not the label count: an entry may hold
+// several labels ("dev.api"), and every entry is level 1. A parent is level
+// 1 when its name relative to the target is an entry, else one more than the
+// lowest level of a resumed parent it is an entry under, which is the level
+// a live scan, breadth first, reaches it at. Only the prefixes of the
+// parents are looked up in Entries, so no set as large as the wordlist is
+// built.
+func resumeDepths(cfg Config) map[string]int {
+	if !cfg.Recursive || len(cfg.ResumeParents) == 0 {
+		return nil
+	}
+	suffix := "." + cfg.Domain
+	parents := map[string]bool{} // relative to the target
+	isEntry := map[string]bool{} // every way to split a parent, entry first
+	for _, p := range cfg.ResumeParents {
+		rel, ok := strings.CutSuffix(strings.ToLower(strings.TrimSuffix(p, ".")), suffix)
+		if !ok || rel == "" {
+			continue
+		}
+		parents[rel] = true
+		isEntry[rel] = false
+		for i := range len(rel) {
+			if rel[i] == '.' {
+				isEntry[rel[:i]] = false
+			}
+		}
+	}
+	for _, e := range cfg.Entries {
+		if _, ok := isEntry[e]; ok {
+			isEntry[e] = true
+		}
+	}
+	level := make(map[string]int, len(parents)) // 0: no way to reach it
+	var find func(rel string) int
+	find = func(rel string) int {
+		if d, ok := level[rel]; ok {
+			return d
+		}
+		best := 0
+		if isEntry[rel] {
+			best = 1
+		}
+		for i := 0; i < len(rel) && best != 1; i++ {
+			if rel[i] != '.' || !isEntry[rel[:i]] || !parents[rel[i+1:]] {
+				continue
+			}
+			if d := find(rel[i+1:]); d > 0 && (best == 0 || d+1 < best) {
+				best = d + 1
+			}
+		}
+		level[rel] = best
+		return best
+	}
+	depths := make(map[string]int, len(parents))
+	for rel := range parents {
+		if d := find(rel); d > 0 {
+			depths[rel+suffix] = d
+		}
+	}
+	return depths
 }
 
 // settle marks wordlist entry i as done and advances the resume watermark.

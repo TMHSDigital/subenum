@@ -434,7 +434,9 @@ func saveResumeState(s *session) bool {
 	st := resumeState{Version: resumeStateVersion, Args: withSeed(s.args, f), Inputs: inputs, Settings: s.settings}
 	for i, domain := range s.targets {
 		saved := prev.target(domain)
-		if (s.status[i] == "" || s.status[i] == "skipped") && saved != nil {
+		// A target finished before the interrupt was not scanned again, so
+		// its saved state, sources and zone transfer included, stands (#315).
+		if saved != nil && (s.status[i] == "" || s.status[i] == "skipped" || saved.Done) {
 			st.Targets = append(st.Targets, *saved)
 			continue
 		}

@@ -28,6 +28,9 @@ func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *r
 	if saved != nil && saved.AXFRDone {
 		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, denial: dns.Denial(saved.Denial), done: true}
 	}
+	if saved != nil && saved.Done {
+		return targetAXFR{} // finished before the interrupt: not scanned again (#315)
+	}
 	opts := axfr.Options{
 		Resolver: f.dnsServer,
 		Port:     port,
