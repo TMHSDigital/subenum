@@ -223,13 +223,21 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 	var ignored []string
 	fs.Visit(func(fl *flag.Flag) {
 		switch {
-		case fl.Name == "tui":
+		case fl.Name == "tui", fl.Name == "ct": // -ct goes to Sources, below
 		case wired[fl.Name]:
 			settings[fl.Name] = fl.Value.String()
 		default:
 			ignored = append(ignored, "-"+fl.Name)
 		}
 	})
+	if f.ct {
+		// The form has no -ct field: -ct is the ct source of -sources, which
+		// the Sources field takes (#348).
+		sources := strings.Split(settings["sources"], ",")
+		if !slices.Contains(sources, "ct") {
+			settings["sources"] = strings.Trim(settings["sources"]+",ct", ",")
+		}
+	}
 	if len(f.wordlists.paths) > 1 {
 		settings["w"] = f.wordlists.paths[0]
 		diag.Notice("Warning: the TUI takes one wordlist; using %s", f.wordlists.paths[0])

@@ -470,6 +470,11 @@ func TestMCPExplainStatsBranches(t *testing.T) {
 			Sources:     []output.SourceSummary{{Name: "wayback", Error: "503"}},
 			Permutation: &output.PermutationSummary{Seeds: 4, Candidates: 40, Found: 1},
 			Error:       "resolver stopped answering",
+		}, {
+			// The permutation pass set this target's verdict (#298, #348).
+			Domain: "two.example", Status: "ok", Verdict: "unreliable", Reason: "permutation pass: 30 of 60 lookups failed",
+			Processed: 10, Total: 10, Outcomes: output.Outcomes{NXDomain: 10},
+			Permutation: &output.PermutationSummary{Seeds: 2, Candidates: 60, Found: 0, Processed: 60, QueriesSent: 70, Verdict: "unreliable"},
 		}},
 		Diff: &output.DiffSummary{Previous: "prev.jsonl", Added: 1, Removed: 2, Unverified: 3},
 	}
@@ -490,10 +495,15 @@ func TestMCPExplainStatsBranches(t *testing.T) {
 		"Zone transfer (AXFR) was allowed by ns1.lab.example", "plain NSEC", "Passive source wayback failed (503)",
 		"Permutation pass: 40 candidates from 4 seeds, 1 found", "Compared with prev.jsonl: 1 added, 2 removed",
 		"3 earlier names could not be checked",
+		"Permutation pass: 60 candidates from 2 seeds, 60 tested with 70 queries, 0 found; its own verdict unreliable",
+		"The permutation pass set this target's verdict",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("explanation lacks %q:\n%s", want, text)
 		}
+	}
+	if n := strings.Count(text, "The permutation pass set"); n != 1 {
+		t.Errorf("%d targets said the permutation pass set their verdict, want only two.example:\n%s", n, text)
 	}
 }
 

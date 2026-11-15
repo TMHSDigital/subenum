@@ -394,6 +394,24 @@ func TestTUIOptionsFromFlags(t *testing.T) {
 		t.Errorf("two -o: Settings %v, stderr %q", opts.Settings, stderr.String())
 	}
 
+	// -ct fills the Sources field, next to any -sources, without a warning
+	// (#348).
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-tui", "-ct"}, "ct"},
+		{[]string{"-tui", "-ct", "-sources", "wayback"}, "wayback,ct"},
+		{[]string{"-tui", "-ct", "-sources", "ct,wayback"}, "ct,wayback"},
+	} {
+		f, pos, fs, _ = parseFlagsWith(tc.args, d.apply, nil)
+		stderr.Reset()
+		opts = tuiOptions(f, fs, pos, d, diag)
+		if opts.Settings["sources"] != tc.want || stderr.Len() != 0 {
+			t.Errorf("%v: Sources %q, stderr %q; want %q and no warning", tc.args, opts.Settings["sources"], stderr.String(), tc.want)
+		}
+	}
+
 	// A bare -tui warns about nothing.
 	f, pos, fs, _ = parseFlagsWith([]string{"-tui"}, d.apply, nil)
 	stderr.Reset()

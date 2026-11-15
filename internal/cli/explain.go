@@ -116,7 +116,16 @@ func explainTarget(p func(string, ...any), t output.TargetSummary) {
 			p("  Passive source %s stopped at one of its limits: its %d names were scanned, but some hosts may be missing.", src.Name, src.Names)
 		}
 	}
-	if t.Permutation != nil {
-		p("  Permutation pass: %d candidates from %d seeds, %d found.", t.Permutation.Candidates, t.Permutation.Seeds, t.Permutation.Found)
+	if pm := t.Permutation; pm != nil {
+		if pm.Verdict == "" {
+			p("  Permutation pass: %d candidates from %d seeds, %d found.", pm.Candidates, pm.Seeds, pm.Found)
+		} else {
+			p("  Permutation pass: %d candidates from %d seeds, %d tested with %d queries, %d found; its own verdict %s.",
+				pm.Candidates, pm.Seeds, pm.Processed, pm.QueriesSent, pm.Found, pm.Verdict)
+		}
+		// Since #298 the pass's verdict becomes the target's when it is worse.
+		if strings.HasPrefix(t.Reason, permutationReason) {
+			p("  The permutation pass set this target's verdict: it went worse than the main pass, so its outcome is the one to act on.")
+		}
 	}
 }

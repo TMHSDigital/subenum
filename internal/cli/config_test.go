@@ -308,7 +308,8 @@ func TestPrintConfigEffectiveAttempts(t *testing.T) {
 // tuiOmittedFlags are flags the TUI form deliberately has no field for: they
 // control CLI-only output, input sources, run state or modes the form does not
 // offer, so a command-line, SUBENUM_* or config file value for them never
-// seeds the form (-tui warns about one given on the command line).
+// seeds the form (-tui warns about one given on the command line). The one
+// exception is -ct, which tuiOptions turns into ct in the Sources field (#348).
 var tuiOmittedFlags = map[string]bool{
 	"tui": true, "print-config": true, "dry-run": true, "version": true, "v": true, "progress": true, "silent": true,
 	"simulate-zone": true, "retries": true, "show-records": true, "stats": true,
