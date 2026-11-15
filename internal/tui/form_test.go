@@ -204,7 +204,7 @@ func TestFormBuildsSharedConfig(t *testing.T) {
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	got := vals.options([]string{"www", "mail"}, 7).Config()
+	got := vals.options([]string{"www", "mail"}, 7).Config
 	want := scan.Config{
 		Domain: "example.com", Entries: []string{"www", "mail"}, Concurrency: 50,
 		Timeout: 800 * time.Millisecond, DNSServer: "1.1.1.1:53", Simulate: true, HitRate: 30,
@@ -263,7 +263,7 @@ func TestValidateExclude(t *testing.T) {
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	if got := vals.options(nil, 0).Config().Exclude; !reflect.DeepEqual(got, []string{"vpn.example.com", "*.corp.example.com"}) {
+	if got := vals.options(nil, 0).Exclude; !reflect.DeepEqual(got, []string{"vpn.example.com", "*.corp.example.com"}) {
 		t.Errorf("Exclude = %q", got)
 	}
 	m.inputs[fieldExclude].SetValue("not a domain")
@@ -485,17 +485,16 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"RetryPrior":        "the TUI does not resume interrupted scans",
 		"Verbose":           "the scan screen shows events itself; there is no debug log",
 		"Logf":              "the scan screen shows events itself; there is no debug log",
+		"Resolver":          "scan.Run builds the resolver from DNSServer",
 	}
 	m := filledForm(t)
 	v, errStr := m.validate()
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	opts := reflect.ValueOf(v.options([]string{"www"}, 9))
-	for i := range opts.NumField() {
-		name := opts.Type().Field(i).Name
+	for name, field := range v.options([]string{"www"}, 9).Fields() {
 		_, listed := tuiUnmapped[name]
-		switch zero := opts.Field(i).IsZero(); {
+		switch zero := field.IsZero(); {
 		case zero && !listed:
 			t.Errorf("scan.Options.%s is never set by the form; map it or list it in tuiUnmapped with a reason", name)
 		case !zero && listed:
@@ -503,7 +502,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		}
 	}
 	for name := range tuiUnmapped {
-		if _, ok := opts.Type().FieldByName(name); !ok {
+		if _, ok := reflect.TypeFor[scan.Options]().FieldByName(name); !ok {
 			t.Errorf("tuiUnmapped lists %s, which scan.Options does not have", name)
 		}
 	}

@@ -7,10 +7,10 @@ import (
 )
 
 func validOptions() Options {
-	return Options{
-		Domain: "example.com", Concurrency: 10, TimeoutMs: 500, DNSServer: "1.1.1.1:53",
+	return Options{Config: Config{
+		Domain: "example.com", Concurrency: 10, Timeout: 500 * time.Millisecond, DNSServer: "1.1.1.1:53",
 		HitRate: 15, Attempts: 1, Depth: 1,
-	}
+	}}
 }
 
 // TestOptionsValidate covers the shared validator both front ends call (#80).
@@ -22,7 +22,8 @@ func TestOptionsValidate(t *testing.T) {
 	}{
 		{"valid", func(*Options) {}, ""},
 		{"concurrency", func(o *Options) { o.Concurrency = 0 }, "concurrency"},
-		{"timeout", func(o *Options) { o.TimeoutMs = 0 }, "timeout"},
+		{"timeout", func(o *Options) { o.Timeout = 0 }, "timeout ({timeout}) must be at least 1 ms, got 0"},
+		{"timeout under 1 ms", func(o *Options) { o.Timeout = 500 * time.Microsecond }, "timeout ({timeout}) must be at least 1 ms"},
 		{"attempts", func(o *Options) { o.Attempts = 0 }, "attempts"},
 		{"depth", func(o *Options) { o.Depth = 0 }, "depth"},
 		{"rate", func(o *Options) { o.Rate = -1 }, "rate"},
@@ -49,13 +50,5 @@ func TestOptionsValidate(t *testing.T) {
 				t.Fatalf("err = %v, want it to mention %q", err, tc.wantErr)
 			}
 		})
-	}
-}
-
-func TestOptionsConfig(t *testing.T) {
-	o := validOptions()
-	o.TimeoutMs = 750
-	if cfg := o.Config(); cfg.Timeout != 750*time.Millisecond || cfg.Domain != o.Domain || cfg.Concurrency != 10 {
-		t.Fatalf("Config() = %+v", cfg)
 	}
 }

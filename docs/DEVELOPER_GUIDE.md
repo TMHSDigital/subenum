@@ -139,7 +139,7 @@ subenum/
 │   ├── permute/                # -permute candidate generation
 │   ├── report/                 # Run-quality report built from finished scans
 │   ├── scan/
-│   │   ├── options.go          # Options: settings shared by CLI and TUI (Validate, Config)
+│   │   ├── options.go          # Options: Config plus the settings only checked (Validate, Fields)
 │   │   ├── runner.go           # Scan engine: Config, Event/NoticeKind, Stats, Run
 │   │   ├── dispatcher.go       # Lazy candidate generation in chunks, budgets, resume watermark
 │   │   ├── autorate.go         # -auto-rate back-off controller

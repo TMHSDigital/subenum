@@ -247,7 +247,7 @@ func TestCLIBuildsSharedConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := &runtimeInputs{maxAttempts: f.attempts, recordTypes: types}
-	got := scanOptions(f, in, scanPass{domain: pos[0], entries: []string{"www", "mail"}, maxQueries: f.maxQueries}, nil).Config()
+	got := scanOptions(f, in, scanPass{domain: pos[0], entries: []string{"www", "mail"}, maxQueries: f.maxQueries}, nil).Config
 	want := scan.Config{
 		Domain: "example.com", Entries: []string{"www", "mail"}, Concurrency: 50,
 		Timeout: 800 * time.Millisecond, DNSServer: "1.1.1.1:53", Simulate: true, HitRate: 30,

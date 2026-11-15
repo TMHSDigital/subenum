@@ -17,7 +17,9 @@ import (
 // scan.Options fails here until the CLI maps it or lists it in cliUnmapped
 // with a reason.
 func TestScanOptionsSetsEveryField(t *testing.T) {
-	cliUnmapped := map[string]string{}
+	cliUnmapped := map[string]string{
+		"Resolver": "scan.Run builds the resolver from DNSServer",
+	}
 
 	f := cliFlags{
 		concurrency: 7, timeoutMs: 700, dnsServer: "192.0.2.53:53", testMode: true, testHitRate: 40,
@@ -61,11 +63,9 @@ func TestRangeErrorsNameFlags(t *testing.T) {
 // field that is set after all.
 func checkEveryOptionSet(t *testing.T, opts scan.Options, unmapped map[string]string) {
 	t.Helper()
-	v := reflect.ValueOf(opts)
-	for i := range v.NumField() {
-		name := v.Type().Field(i).Name
+	for name, field := range opts.Fields() {
 		_, listed := unmapped[name]
-		switch zero := v.Field(i).IsZero(); {
+		switch zero := field.IsZero(); {
 		case zero && !listed:
 			t.Errorf("scan.Options.%s is never set; map it or list it as unmapped with a reason", name)
 		case !zero && listed:
@@ -73,7 +73,7 @@ func checkEveryOptionSet(t *testing.T, opts scan.Options, unmapped map[string]st
 		}
 	}
 	for name := range unmapped {
-		if _, ok := v.Type().FieldByName(name); !ok {
+		if _, ok := reflect.TypeFor[scan.Options]().FieldByName(name); !ok {
 			t.Errorf("unmapped lists %s, which scan.Options does not have", name)
 		}
 	}

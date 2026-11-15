@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/net/dns/dnsmessage"
@@ -215,10 +216,10 @@ func TestSourcesNotAskedInSimulation(t *testing.T) {
 	redirectConfig(t)
 	urls, hits := sourceServers(t)
 	vals := formValues{
-		Options: scan.Options{
-			Domain: "example.com", DNSServer: "8.8.8.8:53", Concurrency: 4, TimeoutMs: 1000, Attempts: 1,
+		Options: scan.Options{Config: scan.Config{
+			Domain: "example.com", DNSServer: "8.8.8.8:53", Concurrency: 4, Timeout: time.Second, Attempts: 1,
 			HitRate: 100, Types: []string{"A"}, Depth: 1, Simulate: true,
-		},
+		}},
 		sources: []string{"ct", "wayback"}, permute: true,
 		wordlist: filepath.Join(t.TempDir(), "wl.txt"),
 	}
@@ -261,7 +262,7 @@ func TestFailedSourceDoesNotStopTheScan(t *testing.T) {
 		t.Errorf("entries %q, sources of www %v; want the wordlist's names alone", cands.Entries(), cands.SourcesOf("www.example.com"))
 	}
 
-	m := Model{scanView: newScanViewModel(120, 40, false), lookups: lookups, vals: formValues{Options: scan.Options{Domain: "example.com"}}}
+	m := Model{scanView: newScanViewModel(120, 40, false), lookups: lookups, vals: formValues{Options: scan.Options{Config: scan.Config{Domain: "example.com"}}}}
 	if tg := m.summary(scan.Event{Kind: scan.EventDone}).Targets[0]; len(tg.Sources) != 1 || tg.Sources[0].Error == "" {
 		t.Errorf("report sources = %+v, want the failed lookup's error", tg.Sources)
 	}
@@ -278,7 +279,7 @@ func TestPermutationPassStates(t *testing.T) {
 		if setup != nil {
 			setup(&sv)
 		}
-		return Model{state: stateScan, scanView: sv, vals: formValues{Options: scan.Options{Domain: "example.com"}, permute: true}, foundBy: map[string]int{}}
+		return Model{state: stateScan, scanView: sv, vals: formValues{Options: scan.Options{Config: scan.Config{Domain: "example.com"}}, permute: true}, foundBy: map[string]int{}}
 	}
 	update := func(m Model, msgs ...tea.Msg) Model {
 		for _, msg := range msgs {

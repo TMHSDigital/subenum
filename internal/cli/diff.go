@@ -357,7 +357,7 @@ func emitRemoved(ctx context.Context, s *session, summary *output.Summary) int64
 	if budget > 0 && budget < len(missing) {
 		out.Info("Note: the remaining -max-queries budget covers %d of them", budget)
 	}
-	cfg := scanOptions(s.f, &s.in, scanPass{maxQueries: budget}, nil).Config()
+	cfg := scanOptions(s.f, &s.in, scanPass{maxQueries: budget}, nil).Config
 	cfg.Pool = nil // the trusted resolver decides
 	outcomes, sent := scan.Verify(ctx, cfg, missing)
 	for _, name := range missing {

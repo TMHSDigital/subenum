@@ -497,7 +497,7 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 			internal.Entries = cands.Entries()
 		}
 		in := make(chan scan.Event, 64)
-		go scan.Run(ctx, internal.Config(), in)
+		go scan.Run(ctx, internal.Config, in)
 		// scan.Run always ends with exactly one EventDone (#99), so the
 		// channel ends with exactly one KindDone too.
 		for ev := range in {
@@ -632,31 +632,34 @@ func (c Config) options() (scan.Options, error) {
 	}
 
 	opts := scan.Options{
-		Domain:      domain,
-		Entries:     entries,
-		Concurrency: orDefault(c.Concurrency, DefaultConcurrency),
-		TimeoutMs:   ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout)),
-		DNSServer:   resolver,
-		Simulate:    c.Simulate,
-		HitRate:     orDefault(c.HitRate, DefaultHitRate),
-		Seed:        seed,
-		Attempts:    orDefault(c.Attempts, DefaultAttempts),
-		Force:       c.Force,
-		Types:       types,
-		Recursive:   c.Recursive,
-		Depth:       orDefault(c.Depth, 1),
-		Rate:        c.Rate,
-		AutoRate:    c.AutoRate,
-		MaxQueries:  c.MaxQueries,
-		MaxDuration: c.MaxDuration,
-		Exclude:     c.Exclude,
-		NoAbort:     c.NoAbort,
-		Verbose:     c.Verbose,
-		Logf:        dns.Logf(c.Logf),
+		Config: scan.Config{
+			Domain:      domain,
+			Entries:     entries,
+			Concurrency: orDefault(c.Concurrency, DefaultConcurrency),
+			// Whole milliseconds, rounded up, as the CLI's -timeout takes.
+			Timeout:    time.Duration(ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout))) * time.Millisecond,
+			DNSServer:  resolver,
+			Simulate:   c.Simulate,
+			HitRate:    orDefault(c.HitRate, DefaultHitRate),
+			Seed:       seed,
+			Attempts:   orDefault(c.Attempts, DefaultAttempts),
+			Force:      c.Force,
+			Types:      types,
+			Recursive:  c.Recursive,
+			Depth:      orDefault(c.Depth, 1),
+			Rate:       c.Rate,
+			AutoRate:   c.AutoRate,
+			MaxQueries: c.MaxQueries,
+			Exclude:    c.Exclude,
+			NoAbort:    c.NoAbort,
+			Verbose:    c.Verbose,
+			Logf:       dns.Logf(c.Logf),
 
-		RetryInconclusive: c.RetryInconclusive,
-		ListInconclusive:  true, // Stats.Inconclusive is part of the API
-		RatePerResolver:   c.RatePerResolver,
+			RetryInconclusive: c.RetryInconclusive,
+			ListInconclusive:  true, // Stats.Inconclusive is part of the API
+		},
+		MaxDuration:     c.MaxDuration,
+		RatePerResolver: c.RatePerResolver,
 	}
 	if c.MaxDuration > 0 {
 		opts.Deadline = time.Now().Add(c.MaxDuration)
@@ -680,7 +683,7 @@ func (c Config) options() (scan.Options, error) {
 		if c.Simulate {
 			return scan.Options{}, errors.New("subenum: ResolverPool cannot be used with Simulate, which sends no DNS queries")
 		}
-		pool, err := dns.NewPoolFromLines(c.ResolverPool, time.Duration(opts.TimeoutMs)*time.Millisecond, c.RatePerResolver)
+		pool, err := dns.NewPoolFromLines(c.ResolverPool, opts.Timeout, c.RatePerResolver)
 		if errors.Is(err, dns.ErrNoResolvers) {
 			return scan.Options{}, errors.New("subenum: ResolverPool lists no resolvers")
 		}

@@ -232,7 +232,7 @@ func loadPool(vals formValues) (*dns.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read resolver pool: %w", err)
 	}
-	pool, err := dns.NewPoolFromLines(lines, time.Duration(vals.TimeoutMs)*time.Millisecond, vals.RatePerResolver)
+	pool, err := dns.NewPoolFromLines(lines, vals.Timeout, vals.RatePerResolver)
 	if errors.Is(err, dns.ErrNoResolvers) {
 		err = fmt.Errorf("%s %w", vals.resolvers, err)
 	}
@@ -314,7 +314,7 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 		m.deadline = time.Now().Add(vals.MaxDuration)
 		opts.Deadline = m.deadline
 	}
-	cfg := opts.Config()
+	cfg := opts.Config
 
 	// Persist form values for next session (best-effort).
 	_ = saveConfig(vals.saved)
@@ -506,7 +506,7 @@ func (m Model) beginPermutation(msg permutationReadyMsg) (tea.Model, tea.Cmd) {
 	m.cancel = cancel
 	events := make(chan scan.Event, 128)
 	m.events = events
-	go scan.Run(ctx, opts.Config(), events)
+	go scan.Run(ctx, opts.Config, events)
 	return m, listenForEvents(events)
 }
 

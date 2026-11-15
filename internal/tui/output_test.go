@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -37,10 +38,10 @@ func runTUIScan(t *testing.T, format output.Format, formatName string, types []s
 func runTUIModel(t *testing.T, path string, format output.Format, types []string) Model {
 	t.Helper()
 	vals := formValues{
-		Options: scan.Options{
-			Domain: "example.com", DNSServer: "8.8.8.8:53", Concurrency: 4, TimeoutMs: 1000, Attempts: 1,
+		Options: scan.Options{Config: scan.Config{
+			Domain: "example.com", DNSServer: "8.8.8.8:53", Concurrency: 4, Timeout: time.Second, Attempts: 1,
 			HitRate: 100, Types: types, Depth: 1, Simulate: true,
-		},
+		}},
 		outputFile: path, format: format,
 	}
 	m := New(Options{Version: "test"})

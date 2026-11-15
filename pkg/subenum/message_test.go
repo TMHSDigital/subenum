@@ -38,6 +38,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"ResumeFrom":    "the library does not resume interrupted scans",
 		"ResumeParents": "the library does not resume interrupted scans",
 		"RetryPrior":    "the library does not resume interrupted scans",
+		"Resolver":      "scan.Run builds the resolver from DNSServer",
 	}
 	c := Config{
 		Domain: "example.com", Words: []string{"www"}, Concurrency: 7, Timeout: 700 * time.Millisecond,
@@ -51,11 +52,9 @@ func TestOptionsSetsEveryField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := reflect.ValueOf(opts)
-	for i := range v.NumField() {
-		name := v.Type().Field(i).Name
+	for name, field := range opts.Fields() {
 		_, listed := pkgUnmapped[name]
-		switch zero := v.Field(i).IsZero(); {
+		switch zero := field.IsZero(); {
 		case zero && !listed:
 			t.Errorf("scan.Options.%s is never set from Config; map it or list it in pkgUnmapped with a reason", name)
 		case !zero && listed:

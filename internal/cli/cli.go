@@ -736,40 +736,43 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		recursive, depth = false, 1
 	}
 	return scan.Options{
-		Domain:      p.domain,
-		Entries:     p.entries,
-		Concurrency: f.concurrency,
-		TimeoutMs:   f.timeoutMs,
-		DNSServer:   f.dnsServer,
-		Simulate:    f.testMode,
-		HitRate:     f.testHitRate,
-		Seed:        f.seed,
-		Attempts:    in.maxAttempts,
-		Force:       f.force,
-		Types:       in.recordTypes,
-		Recursive:   recursive,
-		Depth:       depth,
-		Rate:        f.rate,
-		AutoRate:    f.autoRate,
-		MaxQueries:  p.maxQueries,
-		MaxDuration: f.maxDuration,
-		Deadline:    in.deadline,
-		Exclude:     in.excludes,
-		ResumeFrom:  p.resumeFrom,
-		// The retry pass belongs to the scan, so a resumed scan runs it too,
-		// for the names the stopped run left it as well (#315).
-		RetryInconclusive: f.retryIncon,
-		RetryPrior:        p.retryPrior,
-		// Only the -inconclusive file reads the names (#300).
-		ListInconclusive:  f.inconFile != "",
-		TakeoverProviders: in.providers,
-		// Names found before an interrupt still need their children expanded.
-		ResumeParents:   p.resumeNames,
-		Pool:            in.pool,
+		Config: scan.Config{
+			Domain:      p.domain,
+			Entries:     p.entries,
+			Concurrency: f.concurrency,
+			Timeout:     time.Duration(f.timeoutMs) * time.Millisecond,
+			DNSServer:   f.dnsServer,
+			Simulate:    f.testMode,
+			HitRate:     f.testHitRate,
+			Seed:        f.seed,
+			Attempts:    in.maxAttempts,
+			Force:       f.force,
+			Types:       in.recordTypes,
+			Recursive:   recursive,
+			Depth:       depth,
+			Rate:        f.rate,
+			AutoRate:    f.autoRate,
+			MaxQueries:  p.maxQueries,
+			Deadline:    in.deadline,
+			Exclude:     in.excludes,
+			ResumeFrom:  p.resumeFrom,
+			// The retry pass belongs to the scan, so a resumed scan runs it
+			// too, for the names the stopped run left it as well (#315).
+			RetryInconclusive: f.retryIncon,
+			RetryPrior:        p.retryPrior,
+			// Only the -inconclusive file reads the names (#300).
+			ListInconclusive:  f.inconFile != "",
+			TakeoverProviders: in.providers,
+			// Names found before an interrupt still need their children
+			// expanded.
+			ResumeParents: p.resumeNames,
+			Pool:          in.pool,
+			NoAbort:       f.noAbort,
+			Verbose:       f.verbose,
+			Logf:          logf,
+		},
+		MaxDuration:     f.maxDuration,
 		RatePerResolver: f.ratePerRes,
-		NoAbort:         f.noAbort,
-		Verbose:         f.verbose,
-		Logf:            logf,
 	}
 }
 
@@ -797,7 +800,7 @@ func (r targetResult) unfinished() bool {
 func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Event)) (res targetResult) {
 	f, out := s.f, s.out
 	// Logf is serialized with the progress line (#36).
-	cfg := scanOptions(f, &s.in, p, out.Verbose).Config()
+	cfg := scanOptions(f, &s.in, p, out.Verbose).Config
 
 	events := make(chan scan.Event, 64)
 	go scan.Run(ctx, cfg, events)
