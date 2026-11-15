@@ -276,7 +276,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-max-duration <d>` | `0` | Time budget for the whole run, e.g. `20m` (0 = unlimited). Then no new names are tested, lookups already under way finish, and the run ends normally with its results, report (`stopped_by: "duration"`) and a `degraded` verdict, and saves a `-state` file so `-resume` tests the rest. Under `-dL` it covers all targets |
 | `-retry-inconclusive` | `false` | After each scan, look up once more (against `-dns-server`, never the `-r` pool) every name that timed out, was refused or failed. An answer replaces the first outcome in the counts; a name that resolves is reported, but not expanded by `-recursive`. Skipped after an abort, an interrupt or once `-max-duration` runs out. The report counts `retried` and `recovered` |
 | `-inconclusive <file>` | n/a | Write the names still without an answer (timeout, refused, other) to this file, one per line, sorted, so a later run can retry them with `-w <file>` |
-| `-o <file>` | n/a | Write results to file in addition to stdout |
+| `-o <file>` | n/a | Write results to file in addition to stdout; repeat for several files, each in `-format` or in the format named as a prefix (`-o names.txt -o jsonl:results.jsonl`) |
 | `-format <fmt>` | `text` | Output format: `text`, `json`, `jsonl` (one object per line, streamed), or `csv` |
 | `-log-format <fmt>` | `text` | Diagnostics on stderr: `text`, or `json` for one JSON object per line (`time`, `level`, `kind`, `target`, `message`, and `settings` codes on engine notices). Progress is then an event, only with an explicit `-progress`. Results on stdout are unchanged |
 | `-show-records` | `false` | In `text` format, append each result's records as `TYPE=value` |

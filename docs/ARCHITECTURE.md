@@ -240,11 +240,11 @@ The flow of data through the `subenum` application can be summarized as follows:
 5.  **Wildcard detection**: `Lookup.FingerprintWildcard` probes random labels under the target (skipped in simulation mode). If the check is inconclusive the scan stops, unless `-force` is set, in which case it scans without filtering and says so in a `NoticeWildcard` notice. If a wildcard is detected, a `NoticeWildcard` notice is emitted and the scan stops unless `-force` is set; with `-force`, later results matching the fingerprint are filtered.
 6.  **Dispatch**: The dispatcher generates `prefix.target` jobs lazily from the root expansion (a recursive scan expands each found parent once) and feeds them to the buffered `jobs` channel in chunks of up to eight. It does not close `jobs` until no candidates remain and the pending counter drains to zero, or the context is cancelled.
 7.  **Resolution**: Worker goroutines read jobs and call `Lookup.Resolve` (or `dns.Simulation.Resolve`) for the requested record types; every wire query waits on the rate limiter.
-8.  **Result Emission**: A found result that is not a wildcard answer increments the found counter and is emitted as an `EventResult` with its typed records. Every completed lookup, success or failure, increments the matching `Stats` counter. The CLI `Writer` routes results to stdout and any `-o` file in the selected `-format`; the TUI renders them in its viewport. After `EventDone` the CLI prints the per-outcome breakdown to stderr and the TUI summary line shows the same counters under the run-quality verdict and its reason.
+8.  **Result Emission**: A found result that is not a wildcard answer increments the found counter and is emitted as an `EventResult` with its typed records. Every completed lookup, success or failure, increments the matching `Stats` counter. The CLI routes results to its stdout `Writer` in the selected `-format` and to one file-only `Writer` per `-o` file, each in its own format (`parseOutputs`, #334); the TUI renders them in its viewport. After `EventDone` the CLI prints the per-outcome breakdown to stderr and the TUI summary line shows the same counters under the run-quality verdict and its reason.
 9.  **Recursive Expansion** (optional): when `-recursive` is set and a resolved, non-wildcard job is below the `-depth` cap, the worker hands it back to the dispatcher over the `enqueue` channel, which adds an expansion for its children and grows the progress total.
 10. **Progress Tracking**: Workers update atomic counters; the ticker goroutine emits `EventProgress` once per second.
 11. **Termination**: After finishing a chunk, a worker reports the completion of every job in it in one send on the buffered `completed` channel; the dispatcher uses these reports for its pending count and the resume watermark, so a resumed run repeats at most one chunk per worker. When no work remains the dispatcher closes `jobs`, the workers exit, and `scan.Run` waits on the `sync.WaitGroup`, runs the `-retry-inconclusive` pass if set, stops the progress ticker, emits `EventDone`, and closes the events channel. On `SIGINT`/`SIGTERM` the context is cancelled, the dispatcher closes `jobs` early, and the same drain-and-finish path runs with partial counts.
-12. **Finalization**: If at least one scan finished, the CLI calls `Writer.Finish` and commits the `-o` file, then exits with the code described in 4.5.
+12. **Finalization**: If at least one scan finished, the CLI calls `Writer.Finish` and commits the `-o` files, then exits with the code described in 4.5.
 
 Visually, this can be seen as:
 
@@ -297,7 +297,7 @@ With `-dL`, a reliability-guard abort means the resolver is overloaded, so the r
 
 ### 4.6. Output File Support
 
-When the `-o` flag is provided, results are written to the specified file in the selected `-format` in addition to stdout. The file is replaced atomically (see 2.5), and a mutex in the `Writer` protects concurrent writes to both stdout and the file.
+When the `-o` flag is provided, results are written to the specified file in addition to stdout, in the selected `-format` or in the format a `format:` prefix names. `-o` is repeatable (`outputSpecs`, #334): each file gets its own `output.NewFile` writer and the full current results, also under `-diff`, where stdout carries only the changes. Each file is replaced atomically (see 2.5), and a mutex in each `Writer` protects its concurrent writes.
 
 ### 4.7. Retry Mechanism
 

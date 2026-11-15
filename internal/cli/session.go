@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -44,11 +43,10 @@ type session struct {
 	words       *wordlist.Prepared
 	seeds       map[string]struct{} // -seeds names
 
-	out       *output.Writer // stdout, and the -o file unless -diff
-	fileOut   *output.Writer // the -o file under -diff; nil otherwise
-	outFile   *output.File
-	outWriter *bufio.Writer // the -o file's buffer; nil without -o
-	diff      *differ
+	out     *output.Writer // stdout: every result, or under -diff the changes
+	outputs []outputTarget // the -o files and their formats (#334)
+	files   []resultFile   // the open -o files, each with the full current results
+	diff    *differ
 
 	targetResults resultLog       // the current target's results: -permute seeds, saved on interrupt
 	takeovers     []output.Result // every target's takeover candidates, for -sarif
@@ -65,7 +63,7 @@ type session struct {
 	anyDone       bool
 	anyFailed     bool
 	fileErr       bool // a file write error was reported
-	keepBaseline  bool // -o is also the -diff file and a resume needs it unchanged
+	keepBaseline  bool // an -o file is also the -diff file and a resume needs it unchanged
 	started       time.Time
 	signalCode    atomic.Int32 // 128+signum once a signal arrives
 }
@@ -117,19 +115,22 @@ func runWith(a runArgs) (code int) {
 		return exitFailure
 	}
 	s.setProgress()
-	if s.outFile != nil {
-		// Runs after the final return value is chosen. The results file
+	if len(s.files) > 0 {
+		// Runs after the final return value is chosen. A results file
 		// replaces an existing one only if a scan finished (#52); a failed
 		// flush, close or rename means it is incomplete, so it must turn a
 		// successful exit into a failure (#30). bufio errors are sticky, so a
 		// failure already reported by Finish is not printed twice.
 		defer func() {
-			if err := s.outFile.Close(s.anyDone && !s.keepBaseline); err != nil {
-				if !s.fileErr {
-					s.out.Error("writing output file: %v", err)
-				}
-				if code == 0 {
-					code = 1
+			for _, rf := range s.files {
+				keep := s.keepBaseline && rf.path == s.f.diff
+				if err := rf.file.Close(s.anyDone && !keep); err != nil {
+					if !rf.reported {
+						s.out.Error("writing output file: %v", err)
+					}
+					if code == 0 {
+						code = 1
+					}
 				}
 			}
 		}()
@@ -232,6 +233,17 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 		settings["w"] = f.wordlists.paths[0]
 		diag.Notice("Warning: the TUI takes one wordlist; using %s", f.wordlists.paths[0])
 	}
+	if len(f.outputs.specs) > 0 {
+		// The form has one output file and one format (#334).
+		format, path := splitOutputSpec(f.outputs.specs[0])
+		settings["o"] = path
+		if format != "" {
+			settings["format"] = format
+		}
+		if len(f.outputs.specs) > 1 {
+			diag.Notice("Warning: the TUI takes one output file; using %s", path)
+		}
+	}
 	opts := tui.Options{Version: resolveVersion(), Settings: settings}
 	if len(positionals) > 0 {
 		opts.Domain = positionals[0]
@@ -272,6 +284,12 @@ func (s *session) configure() (domain string, code int, ok bool) {
 		out.Error("%v", formatErr)
 		return "", exitUsage, false
 	}
+	outputs, outputsErr := parseOutputs(f.outputs.specs, format)
+	if outputsErr != nil {
+		out.Error("%v", outputsErr)
+		return "", exitUsage, false
+	}
+	s.outputs = outputs
 	if s.logErr != nil {
 		out.Error("%v", s.logErr)
 		return "", exitUsage, false
@@ -434,30 +452,37 @@ func (s *session) loadInputs() bool {
 	return true
 }
 
-// openOutputs creates the -o file and sets up the result writers.
+// resultFile is one open -o file and the writer that renders into it.
+type resultFile struct {
+	path     string
+	file     *output.File
+	w        *output.Writer
+	reported bool // a write error was already reported by Finish
+}
+
+// openOutputs creates the -o files and sets up the result writers. Each file
+// gets the full current results in its own format; in -diff mode stdout
+// carries only the changes, and each file is ready to be the next run's
+// -diff input (#84).
 func (s *session) openOutputs() bool {
 	f := s.f
-	combined, outFile, ok := openOutputFile(f.outputFile, f.testMode, s.format, s.out)
-	if !ok {
-		return false
-	}
-	s.wire(combined)
-	s.outFile = outFile
-	if outFile != nil {
-		s.outWriter = outFile.Writer
-	}
-	// In -diff mode stdout carries only the changes while the -o file keeps
-	// the full current results, ready to be the next run's -diff input (#84).
-	if s.diff != nil && outFile != nil {
-		s.fileOut = s.wire(output.NewFile(outFile.Writer, f.testMode, s.format))
-	} else {
-		s.out = combined
+	writers := []*output.Writer{s.out}
+	for _, t := range s.outputs {
+		file, err := output.CreateFile(t.path)
+		if err != nil {
+			s.out.Error("creating output file: %v", err)
+			for _, rf := range s.files {
+				_ = rf.file.Close(false) // leave no temporary file behind (#212)
+			}
+			s.files = nil
+			return false
+		}
+		w := s.wire(output.NewFile(file.Writer, f.testMode, t.format))
+		s.files = append(s.files, resultFile{path: t.path, file: file, w: w})
+		writers = append(writers, w)
 	}
 	s.out.SetDiff(s.diff != nil)
-	for _, w := range []*output.Writer{s.out, s.fileOut} {
-		if w == nil {
-			continue
-		}
+	for _, w := range writers {
 		// Bare names when piped or -silent (no "Found:" banner), human-friendly
 		// on a terminal.
 		w.SetPlain(f.silent || !isTerminal(s.a.stdout))
@@ -537,8 +562,8 @@ func (s *session) handleSignals(ctx context.Context, cancel context.CancelFunc) 
 	return func() { signal.Stop(sigCh) }
 }
 
-// emitResult writes one found name: to stdout, or under -diff to the -o
-// file and, when it changed, to stdout. Names restored from a -resume state
+// emitResult writes one found name: to the -o files and to stdout, or under
+// -diff to stdout only when it changed. Names restored from a -resume state
 // were already written.
 func (s *session) emitResult(ev scan.Event, permutation bool) {
 	if s.restored[ev.Result.Subdomain] {
@@ -556,12 +581,12 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 	if res.Takeover != "" {
 		s.takeovers = append(s.takeovers, res)
 	}
+	for _, rf := range s.files {
+		rf.w.Emit(res)
+	}
 	if s.diff == nil {
 		s.out.Emit(res)
 		return
-	}
-	if s.fileOut != nil {
-		s.fileOut.Emit(res)
 	}
 	if change, previous := s.diff.observe(res.Subdomain, res.Records); change != "" {
 		res.Change, res.PreviousRecords = change, previous
@@ -808,9 +833,9 @@ func (s *session) finish(ctx context.Context) int {
 		// With -diff and -o on one file, the partial results must not replace
 		// the baseline the resumed run compares against; the saved state holds
 		// them, and the resumed run writes them to the -o file (#297).
-		if saveResumeState(s) && f.diff != "" && f.diff == f.outputFile {
+		if saveResumeState(s) && f.diff != "" && slices.ContainsFunc(s.files, func(rf resultFile) bool { return rf.path == f.diff }) {
 			s.keepBaseline = true
-			out.Info("Leaving %s unchanged: it is the -diff baseline for the resumed run, which writes the full results", f.outputFile)
+			out.Info("Leaving %s unchanged: it is the -diff baseline for the resumed run, which writes the full results", f.diff)
 		}
 	} else if s.resume != nil && !s.anyFailed {
 		// The resumed run finished: its state file is spent (#109).
@@ -825,9 +850,9 @@ func (s *session) finish(ctx context.Context) int {
 		summary.Diff = &output.DiffSummary{Previous: f.diff, Added: s.diff.added, Changed: s.diff.changed}
 		sent := emitRemoved(ctx, s, &summary)
 		summary.QueriesSent += sent
-		if s.fileOut != nil {
-			s.fileOut.Summary(summary)
-		}
+	}
+	for _, rf := range s.files {
+		rf.w.Summary(summary)
 	}
 	out.Summary(summary)
 	if f.statsFile != "" {
@@ -854,17 +879,16 @@ func (s *session) finish(ctx context.Context) int {
 	// results already written, such as ones restored by -resume before the
 	// target failed, are closed into a valid document even when no scan
 	// finished.
-	if s.anyDone || out.Started() || (s.fileOut != nil && s.fileOut.Started()) {
-		if s.fileOut != nil {
-			if err := s.fileOut.Finish(); err != nil {
-				out.Error("writing output file: %v", err)
+	started := out.Started() || slices.ContainsFunc(s.files, func(rf resultFile) bool { return rf.w.Started() })
+	if s.anyDone || started {
+		for i := range s.files {
+			if err := s.files[i].w.Finish(); err != nil {
+				out.Error("writing output file %s: %v", s.files[i].path, err)
+				s.files[i].reported = true
 				s.fileErr = true
 			}
 		}
-		if err := out.Finish(); err != nil {
-			out.Error("writing output file: %v", err)
-			s.fileErr = true
-		}
+		_ = out.Finish() // stdout only: its write errors are not reported
 		if f.testMode && !f.verbose {
 			out.Info("NOTE: these results are SIMULATED; no DNS queries were sent (seed %d).", f.seed)
 		}

@@ -25,7 +25,9 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
   (removed); JSON and JSONL results carry `"change": "added"` or
   `"change": "removed"`; CSV gains a `change` column.
 - The `-o` file still receives the **full** current results, so it can be the
-  next run's `-diff` input.
+  next run's `-diff` input. With several `-o` files, each one does, in its own
+  format. If a stopped run saves state for `-resume`, an `-o` file that is also
+  the `-diff` file is left unchanged; the others get the partial results.
 - The exit code is `4` when anything was added or removed, `0` when nothing
   changed. A failed scan still exits `1`, `2` or `3`.
 - Names are only reported as removed when the run's

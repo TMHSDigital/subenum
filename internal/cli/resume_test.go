@@ -452,13 +452,18 @@ func TestE2EResumeDiffOntoOutputFile(t *testing.T) {
 	}
 
 	// -rate 50 with 120 words needs about 2.4 s, so a 1 s budget stops the run.
+	// A second -o file is not the baseline: it gets the partial results (#334).
 	results, state := writeFile(t, "results.txt", baseline), filepath.Join(dir, "state.json")
-	code, out := run("-diff", results, "-o", results, "-stats", stats, "-rate", "50", "-max-duration", "1s", "-state", state)
+	extra := filepath.Join(dir, "extra.txt")
+	code, out := run("-diff", results, "-o", results, "-o", "jsonl:"+extra, "-stats", stats, "-rate", "50", "-max-duration", "1s", "-state", state)
 	if _, err := os.Stat(state); err != nil {
 		t.Fatalf("the stopped run (exit %d) saved no resume state: %v\n%s", code, err, out)
 	}
 	if data, err := os.ReadFile(results); err != nil || string(data) != baseline {
 		t.Fatalf("the stopped run changed its -diff baseline (err %v):\n%s", err, data)
+	}
+	if _, err := os.Stat(extra); err != nil {
+		t.Fatalf("the stopped run did not write its other -o file: %v", err)
 	}
 	for i := 0; ; i++ {
 		if i == 20 {
@@ -475,8 +480,10 @@ func TestE2EResumeDiffOntoOutputFile(t *testing.T) {
 	if got := diffOf(stats); code != wantCode || got != want {
 		t.Errorf("resumed run: exit %d, diff %+v; want exit %d, diff %+v as uninterrupted\n%s", code, got, wantCode, want, out)
 	}
-	if got := names(results); !slices.Equal(got, all) {
-		t.Errorf("-o holds %d names after the resumed run, want all %d", len(got), len(all))
+	for _, path := range []string{results, extra} {
+		if got := names(path); !slices.Equal(got, all) {
+			t.Errorf("-o %s holds %d names after the resumed run, want all %d", path, len(got), len(all))
+		}
 	}
 }
 

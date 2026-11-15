@@ -49,12 +49,15 @@ httpx -silent -l names.txt
 ```
 
 With `-format jsonl`, the same report is the last line of the output, so one
-file holds both:
+file holds both. `-o` can be given more than once, and a format prefix
+(`jsonl:results.jsonl`){% include unreleased.html value="o=format:path" %}
+gives a file its own format, so one run saves bare names for the next tool and
+JSONL with the report (and a future `-diff` baseline):
 
 ```bash
-subenum -silent -format jsonl -o results.jsonl example.com > /dev/null
+subenum -silent -o names.txt -o jsonl:results.jsonl example.com > /dev/null
 tail -n 1 results.jsonl | jq -e '.verdict == "complete"' > /dev/null || exit 1
-jq -r 'select(.type != "summary") | .subdomain' results.jsonl | httpx -silent
+httpx -silent -l names.txt
 ```
 
 ## Takeover candidates first

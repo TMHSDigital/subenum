@@ -23,14 +23,15 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,7 +131,7 @@ type cliFlags struct {
 	testHitRate  int
 	seed         uint64
 	simZone      string // -simulate-zone: lab scenario served by a local DNS server (#76)
-	outputFile   string
+	outputs      outputSpecs
 	attempts     int
 	retries      int
 	force        bool
@@ -229,7 +230,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.IntVar(&f.testHitRate, "hit-rate", scan.DefaultHitRate, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
 	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file via a local DNS server, so no traffic leaves the machine (see the Labs page)")
-	fs.StringVar(&f.outputFile, "o", "", "Write results to file (in addition to stdout)")
+	fs.Var(&f.outputs, "o", "Write results to `file` (in addition to stdout); repeat for several files, each in -format or in the format named as a prefix, format:path (jsonl:results.jsonl)")
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain, 1 = no retry (default 1)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
 	fs.BoolVar(&f.force, "force", false, "Continue scanning even if wildcard DNS is detected")
@@ -492,16 +493,88 @@ func loadTargets(f cliFlags, in *runtimeInputs, domain string, out *output.Write
 	return targets, true
 }
 
-func openOutputFile(path string, testMode bool, format output.Format, out *output.Writer) (*output.Writer, *output.File, bool) {
-	if path == "" {
-		return out, nil, true
+// outputSpecs is the repeatable -o flag (#334). Each -o adds a results file,
+// written in -format or in the format its "format:" prefix names, so one run
+// can save bare names for the next tool and JSONL for the next -diff.
+//
+// A config-file or SUBENUM_O value is a default: it is replaced, not added
+// to, by a later source or by the first -o on the command line.
+type outputSpecs struct {
+	specs   []string
+	replace bool // the current specs are a default; the next Set replaces them
+}
+
+func (o *outputSpecs) String() string {
+	if o == nil {
+		return ""
 	}
-	f, err := output.CreateFile(path)
-	if err != nil {
-		out.Error("creating output file: %v", err)
-		return out, nil, false
+	return strings.Join(o.specs, ",")
+}
+
+// Set adds a file. An empty value adds nothing, so -o "" still means none.
+func (o *outputSpecs) Set(v string) error {
+	if o.replace {
+		o.specs, o.replace = nil, false
 	}
-	return output.New(f.Writer, testMode, format), f, true
+	if v != "" {
+		o.specs = append(o.specs, v)
+	}
+	return nil
+}
+
+// markDefault records that the current specs came from the config file or
+// the environment rather than the command line.
+func (o *outputSpecs) markDefault() { o.replace = true }
+
+// describe names the -o files for notices: the paths, comma-separated.
+func (o *outputSpecs) describe() string {
+	paths := make([]string, len(o.specs))
+	for i, spec := range o.specs {
+		_, paths[i] = splitOutputSpec(spec)
+	}
+	return strings.Join(paths, ", ")
+}
+
+// splitOutputSpec splits an -o value into its format prefix, "" for none,
+// and its path. Only a format name counts as a prefix, so a Windows drive
+// letter (C:\results.txt) is part of the path.
+func splitOutputSpec(spec string) (format, path string) {
+	prefix, rest, ok := strings.Cut(spec, ":")
+	if ok && rest != "" && slices.Contains(append(output.Formats(), "ndjson"), strings.ToLower(prefix)) {
+		return prefix, rest
+	}
+	return "", spec
+}
+
+// outputTarget is one -o file and the format it is written in.
+type outputTarget struct {
+	path   string
+	format output.Format
+}
+
+// parseOutputs resolves the -o values; a file without a prefix takes def,
+// the -format of stdout. The same path given twice is refused: both would
+// replace one file.
+func parseOutputs(specs []string, def output.Format) ([]outputTarget, error) {
+	targets := make([]outputTarget, 0, len(specs))
+	seen := map[string]bool{}
+	for _, spec := range specs {
+		name, path := splitOutputSpec(spec)
+		format := def
+		if name != "" {
+			var err error
+			if format, err = output.ParseFormat(name); err != nil {
+				return nil, err
+			}
+		}
+		key := filepath.Clean(path)
+		if seen[key] {
+			return nil, fmt.Errorf("-o %s is given more than once", path)
+		}
+		seen[key] = true
+		targets = append(targets, outputTarget{path: path, format: format})
+	}
+	return targets, nil
 }
 
 // isTerminal reports whether w is a character device (a terminal) rather than
@@ -542,16 +615,16 @@ func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Wri
 	if !f.testMode {
 		out.Info("DNS Server: %s", f.dnsServer)
 	}
-	if f.outputFile != "" {
-		out.Info("Output file: %s", f.outputFile)
+	if len(f.outputs.specs) > 0 {
+		out.Info("Output file: %s", f.outputs.describe())
 	}
 	out.Info("---")
 }
 
-func logVerboseDone(ev scan.Event, f cliFlags, outWriter *bufio.Writer, out *output.Writer) {
+func logVerboseDone(ev scan.Event, f cliFlags, out *output.Writer) {
 	out.Info("Processed %d subdomain prefixes", ev.Processed)
-	if outWriter != nil {
-		out.Info("Results written to: %s", f.outputFile)
+	if len(f.outputs.specs) > 0 {
+		out.Info("Results written to: %s", f.outputs.describe())
 	}
 	if f.testMode {
 		out.Info("\nNOTE: Results were simulated and no actual DNS queries were performed.")
@@ -768,7 +841,7 @@ func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Even
 			res.resolverAbort = ev.Stats.Aborted
 			logScanBreakdown(p.domain, ev, out)
 			if f.verbose {
-				logVerboseDone(ev, f, s.outWriter, out)
+				logVerboseDone(ev, f, out)
 			}
 		}
 	}

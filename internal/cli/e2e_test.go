@@ -271,6 +271,83 @@ func TestE2EBadSeedsLeavesNoTempFile(t *testing.T) {
 	}
 }
 
+// TestE2EMultipleOutputs covers #334: -o is repeatable, a format prefix gives
+// a file its own format, a file without one takes -format, and every file
+// gets the full results and its own run-quality summary.
+func TestE2EMultipleOutputs(t *testing.T) {
+	t.Parallel()
+	wl := writeFile(t, "wl.txt", e2eWords)
+	dir := t.TempDir()
+	names, table, plain := filepath.Join(dir, "names.txt"), filepath.Join(dir, "results.csv"), filepath.Join(dir, "results.jsonl")
+	code, stdout := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-type", "A", "-format", "jsonl", "-w", wl,
+		"-o", "text:"+names, "-o", "CSV:"+table, "-o", plain, "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	read := func(path string) string {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	words := strings.Fields(e2eWords)
+	got := strings.Split(strings.TrimSpace(read(names)), "\n")
+	if len(got) != len(words)+1 || !strings.HasPrefix(got[0], "# SIMULATED") {
+		t.Fatalf("text file has %d lines, want the header and %d names:\n%s", len(got), len(words), read(names))
+	}
+	for _, line := range got[1:] {
+		if !strings.HasSuffix(line, ".example.com") || strings.ContainsAny(line, " {,") {
+			t.Fatalf("text file line %q is not a bare name", line)
+		}
+	}
+	rows := strings.Split(strings.TrimSpace(read(table)), "\n")
+	if len(rows) != len(words)+1 || !strings.HasPrefix(rows[0], "subdomain,type,value,simulated") || !strings.HasSuffix(rows[0], ",sources") {
+		t.Fatalf("CSV file has %d lines, want a header with sources and %d rows:\n%s", len(rows), len(words), read(table))
+	}
+	// The unprefixed file and stdout both use -format jsonl and end with the
+	// summary.
+	for what, data := range map[string]string{"unprefixed -o file": read(plain), "stdout": stdout} {
+		results, _ := jsonlRecords(t, data)
+		lines := strings.Split(strings.TrimSpace(data), "\n")
+		if len(results) != len(words) || !strings.Contains(lines[len(lines)-1], `"type":"summary"`) {
+			t.Errorf("%s: %d results, want %d and a closing summary:\n%s", what, len(results), len(words), data)
+		}
+	}
+
+	// The same file twice is a usage error, before anything is written.
+	if code, _ := runCLI(t, "", "-simulate", "-progress=false", "-w", wl, "-o", names, "-o", "jsonl:"+names, "example.com"); code != 2 {
+		t.Fatalf("-o given twice for one file: exit %d, want 2", code)
+	}
+	// A file that cannot be created fails the run without leaving the
+	// temporary file of one opened before it.
+	empty := t.TempDir()
+	if code, _ := runCLI(t, "", "-simulate", "-progress=false", "-w", wl, "-o", filepath.Join(empty, "a.txt"), "-o", empty, "example.com"); code != 1 {
+		t.Fatalf("unwritable second -o: exit %d, want 1", code)
+	}
+	if left, _ := os.ReadDir(empty); len(left) != 0 {
+		t.Fatalf("files left behind: %v", left)
+	}
+}
+
+// TestSplitOutputSpec: only a format name is a prefix, so a drive letter or
+// a colon elsewhere stays in the path (#334).
+func TestSplitOutputSpec(t *testing.T) {
+	for _, tc := range []struct{ spec, format, path string }{
+		{"names.txt", "", "names.txt"},
+		{"jsonl:results.jsonl", "jsonl", "results.jsonl"},
+		{"NDJSON:r", "NDJSON", "r"},
+		{`C:\out\names.txt`, "", `C:\out\names.txt`},
+		{"json:", "", "json:"},
+		{"html:page", "", "html:page"},
+	} {
+		if format, path := splitOutputSpec(tc.spec); format != tc.format || path != tc.path {
+			t.Errorf("splitOutputSpec(%q) = %q, %q; want %q, %q", tc.spec, format, path, tc.format, tc.path)
+		}
+	}
+}
+
 // runCLIMerged is runCLI with stdout and stderr sharing one stream, like
 // `subenum ... 2>&1 | tee log`.
 func runCLIMerged(t *testing.T, args ...string) (int, string) {

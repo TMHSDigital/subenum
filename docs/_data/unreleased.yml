@@ -25,6 +25,7 @@ values:
   - type=NS
   - type=MX
   - type=TXT
+  - o=format:path
 # action.yml inputs and outputs
 action:
   - max-duration

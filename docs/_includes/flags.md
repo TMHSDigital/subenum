@@ -22,7 +22,7 @@
 | `-max-duration <duration>` {% include unreleased.html flag="max-duration" %} | 0s | Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report, a degraded verdict and saved state for -resume to continue from |
 | `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt |
 | `-no-abort` | - | Do not abort when the resolver failure rate exceeds 20% (warning is still emitted) |
-| `-o <string>` | - | Write results to file (in addition to stdout) |
+| `-o <file>` | - | Write results to file (in addition to stdout); repeat for several files, each in -format or in the format named as a prefix, format:path (jsonl:results.jsonl) format:path: {% include unreleased.html value="o=format:path" %} |
 | `-permute` | - | After each scan, scan permutations of the names found (api -&gt; api-dev, dev-api, dev.api, api2, ...) |
 | `-print-config` | - | Print every setting's effective value and its source (flag, env, config or default), then exit |
 | `-progress` | true | Show progress during scanning |

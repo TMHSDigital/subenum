@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -334,6 +335,28 @@ func TestLoadExcludes(t *testing.T) {
 	}
 }
 
+// TestOutputDefaultReplaced: a SUBENUM_O or config-file -o is a default that
+// the command line's -o files replace, not add to (#334).
+func TestOutputDefaultReplaced(t *testing.T) {
+	env := map[string]string{"SUBENUM_O": "default.txt"}
+	d := &defaultsLoader{path: filepath.Join(t.TempDir(), "none.json"), getenv: func(k string) string { return env[k] }}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{nil, []string{"default.txt"}},
+		{[]string{"-o", "a.txt", "-o", "csv:b.csv"}, []string{"a.txt", "csv:b.csv"}},
+	} {
+		f, _, _, err := parseFlagsWith(append(tc.args, "example.com"), d.apply, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(f.outputs.specs, tc.want) {
+			t.Errorf("%v: -o = %v, want %v", tc.args, f.outputs.specs, tc.want)
+		}
+	}
+}
+
 // TestTUIOptionsFromFlags covers #195: flags given with -tui pre-fill the
 // form over SUBENUM_* values, the domain argument fills the Domain field, and
 // what the form cannot take is named in a warning.
@@ -360,6 +383,15 @@ func TestTUIOptionsFromFlags(t *testing.T) {
 		if !strings.Contains(stderr.String(), w) {
 			t.Errorf("stderr lacks %q:\n%s", w, stderr.String())
 		}
+	}
+
+	// The form has one output file: the first -o, its format prefix filling
+	// the Format field (#334).
+	f, pos, fs, _ = parseFlagsWith([]string{"-tui", "-o", "jsonl:r.jsonl", "-o", "names.txt"}, d.apply, nil)
+	stderr.Reset()
+	opts = tuiOptions(f, fs, pos, d, diag)
+	if opts.Settings["o"] != "r.jsonl" || opts.Settings["format"] != "jsonl" || !strings.Contains(stderr.String(), "one output file; using r.jsonl") {
+		t.Errorf("two -o: Settings %v, stderr %q", opts.Settings, stderr.String())
 	}
 
 	// A bare -tui warns about nothing.
