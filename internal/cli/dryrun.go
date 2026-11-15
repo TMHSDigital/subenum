@@ -44,11 +44,12 @@ func (s *session) dryRun() int {
 	defer dns.CloseIdleConnections(resolver)
 	plans := make([]dryRunTarget, 0, len(s.targets))
 	failed := false
+	excluded := scan.Excluder(s.in.excludes)
 	for _, target := range s.targets {
 		entries, duplicates, skipped := s.words.For(target)
 		p := dryRunTarget{Domain: target, Duplicates: duplicates, Skipped: skipped, PreflightOK: true}
 		for _, e := range entries {
-			if len(s.in.excludes) > 0 && scan.IsExcluded(s.in.excludes, e+"."+target) {
+			if len(s.in.excludes) > 0 && excluded(e+"."+target) {
 				p.Excluded++
 				continue
 			}

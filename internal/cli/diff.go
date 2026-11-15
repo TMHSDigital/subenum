@@ -291,8 +291,9 @@ func (d *differ) missingNames(targets, exclude []string) []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var out []string
+	excluded := scan.Excluder(exclude)
 	for name := range d.previous {
-		if _, ok := d.current[name]; ok || scan.IsExcluded(exclude, name) {
+		if _, ok := d.current[name]; ok || excluded(name) {
 			continue
 		}
 		for _, t := range targets {

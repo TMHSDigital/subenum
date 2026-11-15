@@ -29,6 +29,14 @@ func TestScopeMatching(t *testing.T) {
 	if (*scope)(nil).excluded("x.example.com") {
 		t.Error("nil scope excluded a name")
 	}
+	// Excluder applies the same rules, from patterns parsed once (#349).
+	excluded := Excluder([]string{"VPN.example.com.", "*.dev.example.com"})
+	if !excluded("vpn.example.com") || !excluded("api.dev.example.com") || excluded("dev.example.com") {
+		t.Error("Excluder does not match the scope's rules")
+	}
+	if Excluder(nil)("www.example.com") {
+		t.Error("Excluder with no patterns excluded a name")
+	}
 	if err := ValidateExcludes([]string{"*.ok.example.com", "bad pattern"}); err == nil || !strings.Contains(err.Error(), "bad pattern") {
 		t.Errorf("ValidateExcludes accepted an invalid pattern: %v", err)
 	}

@@ -383,8 +383,9 @@ func nextOffset(cfg subenum.Config, stats subenum.Stats, offset int) int {
 		return 0
 	}
 	tested := 0
+	excluded := scan.Excluder(cfg.Exclude)
 	for i, word := range cfg.Words {
-		if scan.IsExcluded(cfg.Exclude, word+"."+cfg.Domain) {
+		if excluded(word + "." + cfg.Domain) {
 			continue
 		}
 		if tested == cfg.MaxQueries {
