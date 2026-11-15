@@ -121,8 +121,29 @@ jobs:
 | `version` | `latest` | Release to install, or `source` to build the action's checkout |
 | `token` | `github.token` | Token for downloading the release and the baseline artifact |
 
-Outputs: `verdict`, `found`, `added`, `removed`, `changed`{% include unreleased.html action="changed" %} (with `-diff-records`), and the paths `results` (JSONL)
-and `stats` (the run-quality report). The step below builds the same thing by
+Outputs: `verdict`, `found`, `added`, `removed`, `changed`{% include unreleased.html action="changed" %} (with `-diff-records`),
+`takeovers`{% include unreleased.html action="takeovers" %} (takeover candidates among the names found; needs `CNAME` or `NS` in `-type`),
+`internal`{% include unreleased.html action="internal" %} (names answering with an address that is not public), and the paths `results` (JSONL),
+`stats` (the run-quality report) and `changes`{% include unreleased.html action="changes" %} (JSONL, one line per added, removed or
+changed name with a `change` field; empty when there were no previous results to
+diff against). The job summary lists the takeover candidates under the table.
+
+To open an issue with the new names, add a step after the action (the job
+then also needs `issues: write`):
+
+{% raw %}
+```yaml
+      - if: steps.subenum.outputs.added != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGES: ${{ steps.subenum.outputs.changes }}
+        run: |
+          jq -r 'select(.change == "added") | "- \(.subdomain)"' "$CHANGES" > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "New subdomains ($(date -u +%F))" --body-file body.md
+```
+{% endraw %}
+
+The step below builds the same thing by
 hand, if you prefer to see every command.
 
 ## Example: a scheduled GitHub Actions workflow

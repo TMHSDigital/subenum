@@ -28,6 +28,9 @@ values:
 action:
   - max-duration
   - changed
+  - changes
+  - takeovers
+  - internal
 # pkg/subenum identifiers
 library:
   - AutoRate

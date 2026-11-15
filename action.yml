@@ -74,6 +74,18 @@ outputs:
   changed:
     description: Names whose records changed since the previous results (add -diff-records to args).
     value: ${{ steps.scan.outputs.changed }}
+  changes:
+    description: >-
+      Path of the changes (JSONL): one line per added, removed or changed name
+      with a "change" field, then the run summary. Empty when there were no
+      previous results to diff against.
+    value: ${{ steps.scan.outputs.changes }}
+  takeovers:
+    description: Takeover candidates among the names found (needs CNAME or NS in -type).
+    value: ${{ steps.scan.outputs.takeovers }}
+  internal:
+    description: Names found that answer with an address that is not public.
+    value: ${{ steps.scan.outputs.internal }}
   results:
     description: Path of the full results (JSONL).
     value: ${{ steps.scan.outputs.results }}
@@ -185,9 +197,14 @@ runs:
         added=$(jq '.diff.added // 0' "$out/run.json")
         removed=$(jq '.diff.removed // 0' "$out/run.json")
         changed=$(jq '.diff.changed // 0' "$out/run.json")
+        takeovers=$(jq '[.targets[].takeover_candidates // 0] | add // 0' "$out/run.json")
+        internal=$(jq '[.targets[].internal_addresses // 0] | add // 0' "$out/run.json")
         {
           echo "verdict=$verdict"; echo "found=$found"; echo "added=$added"; echo "removed=$removed"; echo "changed=$changed"
+          echo "takeovers=$takeovers"; echo "internal=$internal"
           echo "results=$out/results.jsonl"; echo "stats=$out/run.json"
+          # Without -diff the scan prints every result, not changes.
+          if [ -n "$prev" ]; then echo "changes=$out/changes.jsonl"; fi
         } >> "$GITHUB_OUTPUT"
 
         {
@@ -195,9 +212,14 @@ runs:
           echo
           echo "$reason"
           echo
-          echo "| Target | Verdict | Found | Queries |"
-          echo "|---|---|---|---|"
-          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \(.found // 0) | \(.queries_sent // 0) |"' "$out/run.json"
+          echo "| Target | Verdict | Found | Queries | Takeover candidates | Internal addresses |"
+          echo "|---|---|---|---|---|---|"
+          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \(.found // 0) | \(.queries_sent // 0) | \(.takeover_candidates // 0) | \(.internal_addresses // 0) |"' "$out/run.json"
+          if [ "$takeovers" != 0 ]; then
+            echo
+            echo "**Takeover candidates:** $takeovers"
+            jq -r 'select(.takeover_candidate) | "- `\(.subdomain)`: \(.takeover_candidate)"' "$out/results.jsonl" | head -50
+          fi
           if [ -n "$prev" ]; then
             echo
             echo "**Changes since the previous results:** $added added, $removed removed, $changed changed."
