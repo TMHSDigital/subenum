@@ -502,11 +502,60 @@ func TestTypeAndFormatListsAgree(t *testing.T) {
 			Enum []string `json:"enum"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal(recordTypeSchema, &schema); err != nil {
+	raw, err := json.Marshal(recordTypeSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(schema.Items.Enum, dns.Types()) {
 		t.Errorf("MCP types enum %v, want %v", schema.Items.Enum, dns.Types())
+	}
+}
+
+// TestMCPInputSchemaQuoting checks that the tools' input schemas are encoded,
+// not spliced together: a value holding a quote, backslash or newline stays
+// inside its string, and the properties keep the order they were written in.
+func TestMCPInputSchemaQuoting(t *testing.T) {
+	hostile := `a.example", "injected": {"x": "\` + "\n"
+	cfg := mcpConfig{maxQueries: 10, allow: []string{hostile}, sources: []string{hostile}}
+	raw := scanTool(cfg).InputSchema
+	var schema struct {
+		Type       string `json:"type"`
+		Properties map[string]struct {
+			Description string `json:"description"`
+			Items       struct {
+				Enum []string `json:"enum"`
+			} `json:"items"`
+		} `json:"properties"`
+		Required             []string `json:"required"`
+		AdditionalProperties *bool    `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("scan inputSchema is not JSON: %v\n%s", err, raw)
+	}
+	if _, ok := schema.Properties["injected"]; ok {
+		t.Error("a quoted value added a property to the schema")
+	}
+	if want := "Domain to enumerate: one of " + hostile + ", or a subdomain of one."; schema.Properties["domain"].Description != want {
+		t.Errorf("domain description = %q, want %q", schema.Properties["domain"].Description, want)
+	}
+	if got := schema.Properties["sources"].Items.Enum; !slices.Equal(got, []string{hostile}) {
+		t.Errorf("sources enum = %q, want the value unchanged", got)
+	}
+	if schema.Type != "object" || !slices.Equal(schema.Required, []string{"domain"}) ||
+		schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+		t.Errorf("scan schema envelope = %s", raw)
+	}
+	order := []string{`"domain"`, `"words"`, `"types"`, `"max_queries"`, `"sources"`, `"retry_inconclusive"`, `"auto_rate"`, `"exclude"`, `"depth"`}
+	at := 0
+	for _, name := range order {
+		i := strings.Index(string(raw[at:]), name+":")
+		if i < 0 {
+			t.Fatalf("property %s missing or out of order in %s", name, raw)
+		}
+		at += i
 	}
 }
 

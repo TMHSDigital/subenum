@@ -305,14 +305,67 @@ const (
 	maxMCPExclude = 1000
 )
 
+// schemaField is one key of a JSON object whose keys keep the order written.
+type schemaField struct {
+	key string
+	val any
+}
+
+// schemaObject is a JSON object with ordered keys, for the tools' input
+// schemas. Every key and value goes through encoding/json and the only bytes
+// written by hand are braces, colons and commas, so no name, description or
+// enum entry can break out of its string, whatever it contains.
+type schemaObject []schemaField
+
+// MarshalJSON writes the fields in order.
+func (o schemaObject) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, f := range o {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		key, err := json.Marshal(f.key)
+		if err != nil {
+			return nil, err
+		}
+		val, err := json.Marshal(f.val)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(key)
+		b.WriteByte(':')
+		b.Write(val)
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// inputSchema is the JSON Schema of a tool's arguments: an object with these
+// properties and no others.
+func inputSchema(props schemaObject, required ...string) json.RawMessage {
+	schema := schemaObject{{"type", "object"}, {"properties", props}}
+	if len(required) > 0 {
+		schema = append(schema, schemaField{"required", required})
+	}
+	schema = append(schema, schemaField{"additionalProperties", false})
+	raw, _ := json.Marshal(schema) // strings, numbers and booleans only: cannot fail
+	return raw
+}
+
+// wordsSchema is the words argument, with the tool's own description.
+func wordsSchema(description string) map[string]any {
+	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": maxMCPWords, "description": description}
+}
+
 // remediationProps are the scan settings an agent can change after a verdict
 // that is not complete (#269). None can raise the operator's caps.
-var remediationProps = fmt.Sprintf(`,
-    "retry_inconclusive": {"type": "boolean", "description": "At the end, look up once more every name that timed out, was refused or failed; an answer replaces the first outcome. Use it when failures degraded the verdict."},
-    "auto_rate": {"type": "boolean", "description": "Halve the query rate while many lookups fail and raise it again once they succeed, never above the starting rate, instead of giving up."},
-    "exclude": {"type": "array", "items": {"type": "string"}, "maxItems": %d, "description": "Names out of scope that are never queried: one name (mail.example.com) or a branch (*.corp.example.com)."},
-    "depth": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Enumerate the words again under every name found, down to this many levels; default 1, no recursion. Every level stays within max_queries."}`,
-	maxMCPExclude, maxMCPDepth)
+var remediationProps = schemaObject{
+	{"retry_inconclusive", map[string]any{"type": "boolean", "description": "At the end, look up once more every name that timed out, was refused or failed; an answer replaces the first outcome. Use it when failures degraded the verdict."}},
+	{"auto_rate", map[string]any{"type": "boolean", "description": "Halve the query rate while many lookups fail and raise it again once they succeed, never above the starting rate, instead of giving up."}},
+	{"exclude", map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": maxMCPExclude, "description": "Names out of scope that are never queried: one name (mail.example.com) or a branch (*.corp.example.com)."}},
+	{"depth", map[string]any{"type": "integer", "minimum": 1, "maximum": maxMCPDepth, "description": "Enumerate the words again under every name found, down to this many levels; default 1, no recursion. Every level stays within max_queries."}},
+}
 
 // remediation holds the remediationProps arguments.
 type remediation struct {
@@ -338,32 +391,27 @@ func (r remediation) apply(cfg *subenum.Config) error {
 }
 
 // recordTypeSchema offers every type -type accepts (#264).
-var recordTypeSchema = func() json.RawMessage {
-	enum, _ := json.Marshal(dns.Types())
-	return json.RawMessage(`{"type": "array", "items": {"enum": ` + string(enum) + `}, "description": "Record types to look up; default A and AAAA. CNAME and NS add takeover hints."}`)
-}()
+var recordTypeSchema = map[string]any{
+	"type":        "array",
+	"items":       map[string]any{"enum": dns.Types()},
+	"description": "Record types to look up; default A and AAAA. CNAME and NS add takeover hints.",
+}
 
 func labScanTool(cfg mcpConfig) mcp.Tool {
-	scenarios, _ := json.Marshal(labScenarios())
-	scenarioDesc, _ := json.Marshal(fmt.Sprintf("Lab scenario to scan; default lab1-first-scan. Each is a fictional zone for %s served on this machine.%s",
-		labDomain, labScenarioGuide()))
-	schema := fmt.Sprintf(`{
-  "type": "object",
-  "properties": {
-    "scenario": {"enum": %s, "description": %s},
-    "words": {"type": "array", "items": {"type": "string"}, "maxItems": %d, "description": "Subdomain labels to try; default the labs' short wordlist."},
-    "types": %s,
-    "rate": {"type": "integer", "minimum": 0, "maximum": 1000, "description": "Queries per second; 0 or absent is unlimited. Lab traffic stays on this machine."},
-    "max_queries": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Most names to test."},
-    "force": {"type": "boolean", "description": "Scan a wildcard zone anyway, filtering answers that match the wildcard."}%s
-  },
-  "additionalProperties": false
-}`, scenarios, scenarioDesc, maxMCPWords, recordTypeSchema, cfg.maxQueries, remediationProps)
+	schema := inputSchema(append(schemaObject{
+		{"scenario", map[string]any{"enum": labScenarios(), "description": fmt.Sprintf("Lab scenario to scan; default lab1-first-scan. Each is a fictional zone for %s served on this machine.%s",
+			labDomain, labScenarioGuide())}},
+		{"words", wordsSchema("Subdomain labels to try; default the labs' short wordlist.")},
+		{"types", recordTypeSchema},
+		{"rate", map[string]any{"type": "integer", "minimum": 0, "maximum": 1000, "description": "Queries per second; 0 or absent is unlimited. Lab traffic stays on this machine."}},
+		{"max_queries", map[string]any{"type": "integer", "minimum": 1, "maximum": cfg.maxQueries, "description": "Most names to test."}},
+		{"force", map[string]any{"type": "boolean", "description": "Scan a wildcard zone anyway, filtering answers that match the wildcard."}},
+	}, remediationProps...))
 	return mcp.Tool{
 		Name:         "lab_scan",
 		Title:        "Scan a lab zone",
 		Description:  fmt.Sprintf("Enumerate subdomains of %s in one of subenum's lab scenarios: fictional zones answered by a DNS server on this machine, so no traffic leaves it. Safe for practice and for learning how wildcards, rate limits and failing resolvers change a scan's verdict.", labDomain),
-		InputSchema:  json.RawMessage(schema),
+		InputSchema:  schema,
 		OutputSchema: mcpReportSchema,
 		Annotations:  mcp.Annotations{ReadOnlyHint: true},
 		Call: func(ctx context.Context, raw json.RawMessage) mcp.Result {
@@ -426,30 +474,23 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 }
 
 func scanTool(cfg mcpConfig) mcp.Tool {
-	sourcesProp := ""
-	if len(cfg.sources) > 0 {
-		enum, _ := json.Marshal(cfg.sources)
-		sourcesProp = fmt.Sprintf(`,
-    "sources": {"type": "array", "items": {"enum": %s}, "description": "Passive sources to seed candidates from before the scan; default none. Their names are added to words after dedupe, count against max_queries, and are each verified by a lookup. One HTTPS request per source."}`, enum)
+	props := schemaObject{
+		{"domain", map[string]any{"type": "string", "description": fmt.Sprintf("Domain to enumerate: one of %s, or a subdomain of one.", strings.Join(cfg.allow, ", "))}},
+		{"words", wordsSchema("Subdomain labels to try; default subenum's bundled list of the most common ones.")},
+		{"types", recordTypeSchema},
+		{"max_queries", map[string]any{"type": "integer", "minimum": 1, "maximum": cfg.maxQueries, "description": fmt.Sprintf("Most names to test; default and ceiling %d.", cfg.maxQueries)}},
 	}
-	schema := fmt.Sprintf(`{
-  "type": "object",
-  "properties": {
-    "domain": {"type": "string", "description": "Domain to enumerate: one of %s, or a subdomain of one."},
-    "words": {"type": "array", "items": {"type": "string"}, "maxItems": %d, "description": "Subdomain labels to try; default subenum's bundled list of the most common ones."},
-    "types": %s,
-    "max_queries": {"type": "integer", "minimum": 1, "maximum": %d, "description": "Most names to test; default and ceiling %d."}%s%s
-  },
-  "required": ["domain"],
-  "additionalProperties": false
-}`, strings.Join(cfg.allow, ", "), maxMCPWords, recordTypeSchema, cfg.maxQueries, cfg.maxQueries, sourcesProp, remediationProps)
+	if len(cfg.sources) > 0 {
+		props = append(props, schemaField{"sources", map[string]any{"type": "array", "items": map[string]any{"enum": cfg.sources}, "description": "Passive sources to seed candidates from before the scan; default none. Their names are added to words after dedupe, count against max_queries, and are each verified by a lookup. One HTTPS request per source."}})
+	}
+	schema := inputSchema(append(props, remediationProps...), "domain")
 	var calls atomic.Int64 // scan calls this session has made
 	return mcp.Tool{
 		Name:  "scan",
 		Title: "Enumerate subdomains",
 		Description: fmt.Sprintf("Enumerate subdomains of a real domain by DNS, through the operator's resolver at %d queries per second, testing at most %d names in %s. Only domains the operator allowed can be scanned: %s.",
 			cfg.rate, cfg.maxQueries, cfg.maxDuration, strings.Join(cfg.allow, ", ")),
-		InputSchema:  json.RawMessage(schema),
+		InputSchema:  schema,
 		OutputSchema: mcpReportSchema,
 		Annotations:  mcp.Annotations{ReadOnlyHint: true, OpenWorldHint: true},
 		Call: func(ctx context.Context, raw json.RawMessage) mcp.Result {
