@@ -706,6 +706,7 @@ type targetResult struct {
 	permutation   *permutationResult
 	sources       []targetSource // -ct and -sources names, kept for the report and resume state
 	axfr          targetAXFR     // -axfr zone transfer, kept for the report and resume state
+	foundBy       map[string]int // results per source that proposed them, for the report (#273)
 }
 
 // unfinished reports whether the pass stopped with candidates untested, on

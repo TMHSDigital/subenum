@@ -100,6 +100,8 @@ type TargetSummary struct {
 	AXFRAllowed []string `json:"axfr_allowed,omitempty"`
 	AXFRNames   int      `json:"axfr_names,omitempty"`
 	AXFRError   string   `json:"axfr_error,omitempty"`
+	// AXFRFound counts the results a zone transfer had proposed (#273).
+	AXFRFound int `json:"axfr_found,omitempty"`
 	// ZoneDenial is how the zone proves a name does not exist, from -axfr's
 	// DNSSEC probe: "nsec" (walkable: every name can be listed), "nsec3" or
 	// "none" (unsigned) (#234).
@@ -117,6 +119,7 @@ type TargetSummary struct {
 type SourceSummary struct {
 	Name  string `json:"name"`            // -sources name: ct, wayback
 	Names int    `json:"names"`           // names it added as candidates and seeds
+	Found int    `json:"found"`           // results it had proposed, whoever else did too (#273)
 	Error string `json:"error,omitempty"` // why the lookup failed; the scan went on without it
 	// Truncated reports that the source stopped at one of its limits: its
 	// names were used, but some hosts may be missing (#272).

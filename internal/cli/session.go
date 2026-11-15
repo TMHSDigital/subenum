@@ -51,6 +51,8 @@ type session struct {
 
 	targetResults resultLog       // the current target's results: -permute seeds, saved on interrupt
 	takeovers     []output.Result // every target's takeover candidates, for -sarif
+	cands         *candidates     // the current target's candidates: what proposed each name (#273)
+	foundBy       map[string]int  // the current target's results per source (#273)
 	restored      map[string]bool // names re-emitted from a -resume state
 	refound       int             // restored names a resumed pass found again (#156)
 
@@ -462,6 +464,7 @@ func (s *session) openOutputs() bool {
 		w.SetShowRecords(f.showRecords)
 		w.SetSeed(f.seed)
 		w.SetTakeoverColumn(dns.HintsTakeover(s.in.recordTypes))
+		w.SetSourcesColumn(true)
 	}
 	return true
 }
@@ -541,7 +544,13 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 		s.refound++
 		return
 	}
-	res := output.Result{Result: ev.Result, Permutation: permutation}
+	res := output.Result{Result: ev.Result, Permutation: permutation, Sources: fromPermute}
+	if !permutation {
+		res.Sources = s.cands.sourcesOf(res.Subdomain)
+	}
+	for _, src := range res.Sources {
+		s.foundBy[src]++
+	}
 	s.targetResults.add(res)
 	if res.Takeover != "" {
 		s.takeovers = append(s.takeovers, res)
@@ -633,9 +642,10 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	// like a wordlist entry (#130, #193). One set of the entries serves
 	// every source and the zone transfer (#248).
 	cands := &candidates{target: target, entries: entries, seeds: s.seeds}
+	s.cands, s.foundBy = cands, map[string]int{}
 	sourceInfo := passiveNames(ctx, s.in.sources, target, saved, out, s.a.sourceURLs)
 	for _, src := range sourceInfo {
-		added := cands.add(src.names)
+		added := cands.add(src.source, src.names)
 		if src.fetched {
 			out.Info("%s: %d names under %s, %d of them new candidates", passive.Labels[src.source], len(src.names), target, added)
 		}
@@ -645,7 +655,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		// Transferred names are candidates like -ct's: each is still looked
 		// up, so only names that resolve are reported (#85).
 		axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, out)
-		added := cands.add(axfrInfo.names)
+		added := cands.add(sourceAXFR, axfrInfo.names)
 		if len(axfrInfo.allowed) > 0 {
 			out.Info("Zone transfer: %d names under %s, %d of them new candidates", len(axfrInfo.names), target, added)
 		}
@@ -691,6 +701,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	}
 	res.sources = sourceInfo
 	res.axfr = axfrInfo
+	res.foundBy = s.foundBy
 	return s.recordTarget(i, res)
 }
 

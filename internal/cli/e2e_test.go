@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -675,19 +676,28 @@ func TestE2EPermute(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	results := map[string]bool{} // name -> permutation
+	results := map[string]bool{}     // name -> permutation
+	sources := map[string][]string{} // name -> sources (#273)
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		var r struct {
-			Type        string `json:"type"`
-			Subdomain   string `json:"subdomain"`
-			Permutation bool   `json:"permutation"`
+			Type        string   `json:"type"`
+			Subdomain   string   `json:"subdomain"`
+			Permutation bool     `json:"permutation"`
+			Sources     []string `json:"sources"`
 		}
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			t.Fatalf("bad line %q: %v", line, err)
 		}
 		if r.Type != "summary" {
 			results[r.Subdomain] = r.Permutation
+			sources[r.Subdomain] = r.Sources
 		}
+	}
+	if got := sources["api-dev.example.com"]; !slices.Equal(got, []string{"permute"}) {
+		t.Errorf("api-dev.example.com sources = %v, want permute", got)
+	}
+	if got := sources["api.example.com"]; !slices.Equal(got, []string{"wordlist"}) {
+		t.Errorf("api.example.com sources = %v, want wordlist", got)
 	}
 	perm, ok := results["api-dev.example.com"]
 	if !ok || !perm {

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/csv"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -116,11 +118,53 @@ func TestE2EPassiveSources(t *testing.T) {
 		t.Fatalf("exit %d, results %q: want the CT and the Wayback name", code, out)
 	}
 	tg := report()
-	if len(tg.Sources) != 2 || tg.Sources[0] != (output.SourceSummary{Name: "ct", Names: 1}) || tg.Sources[1] != (output.SourceSummary{Name: "wayback", Names: 2}) {
-		t.Errorf("report sources = %+v, want ct 1 and wayback 2", tg.Sources)
+	if len(tg.Sources) != 2 || tg.Sources[0] != (output.SourceSummary{Name: "ct", Names: 1, Found: 1}) || tg.Sources[1] != (output.SourceSummary{Name: "wayback", Names: 2, Found: 2}) {
+		t.Errorf("report sources = %+v, want ct 1 (1 found) and wayback 2 (2 found)", tg.Sources)
 	}
 	if tg.CTNames != 1 {
 		t.Errorf("ct_names = %d, want 1 (the ct entry, for compatibility)", tg.CTNames)
+	}
+
+	// #273: each result names every source that proposed it, in JSONL and in
+	// a CSV column.
+	want := map[string]string{
+		"www.example.com":            "wordlist;wayback",
+		"legacy-billing.example.com": "ct",
+		"old-shop.example.com":       "wayback",
+	}
+	sourceArgs := runArgs{sourceURLs: map[string]string{"ct": ctUp.URL + "/", "wayback": wayback.URL}}
+	scanArgs := []string{"-sources", "ct,wayback", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.com"}
+	sourceArgs.args = append([]string{"-format", "jsonl"}, scanArgs...)
+	code, out = runCLIWith(t, sourceArgs)
+	got := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var r struct {
+			Type      string   `json:"type"`
+			Subdomain string   `json:"subdomain"`
+			Sources   []string `json:"sources"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("bad line %q: %v", line, err)
+		}
+		if r.Type != "summary" {
+			got[r.Subdomain] = strings.Join(r.Sources, ";")
+		}
+	}
+	if code != 0 || !maps.Equal(got, want) {
+		t.Errorf("jsonl: exit %d, sources = %v, want %v", code, got, want)
+	}
+	sourceArgs.args = append([]string{"-format", "csv"}, scanArgs...)
+	code, out = runCLIWith(t, sourceArgs)
+	rows, err := csv.NewReader(strings.NewReader(out)).ReadAll()
+	if err != nil || len(rows) == 0 || !slices.Equal(rows[0], []string{"subdomain", "type", "value", "sources"}) {
+		t.Fatalf("csv: exit %d, err %v, rows %q; want a sources column", code, err, rows)
+	}
+	got = map[string]string{}
+	for _, row := range rows[1:] {
+		got[row[0]] = row[3]
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("csv: sources = %v, want %v", got, want)
 	}
 
 	code, out = runCLIWith(t, runArgs{sourceURLs: map[string]string{"ct": ctUp.URL + "/", "wayback": down.URL},
@@ -143,14 +187,30 @@ func TestE2EPassiveSources(t *testing.T) {
 func TestCandidates(t *testing.T) {
 	shared := map[string]struct{}{"seed.example.com": {}}
 	c := &candidates{target: "example.com", entries: []string{"www", "mail"}, seeds: shared}
-	if n := c.add(nil); n != 0 || len(c.seeds) != 1 {
+	if n := c.add("ct", nil); n != 0 || len(c.seeds) != 1 {
 		t.Fatalf("no names: added %d, seeds %v", n, c.seeds)
 	}
-	if n := c.add([]string{"api", "www", "bad name!"}); n != 1 {
+	if got := c.sourcesOf("www.example.com"); !slices.Equal(got, []string{"wordlist"}) {
+		t.Errorf("no source names: sources = %v, want wordlist", got)
+	}
+	if n := c.add("wayback", []string{"api", "www", "bad name!"}); n != 1 {
 		t.Errorf("first source added %d, want 1 (api)", n)
 	}
-	if n := c.add([]string{"api", "old", "OLD"}); n != 1 {
+	if n := c.add("axfr", []string{"api", "old", "OLD"}); n != 1 {
 		t.Errorf("second source added %d, want 1 (old)", n)
+	}
+	// #273: every source that proposed a name, the wordlist first; a name no
+	// source gave (an entry, or a -recursive child) is the wordlist's.
+	for name, want := range map[string][]string{
+		"www.example.com":      {"wordlist", "wayback"},
+		"mail.example.com":     {"wordlist"},
+		"api.example.com":      {"wayback", "axfr"},
+		"old.example.com":      {"axfr"},
+		"mail.api.example.com": {"wordlist"},
+	} {
+		if got := c.sourcesOf(name); !slices.Equal(got, want) {
+			t.Errorf("sources of %s = %v, want %v", name, got, want)
+		}
 	}
 	if want := []string{"www", "mail", "api", "old"}; !slices.Equal(c.entries, want) {
 		t.Errorf("entries = %v, want %v", c.entries, want)

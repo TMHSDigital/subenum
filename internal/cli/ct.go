@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // targetSource is one passive source's lookup for a target (#130, #193).
@@ -107,12 +109,31 @@ type candidates struct {
 	seeds   map[string]struct{} // -seeds names plus every added name, full
 	have    map[string]bool     // entries, once a source has names
 	owned   bool                // seeds is this target's copy, not the shared -seeds map
+
+	// Provenance (#273): from has every name a source proposed, as a bit per
+	// label of who had it (bit 0 is the wordlist). Names missing from it are
+	// the wordlist's alone, so a scan without sources keeps no map.
+	labels []string
+	from   map[string]uint8
+	lists  map[uint8][]string // the labels of each bit set in use, shared by its results
 }
 
-// add appends the names that are not already entries, after them, so the
-// wordlist's own resume positions stay put, and returns how many were new.
-// Names too long for the target are dropped by wordlist.Build.
-func (c *candidates) add(names []string) int {
+// Result sources that are not a passive source's -sources name (#273).
+const (
+	sourceWordlist = "wordlist"
+	sourceAXFR     = "axfr"
+	sourcePermute  = "permute"
+)
+
+var (
+	fromWordlist = []string{sourceWordlist}
+	fromPermute  = []string{sourcePermute}
+)
+
+// add appends source's names that are not already entries, after them, so
+// the wordlist's own resume positions stay put, and returns how many were
+// new. Names too long for the target are dropped by wordlist.Build.
+func (c *candidates) add(source string, names []string) int {
 	if len(names) == 0 {
 		return 0
 	}
@@ -121,6 +142,19 @@ func (c *candidates) add(names []string) int {
 		for _, e := range c.entries {
 			c.have[e] = true
 		}
+		c.labels, c.from = []string{sourceWordlist}, map[string]uint8{}
+	}
+	// Before the merge, while have still tells a wordlist entry from a name
+	// only an earlier source had (those are in from).
+	bit := uint8(1) << len(c.labels)
+	c.labels = append(c.labels, source)
+	proposed, _, _ := wordlist.Build(names, c.target)
+	for _, n := range proposed {
+		mask, seen := c.from[n]
+		if !seen && c.have[n] {
+			mask = 1
+		}
+		c.from[n] = mask | bit
 	}
 	var added int
 	c.entries, added = passive.Merge(c.entries, c.have, names, c.target)
@@ -135,4 +169,31 @@ func (c *candidates) add(names []string) int {
 		c.seeds[n+"."+c.target] = struct{}{}
 	}
 	return added
+}
+
+// sourcesOf names what proposed a main-pass result (#273). A name no source
+// gave is the wordlist's: an entry, or under -recursive an entry below a
+// found name.
+func (c *candidates) sourcesOf(name string) []string {
+	if c == nil {
+		return fromWordlist
+	}
+	mask, ok := c.from[strings.TrimSuffix(name, "."+c.target)]
+	if !ok {
+		return fromWordlist
+	}
+	if list, ok := c.lists[mask]; ok {
+		return list
+	}
+	var list []string
+	for i, label := range c.labels {
+		if mask&(1<<i) != 0 {
+			list = append(list, label)
+		}
+	}
+	if c.lists == nil {
+		c.lists = map[uint8][]string{}
+	}
+	c.lists[mask] = list
+	return list
 }

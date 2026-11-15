@@ -66,6 +66,10 @@ type Result struct {
 	PreviousRecords []dns.Record `json:"previous_records,omitempty"`
 	// Permutation marks a name found by the -permute pass (#72).
 	Permutation bool `json:"permutation,omitempty"`
+	// Sources names what proposed the name (#273): "wordlist", a passive
+	// source ("ct", "wayback") and "axfr", every one that had it, in that
+	// order; or "permute" alone for a -permute hit.
+	Sources []string `json:"sources,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
@@ -97,6 +101,7 @@ type Writer struct {
 	seed           uint64 // simulation seed, named in the text file header
 	takeoverColumn bool   // CSV carries a takeover_candidate column
 	diff           bool   // -diff output: +/- prefixes and a CSV change column
+	sourcesColumn  bool   // CSV carries a sources column (#273)
 	headerDone     bool   // text file header written
 
 	jsonOpen  bool          // FormatJSON: the array's "[" and first element are written (#181)
@@ -164,6 +169,10 @@ func diffPrefix(change string) string {
 // sets it when CNAME or NS records are requested, the only cases that yield
 // hints (see dns.HintsTakeover).
 func (w *Writer) SetTakeoverColumn(on bool) { w.takeoverColumn = on }
+
+// SetSourcesColumn adds a sources column to CSV output, after every other
+// column: each result's Sources joined with ";" (#273).
+func (w *Writer) SetSourcesColumn(on bool) { w.sourcesColumn = on }
 
 // SetSeed records the simulation seed for the simulated-results file header.
 func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
@@ -324,6 +333,9 @@ func (w *Writer) ensureCSV() {
 	if w.diff {
 		header = append(header, "change")
 	}
+	if w.sourcesColumn {
+		header = append(header, "sources")
+	}
 	if w.stdout {
 		w.csvStdout = csv.NewWriter(w.stdOut())
 		_ = w.csvStdout.Write(header)
@@ -350,6 +362,9 @@ func (w *Writer) writeCSVRows(res Result) {
 		}
 		if w.diff {
 			row = append(row, res.Change)
+		}
+		if w.sourcesColumn {
+			row = append(row, strings.Join(res.Sources, ";"))
 		}
 		if w.csvStdout != nil {
 			_ = w.csvStdout.Write(row)

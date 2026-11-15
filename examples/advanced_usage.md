@@ -271,10 +271,13 @@ Emits a single JSON array of objects, each with the subdomain and its resolved r
 [
   {
     "subdomain": "www.example.com",
-    "records": [{ "type": "A", "value": "93.184.216.34" }]
+    "records": [{ "type": "A", "value": "93.184.216.34" }],
+    "sources": ["wordlist"]
   }
 ]
 ```
+
+`sources` names what proposed the name: `wordlist`, `ct`, `wayback` and `axfr`, every one that had it, or `permute` alone for a `-permute` hit.
 
 JSON is streamed: each element is written as it is found, and the array is closed when the scan ends, so a run interrupted with Ctrl+C still leaves a valid document.
 
@@ -287,17 +290,18 @@ Streams a header followed by one row per record. The first three columns are alw
 | `simulated` | `-simulate` (every row is `true`) |
 | `takeover_candidate` | `-type` includes `CNAME` or `NS` (see takeover hints in the README) |
 | `change` | `-diff` (`added`, `removed` or, with `-diff-records`, `changed`) |
+| `sources` | always, last: what proposed the name, joined with `;` (empty for a `removed` row) |
 
 ```bash
 ./subenum -w wordlist.txt -format csv -o results.csv example.com
 ```
 
 ```csv
-subdomain,type,value
-www.example.com,A,93.184.216.34
+subdomain,type,value,sources
+www.example.com,A,93.184.216.34,wordlist
 ```
 
-With `-type A,CNAME` the header is `subdomain,type,value,takeover_candidate`. Read columns by header name rather than position.
+With `-type A,CNAME` the header is `subdomain,type,value,takeover_candidate,sources`. Read columns by header name rather than position.
 
 ## Continuous Integration / Automated Testing
 

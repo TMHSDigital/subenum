@@ -459,6 +459,12 @@ subenum -sources ct,wayback example.com
 
 The sources of a target are asked at the same time, and a busy answer (429, 502, 503, 504) or a dropped connection is retried twice with a short backoff, honouring `Retry-After`, within the source's 60-second limit. The report has one `sources` entry per source, with the names it added or the `error` it hit; a failed source is a warning, and the scan goes on with the others. The Wayback Machine is asked for at most 200,000 URLs and 64 MiB, and crt.sh's answer is read up to 64 MiB; when a source reaches a limit its names are still used, a note says some hosts may be missing, and its entry is marked `truncated`. Simulation ignores `-sources`, lab mode refuses it, and a resumed scan reuses what each source returned.
 
+Each result says what proposed it: a `sources` list in JSON and JSONL, and a `sources` column in CSV (joined with `;`). The values are `wordlist`, `ct`, `wayback` and `axfr`, every one that had the name, in that order, or `permute` alone for a `-permute` hit; text output is unchanged. The report counts the results each source had proposed as `found` in its `sources` entry, and `axfr_found` for a zone transfer, so you can see whether a source earns its request:
+
+```bash
+subenum -sources ct,wayback -format jsonl example.com | jq -r 'select(.sources == ["wayback"]) | .subdomain'
+```
+
 ### Zone transfers: the whole zone in one query
 
 A name server that allows anyone a zone transfer (AXFR) lists every name in the zone, and finding one is a misconfiguration worth reporting in itself. `-axfr` looks up the target's name servers through `-dns-server` and asks each of them for a transfer over TCP before the scan. Most refuse, which is correct and stays quiet (`-v` shows each refusal). When one allows it, subenum says so on stderr, names the server in the report (`axfr_allowed`, with `axfr_names`), and adds the names as candidates after the wordlist and as `-permute` seeds. Like `-ct` names they are only candidates: each is still looked up, so a stale entry is never reported.

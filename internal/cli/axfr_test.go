@@ -90,6 +90,9 @@ func TestE2EZoneTransfer(t *testing.T) {
 	if !slices.Equal(tg.AXFRAllowed, []string{"ns1.example.test"}) || tg.AXFRNames != 3 {
 		t.Errorf("report axfr_allowed = %q, axfr_names = %d; want ns1.example.test and 3", tg.AXFRAllowed, tg.AXFRNames)
 	}
+	if tg.AXFRFound != 2 { // www and admin-legacy resolve, gone does not (#273)
+		t.Errorf("report axfr_found = %d, want 2", tg.AXFRFound)
+	}
 }
 
 // TestE2EZoneTransferRefused: a refusal, the correct configuration, is not
