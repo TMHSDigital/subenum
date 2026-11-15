@@ -25,11 +25,17 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Read Go language minimum
+      if: matrix.go == 'minimum'
+      id: go-minimum
+      shell: bash
+      run: echo "version=$(sed -n 's/^go //p' go.mod)" >> "$GITHUB_OUTPUT"
+
     - name: Set up Go (go.mod minimum)
       if: matrix.go == 'minimum'
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
       with:
-        go-version-file: 'go.mod'
+        go-version: ${{ steps.go-minimum.outputs.version }}
         cache: false
 
     - name: Set up Go (latest stable)

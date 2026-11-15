@@ -197,7 +197,8 @@ func (f fakeSource) Names(context.Context, string) ([]string, error) { return f.
 // TestE2EMCPScanSources checks that scan seeds candidates from the passive
 // sources the operator enabled and only those, reporting each one (#268).
 func TestE2EMCPScanSources(t *testing.T) {
-	t.Parallel()
+	// This test replaces the process-wide source registry. Keep it serial so
+	// parallel MCP sessions cannot read the stub or race with its restoration.
 	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
 	if err != nil {
 		t.Fatal(err)
