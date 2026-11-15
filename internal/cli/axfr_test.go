@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 
+	"github.com/TMHSDigital/subenum/internal/axfr"
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 	"github.com/TMHSDigital/subenum/internal/output"
 )
@@ -238,7 +239,7 @@ func TestE2EZoneTransferNSLookupFails(t *testing.T) {
 }
 
 // TestE2EZoneTransferServerCap covers #303: of a target's ten name servers,
-// all refusing, only axfrMaxServers are resolved and asked.
+// all refusing, only axfr.MaxServers are resolved and asked.
 func TestE2EZoneTransferServerCap(t *testing.T) {
 	t.Parallel()
 	hosts := map[string][]string{}
@@ -251,8 +252,8 @@ func TestE2EZoneTransferServerCap(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != axfrMaxServers {
-		t.Errorf("AXFR queries = %d, want %d", n, axfrMaxServers)
+	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != axfr.MaxServers {
+		t.Errorf("AXFR queries = %d, want %d", n, axfr.MaxServers)
 	}
 	resolved := 0
 	for host := range hosts {
@@ -260,16 +261,16 @@ func TestE2EZoneTransferServerCap(t *testing.T) {
 			resolved++
 		}
 	}
-	if resolved != axfrMaxServers {
-		t.Errorf("%d name servers were resolved, want %d", resolved, axfrMaxServers)
+	if resolved != axfr.MaxServers {
+		t.Errorf("%d name servers were resolved, want %d", resolved, axfr.MaxServers)
 	}
-	if want := "(" + strconv.Itoa(axfrMaxServers) + " addresses asked)"; !strings.Contains(out, want) {
+	if want := "(" + strconv.Itoa(axfr.MaxServers) + " addresses asked)"; !strings.Contains(out, want) {
 		t.Errorf("verbose output lacks %q\n%s", want, out)
 	}
 }
 
 // TestE2EZoneTransferAddressCap covers #303: a name server with four
-// addresses, all refusing, is asked on axfrAddrsPerServer of them.
+// addresses, all refusing, is asked on axfr.AddrsPerServer of them.
 func TestE2EZoneTransferAddressCap(t *testing.T) {
 	t.Parallel()
 	srv := nsZone(t, map[string][]string{"ns1.example.test": {"127.0.0.1", "127.0.0.1", "127.0.0.1", "127.0.0.1"}}, nil)
@@ -278,10 +279,10 @@ func TestE2EZoneTransferAddressCap(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != axfrAddrsPerServer {
-		t.Errorf("AXFR queries = %d, want %d", n, axfrAddrsPerServer)
+	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != axfr.AddrsPerServer {
+		t.Errorf("AXFR queries = %d, want %d", n, axfr.AddrsPerServer)
 	}
-	if want := "(" + strconv.Itoa(axfrAddrsPerServer) + " addresses asked)"; !strings.Contains(out, want) {
+	if want := "(" + strconv.Itoa(axfr.AddrsPerServer) + " addresses asked)"; !strings.Contains(out, want) {
 		t.Errorf("verbose output lacks %q\n%s", want, out)
 	}
 }

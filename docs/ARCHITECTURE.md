@@ -39,6 +39,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/cliargs` | Parses command lines whose flags may follow positional arguments, shared by subenum and wordlist-gen |
 | `internal/ct` | Looks up subdomain names in Certificate Transparency logs through crt.sh |
 | `internal/passive` | The `Source` interface behind `-sources`, the source registry, the merge of source names into candidates (shared by the CLI and `pkg/subenum`), and the Wayback Machine source |
+| `internal/axfr` | Zone transfer attempts and the DNSSEC denial probe within fixed bounds (shared by `-axfr` and `pkg/subenum`'s `ProbeZone`) |
 | `internal/labzone` | Parses `-simulate-zone` scenario files for lab mode |
 | `internal/mcp` | Minimal Model Context Protocol server (JSON-RPC over stdio, tools only) behind `subenum mcp` |
 | `internal/dnsserver` | Scriptable local DNS server backing lab mode and the hermetic tests |
@@ -55,7 +56,8 @@ internal/cli/session.go        - runWith and the session: per-run state, the -dL
 internal/cli/completion.go     - completion and man subcommands; dispatches diff
 internal/cli/config.go         - config file and SUBENUM_* environment defaults, -print-config
 internal/cli/ct.go             - -ct / -sources: passive source names as extra candidates
-internal/cli/axfr.go           - -axfr: zone transfer names as extra candidates
+internal/cli/axfr.go           - -axfr: zone transfer names as extra candidates, with resume and messages
+internal/axfr/axfr.go          - Try: AXFR from each name server and the denial probe (-axfr, subenum.ProbeZone)
 internal/cli/diff.go           - -diff / -diff-records: compare against a previous results file; runDiff: the diff subcommand
 internal/cli/dryrun.go         - -dry-run: print the scan plan and its cost without sending queries
 internal/cli/lab.go            - -simulate-zone: serve a lab scenario on a loopback DNS server
@@ -98,6 +100,7 @@ internal/passive/passive.go    - Source, Known, ParseList, New: the -sources reg
 internal/passive/wayback.go    - Wayback.Names: hostnames from the Wayback Machine's CDX index
 internal/mcp/mcp.go            - Server.Serve: MCP over stdio (initialize, ping, tools/list, tools/call, cancellation)
 pkg/subenum/sources.go         - Source, CertificateTransparency, WaybackMachine: Config.Sources
+pkg/subenum/zone.go            - ProbeZone, ZoneTransfer: zone transfers and the denial probe
 internal/labzone/labzone.go    - Load, Parse: lab scenario files
 internal/dnsserver/server.go   - Listen: scriptable loopback DNS server
 internal/dnstest/dnstest.go    - Start, StartWith, StartTLS: test helpers around dnsserver

@@ -88,6 +88,26 @@ for _, c := range changes.Changed {
 
 `Removed` lists previous names the new results lack, which is not proof they are gone: they may not have been candidates this time, or their lookup failed. The CLI reports a name removed only after a fresh NXDOMAIN on a complete run, so look them up again before acting on them.
 
+## ProbeZone: zone transfers
+
+`ProbeZone`{% include unreleased.html library="ProbeZone" %} does what the CLI's `-axfr` does before a scan, with the same code and limits. It looks up the domain's name servers through `ZoneOptions.Resolver` (default `8.8.8.8:53`), asks at most 8 of them, on at most 2 addresses each, for a full zone transfer (AXFR), and asks one how the zone proves a name does not exist:
+
+```go
+info, err := subenum.ProbeZone(ctx, "example.com", subenum.ZoneOptions{})
+if err != nil {
+    return err // a bad domain or option, or the name server lookup failed
+}
+fmt.Println(info.TransferAllowed) // name servers that allowed a transfer
+fmt.Println(info.Names)           // the names they gave, relative to the domain
+if info.Denial == "nsec" {
+    fmt.Println("plain NSEC: anyone can list the zone by walking it")
+}
+```
+
+Most name servers refuse transfers, which is the correct configuration and not an error. `Denial` is `nsec`, `nsec3`, `none` (no DNSSEC), or empty when no name server answered the probe. To scan the transferred names, pass `ZoneTransfer(opts)`{% include unreleased.html library="ZoneTransfer" %} in `Config.Sources`: its names are looked up like any other, so only names that still resolve are reported.
+
+These queries go to the domain's own name servers, not to `Resolver`, and they are **not paced by `Rate`**, just as the CLI's `-axfr` is not: at most 34 queries in all (the name server lookup, two address lookups and up to two transfers per name server, and one DNSSEC probe). `ZoneOptions.Timeout` (default `1s`) bounds each lookup; a transfer gets at least 10 seconds.
+
 ## Configuration
 
 | Field | Default | What it does |
@@ -108,7 +128,7 @@ for _, c := range changes.Changed {
 | `AutoRate`{% include unreleased.html library="AutoRate" %} | false | When over a fifth of the last 200 lookups fail, halve the rate and keep going (a `NoticeRate` event says so), and raise it again once lookups succeed. It halves up to six times and not below 5 per second; only when it can slow down no further does the reliability guard apply. `Stats.RateBackoffs` and `Stats.FinalRate` report it. |
 | `TakeoverProviders`{% include unreleased.html library="TakeoverProviders" %} | built-in list | Extra takeover-prone services (`{Suffix: ".example-cdn.net", Name: "example-cdn"}`) for `provider:` hints, added to the built-in list; a `Name` of `-` removes a suffix. `TakeoverProvidersOnly` uses them alone. |
 | `RetryInconclusive`{% include unreleased.html library="RetryInconclusive" %} | false | Once every candidate is tried, look up each name that timed out, was refused or failed once more against `Resolver`. Names it resolves are reported but not expanded by `Recursive`. `Stats.Retried` and `Stats.Recovered` count the pass; `Stats.Inconclusive` lists the names still without an answer. |
-| `Sources`{% include unreleased.html library="Sources" %} | none | Passive sources whose names are added after `Words` and looked up like them: `CertificateTransparency()`, `WaybackMachine()`, or your own `Source` (one `Names(ctx, domain)` method). A source that fails sends a `NoticeSource` event and the scan goes on. Ignored with `Simulate`. |
+| `Sources`{% include unreleased.html library="Sources" %} | none | Passive sources whose names are added after `Words` and looked up like them: `CertificateTransparency()`, `WaybackMachine()`, `ZoneTransfer(opts)` (see [Zone transfers](#probezone-zone-transfers)), or your own `Source` (one `Names(ctx, domain)` method). A source that fails sends a `NoticeSource` event and the scan goes on. Ignored with `Simulate`. |
 | `Exclude` | none | Out-of-scope names and `*.parent` branches, never queried. |
 | `Force` | off | Scan a wildcard zone, dropping answers that match its fingerprint. |
 | `NoAbort` | off | Keep going when more than a fifth of lookups fail. `Run` still sends the warning as a `KindError` event; `Scan` returns no error for a scan that finished. |

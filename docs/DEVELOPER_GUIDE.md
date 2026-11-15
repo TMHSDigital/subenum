@@ -104,6 +104,7 @@ subenum/
 │   └── labs/                   # -simulate-zone scenarios and wordlist for docs/labs.md
 ├── internal/
 │   ├── cli/                    # The command: flags, session, config, diff, resume, permute, labs, MCP, and its tests
+│   ├── axfr/                   # Zone transfer attempts shared by -axfr and subenum.ProbeZone
 │   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/
 │   │   ├── ct.go               # Certificate Transparency (crt.sh) client for -ct

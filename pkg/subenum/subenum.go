@@ -130,9 +130,9 @@ type Config struct {
 	RetryInconclusive bool
 
 	// Sources propose extra candidates before the scan, such as
-	// CertificateTransparency() and WaybackMachine(): their names are added
-	// after Words and looked up like any other, so a stale name is never
-	// reported. Each is asked once; one that fails sends a KindNotice event
+	// CertificateTransparency(), WaybackMachine() and ZoneTransfer(): their
+	// names are added after Words and looked up like any other, so a stale
+	// name is never reported. Each is asked once; one that fails sends a KindNotice event
 	// with NoticeSource and the scan goes on without it. Ignored when
 	// Simulate is set.
 	Sources []Source

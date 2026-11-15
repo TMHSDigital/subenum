@@ -9,9 +9,10 @@ import (
 	"github.com/TMHSDigital/subenum/internal/passive"
 )
 
-// Source proposes names under a domain without querying the domain's DNS,
-// for Config.Sources (#193). Implement it to seed scans from your own
-// inventory or another passive index.
+// Source proposes names under a domain for Config.Sources (#193). The
+// passive sources below do not query the domain's DNS; ZoneTransfer asks
+// its name servers. Implement it to seed scans from your own inventory or
+// another passive index.
 type Source interface {
 	// Names returns names under domain, relative to it ("api", "dev.api").
 	// Names that are not valid in DNS are dropped by the scan.

@@ -39,8 +39,10 @@ library:
   - Internal
   - MaxDuration
   - Permutations
+  - ProbeZone
   - RatePerResolver
   - Sources
   - RetryInconclusive
   - TakeoverProviders
   - Verdict
+  - ZoneTransfer
