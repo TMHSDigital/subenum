@@ -80,7 +80,7 @@ type formField struct {
 var formFields = [fieldCount]formField{
 	fieldDomain: {label: "Domain*", kind: textField, placeholder: "e.g. example.com",
 		saved: func(c *savedConfig) any { return &c.Domain }},
-	fieldWordlist: {label: "Wordlist*", flag: "w", kind: textField, placeholder: "e.g. examples/sample_wordlist.txt", def: "examples/sample_wordlist.txt",
+	fieldWordlist: {label: "Wordlist", flag: "w", kind: textField, placeholder: "empty = bundled top-5000 list",
 		saved: func(c *savedConfig) any { return &c.Wordlist }},
 	fieldSimulate: {label: "Simulate", flag: "simulate", kind: toggleField,
 		saved: func(c *savedConfig) any { return &c.Simulate }},
@@ -388,10 +388,9 @@ func (m *formModel) validate() (formValues, string) {
 	if err != nil {
 		return formValues{}, err.Error()
 	}
+	// An empty Wordlist field scans with the bundled list, the way a missing
+	// -w does on the command line (#288).
 	wl := expandHome(strings.TrimSpace(text(fieldWordlist)))
-	if wl == "" {
-		return formValues{}, "Wordlist path is required"
-	}
 	// The TUI owns stdin, so reading a wordlist from it would block forever (#55).
 	if wl == wordlist.Stdin {
 		return formValues{}, "Wordlist from standard input (-) is not supported in the TUI; enter a file path"

@@ -260,6 +260,43 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 	}
 }
 
+// TestEmptyWordlistUsesBundledList covers #288: an installed binary has no
+// examples/sample_wordlist.txt beside it, so an empty Wordlist field must scan
+// with the bundled list, the way a missing -w does for the CLI.
+func TestEmptyWordlistUsesBundledList(t *testing.T) {
+	redirectConfig(t) // beginScan saves the form values
+	m := Model{state: stateForm, form: newFormModel(savedConfig{})}
+	m.form.inputs[fieldDomain].SetValue("example.com")
+	m.form.inputs[fieldWordlist].SetValue("")
+	m.form.inputs[fieldOutput].SetValue("") // no output file
+	m.form.toggles[fieldSimulate] = true    // simulate: the started scan sends no DNS traffic
+
+	next, cmd := m.updateForm(keyCtrlR)
+	nm := next.(Model)
+	if nm.form.err != "" {
+		t.Fatalf("form error: %s", nm.form.err)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+r with an empty wordlist field did not start a load")
+	}
+	loaded, ok := cmd().(wordlistLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("load result = %+v, want the bundled list", loaded)
+	}
+	if len(loaded.entries) < 1000 {
+		t.Fatalf("loaded %d entries, want the bundled top-5000 list", len(loaded.entries))
+	}
+	started, _ := nm.updateForm(loaded)
+	sm := started.(Model)
+	defer sm.cancel()
+	if sm.state != stateScan {
+		t.Fatalf("state=%v after load, want the scan screen", sm.state)
+	}
+	if !strings.Contains(sm.scanView.View(), "bundled top-5000 list") {
+		t.Error("scan view does not say which wordlist ran")
+	}
+}
+
 // TestPoolErrorStaysOnForm covers #195: a resolver pool file that cannot be
 // used is reported on the form instead of starting the scan.
 func TestPoolErrorStaysOnForm(t *testing.T) {
