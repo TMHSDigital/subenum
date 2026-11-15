@@ -355,8 +355,11 @@ func TestE2EResumeDiffOntoOutputFile(t *testing.T) {
 	if len(all) < 10 {
 		t.Fatalf("the simulation found %d names, want at least 10", len(all))
 	}
-	// The baseline lacks one name the scan finds and has one it cannot find.
-	baseline := strings.Join(all[1:], "\n") + "\ngone.example.com\n"
+	// The baseline lacks one name the scan finds. It holds no name the scan
+	// cannot find: such a name is re-checked after the scan, and a resumed
+	// run that ends close to its -max-duration reports it unverified instead
+	// of removed, which made the comparison below depend on timing.
+	baseline := strings.Join(all[1:], "\n") + "\n"
 
 	// The uninterrupted run.
 	stats := filepath.Join(dir, "stats.json")
