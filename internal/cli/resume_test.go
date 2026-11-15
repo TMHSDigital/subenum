@@ -455,7 +455,9 @@ func TestE2EResumeDiffOntoOutputFile(t *testing.T) {
 	// A second -o file is not the baseline: it gets the partial results (#334).
 	results, state := writeFile(t, "results.txt", baseline), filepath.Join(dir, "state.json")
 	extra := filepath.Join(dir, "extra.txt")
-	code, out := run("-diff", results, "-o", results, "-o", "jsonl:"+extra, "-stats", stats, "-rate", "50", "-max-duration", "1s", "-state", state)
+	// -o names the baseline another way: it is still the same file (#342).
+	respelled := filepath.Dir(results) + string(filepath.Separator) + "." + string(filepath.Separator) + filepath.Base(results)
+	code, out := run("-diff", results, "-o", respelled, "-o", "jsonl:"+extra, "-stats", stats, "-rate", "50", "-max-duration", "1s", "-state", state)
 	if _, err := os.Stat(state); err != nil {
 		t.Fatalf("the stopped run (exit %d) saved no resume state: %v\n%s", code, err, out)
 	}

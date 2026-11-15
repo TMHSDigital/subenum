@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -123,7 +124,7 @@ func runWith(a runArgs) (code int) {
 		// failure already reported by Finish is not printed twice.
 		defer func() {
 			for _, rf := range s.files {
-				keep := s.keepBaseline && rf.path == s.f.diff
+				keep := s.keepBaseline && samePath(rf.path, s.f.diff)
 				if err := rf.file.Close(s.anyDone && !keep); err != nil {
 					if !rf.reported {
 						s.out.Error("writing output file: %v", err)
@@ -822,6 +823,23 @@ func (s *session) stoppedEarly() bool {
 	return false
 }
 
+// samePath reports whether a and b name one file, however each is spelled
+// (x and ./x, a relative and an absolute path, another case on Windows), so
+// a -diff baseline that is also an -o file is recognised (#342).
+func samePath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ia, errA := os.Stat(a)
+	ib, errB := os.Stat(b)
+	if errA == nil && errB == nil {
+		return os.SameFile(ia, ib)
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && absA == absB
+}
+
 // finish saves or removes the resume state, writes the run-quality report
 // and the -stats and -sarif files, closes the structured output and returns
 // the exit code. The deferred -o file close in runWith runs after it.
@@ -833,7 +851,7 @@ func (s *session) finish(ctx context.Context) int {
 		// With -diff and -o on one file, the partial results must not replace
 		// the baseline the resumed run compares against; the saved state holds
 		// them, and the resumed run writes them to the -o file (#297).
-		if saveResumeState(s) && f.diff != "" && slices.ContainsFunc(s.files, func(rf resultFile) bool { return rf.path == f.diff }) {
+		if saveResumeState(s) && f.diff != "" && slices.ContainsFunc(s.files, func(rf resultFile) bool { return samePath(rf.path, f.diff) }) {
 			s.keepBaseline = true
 			out.Info("Leaving %s unchanged: it is the -diff baseline for the resumed run, which writes the full results", f.diff)
 		}
