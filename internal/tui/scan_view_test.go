@@ -212,6 +212,59 @@ func TestScanViewShowsVerdict(t *testing.T) {
 	}
 }
 
+// TestScanViewCountersFitWidth covers #343: with every counter set the
+// finished counters are wider than 80 columns, so they wrap between
+// counters, and the view still fills an 80x24 terminal exactly, measured in
+// terminal rows rather than newlines.
+func TestScanViewCountersFitWidth(t *testing.T) {
+	const width, height = 80, 24
+	stats := scan.Stats{Found: 12345, NXDomain: 987654, Timeout: 4321, Refused: 321, Other: 21, WildcardFiltered: 4567,
+		Skipped: 40000, Retried: 600, Recovered: 200, Takeover: 7, RateBackoffs: 3}
+	for _, aborted := range []bool{false, true} {
+		m := newScanViewModel(width, height, false)
+		m.aborted = aborted
+		m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventDone, Processed: 1009876, Total: 1049876, Found: stats.Found, Stats: stats}})
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		for _, line := range lines {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("aborted %v: a %d-column line on an %d-column terminal: %q", aborted, w, width, line)
+			}
+		}
+		if len(lines) != height {
+			t.Errorf("aborted %v: view is %d lines, want exactly %d:\n%s", aborted, len(lines), height, view)
+		}
+		flat := strings.ReplaceAll(view, "\n", " - ")
+		for _, want := range []string{"wildcard-filtered 4567", "retried 600 (recovered 200)", "rate back-offs 3"} {
+			if !strings.Contains(flat, want) {
+				t.Errorf("aborted %v: counter %q split or missing:\n%s", aborted, want, view)
+			}
+		}
+	}
+}
+
+// TestScanViewAbortAfterNoAbortWarning covers #343: with No Abort and
+// Permute on, ctrl+c during the permutation pass after the main pass's
+// reliability warning is an abort, not a failure.
+func TestScanViewAbortAfterNoAbortWarning(t *testing.T) {
+	m := newScanViewModel(120, 30, false)
+	m.permute = true
+	m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventError, Message: "warning: 30% of 200 queries failed"}})
+	m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventDone, Processed: 200, Total: 200}})
+	if m.done || m.main == nil {
+		t.Fatal("the main pass did not hand over to the permutation pass")
+	}
+	m.perm = &permutationPass{seeds: 1, candidates: 90}
+	m.aborted = true
+	m, _ = m.Update(eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true}})
+	if !m.done || m.failed() {
+		t.Fatalf("done %v failed %v, want an abort:\n%s", m.done, m.failed(), m.View())
+	}
+	if view := m.View(); strings.Contains(view, "Failed:") || !strings.Contains(view, "Aborted - processed") {
+		t.Errorf("abort shown as a failure:\n%s", view)
+	}
+}
+
 func TestScanViewSummaryIncludesStats(t *testing.T) {
 	m := newScanViewModel(100, 24, false)
 	m, _ = m.Update(eventMsg{scan.Event{

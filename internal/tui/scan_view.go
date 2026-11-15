@@ -126,6 +126,11 @@ func (m *scanViewModel) layout() {
 	if mv := m.messagesView(); mv != "" {
 		msgLines = lipgloss.Height(mv)
 	}
+	if m.done {
+		// chromeLines has one line for the counters; a narrow terminal
+		// needs more (#343).
+		msgLines += lipgloss.Height(m.countersLine()) - 1
+	}
 	m.viewport.SetHeight(max(1, m.height-chromeLines-msgLines))
 	m.progress.SetWidth(max(1, m.width-4))
 }
@@ -422,6 +427,7 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 				m.done = true
 			}
 		}
+		m.layout() // the finished counters may take more than one line
 		m.refresh()
 	}
 }
@@ -460,26 +466,17 @@ func (m scanViewModel) View() string {
 	switch {
 	case m.failed():
 		b.WriteString(errorStyle.Render("Failed: "+m.errText) + "\n")
-		b.WriteString(dimStyle.Render(fmt.Sprintf(
-			"processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
-			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
-		)) + "\n")
+		b.WriteString(m.countersLine() + "\n")
 		b.WriteString(m.doneHint())
 	case m.done && (m.aborted || m.stopped):
 		if !m.stopped {
 			b.WriteString(m.verdictLine() + "\n")
 		}
-		b.WriteString(dimStyle.Render(fmt.Sprintf(
-			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
-			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
-		)+m.extraCounts()) + "\n")
+		b.WriteString(m.countersLine() + "\n")
 		b.WriteString(m.doneHint())
 	case m.done:
 		b.WriteString(m.verdictLine() + "\n")
-		b.WriteString(summaryStyle.Render(fmt.Sprintf(
-			"Done - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
-			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
-		)+m.extraCounts()) + "\n")
+		b.WriteString(m.countersLine() + "\n")
 		b.WriteString(m.doneHint())
 	default:
 		status := fmt.Sprintf("  %d/%d processed  •  %d found", m.processed, m.total, m.found)
@@ -517,6 +514,45 @@ func (m scanViewModel) verdictLine() string {
 	return style.Bold(true).MaxWidth(max(1, m.width)).Render("Verdict: " + t.Verdict + " - " + t.Reason)
 }
 
+// countersLine renders the finished screen's counters, wrapped to the
+// terminal width: with every counter set it is longer than 80 columns, and
+// a line the terminal wraps by itself would push the layout one row past
+// what layout reserved for it (#343). layout counts the wrapped lines.
+func (m scanViewModel) countersLine() string {
+	text := fmt.Sprintf("processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
+		m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered)
+	style := summaryStyle
+	switch {
+	case m.failed():
+		style = dimStyle
+	case m.aborted || m.stopped:
+		text, style = "Aborted - "+text+m.extraCounts(), dimStyle
+	default:
+		text = "Done - " + text + m.extraCounts()
+	}
+	return style.Render(wrapCounters(text, max(1, m.width)))
+}
+
+// wrapCounters wraps a " - "-separated counters line to width, breaking only
+// between counters so none is split; a counter wider than width is cut by
+// lipgloss.Wrap.
+func wrapCounters(text string, width int) string {
+	var lines []string
+	cur := ""
+	for part := range strings.SplitSeq(text, " - ") {
+		switch {
+		case cur == "":
+			cur = part
+		case len(cur)+len(" - ")+len(part) <= width:
+			cur += " - " + part
+		default:
+			lines = append(lines, cur)
+			cur = part
+		}
+	}
+	return lipgloss.Wrap(strings.Join(append(lines, cur), "\n"), width, "")
+}
+
 // extraCounts is the tail of the finished counters line: the run facts
 // that are only worth showing when they are not zero.
 func (m scanViewModel) extraCounts() string {
@@ -540,10 +576,10 @@ func (m scanViewModel) extraCounts() string {
 // code. The engine says so on each pass's EventDone (#308): a fatal error
 // (preflight failure, wildcard abort, reliability abort) fails the scan, the
 // reliability warning under -no-abort does not, and neither does a user
-// abort (#55). As before #308, a permutation pass that did not get through
-// its candidates also fails a scan that reported an error.
+// abort (#55), even during a permutation pass that follows that warning
+// (#343).
 func (m scanViewModel) failed() bool {
-	return m.done && (m.scanFailed || (m.errText != "" && m.perm.unfinished()))
+	return m.done && m.scanFailed
 }
 
 type wordlistLoadedMsg struct {
