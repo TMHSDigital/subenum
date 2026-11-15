@@ -8,6 +8,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/mcp"
+	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
@@ -62,7 +63,8 @@ type mcpOutcomes struct {
 func runMCPScan(ctx context.Context, cfg subenum.Config, offset int) *mcpReport {
 	report := &mcpReport{Domain: cfg.Domain, Results: []mcpResult{}, MaxQueries: cfg.MaxQueries, Rate: cfg.Rate}
 	cfg.Logf = func(string, ...any) {} // standard output carries the protocol
-	events, err := subenum.Run(ctx, cfg)
+	// The report never lists inconclusive names, so the scan keeps none (#349).
+	events, err := subenum.Run(scan.WithoutInconclusiveList(ctx), cfg)
 	if err != nil {
 		report.Verdict, report.Reason, report.Error = verdictNotRun, "the scan did not start; see error", err.Error()
 		return report

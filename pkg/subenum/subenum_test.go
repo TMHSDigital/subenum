@@ -13,6 +13,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/TMHSDigital/subenum/internal/dnstest"
+	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
@@ -475,6 +476,27 @@ func TestMaxDuration(t *testing.T) {
 // TestNoAbortScanSucceedsDespiteFailingLookups covers #149: under NoAbort
 // the reliability guard only warns, so a completed Scan returns no error,
 // while Run still reports the warning.
+// TestInconclusiveListOff covers #349: Stats.Inconclusive lists the names
+// without an answer, except for a context subenum mcp marks, which keeps none.
+func TestInconclusiveListOff(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if strings.HasPrefix(q.Name, "bad") {
+			return dnstest.Refused
+		}
+		return dnstest.NXDomain
+	})
+	cfg := subenum.Config{Domain: "lab.example", Words: []string{"bad1", "ok", "bad2"}, Resolver: srv.Addr,
+		Timeout: 10 * time.Second, Attempts: 1}
+	_, stats, err := subenum.Scan(context.Background(), cfg)
+	if err != nil || len(stats.Inconclusive) != 2 {
+		t.Fatalf("Scan: err %v, inconclusive %q; want the two refused names", err, stats.Inconclusive)
+	}
+	_, stats, err = subenum.Scan(scan.WithoutInconclusiveList(context.Background()), cfg)
+	if err != nil || stats.Inconclusive != nil || stats.Refused != 2 {
+		t.Errorf("marked Scan: err %v, inconclusive %q, refused %d; want no list and the two refusals counted", err, stats.Inconclusive, stats.Refused)
+	}
+}
+
 func TestNoAbortScanSucceedsDespiteFailingLookups(t *testing.T) {
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		if strings.HasPrefix(q.Name, "bad-") {

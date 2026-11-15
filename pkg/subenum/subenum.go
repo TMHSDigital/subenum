@@ -476,6 +476,9 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	if scan.InconclusiveListOff(ctx) {
+		internal.ListInconclusive = false // subenum mcp never reads it (#349)
+	}
 	out := make(chan Event, 64)
 	go func() {
 		defer close(out)
