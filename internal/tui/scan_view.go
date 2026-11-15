@@ -32,7 +32,8 @@ const (
 	// ones collapse into a "+N earlier" line so the layout cannot overflow.
 	maxShownMessages = 3
 	// maxResultLines bounds the viewport buffer. The full result set still
-	// goes to the output file when one is configured.
+	// goes to the output file when one is configured; a save after the scan
+	// (#332) writes the results still held.
 	maxResultLines = 10000
 	// liveRefreshLimit is how many results are re-rendered on every event;
 	// past it, content refreshes on progress ticks and at the end, so render
@@ -40,12 +41,14 @@ const (
 	liveRefreshLimit = 200
 )
 
-// resultLine is one result in the viewport buffer: its rendered line, and
-// what the filter matches on (#221).
+// resultLine is one result in the viewport buffer: its rendered line, what
+// the filter matches on (#221), and the result itself, for the records view
+// and for saving the results after the scan (#332).
 type resultLine struct {
 	name     string
 	takeover bool
 	line     string
+	res      output.Result
 }
 
 // scanViewModel is the live-results screen.
@@ -76,6 +79,13 @@ type scanViewModel struct {
 	height       int
 	simMode      bool
 	seed         uint64 // simulation seed, shown so a TUI run can be reproduced
+
+	// v shows each result's records under its line; on the finished screen
+	// s opens the save prompt with a default path, enter saves, esc cancels
+	// (#332).
+	records  bool
+	saving   bool
+	savePath string
 
 	// The permutation pass (#274). permute says one follows the main pass;
 	// main is the main pass's last event once it has finished, and perm the
@@ -151,14 +161,18 @@ func (m *scanViewModel) refresh() {
 		return
 	}
 	lines := make([]string, 0, len(m.results))
-	needle := strings.ToLower(m.filter)
+	shown := 0
 	for _, r := range m.results {
-		if (m.takeoverOnly && !r.takeover) || !strings.Contains(r.name, needle) {
+		if !m.matches(r) {
 			continue
 		}
+		shown++
 		lines = append(lines, r.line)
+		if m.records {
+			lines = append(lines, dimStyle.Render("    "+recordsText(r.res)))
+		}
 	}
-	m.shown = len(lines)
+	m.shown = shown
 	content := strings.Join(lines, "\n")
 	if m.dropped > 0 {
 		content = dimStyle.Render(fmt.Sprintf("(%d earlier results not shown)", m.dropped)) + "\n" + content
@@ -170,8 +184,27 @@ func (m *scanViewModel) refresh() {
 	m.dirty = false
 }
 
-// handleFilterKey applies a key to the result filter and reports whether it
-// used it. While typing, every key but ctrl+c edits the filter.
+// matches reports whether the filter lets r through.
+func (m *scanViewModel) matches(r resultLine) bool {
+	return (!m.takeoverOnly || r.takeover) && strings.Contains(r.name, strings.ToLower(m.filter))
+}
+
+// recordsText renders a result's records as "A=192.0.2.1 CNAME=x.example.net",
+// as -show-records does, or says it has none.
+func recordsText(r output.Result) string {
+	parts := make([]string, 0, len(r.Records))
+	for _, rec := range r.Records {
+		parts = append(parts, rec.Type+"="+rec.Value)
+	}
+	if len(parts) == 0 {
+		return "(no records)"
+	}
+	return strings.Join(parts, " ")
+}
+
+// handleFilterKey applies a key to the result filter, or v to the records
+// view, and reports whether it used it. While typing, every key but ctrl+c
+// edits the filter.
 func (m *scanViewModel) handleFilterKey(msg tea.KeyPressMsg) bool {
 	if m.typing {
 		switch {
@@ -197,6 +230,8 @@ func (m *scanViewModel) handleFilterKey(msg tea.KeyPressMsg) bool {
 		m.typing = true
 	case "t":
 		m.takeoverOnly = !m.takeoverOnly
+	case "v":
+		m.records = !m.records
 	case "esc":
 		if !m.filtered() {
 			return false
@@ -231,7 +266,46 @@ func (m scanViewModel) filterHint() string {
 		}
 		return fmt.Sprintf("showing %d of %d (%s)  •  esc clear", m.shown, len(m.results), strings.Join(desc, ", "))
 	}
-	return "/ filter  •  t takeovers"
+	return "/ filter  •  t takeovers  •  v records"
+}
+
+// doneHint is the finished screen's key hint line, or the save prompt while
+// it is open (#332).
+func (m scanViewModel) doneHint() string {
+	if m.saving {
+		return m.hint("  save to: " + m.savePath + "█  (enter save  •  esc cancel)")
+	}
+	return m.hint("  r new scan  •  s save  •  q quit  •  " + m.filterHint())
+}
+
+// handleSaveKey edits the save prompt's path. It reports whether the user
+// pressed enter to save; esc closes the prompt.
+func (m *scanViewModel) handleSaveKey(msg tea.KeyPressMsg) (save bool) {
+	switch {
+	case msg.Code == tea.KeyEnter:
+		m.saving = false
+		return strings.TrimSpace(m.savePath) != ""
+	case msg.Code == tea.KeyEscape:
+		m.saving = false
+	case msg.Code == tea.KeyBackspace:
+		if r := []rune(m.savePath); len(r) > 0 {
+			m.savePath = string(r[:len(r)-1])
+		}
+	case msg.Text != "":
+		m.savePath += msg.Text
+	}
+	return false
+}
+
+// toSave returns the results a save writes: those the filter shows.
+func (m *scanViewModel) toSave() []output.Result {
+	out := make([]output.Result, 0, len(m.results))
+	for _, r := range m.results {
+		if m.matches(r) {
+			out = append(out, r.res)
+		}
+	}
+	return out
 }
 
 func (m scanViewModel) Update(msg tea.Msg) (scanViewModel, tea.Cmd) {
@@ -271,7 +345,9 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 			m.perm.found++
 			line += dimStyle.Render("  permutation")
 		}
-		m.results = append(m.results, resultLine{name: strings.ToLower(ev.Result.Subdomain), takeover: ev.Result.Takeover != "", line: line})
+		// Model.record fills in what proposed the result.
+		res := output.Result{Result: ev.Result, Permutation: m.perm != nil}
+		m.results = append(m.results, resultLine{name: strings.ToLower(ev.Result.Subdomain), takeover: ev.Result.Takeover != "", line: line, res: res})
 		if len(m.results) > maxResultLines {
 			// Evict in chunks so the copy cost is amortized across results.
 			n := len(m.results) - maxResultLines + maxResultLines/10
@@ -382,7 +458,7 @@ func (m scanViewModel) View() string {
 			"processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)) + "\n")
-		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
+		b.WriteString(m.doneHint())
 	case m.done && (m.aborted || m.stopped):
 		if !m.stopped {
 			b.WriteString(m.verdictLine() + "\n")
@@ -391,14 +467,14 @@ func (m scanViewModel) View() string {
 			"Aborted - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)+m.extraCounts()) + "\n")
-		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
+		b.WriteString(m.doneHint())
 	case m.done:
 		b.WriteString(m.verdictLine() + "\n")
 		b.WriteString(summaryStyle.Render(fmt.Sprintf(
 			"Done - processed %d/%d - found %d - nxdomain %d - timeout %d - refused %d - other %d - wildcard-filtered %d",
 			m.processed, m.total, m.found, m.stats.NXDomain, m.stats.Timeout, m.stats.Refused, m.stats.Other, m.stats.WildcardFiltered,
 		)+m.extraCounts()) + "\n")
-		b.WriteString(m.hint("  r new scan  •  q quit  •  " + m.filterHint()))
+		b.WriteString(m.doneHint())
 	default:
 		status := fmt.Sprintf("  %d/%d processed  •  %d found", m.processed, m.total, m.found)
 		if m.etaText != "" {

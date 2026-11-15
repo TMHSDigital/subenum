@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -47,6 +48,7 @@ type Model struct {
 	vals    formValues // the running scan's settings, for its report
 	seed    uint64
 	started time.Time
+	final   scan.Event // the event that ended the scan, for a saved file's summary (#332)
 
 	// What the Sources and Permute fields add around the scan (#274).
 	lookups  []sourceLookup      // the passive sources asked, in order
@@ -254,16 +256,9 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.outFile = f
-		m.out = output.NewFile(f.Writer, vals.Simulate, vals.format)
-		m.out.SetSeed(seed)
-		// Same file shape as the CLI's: a takeover column when CNAME
-		// records are requested (#118).
-		m.out.SetTakeoverColumn(dns.HintsTakeover(vals.Types))
-		// With sources or a permutation pass, each result says what proposed
-		// it, as the CLI's do.
-		m.out.SetSourcesColumn(len(vals.sources) > 0 || vals.permute)
+		m.out = newFileWriter(f, vals, vals.format, seed)
 	}
-	m.vals, m.seed, m.started = vals, seed, time.Now()
+	m.vals, m.seed, m.started, m.final = vals, seed, time.Now(), scan.Event{}
 	m.lookups, m.from, m.foundBy = loaded.lookups, loaded.from, map[string]int{}
 	m.entries, m.names, m.pool, m.deadline = entries, nil, pool, time.Time{}
 
@@ -325,15 +320,40 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 	return m, listenForEvents(events)
 }
 
+// newFileWriter returns a writer for a results file in the same shape as the
+// CLI's: a takeover column when CNAME records are requested (#118), and with
+// sources or a permutation pass, what proposed each result (#274).
+func newFileWriter(f *output.File, vals formValues, format output.Format, seed uint64) *output.Writer {
+	w := output.NewFile(f.Writer, vals.Simulate, format)
+	w.SetSeed(seed)
+	w.SetTakeoverColumn(dns.HintsTakeover(vals.Types))
+	w.SetSourcesColumn(len(vals.sources) > 0 || vals.permute)
+	return w
+}
+
 func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// The save prompt (#332) takes every key but ctrl+c while it is open.
+		if m.scanView.saving && msg.String() != "ctrl+c" {
+			if m.scanView.handleSaveKey(msg) {
+				m.saveResults(expandHome(strings.TrimSpace(m.scanView.savePath)))
+			}
+			return m, nil
+		}
 		// The result filter (#221) takes its keys first; while it is being
 		// typed it takes every key but ctrl+c, so q and r can be typed.
 		if m.scanView.handleFilterKey(msg) {
 			return m, nil
 		}
 		switch msg.String() {
+		case "s":
+			if m.scanView.done {
+				m.scanView.saving = true
+				if m.scanView.savePath == "" {
+					m.scanView.savePath = m.defaultSavePath()
+				}
+			}
 		case "ctrl+c":
 			// Once the scan has finished there is nothing to abort; quit
 			// instead of relabelling a completed scan as "Aborted" (#43).
@@ -399,6 +419,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The scan stopped before testing candidates (an early error such as a
 		// wildcard zone without Force, #99): close the file without finalizing,
 		// mirroring the CLI, which skips Finish so no empty JSON array is written.
+		m.final = ev.Event
 		m.reportOutputErr(m.finalizeOutput(false))
 		return m, svCmd
 	case ev.Kind == scan.EventDone:
@@ -436,6 +457,11 @@ func (m *Model) record(r scan.Result) {
 	}
 	for _, src := range res.Sources {
 		m.foundBy[src]++
+	}
+	// The scan view has just added this result as its last line; keep what
+	// proposed it there too, so a saved file says so (#332).
+	if n := len(m.scanView.results); n > 0 {
+		m.scanView.results[n-1].res = res
 	}
 	if m.out != nil {
 		m.out.Emit(res)
@@ -488,10 +514,81 @@ func (m *Model) finishOutput(final scan.Event) {
 	if main := m.scanView.main; main != nil {
 		final = *main // the report's counts are the main pass's (#298)
 	}
+	m.final = final
 	if m.out != nil {
 		m.out.Summary(m.summary(final))
 	}
 	m.reportOutputErr(m.finalizeOutput(true))
+}
+
+// defaultSavePath is the save prompt's starting path: the form's Output
+// file if it had one, else subenum-<domain> with the form's format's
+// extension (#332).
+func (m *Model) defaultSavePath() string {
+	if m.vals.outputFile != "" {
+		return m.vals.outputFile
+	}
+	ext := map[output.Format]string{output.FormatJSON: ".json", output.FormatJSONL: ".jsonl", output.FormatCSV: ".csv"}[m.vals.format]
+	if ext == "" {
+		ext = ".txt"
+	}
+	return "subenum-" + m.vals.Domain + ext
+}
+
+// saveFormat picks a saved file's format from its extension, falling back
+// to the form's Format for any other name (#332).
+func saveFormat(path string, fallback output.Format) output.Format {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".txt":
+		return output.FormatText
+	case ".json":
+		return output.FormatJSON
+	case ".jsonl", ".ndjson":
+		return output.FormatJSONL
+	case ".csv":
+		return output.FormatCSV
+	}
+	return fallback
+}
+
+// saveResults writes the results the filter shows to path, in the format its
+// extension names, the way the Output file would have (#332). A text file
+// carries each result's records while the records view is on, as with
+// -show-records. The outcome is a notice on the scan screen; a failed save
+// leaves an existing file unchanged and does not change the exit code.
+func (m *Model) saveResults(path string) {
+	sv := &m.scanView
+	results := sv.toSave()
+	format := saveFormat(path, m.vals.format)
+	err := func() error {
+		f, err := output.CreateFile(path)
+		if err != nil {
+			return err
+		}
+		w := newFileWriter(f, m.vals, format, m.seed)
+		w.SetShowRecords(sv.records)
+		for _, r := range results {
+			w.Emit(r)
+		}
+		w.Summary(m.summary(m.final))
+		err = w.Finish()
+		if cerr := f.Close(err == nil); err == nil {
+			err = cerr
+		}
+		return err
+	}()
+	if err != nil {
+		sv.addMessage(errorStyle.Render("✗ cannot save results: " + err.Error()))
+		return
+	}
+	text := fmt.Sprintf("Saved %d results to %s", len(results), path)
+	if sv.filtered() {
+		text += fmt.Sprintf(" (the %d of %d the filter shows)", len(results), len(sv.results))
+	}
+	if sv.dropped > 0 {
+		text += fmt.Sprintf("; %d earlier results were no longer kept", sv.dropped)
+	}
+	sv.addMessage(dimStyle.Render(text))
 }
 
 // finalizeOutput closes the optional output file. When finish is true the
