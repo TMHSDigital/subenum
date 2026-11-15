@@ -218,14 +218,16 @@ runs:
           if [ "$takeovers" != 0 ]; then
             echo
             echo "**Takeover candidates:** $takeovers"
-            jq -r 'select(.takeover_candidate) | "- `\(.subdomain)`: \(.takeover_candidate)"' "$out/results.jsonl" | head -50
+            # jq stops at 50 itself: `| head -50` would close the pipe under
+            # pipefail and fail the step on a long list.
+            jq -rn 'limit(50; inputs | select(.takeover_candidate) | "- `\(.subdomain)`: \(.takeover_candidate)")' "$out/results.jsonl"
           fi
           if [ -n "$prev" ]; then
             echo
             echo "**Changes since the previous results:** $added added, $removed removed, $changed changed."
-            jq -r 'select(.change == "added") | "- `+ \(.subdomain)`"' "$out/changes.jsonl" | head -50
-            jq -r 'select(.change == "removed") | "- `- \(.subdomain)`"' "$out/changes.jsonl" | head -50
-            jq -r 'select(.change == "changed") | "- `~ \(.subdomain)`: \([.previous_records[]? | "\(.type) \(.value)"] | join(", ")) -> \([.records[] | "\(.type) \(.value)"] | join(", "))"' "$out/changes.jsonl" | head -50
+            jq -rn 'limit(50; inputs | select(.change == "added") | "- `+ \(.subdomain)`")' "$out/changes.jsonl"
+            jq -rn 'limit(50; inputs | select(.change == "removed") | "- `- \(.subdomain)`")' "$out/changes.jsonl"
+            jq -rn 'limit(50; inputs | select(.change == "changed") | "- `~ \(.subdomain)`: \([.previous_records[]? | "\(.type) \(.value)"] | join(", ")) -> \([.records[] | "\(.type) \(.value)"] | join(", "))")' "$out/changes.jsonl"
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 

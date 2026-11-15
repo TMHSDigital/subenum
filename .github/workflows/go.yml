@@ -198,6 +198,10 @@ jobs:
         grep -q 'dangling-cname' takeovers.sarif
         cp "${{ steps.scan.outputs.results }}" previous.jsonl
         echo "gone.lab.example" >> previous.jsonl
+        # Thousands of removed names make the job summary's list far longer
+        # than a pipe buffer, which the action must cut to 50 without
+        # failing its step (#345).
+        for i in $(seq 1 3000); do echo "gone$i.lab.example"; done >> previous.jsonl
 
     - name: Diff against it
       id: diff
@@ -212,7 +216,7 @@ jobs:
       shell: bash
       run: |
         test "${{ steps.diff.outputs.added }}" = 0
-        test "${{ steps.diff.outputs.removed }}" = 1
+        test "${{ steps.diff.outputs.removed }}" = 3001
         grep -q '"change":"removed"' "${{ steps.diff.outputs.changes }}"
         grep -q 'gone.lab.example' "${{ steps.diff.outputs.changes }}"
 
