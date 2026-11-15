@@ -77,29 +77,126 @@ func TestCapLeavesExcludedOutOfSkipped(t *testing.T) {
 	}
 }
 
-// A recursive scan can reach one name twice, so it dedupes; a flat scan
-// relies on its entries being unique already and keeps no visited set
-// (#248).
-func TestDispatcherDedupesAndSettlesDuplicates(t *testing.T) {
-	if flat := testDispatcher(Config{Entries: []string{"www"}}, 1); flat.visited != nil {
-		t.Error("a non-recursive scan allocated a visited set")
+// Only a recursive scan with a multi-label entry can reach one name through
+// two parents, so only it keeps a set of generated candidates (#248, #301);
+// a flat scan, and a recursive one over single labels, rely on their entries
+// being unique already.
+func TestDispatcherVisitedSetOnlyForMultiLabelEntries(t *testing.T) {
+	if flat := testDispatcher(Config{Entries: []string{"www", "a.b"}}, 1); flat.visited != nil || flat.expanded != nil {
+		t.Error("a non-recursive scan allocated a visited or expanded set")
 	}
-	d := testDispatcher(Config{Entries: []string{"www", "mail", "www", "api"}, Recursive: true}, 1)
+	single := testDispatcher(Config{Entries: []string{"a", "b"}, Recursive: true}, 3)
+	drain(single)
+	single.expand(job{domain: "a.example.com", depth: 1})
+	if got := drain(single); len(got) != 2 {
+		t.Fatalf("children %v, want 2", got)
+	}
+	if single.visited != nil {
+		t.Error("a recursive scan over single-label entries kept a per-candidate set")
+	}
+
+	// "a.b" under the root and "a" under b.example.com are one name.
+	d := testDispatcher(Config{Entries: []string{"a.b", "a", "b"}, Recursive: true}, 3)
+	if d.visited == nil {
+		t.Fatal("a recursive scan with a multi-label entry kept no per-candidate set")
+	}
+	drain(d)
+	d.expand(job{domain: "b.example.com", depth: 1})
 	got := drain(d)
-	if want := []string{"www.example.com", "mail.example.com", "api.example.com"}; !slices.Equal(got, want) {
-		t.Fatalf("jobs %v, want %v", got, want)
+	if want := []string{"a.b.b.example.com", "b.b.example.com"}; !slices.Equal(got, want) {
+		t.Errorf("children %v, want %v", got, want)
 	}
-	// The duplicate (index 2) settled when it was skipped; the others settle
-	// as they complete, in any order.
-	for _, root := range []int{3, 0} {
+}
+
+// Jobs settle as they complete, in any order, and the watermark is the first
+// entry not yet done.
+func TestDispatcherSettlesOutOfOrder(t *testing.T) {
+	d := testDispatcher(Config{Entries: []string{"www", "mail", "api"}, Recursive: true}, 1)
+	drain(d)
+	for _, root := range []int{2, 0} {
 		d.complete(completion{root: root, finished: true})
 	}
 	if d.watermark != 1 {
 		t.Errorf("watermark %d, want 1 (entry 1 not yet done)", d.watermark)
 	}
 	d.complete(completion{root: 1, finished: true})
-	if d.watermark != 4 {
-		t.Errorf("watermark %d, want 4", d.watermark)
+	if d.watermark != 3 {
+		t.Errorf("watermark %d, want 3", d.watermark)
+	}
+}
+
+// TestCapCountsRecursiveRemainderWithoutBuildingIt covers #301: a budget
+// reached in a recursive scan splits what is left into skipped and excluded
+// with the same counts as generating every candidate would give.
+func TestCapCountsRecursiveRemainderWithoutBuildingIt(t *testing.T) {
+	entries := makeEntries(10)
+	cfg := Config{
+		Domain: "example.com", Entries: entries, Recursive: true, MaxQueries: 12,
+		Exclude: []string{
+			entries[1] + ".example.com",                     // tested before the cap: excluded as generated
+			entries[9] + ".example.com",                     // past the cap
+			entries[0] + "." + entries[0] + ".example.com",  // generated before the cap
+			entries[7] + "." + entries[0] + ".example.com",  // past the cap
+			"absent." + entries[0] + ".example.com",         // not a candidate
+			entries[3] + ".other.example.com",               // parent never expanded
+			"*." + entries[2] + ".example.com",              // whole subtree of a found parent
+			"*.deep." + entries[4] + ".example.com",         // excludes nothing queued
+			entries[5] + "." + entries[4] + ".example.com.", // past the cap, written with a trailing dot
+		},
+	}
+	// The same scan with no budget, generating every candidate, gives the
+	// counts the capped one must reach without building them.
+	find := func(d *dispatcher) {
+		for _, i := range []int{0, 2, 4} {
+			d.expand(job{domain: entries[i] + ".example.com", depth: 1})
+		}
+	}
+	full := cfg
+	full.MaxQueries = 0
+	all := testDispatcher(full, 2)
+	find(all)
+	candidates := len(drain(all))
+
+	d := testDispatcher(cfg, 2)
+	// Take 4 root jobs, then queue the found parents behind the root.
+	for i := 0; i < 4; i++ {
+		if _, ok := d.next(); !ok {
+			t.Fatal("no job")
+		}
+	}
+	find(d)
+	admitted := 4 + len(drain(d))
+	if admitted != 12 || !d.capped {
+		t.Fatalf("admitted %d capped %v, want 12 and true", admitted, d.capped)
+	}
+	if d.excluded != all.excluded || d.skipped != candidates-admitted {
+		t.Errorf("capped: excluded %d skipped %d, want %d and %d", d.excluded, d.skipped, all.excluded, candidates-admitted)
+	}
+	if d.remaining != 0 || len(d.frontier) != 0 {
+		t.Errorf("remaining %d frontier %d after the cap, want 0 and 0", d.remaining, len(d.frontier))
+	}
+}
+
+// A resumed parent that the resumed scan finds again is expanded once, and
+// counted once when a budget stops admission (#301).
+func TestDispatcherExpandsAResumedParentOnce(t *testing.T) {
+	cfg := Config{
+		Entries: []string{"a", "b"}, Recursive: true,
+		ResumeParents: []string{"dev.example.com", "DEV.example.com."},
+	}
+	d := testDispatcher(cfg, 3)
+	d.expand(job{domain: "dev.example.com", depth: 1})
+	want := []string{"a.example.com", "b.example.com", "a.dev.example.com", "b.dev.example.com"}
+	if got := drain(d); !slices.Equal(got, want) {
+		t.Errorf("jobs %v, want %v", got, want)
+	}
+
+	cfg.MaxQueries = 1
+	d = testDispatcher(cfg, 3)
+	drain(d)
+	d.expand(job{domain: "dev.example.com", depth: 1})
+	if d.skipped != 3 {
+		t.Errorf("skipped %d, want 3 (one root entry and dev's two children, once)", d.skipped)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 )
 
 // dispatcher owns candidate generation for one scan (#159): the expansion
-// queue, the visited set (loop and duplicate protection), the resume
+// queue, the expanded and visited sets (loop and duplicate protection), the resume
 // watermark, the -max-queries and -max-duration budgets, and the count of
 // dispatched jobs not yet completed. Its methods are plain state changes,
 // called only from run's goroutine (or a test), so they need no locking.
@@ -23,6 +23,14 @@ type dispatcher struct {
 	cfg Config
 	n   int // len(cfg.Entries)
 
+	// A recursive scan dedupes by parent: expanded holds every parent queued
+	// for expansion, so one found twice (a resumed parent found again) is
+	// expanded once. With single-label entries that is enough, since a name
+	// then has one (entry, parent) pair. Only multi-label entries can reach
+	// one name through two parents ("a.b" under the root, "a" under
+	// "b.root"), and only then is visited, the set of generated candidates,
+	// kept (#301). Both are nil for a non-recursive scan.
+	expanded  map[string]struct{}
 	visited   map[string]struct{}
 	frontier  []expansion
 	head      int // first unconsumed expansion in frontier
@@ -43,13 +51,18 @@ type dispatcher struct {
 	pending  int  // dispatched jobs not yet completed
 }
 
-// visitedSet is the dispatcher's visited set: a map for recursive scans,
-// nil otherwise.
-func visitedSet(recursive bool, n int) map[string]struct{} {
+// visitedSet is the dispatcher's set of generated candidates: a map for a
+// recursive scan whose entries include a multi-label one, nil otherwise.
+func visitedSet(recursive bool, entries []string) map[string]struct{} {
 	if !recursive {
 		return nil
 	}
-	return make(map[string]struct{}, n)
+	for _, e := range entries {
+		if strings.Contains(e, ".") {
+			return make(map[string]struct{}, len(entries))
+		}
+	}
+	return nil
 }
 
 func newDispatcher(cfg Config, maxDepth int) *dispatcher {
@@ -59,10 +72,11 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		cfg: cfg,
 		n:   n,
 		// Entries are unique (every caller deduplicates them), so only a
-		// recursive scan, whose levels can reach one name twice, needs to
-		// remember what it visited. Without it a multi-million-entry list
-		// skips a map as large as the list (#248).
-		visited:   visitedSet(cfg.Recursive, n),
+		// recursive scan with multi-label entries, whose levels can reach
+		// one name twice, needs to remember what it visited. Without it a
+		// multi-million-entry list skips a map as large as the list (#248),
+		// and a recursive scan one that grows with every candidate (#301).
+		visited:   visitedSet(cfg.Recursive, cfg.Entries),
 		frontier:  []expansion{{parent: cfg.Domain, depth: 1, next: start}},
 		remaining: n - start,
 		start:     start,
@@ -73,14 +87,28 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 	// interrupt, whose children may not all have been tested (#73). Run
 	// passes only the ones a live scan would expand (see gateResumeParents).
 	if cfg.Recursive {
+		d.expanded = make(map[string]struct{})
 		for _, p := range cfg.ResumeParents {
-			if name, depth, ok := resumeParent(cfg, p, maxDepth); ok {
+			if name, depth, ok := resumeParent(cfg, p, maxDepth); ok && d.markExpanded(name) {
 				d.frontier = append(d.frontier, expansion{parent: name, depth: depth + 1})
 				d.remaining += n
 			}
 		}
 	}
 	return d
+}
+
+// markExpanded records parent as queued for expansion and reports whether it
+// was new. A non-recursive scan never expands, so it keeps no record.
+func (d *dispatcher) markExpanded(parent string) bool {
+	if d.expanded == nil {
+		return true
+	}
+	if _, dup := d.expanded[parent]; dup {
+		return false
+	}
+	d.expanded[parent] = struct{}{}
+	return true
 }
 
 // resumeParent normalizes a name found before an interrupt and reports its
@@ -112,11 +140,16 @@ func (d *dispatcher) settle(i int) {
 // that -exclude, or a recursive scan's visited set, would have kept out are
 // counted as they would have been, not as skipped, so a budget that ran out
 // only past them still leaves the verdict complete (#238). Without
-// exclusions that walk is not needed, and a cap stays O(1).
+// exclusions a cap stays O(1), and with them no candidate is built (see
+// countUnbuilt); only a visited set (multi-label entries in a recursive
+// scan) needs every remaining candidate walked (#301).
 func (d *dispatcher) stopAdmitting() {
-	if d.cfg.scope.empty() && d.visited == nil {
+	switch {
+	case d.visited == nil && d.cfg.scope.empty():
 		d.skipped += d.remaining
-	} else {
+	case d.visited == nil:
+		d.countUnbuilt()
+	default:
 		for _, e := range d.frontier[d.head:] {
 			for i := e.next; i < d.n; i++ {
 				entry := d.cfg.Entries[i]
@@ -141,6 +174,47 @@ func (d *dispatcher) stopAdmitting() {
 	d.remaining = 0
 	d.capped = true
 	d.frontier, d.head = nil, 0
+}
+
+// countUnbuilt splits the candidates not yet generated into excluded and
+// skipped without building them, for a scan with no visited set (so every
+// entry is a single label). An expansion whose parent's subtree is excluded
+// is excluded whole. Otherwise only an exact pattern can exclude a child,
+// and only the child made of its first label under its parent, so one pass
+// over the entries finds where those labels sit, and each expansion then
+// checks the patterns directly below its parent against its cursor.
+func (d *dispatcher) countUnbuilt() {
+	s := d.cfg.scope
+	labels := make(map[string][]string) // parent -> first labels of the exact patterns below it
+	index := make(map[string]int)       // those labels -> their index in Entries, -1 if absent
+	for pattern := range s.exact {
+		if label, parent, ok := strings.Cut(pattern, "."); ok {
+			labels[parent] = append(labels[parent], label)
+			index[label] = -1
+		}
+	}
+	if len(index) > 0 {
+		for i, entry := range d.cfg.Entries {
+			if _, ok := index[entry]; ok {
+				index[entry] = i
+			}
+		}
+	}
+	for _, e := range d.frontier[d.head:] {
+		left := d.n - e.next
+		if s.subtreeExcluded(e.parent) {
+			d.excluded += left
+			continue
+		}
+		out := 0
+		for _, label := range labels[e.parent] {
+			if index[label] >= e.next {
+				out++
+			}
+		}
+		d.excluded += out
+		d.skipped += left - out
+	}
 }
 
 // total is the progress total: jobs admitted plus candidates not yet
@@ -181,17 +255,17 @@ func (d *dispatcher) next() (job, bool) {
 		e.next++
 		d.remaining--
 		name := entry + "." + e.parent
-		// Key by the name relative to the root domain. For depth 1 that is
-		// the entry itself, so no extra string is retained.
-		key := entry
-		if e.depth > 1 {
-			key = name[:len(name)-len(d.cfg.Domain)-1]
-		}
 		root := -1
 		if e.depth == 1 {
 			root = e.next - 1
 		}
 		if d.visited != nil {
+			// Key by the name relative to the root domain. For depth 1 that
+			// is the entry itself, so no extra string is retained.
+			key := entry
+			if e.depth > 1 {
+				key = name[:len(name)-len(d.cfg.Domain)-1]
+			}
 			if _, dup := d.visited[key]; dup {
 				d.settle(root)
 				continue
@@ -211,7 +285,11 @@ func (d *dispatcher) next() (job, bool) {
 
 // expand queues the children of a found parent, unless a budget has stopped
 // admission or every child would be out of scope; then they are only counted.
+// A parent already queued (a resumed one found again) adds nothing.
 func (d *dispatcher) expand(parent job) {
+	if !d.markExpanded(parent.domain) {
+		return
+	}
 	switch {
 	case d.capped:
 		d.skipped += d.n
