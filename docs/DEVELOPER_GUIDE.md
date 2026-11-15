@@ -31,7 +31,7 @@ To work with `subenum`, you'll need:
     To build the project, run:
 
     ```bash
-    # Standard build (version fallback is the `Version` var in main.go)
+    # Standard build (reports dev without an injected or module version)
     go build -buildvcs=false
 
     # Inject the git tag into the binary
@@ -88,7 +88,7 @@ subenum/
 │   ├── DOCUMENTATION_STRUCTURE.md
 │   ├── ROADMAP.md              # Planned work
 │   ├── docker.md               # Container setup and volume mounting
-│   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md  # User guides
+│   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md, mcp.md  # User guides
 │   ├── _config.yml             # Jekyll config for GitHub Pages
 │   ├── _data/nav.yml           # Site navigation: sidebar, footer, search, reading order
 │   ├── _includes/, _layouts/, assets/  # Jekyll site templates, CSS, JS, images
@@ -387,6 +387,6 @@ The following capabilities are implemented and available today:
 
 See `docs/ROADMAP.md` for the next-pass list. Areas still open:
 
-*   **Additional record types**: `Lookup.ResolveTypes` covers A, AAAA, CNAME, NS, MX and TXT; a new type is a case in `lookupType`, an entry in `supportedTypes` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
+*   **Additional record types**: `Lookup.ResolveTypes` covers A, AAAA, CNAME, NS, MX and TXT; a new type is a case in `lookupType`, an entry in `typeOrder` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 

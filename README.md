@@ -695,7 +695,7 @@ subenum/
 │   ├── assets/                 # Brand, CSS, JS, TUI screenshot, demo clip
 │   ├── _data/, _includes/, _layouts/
 │   ├── ARCHITECTURE.md, CONTRIBUTING.md, DEVELOPER_GUIDE.md, ROADMAP.md
-│   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md, docker.md
+│   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md, docker.md, mcp.md
 │   └── index.html              # Landing page
 ├── examples/
 │   ├── labs/                   # Lab scenario zones and their wordlist
