@@ -115,6 +115,25 @@ func TestNewFileWriterSkipsStdout(t *testing.T) {
 	}
 }
 
+// TestWriterCSVStdoutStreams covers #319: a CSV row reaches stdout when its
+// result is emitted, before Finish, as text, JSON and JSONL rows do.
+func TestWriterCSVStdoutStreams(t *testing.T) {
+	var out bytes.Buffer
+	w := New(nil, false, FormatCSV)
+	w.SetStdout(&out)
+	w.Emit(found("www.example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+	if got, want := out.String(), "subdomain,type,value\nwww.example.com,A,192.0.2.1\n"; got != want {
+		t.Fatalf("stdout before Finish = %q, want %q", got, want)
+	}
+	w.Emit(found("api.example.com", []dns.Record{{Type: "A", Value: "192.0.2.2"}}))
+	if !strings.HasSuffix(out.String(), "api.example.com,A,192.0.2.2\n") {
+		t.Fatalf("second row not written before Finish: %q", out.String())
+	}
+	if err := w.Finish(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWriterCSVEmptyRecords(t *testing.T) {
 	tmp, err := os.CreateTemp("", "output-csv-empty-*.csv")
 	if err != nil {
@@ -125,7 +144,7 @@ func TestWriterCSVEmptyRecords(t *testing.T) {
 	bw := bufio.NewWriter(tmp)
 	w := New(bw, false, FormatCSV)
 	// A resolved domain with no records still gets one row with empty fields.
-	// Finish must run inside the capture because csv.Writer buffers until flush.
+	// Finish runs inside the capture so the header and rows are all flushed.
 	out := captureStdout(t, func() {
 		w.Emit(found("www.example.com", nil))
 		if err := w.Finish(); err != nil {

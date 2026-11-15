@@ -375,6 +375,12 @@ func (w *Writer) writeCSVRows(res Result) {
 			_ = w.csvFile.Write(row)
 		}
 	}
+	// Stdout gets each result as it is found, as the other formats do, so a
+	// pipe sees live rows and a force quit loses none (#319). The -o file
+	// stays buffered behind its own bufio.Writer.
+	if w.csvStdout != nil {
+		w.csvStdout.Flush()
+	}
 }
 
 // Finish flushes any buffered or streamed structured output. It must be called
