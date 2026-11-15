@@ -228,16 +228,12 @@ func fileDigest(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// inputDigests fingerprints the inputs a resume must find unchanged. The
-// -diff file is left out when it is also the -o file, which an interrupted
-// run rewrites with its partial results.
+// inputDigests fingerprints the inputs a resume must find unchanged. That
+// includes a -diff file that is also the -o file: a run that saves a resume
+// state leaves it as it was (#297).
 func inputDigests(f cliFlags) (map[string]string, error) {
 	out := map[string]string{}
-	diff := f.diff
-	if diff == f.outputFile {
-		diff = ""
-	}
-	paths := append(slices.Clone(f.wordlists.paths), f.domainList, f.excludeFile, f.resolvers, f.simZone, f.seedsFile, diff)
+	paths := append(slices.Clone(f.wordlists.paths), f.domainList, f.excludeFile, f.resolvers, f.simZone, f.seedsFile, f.diff)
 	for _, p := range paths {
 		d, err := fileDigest(p)
 		if err != nil {
@@ -353,17 +349,18 @@ func savedSources(sources []targetSource) map[string][]string {
 // how to continue. Runs that read stdin cannot be replayed. prev is the
 // state this run resumed from, if any: a target interrupted again before its
 // scan reported progress keeps the earlier resume point (#109), and one this
-// run never reached keeps its saved state unchanged.
-func saveResumeState(s *session) {
+// run never reached keeps its saved state unchanged. It reports whether the
+// state was saved.
+func saveResumeState(s *session) bool {
 	f, out, prev := s.f, s.out, s.resume
 	if f.wordlists.readsStdin() || f.domainList == "-" {
 		out.Info("Not saving resume state: the wordlist or domain list came from stdin")
-		return
+		return false
 	}
 	inputs, err := inputDigests(f)
 	if err != nil {
 		out.Error("saving resume state: %v", err)
-		return
+		return false
 	}
 	st := resumeState{Version: resumeStateVersion, Args: withSeed(s.args, f), Inputs: inputs, Settings: s.settings}
 	for i, domain := range s.targets {
@@ -399,9 +396,10 @@ func saveResumeState(s *session) {
 	}
 	if err := writeResumeState(f.stateFile, st); err != nil {
 		out.Error("saving resume state: %v", err)
-		return
+		return false
 	}
 	out.Info("Saved resume state to %s; continue with: subenum -resume %s", f.stateFile, f.stateFile)
+	return true
 }
 
 // writeResumeState saves where an interrupted run stopped.

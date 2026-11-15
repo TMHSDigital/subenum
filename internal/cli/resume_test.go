@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -300,6 +301,96 @@ func TestE2EMaxDurationSavesResumeState(t *testing.T) {
 	}
 	if sum.Verdict != "complete" || len(sum.Targets) != 1 || sum.Targets[0].SkippedCap != 0 || sum.Targets[0].StoppedBy != "" || sum.Targets[0].Processed < n {
 		t.Errorf("finished scan: verdict %q, targets %+v; want complete with all %d words tested and none skipped", sum.Verdict, sum.Targets, n)
+	}
+}
+
+// TestE2EResumeDiffOntoOutputFile covers #297: with -diff and -o on one
+// file, a run that stops and saves a resume state leaves the file alone, so
+// the resumed run reports the same diff and exit code as an uninterrupted
+// one, and then writes the full results.
+func TestE2EResumeDiffOntoOutputFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const n = 120
+	var words strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&words, "host%d\n", i)
+	}
+	base := []string{"-simulate", "-seed", "3", "-hit-rate", "50", "-progress=false", "-t", "2", "-format", "jsonl",
+		"-w", writeFile(t, "wl.txt", words.String())}
+	run := func(extra ...string) (int, string) {
+		return runCLIMerged(t, append(append(slices.Clone(base), extra...), "example.com")...)
+	}
+	names := func(path string) []string {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		results, _ := jsonlRecords(t, string(data))
+		var out []string
+		for _, r := range results {
+			out = append(out, r.Subdomain)
+		}
+		slices.Sort(out)
+		return out
+	}
+	diffOf := func(path string) output.DiffSummary {
+		t.Helper()
+		var summary output.Summary
+		if data, err := os.ReadFile(path); err != nil || json.Unmarshal(data, &summary) != nil || summary.Diff == nil {
+			t.Fatalf("reading the diff summary in %s: %v", path, err)
+		}
+		d := *summary.Diff
+		d.Previous = ""
+		return d
+	}
+
+	full := filepath.Join(dir, "full.jsonl")
+	if code, out := run("-o", full); code != 0 {
+		t.Fatalf("baseline run: exit %d\n%s", code, out)
+	}
+	all := names(full)
+	if len(all) < 10 {
+		t.Fatalf("the simulation found %d names, want at least 10", len(all))
+	}
+	// The baseline lacks one name the scan finds and has one it cannot find.
+	baseline := strings.Join(all[1:], "\n") + "\ngone.example.com\n"
+
+	// The uninterrupted run.
+	stats := filepath.Join(dir, "stats.json")
+	wantCode, out := run("-diff", writeFile(t, "prev.txt", baseline), "-o", filepath.Join(dir, "cur.jsonl"), "-stats", stats)
+	want := diffOf(stats)
+	if wantCode != 4 || want.Added != 1 {
+		t.Fatalf("uninterrupted run: exit %d, diff %+v; want exit 4 with 1 added\n%s", wantCode, want, out)
+	}
+
+	// -rate 50 with 120 words needs about 2.4 s, so a 1 s budget stops the run.
+	results, state := writeFile(t, "results.txt", baseline), filepath.Join(dir, "state.json")
+	code, out := run("-diff", results, "-o", results, "-stats", stats, "-rate", "50", "-max-duration", "1s", "-state", state)
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("the stopped run (exit %d) saved no resume state: %v\n%s", code, err, out)
+	}
+	if data, err := os.ReadFile(results); err != nil || string(data) != baseline {
+		t.Fatalf("the stopped run changed its -diff baseline (err %v):\n%s", err, data)
+	}
+	for i := 0; ; i++ {
+		if i == 20 {
+			t.Fatal("the scan did not finish in 20 resumed runs")
+		}
+		code, out = runCLIMerged(t, "-resume", state)
+		if _, err := os.Stat(state); err != nil {
+			break // the run that finished removed its state
+		}
+		if data, err := os.ReadFile(results); err != nil || string(data) != baseline {
+			t.Fatalf("resumed run %d changed its -diff baseline (err %v):\n%s", i, err, data)
+		}
+	}
+	if got := diffOf(stats); code != wantCode || got != want {
+		t.Errorf("resumed run: exit %d, diff %+v; want exit %d, diff %+v as uninterrupted\n%s", code, got, wantCode, want, out)
+	}
+	if got := names(results); !slices.Equal(got, all) {
+		t.Errorf("-o holds %d names after the resumed run, want all %d", len(got), len(all))
 	}
 }
 

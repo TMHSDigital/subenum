@@ -62,6 +62,7 @@ type session struct {
 	anyDone       bool
 	anyFailed     bool
 	fileErr       bool // a file write error was reported
+	keepBaseline  bool // -o is also the -diff file and a resume needs it unchanged
 	started       time.Time
 	signalCode    atomic.Int32 // 128+signum once a signal arrives
 }
@@ -120,7 +121,7 @@ func runWith(a runArgs) (code int) {
 		// successful exit into a failure (#30). bufio errors are sticky, so a
 		// failure already reported by Finish is not printed twice.
 		defer func() {
-			if err := s.outFile.Close(s.anyDone); err != nil {
+			if err := s.outFile.Close(s.anyDone && !s.keepBaseline); err != nil {
 				if !s.fileErr {
 					s.out.Error("writing output file: %v", err)
 				}
@@ -790,7 +791,13 @@ func (s *session) finish(ctx context.Context) int {
 	logPoolHealth(s.in.pool, out)
 
 	if s.signalCode.Load() != 0 || s.stoppedEarly() {
-		saveResumeState(s)
+		// With -diff and -o on one file, the partial results must not replace
+		// the baseline the resumed run compares against; the saved state holds
+		// them, and the resumed run writes them to the -o file (#297).
+		if saveResumeState(s) && f.diff != "" && f.diff == f.outputFile {
+			s.keepBaseline = true
+			out.Info("Leaving %s unchanged: it is the -diff baseline for the resumed run, which writes the full results", f.outputFile)
+		}
 	} else if s.resume != nil && !s.anyFailed {
 		// The resumed run finished: its state file is spent (#109).
 		if err := os.Remove(s.resume.path); err == nil {
