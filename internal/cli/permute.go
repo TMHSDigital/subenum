@@ -2,13 +2,10 @@ package cli
 
 import (
 	"context"
-	"sort"
-	"strings"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/output"
-	"github.com/TMHSDigital/subenum/internal/permute"
 	"github.com/TMHSDigital/subenum/internal/scan"
-	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // permutationResult is the second-pass part of a target's result (#72).
@@ -29,30 +26,6 @@ type permuteInput struct {
 	restoredHits int                 // permutation results that run already found
 }
 
-// relativeSeeds returns the names under target, relative to it ("api" for
-// api.example.com), from this target's hits and the -seeds file.
-func relativeSeeds(target string, found []string, seeds map[string]struct{}) []string {
-	set := map[string]bool{}
-	addName := func(name string) {
-		name = strings.ToLower(strings.TrimSuffix(name, "."))
-		if rel, ok := strings.CutSuffix(name, "."+target); ok && rel != "" {
-			set[rel] = true
-		}
-	}
-	for _, n := range found {
-		addName(n)
-	}
-	for n := range seeds {
-		addName(n)
-	}
-	out := make([]string, 0, len(set))
-	for s := range set {
-		out = append(out, s)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // mainPassNames returns the names of a target's results that the main pass
 // found, leaving out permutation hits: they are the -permute seeds.
 func mainPassNames(results []output.Result) []string {
@@ -65,32 +38,16 @@ func mainPassNames(results []output.Result) []string {
 	return names
 }
 
-// permutationCandidates returns the permutations of rel (seed names relative
-// to target) that are not wordlist entries or seeds themselves, in a stable
-// order. Candidates whose full name would pass the 253-character limit are
-// dropped and counted in tooLong: they would otherwise fail as "other" and
-// count against the reliability guard (#111). The permutations are checked
-// against entries in one pass, with no map as large as the wordlist (#321).
-func permutationCandidates(target string, entries, rel []string) (candidates []string, tooLong int) {
-	skip := make(map[string]bool, len(rel))
-	for _, s := range rel {
-		skip[s] = true
-	}
-	generated := wordlist.NotIn(permute.Generate(rel, permute.Words, skip), entries)
-	candidates, _, tooLong = wordlist.Build(generated, target)
-	return candidates, tooLong
-}
-
 // finishedPermutation is the -permute pass of a target finished before the
 // interrupt, rebuilt from the state without scanning: the same seeds and
 // candidates runPermutationPass would count, and the saved pass (#315).
 func finishedPermutation(p permuteInput) *permutationResult {
-	rel := relativeSeeds(p.target, p.found, p.seeds)
+	rel := candidates.RelativeSeeds(p.target, p.found, p.seeds)
 	if len(rel) == 0 {
 		return nil
 	}
-	candidates, _ := permutationCandidates(p.target, p.entries, rel)
-	res := &permutationResult{seeds: len(rel), candidates: len(candidates), found: p.restoredHits}
+	perms, _ := candidates.Permutations(p.target, p.entries, rel)
+	res := &permutationResult{seeds: len(rel), candidates: len(perms), found: p.restoredHits}
 	if p.prev != nil {
 		res.pass = targetResult{done: true, final: p.prev.event()}
 	}
@@ -107,13 +64,13 @@ func finishedPermutation(p permuteInput) *permutationResult {
 // which a resumed pass has to rebuild identically.
 func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permutationResult {
 	out, target := s.out, p.target
-	rel := relativeSeeds(target, p.found, p.seeds)
+	rel := candidates.RelativeSeeds(target, p.found, p.seeds)
 	if len(rel) == 0 {
 		return nil
 	}
-	candidates, tooLong := permutationCandidates(target, p.entries, rel)
-	res := &permutationResult{seeds: len(rel), candidates: len(candidates), found: p.restoredHits}
-	if len(candidates) == 0 {
+	perms, tooLong := candidates.Permutations(target, p.entries, rel)
+	res := &permutationResult{seeds: len(rel), candidates: len(perms), found: p.restoredHits}
+	if len(perms) == 0 {
 		return res
 	}
 	if tooLong > 0 {
@@ -124,7 +81,7 @@ func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permut
 	// permutation would otherwise be built from the candidate list itself,
 	// giving names such as <candidate>.api-dev.<target>, and multiply the
 	// pass past the recursion ceiling (#111).
-	pass := scanPass{domain: target, entries: candidates, maxQueries: s.f.maxQueries, flat: true}
+	pass := scanPass{domain: target, entries: perms, maxQueries: s.f.maxQueries, flat: true}
 	if p.prev != nil {
 		// A copy: the saved state keeps its pending names should this pass
 		// stop before it reports (#315).
@@ -138,9 +95,9 @@ func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permut
 		}
 		pass.resumeFrom, pass.maxQueries = prev.RootDone, left
 		prev.handOverPending(&pass, s.f.retryIncon)
-		out.Info("Resuming the permutation pass for %s at candidate %d of %d", target, prev.RootDone, len(candidates))
+		out.Info("Resuming the permutation pass for %s at candidate %d of %d", target, prev.RootDone, len(perms))
 	} else {
-		out.Info("Permutation pass for %s: %d candidates from %d seed names", target, len(candidates), len(rel))
+		out.Info("Permutation pass for %s: %d candidates from %d seed names", target, len(perms), len(rel))
 	}
 	res.pass = scanTarget(ctx, s, pass, func(ev scan.Event) {
 		res.found++

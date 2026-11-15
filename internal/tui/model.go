@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/TMHSDigital/subenum/data"
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
@@ -51,13 +52,13 @@ type Model struct {
 	final   scan.Event // the event that ended the scan, for a saved file's summary (#332)
 
 	// What the Sources and Permute fields add around the scan (#274).
-	lookups  []sourceLookup      // the passive sources asked, in order
-	from     map[string][]string // who proposed each name a source had
-	foundBy  map[string]int      // results per source that proposed them
-	entries  []string            // the main pass's candidates, not permuted again
-	names    []string            // the main pass's results: permutation seeds
-	pool     *dns.Pool           // the resolver pool, for the permutation pass too
-	deadline time.Time           // Max Duration's end, shared by both passes
+	lookups  []sourceLookup  // the passive sources asked, in order
+	cands    *candidates.Set // who proposed each name a source had; nil without sources
+	foundBy  map[string]int  // results per source that proposed them
+	entries  []string        // the main pass's candidates, not permuted again
+	names    []string        // the main pass's results: permutation seeds
+	pool     *dns.Pool       // the resolver pool, for the permutation pass too
+	deadline time.Time       // Max Duration's end, shared by both passes
 }
 
 // Options configure the TUI.
@@ -194,7 +195,12 @@ func loadWordlistCmd(vals formValues, o Options) tea.Cmd {
 		// simulation mode, which sends nothing off the machine (#274).
 		if err == nil && poolErr == nil && len(entries) > 0 && !vals.Simulate && len(vals.sources) > 0 {
 			msg.lookups = fetchSources(context.Background(), vals.Domain, vals.sources, o)
-			msg.entries, msg.from = mergeSources(vals.Domain, entries, msg.lookups)
+			// The same candidate set as the command line's (#347).
+			msg.cands = candidates.New(vals.Domain, entries, nil)
+			for i := range msg.lookups {
+				msg.lookups[i].added = msg.cands.Add(msg.lookups[i].name, msg.lookups[i].names)
+			}
+			msg.entries = msg.cands.Entries()
 		}
 		return msg
 	}
@@ -259,7 +265,7 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 		m.out = newFileWriter(f, vals, vals.format, seed)
 	}
 	m.vals, m.seed, m.started, m.final = vals, seed, time.Now(), scan.Event{}
-	m.lookups, m.from, m.foundBy = loaded.lookups, loaded.from, map[string]int{}
+	m.lookups, m.cands, m.foundBy = loaded.lookups, loaded.cands, map[string]int{}
 	m.entries, m.names, m.pool, m.deadline = entries, nil, pool, time.Time{}
 
 	m.state = stateScan
@@ -414,7 +420,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The main pass finished and a permutation pass follows (#274): its
 		// candidates are built off the event loop, and beginPermutation runs
 		// when they arrive.
-		return m, tea.Batch(svCmd, permutationCmd(m.vals.Domain, m.entries, m.names, m.from))
+		return m, tea.Batch(svCmd, permutationCmd(m.vals.Domain, m.entries, m.names, m.cands))
 	case ev.Kind == scan.EventDone && ev.Stopped && m.scanView.main == nil:
 		// The scan stopped before testing candidates (an early error such as a
 		// wildcard zone without Force, #99): close the file without finalizing,
@@ -445,12 +451,9 @@ func (m *Model) record(r scan.Result) {
 	res := output.Result{Result: r}
 	switch permuting := m.scanView.main != nil; {
 	case permuting:
-		res.Permutation, res.Sources = true, fromPermute
+		res.Permutation, res.Sources = true, candidates.FromPermute
 	case len(m.vals.sources) > 0 || m.vals.permute:
-		res.Sources = fromWordlist
-		if list, ok := m.from[strings.TrimSuffix(strings.ToLower(r.Subdomain), "."+m.vals.Domain)]; ok {
-			res.Sources = list
-		}
+		res.Sources = m.cands.SourcesOf(r.Subdomain)
 		if m.vals.permute {
 			m.names = append(m.names, r.Subdomain)
 		}

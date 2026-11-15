@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/dnstest"
@@ -73,7 +74,7 @@ func writeState(t *testing.T, st resumeState) string {
 // candidatesFor rebuilds a target's -permute candidate list from its
 // main-pass names, as runPermutationPass does.
 func candidatesFor(target string, entries []string, found []string) []string {
-	c, _ := permutationCandidates(target, entries, relativeSeeds(target, found, nil))
+	c, _ := candidates.Permutations(target, entries, candidates.RelativeSeeds(target, found, nil))
 	return c
 }
 
@@ -1044,23 +1045,6 @@ func TestE2EPermuteRecursive(t *testing.T) {
 	}
 	if perms == 0 {
 		t.Fatal("no permutation results; adjust the seed")
-	}
-}
-
-// TestPermutationCandidatesRespectNameLength covers #111: candidates whose
-// full name passes 253 characters are dropped, not queried.
-func TestPermutationCandidatesRespectNameLength(t *testing.T) {
-	label := strings.Repeat("a", 60)
-	target := strings.Join([]string{label, label, label, "example"}, ".") // 191 characters
-	seed := strings.Repeat("b", 55) + "." + target                        // 247 characters
-	candidates, tooLong := permutationCandidates(target, nil, relativeSeeds(target, []string{seed}, nil))
-	if tooLong == 0 || len(candidates) == 0 {
-		t.Fatalf("%d candidates, %d too long; want some of each", len(candidates), tooLong)
-	}
-	for _, c := range candidates {
-		if n := len(c) + 1 + len(target); n > 253 {
-			t.Errorf("candidate %s is %d characters long", c, n)
-		}
 	}
 }
 

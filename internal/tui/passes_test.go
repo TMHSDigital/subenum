@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/net/dns/dnsmessage"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -254,9 +255,10 @@ func TestFailedSourceDoesNotStopTheScan(t *testing.T) {
 	if len(lookups) != 1 || lookups[0].fetched || lookups[0].err == "" {
 		t.Fatalf("lookups = %+v, want one failed lookup", lookups)
 	}
-	entries, from := mergeSources("example.com", []string{"www"}, lookups)
-	if !reflect.DeepEqual(entries, []string{"www"}) || len(from) != 0 {
-		t.Errorf("entries %q, from %v; want the wordlist's names alone", entries, from)
+	cands := candidates.New("example.com", []string{"www"}, nil)
+	if added := cands.Add(lookups[0].name, lookups[0].names); added != 0 || !reflect.DeepEqual(cands.Entries(), []string{"www"}) ||
+		!reflect.DeepEqual(cands.SourcesOf("www.example.com"), candidates.FromWordlist) {
+		t.Errorf("entries %q, sources of www %v; want the wordlist's names alone", cands.Entries(), cands.SourcesOf("www.example.com"))
 	}
 
 	m := Model{scanView: newScanViewModel(120, 40, false), lookups: lookups, vals: formValues{Options: scan.Options{Domain: "example.com"}}}

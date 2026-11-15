@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
@@ -589,8 +590,8 @@ type wordlistLoadedMsg struct {
 	err     error
 	pool    *dns.Pool // built from the Resolver Pool file, if one is set (#195)
 	poolErr error     // the pool file could not be read or parsed
-	// The passive sources' answers, already merged into entries, and who
-	// proposed each of their names (#274).
+	// The passive sources' answers, already merged into entries, and the
+	// candidate set that knows who proposed each name (#274, #347).
 	lookups []sourceLookup
-	from    map[string][]string
+	cands   *candidates.Set
 }

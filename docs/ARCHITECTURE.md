@@ -35,6 +35,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/wordlist` | Reads wordlist files and normalizes their entries into candidate prefixes |
 | `internal/validate` | Input validators shared by the CLI and the TUI (domain, resolver address, punycode) |
 | `internal/permute` | Generates second-pass candidates from names a scan has already found |
+| `internal/candidates` | A target's candidate set: the wordlist plus the names sources and zone transfers propose, which source proposed each result, and the `-permute` seeds and candidates (shared by the CLI and the TUI) |
 | `internal/diff` | Compares two runs' results: new and missing names, changed records (shared by `-diff` and `pkg/subenum`'s `Diff`) |
 | `internal/cliargs` | Parses command lines whose flags may follow positional arguments, shared by subenum and wordlist-gen |
 | `internal/ct` | Looks up subdomain names in Certificate Transparency logs through crt.sh |
@@ -96,7 +97,9 @@ internal/output/sarif.go       - WriteSARIF: takeover candidates as SARIF 2.1.0
 internal/output/eta.go         - ETA: progress estimate over a sliding window, FormatETA
 internal/output/log.go         - -log-format: text or JSON diagnostics on stderr (ParseLogFormat, SetLogFormat)
 internal/report/report.go      - New, Target, Finish: the run-quality report; Status, a target's status
+internal/report/permutation.go - Permutation: a target's -permute pass in the report (CLI and TUI)
 internal/permute/permute.go    - Generate: permutations of found names
+internal/candidates/candidates.go - Set (New, Add, SourcesOf), RelativeSeeds, Permutations: candidates for the CLI and the TUI
 internal/diff/diff.go          - Name, RecordsChanged: the comparison behind -diff-records and subenum.Diff
 internal/ct/ct.go              - Client.Names: crt.sh lookup
 internal/passive/passive.go    - Source, Known, ParseList, New: the -sources registry; Merge: source names into candidates

@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/TMHSDigital/subenum/internal/axfr"
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -418,7 +419,7 @@ func TestResumeFinishedTargetKeepsDetails(t *testing.T) {
 			if axfrDone {
 				seeds = append(seeds, "zt1", "zt2")
 			}
-			want, _ := permutationCandidates("example.test", seeds, seeds)
+			want, _ := candidates.Permutations("example.test", seeds, seeds)
 			if p := tg.Permutation; p == nil || p.Seeds != len(seeds) || p.Candidates != len(want) || p.Processed != 7 || p.Verdict != scan.VerdictComplete {
 				t.Errorf("report permutation = %+v; want %d seeds, %d candidates, 7 processed, complete", p, len(seeds), len(want))
 			}

@@ -3,6 +3,7 @@ package cli
 import (
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -40,33 +41,15 @@ func targetSummary(domain string, status report.Status, res targetResult) output
 		t.Sources = append(t.Sources, output.SourceSummary{Name: src.source, Names: len(src.names), Found: res.foundBy[src.source], Error: src.err, Truncated: src.truncated != ""})
 	}
 	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
-	t.AXFRFound = res.foundBy[sourceAXFR]
+	t.AXFRFound = res.foundBy[candidates.AXFR]
 	t.ZoneDenial = string(res.axfr.denial)
 	t.QueriesSent += res.axfr.queries // the NS and address lookups and the transfers (#85)
 	if p := res.permutation; p != nil && res.done && status != report.StatusNotRun && status != report.StatusSkipped {
-		t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}
+		pass := report.PermutationPass{Seeds: p.seeds, Candidates: p.candidates, Found: p.found, Failure: p.pass.err}
 		if p.pass.done {
-			// The pass is part of the target's scan: its queries count, and a
-			// worse verdict than the main pass's becomes the target's (#298).
-			final := p.pass.final
-			verdict, reason := final.Stats.Verdict(status == report.StatusInterrupted)
-			t.Permutation.Verdict = verdict
-			t.Permutation.Processed, t.Permutation.QueriesSent = final.Processed, final.Stats.QueriesSent
-			t.QueriesSent += final.Stats.QueriesSent
-			if scan.VerdictRank(verdict) > scan.VerdictRank(t.Verdict) {
-				t.Verdict, t.Reason = verdict, permutationReason+scan.Render(reason, scan.FlagName)
-			}
-		} else if p.candidates > 0 && scan.VerdictRank(t.Verdict) < scan.VerdictRank(scan.VerdictDegraded) {
-			reason := p.pass.err
-			if reason == "" {
-				reason = "it did not run to completion"
-			}
-			t.Verdict, t.Reason = scan.VerdictDegraded, permutationReason+reason
+			pass.Final = &p.pass.final
 		}
+		report.Permutation(&t, pass, status == report.StatusInterrupted, scan.FlagName)
 	}
 	return t
 }
-
-// permutationReason starts a target's verdict reason when the verdict is the
-// -permute pass's.
-const permutationReason = "permutation pass: "

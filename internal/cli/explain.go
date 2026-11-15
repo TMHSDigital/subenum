@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
@@ -124,7 +125,7 @@ func explainTarget(p func(string, ...any), t output.TargetSummary) {
 				pm.Candidates, pm.Seeds, pm.Processed, pm.QueriesSent, pm.Found, pm.Verdict)
 		}
 		// Since #298 the pass's verdict becomes the target's when it is worse.
-		if strings.HasPrefix(t.Reason, permutationReason) {
+		if strings.HasPrefix(t.Reason, report.PermutationReason) {
 			p("  The permutation pass set this target's verdict: it went worse than the main pass, so its outcome is the one to act on.")
 		}
 	}

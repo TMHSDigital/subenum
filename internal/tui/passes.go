@@ -3,30 +3,21 @@ package tui
 import (
 	"context"
 	"errors"
-	"maps"
-	"slices"
-	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
-	"github.com/TMHSDigital/subenum/internal/permute"
+	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
-	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // The Sources and Permute fields run around the scan, as -sources and
 // -permute do on the command line (#274): the passive sources are asked
 // while the wordlist loads, and the permutation pass is a second scan after
 // the main one.
-
-// Result sources that are not a passive source's name, as the CLI writes them.
-var (
-	fromWordlist = []string{"wordlist"}
-	fromPermute  = []string{"permute"}
-)
 
 // sourceLookup is one passive source's answer for the scan's domain.
 type sourceLookup struct {
@@ -71,41 +62,6 @@ func fetchSources(ctx context.Context, domain string, sources []string, o Option
 	return res
 }
 
-// mergeSources appends the sources' names that are not entries already, after
-// them, and sets each lookup's added count. from has every name a source
-// proposed (relative to domain) with who had it, the wordlist first; names
-// missing from it are the wordlist's alone.
-func mergeSources(domain string, entries []string, lookups []sourceLookup) (merged []string, from map[string][]string) {
-	for i := range lookups {
-		l := &lookups[i]
-		if len(l.names) == 0 {
-			continue
-		}
-		if from == nil {
-			from = map[string][]string{}
-		}
-		var added []string
-		entries, added = passive.Merge(entries, l.names, domain)
-		l.added = len(added)
-		fresh := make(map[string]struct{}, len(added))
-		for _, n := range added {
-			fresh[n] = struct{}{}
-		}
-		// A proposed name that was already an entry and that no earlier
-		// source had (those are in from) is a wordlist entry. No map as large
-		// as the wordlist is built (#321).
-		proposed, _, _ := wordlist.Build(l.names, domain)
-		for _, n := range proposed {
-			_, seen := from[n]
-			if _, isNew := fresh[n]; !seen && !isNew {
-				from[n] = fromWordlist
-			}
-			from[n] = append(slices.Clip(from[n]), l.name)
-		}
-	}
-	return entries, from
-}
-
 // permutationPass is the second pass of a scan with Permute on.
 type permutationPass struct {
 	seeds      int
@@ -121,30 +77,17 @@ func (p *permutationPass) unfinished() bool {
 	return p != nil && p.candidates > 0 && !p.done
 }
 
-// summarize adds the pass to the target's summary the way the CLI's report
-// does (#298): its counts and queries, and its verdict when that is worse
-// than the main pass's. errText is the scan's first error, if any.
+// summarize adds the pass to the target's summary with the command line's
+// code (#298, #347). errText is the scan's first error, if any.
 func (p *permutationPass) summarize(t *output.TargetSummary, interrupted bool, errText string) {
 	if p == nil {
 		return
 	}
-	t.Permutation = &output.PermutationSummary{Seeds: p.seeds, Candidates: p.candidates, Found: p.found}
-	const prefix = "permutation pass: "
-	switch {
-	case p.done:
-		verdict, reason := p.final.Stats.Verdict(interrupted)
-		t.Permutation.Verdict = verdict
-		t.Permutation.Processed, t.Permutation.QueriesSent = p.final.Processed, p.final.Stats.QueriesSent
-		t.QueriesSent += p.final.Stats.QueriesSent
-		if scan.VerdictRank(verdict) > scan.VerdictRank(t.Verdict) {
-			t.Verdict, t.Reason = verdict, prefix+scan.Render(reason, settingLabel)
-		}
-	case p.unfinished() && scan.VerdictRank(t.Verdict) < scan.VerdictRank(scan.VerdictDegraded):
-		if errText == "" {
-			errText = "it did not run to completion"
-		}
-		t.Verdict, t.Reason = scan.VerdictDegraded, prefix+errText
+	pass := report.PermutationPass{Seeds: p.seeds, Candidates: p.candidates, Found: p.found, Failure: errText}
+	if p.done {
+		pass.Final = &p.final
 	}
+	report.Permutation(t, pass, interrupted, settingLabel)
 }
 
 // addStats sums two passes' counters for the finished screen's counters
@@ -175,34 +118,21 @@ type permutationReadyMsg struct {
 }
 
 // permutationCmd builds the permutation pass's candidates in a tea.Cmd
-// goroutine, since the set of entries is as large as the wordlist. The seeds
-// are the names the main pass found and the ones the sources proposed;
-// candidates that are entries or seeds already are left out, so nothing is
-// queried twice.
-func permutationCmd(domain string, entries, found []string, from map[string][]string) tea.Cmd {
+// goroutine, with the command line's code (#347). The seeds are the names the
+// main pass found and the ones the sources proposed; candidates that are
+// entries or seeds already are left out, so nothing is queried twice, and no
+// map as large as the wordlist is built (#321).
+func permutationCmd(domain string, entries, found []string, cands *candidates.Set) tea.Cmd {
 	return func() tea.Msg {
-		set := map[string]bool{}
-		for _, name := range found {
-			name = strings.ToLower(strings.TrimSuffix(name, "."))
-			if rel, ok := strings.CutSuffix(name, "."+domain); ok && rel != "" {
-				set[rel] = true
-			}
+		var seeds map[string]struct{}
+		if cands != nil {
+			seeds = cands.Seeds()
 		}
-		for rel := range from {
-			set[rel] = true
-		}
-		rel := slices.Sorted(maps.Keys(set))
+		rel := candidates.RelativeSeeds(domain, found, seeds)
 		if len(rel) == 0 {
 			return permutationReadyMsg{}
 		}
-		skip := make(map[string]bool, len(entries)+len(rel))
-		for _, e := range entries {
-			skip[e] = true
-		}
-		for _, s := range rel {
-			skip[s] = true
-		}
-		candidates, _, tooLong := wordlist.Build(permute.Generate(rel, permute.Words, skip), domain)
-		return permutationReadyMsg{seeds: len(rel), candidates: candidates, tooLong: tooLong}
+		perms, tooLong := candidates.Permutations(domain, entries, rel)
+		return permutationReadyMsg{seeds: len(rel), candidates: perms, tooLong: tooLong}
 	}
 }
