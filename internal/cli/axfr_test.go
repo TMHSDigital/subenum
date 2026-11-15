@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -141,6 +145,251 @@ func TestE2EZoneWalkable(t *testing.T) {
 	}
 	if tg := s.Targets[0]; tg.ZoneDenial != "nsec" {
 		t.Errorf("zone_denial = %q, want nsec", tg.ZoneDenial)
+	}
+}
+
+// nsZone serves example.test from one local server. hosts are its name
+// servers and the addresses each resolves to; one with no addresses does not
+// resolve. transfer is the zone an AXFR gives, nil to refuse it. www and the
+// transferred names resolve.
+func nsZone(t *testing.T, hosts map[string][]string, transfer []string) *dnstest.Server {
+	t.Helper()
+	return dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		addrs, isNS := hosts[q.Name]
+		switch {
+		case q.Type == dnsmessage.TypeAXFR && q.Name == "example.test":
+			if transfer == nil {
+				return dnstest.Refused
+			}
+			return dnstest.Reply{Transfer: transfer}
+		case q.Type == dnsmessage.TypeNS && q.Name == "example.test":
+			return dnstest.Reply{NS: slices.Sorted(maps.Keys(hosts))}
+		case isNS && len(addrs) == 0:
+			return dnstest.NXDomain
+		case isNS && q.Type == dnsmessage.TypeA:
+			return dnstest.Reply{A: addrs}
+		case q.Name == "www.example.test" || slices.Contains(transfer, q.Name):
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.10"}}
+			}
+		default:
+			return dnstest.NXDomain
+		}
+		return dnstest.Reply{}
+	})
+}
+
+// axfrSummary reads the -stats report a run wrote.
+func axfrSummary(t *testing.T, path string) output.Summary {
+	t.Helper()
+	var s output.Summary
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Targets) != 1 {
+		t.Fatalf("report has %d targets, want 1", len(s.Targets))
+	}
+	return s
+}
+
+// TestE2EZoneTransferNSLookupFails covers #303: when the target's name
+// servers cannot be found, the run warns, records why in the report, asks no
+// one for a transfer and still scans the wordlist.
+func TestE2EZoneTransferNSLookupFails(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		ns   dnstest.Reply
+		want string
+	}{
+		"servfail": {dnstest.ServFail, "name server lookup failed"},
+		// The resolver reports an answer without NS records as an error too.
+		"no NS": {dnstest.Reply{}, "name server lookup failed"},
+	} {
+		srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+			switch {
+			case q.Type == dnsmessage.TypeNS:
+				return tc.ns
+			case q.Name == "www.example.test" && q.Type == dnsmessage.TypeA:
+				return dnstest.Reply{A: []string{"192.0.2.10"}}
+			}
+			return dnstest.NXDomain
+		})
+		wl := writeFile(t, "wl.txt", "www\nmail\n")
+		stats := filepath.Join(t.TempDir(), "run.json")
+		code, out := runAXFR(t, srv, "-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.test")
+		if code != 0 || !strings.Contains(out, "www.example.test") {
+			t.Errorf("%s: exit %d; want the wordlist scan to run\n%s", name, code, out)
+			continue
+		}
+		if !strings.Contains(out, "Warning: -axfr: "+tc.want) {
+			t.Errorf("%s: no warning with %q\n%s", name, tc.want, out)
+		}
+		if tg := axfrSummary(t, stats).Targets[0]; !strings.HasPrefix(tg.AXFRError, tc.want) || len(tg.AXFRAllowed) != 0 {
+			t.Errorf("%s: report axfr_error = %q, axfr_allowed = %q; want an error starting %q and no server", name, tg.AXFRError, tg.AXFRAllowed, tc.want)
+		}
+		if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != 0 {
+			t.Errorf("%s: AXFR queries = %d, want 0", name, n)
+		}
+	}
+}
+
+// TestE2EZoneTransferServerCap covers #303: of a target's ten name servers,
+// all refusing, only axfrMaxServers are resolved and asked.
+func TestE2EZoneTransferServerCap(t *testing.T) {
+	t.Parallel()
+	hosts := map[string][]string{}
+	for i := range 10 {
+		hosts["ns"+strconv.Itoa(i)+".example.test"] = []string{"127.0.0.1"}
+	}
+	srv := nsZone(t, hosts, nil)
+	wl := writeFile(t, "wl.txt", "www\n")
+	code, out := runAXFR(t, srv, "-axfr", "-v", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.test")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != axfrMaxServers {
+		t.Errorf("AXFR queries = %d, want %d", n, axfrMaxServers)
+	}
+	resolved := 0
+	for host := range hosts {
+		if srv.QueriesFor(host, dnsmessage.TypeA) > 0 {
+			resolved++
+		}
+	}
+	if resolved != axfrMaxServers {
+		t.Errorf("%d name servers were resolved, want %d", resolved, axfrMaxServers)
+	}
+	if want := "(" + strconv.Itoa(axfrMaxServers) + " addresses asked)"; !strings.Contains(out, want) {
+		t.Errorf("verbose output lacks %q\n%s", want, out)
+	}
+}
+
+// TestE2EZoneTransferAddressCap covers #303: a name server with four
+// addresses, all refusing, is asked on axfrAddrsPerServer of them.
+func TestE2EZoneTransferAddressCap(t *testing.T) {
+	t.Parallel()
+	srv := nsZone(t, map[string][]string{"ns1.example.test": {"127.0.0.1", "127.0.0.1", "127.0.0.1", "127.0.0.1"}}, nil)
+	wl := writeFile(t, "wl.txt", "www\n")
+	code, out := runAXFR(t, srv, "-axfr", "-v", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.test")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != axfrAddrsPerServer {
+		t.Errorf("AXFR queries = %d, want %d", n, axfrAddrsPerServer)
+	}
+	if want := "(" + strconv.Itoa(axfrAddrsPerServer) + " addresses asked)"; !strings.Contains(out, want) {
+		t.Errorf("verbose output lacks %q\n%s", want, out)
+	}
+}
+
+// TestE2EZoneTransferSkipsUnresolvableServer covers #303: a name server that
+// does not resolve is skipped, mentioned only under -v, and the transfer
+// still comes from the one that does.
+func TestE2EZoneTransferSkipsUnresolvableServer(t *testing.T) {
+	t.Parallel()
+	srv := nsZone(t, map[string][]string{"ns-bad.example.test": nil, "ns1.example.test": {"127.0.0.1"}},
+		[]string{"www.example.test", "admin-legacy.example.test"})
+	wl := writeFile(t, "wl.txt", "www\n")
+	const skipped = "cannot resolve name server ns-bad.example.test"
+	for _, verbose := range []bool{false, true} {
+		args := []string{"-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl}
+		if verbose {
+			args = append(args, "-v")
+		}
+		code, out := runAXFR(t, srv, append(args, "example.test")...)
+		if code != 0 || !strings.Contains(out, "admin-legacy.example.test") || !strings.Contains(out, "ns1.example.test (127.0.0.1) allowed AXFR") {
+			t.Errorf("verbose %v: exit %d; want the transfer from ns1\n%s", verbose, code, out)
+		}
+		if strings.Contains(out, skipped) != verbose {
+			t.Errorf("verbose %v: output mentions the unresolvable server = %v\n%s", verbose, !verbose, out)
+		}
+	}
+}
+
+// TestE2EResumeReusesZoneTransfer covers #303: a resumed run scans the names
+// the interrupted run's transfer gave and asks no name server again, so its
+// candidate list is the one the saved position counts in.
+func TestE2EResumeReusesZoneTransfer(t *testing.T) {
+	t.Parallel()
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch {
+		case q.Type == dnsmessage.TypeAXFR:
+			return dnstest.Reply{Transfer: []string{"other.example.test"}}
+		case q.Type == dnsmessage.TypeNS:
+			return dnstest.Reply{NS: []string{"ns1.example.test"}}
+		case q.Name == "ns1.example.test" && q.Type == dnsmessage.TypeA:
+			return dnstest.Reply{A: []string{"127.0.0.1"}}
+		case q.Name == "example.test" || q.Name == "ns1.example.test":
+			return dnstest.Reply{}
+		case slices.Contains([]string{"zt1.example.test", "zt2.example.test", "other.example.test", "www.example.test"}, q.Name):
+			if q.Type == dnsmessage.TypeA {
+				return dnstest.Reply{A: []string{"192.0.2.10"}}
+			}
+			return dnstest.Reply{}
+		}
+		return dnstest.NXDomain
+	})
+	_, port, err := net.SplitHostPort(srv.Addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wl := writeFile(t, "wl.txt", "www\n")
+	stats := filepath.Join(t.TempDir(), "run.json")
+	args := append(localArgs("-axfr", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl), "example.test")
+	path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{{
+		Domain: "example.test", AXFRDone: true, AXFR: []string{"zt1", "zt2"}, AXFRServers: []string{"ns1.example.test"},
+	}}})
+	code, out := runCLIMergedWith(t, runArgs{axfrPort: port, args: []string{"-resume", path}})
+	if code != 0 || !strings.Contains(out, "zt1.example.test") || !strings.Contains(out, "zt2.example.test") {
+		t.Fatalf("exit %d; want the saved transfer's names scanned\n%s", code, out)
+	}
+	if strings.Contains(out, "other.example.test") {
+		t.Errorf("the resumed run scanned a name from a new transfer\n%s", out)
+	}
+	if ns, axfr := srv.QueriesFor("example.test", dnsmessage.TypeNS), srv.QueriesFor("example.test", dnsmessage.TypeAXFR); ns != 0 || axfr != 0 {
+		t.Errorf("the resumed run sent %d NS and %d AXFR queries, want none", ns, axfr)
+	}
+	if tg := axfrSummary(t, stats).Targets[0]; !slices.Equal(tg.AXFRAllowed, []string{"ns1.example.test"}) || tg.AXFRNames != 2 {
+		t.Errorf("report axfr_allowed = %q, axfr_names = %d; want the saved ns1.example.test and 2", tg.AXFRAllowed, tg.AXFRNames)
+	}
+}
+
+// TestZoneTransferStopsWhenCancelled covers #303: once the run is cancelled,
+// a name server's next address is not asked.
+func TestZoneTransferStopsWhenCancelled(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch {
+		case q.Type == dnsmessage.TypeAXFR:
+			cancel() // the interrupt arrives during the first transfer
+			return dnstest.Refused
+		case q.Type == dnsmessage.TypeNS:
+			return dnstest.Reply{NS: []string{"ns1.example.test"}}
+		case q.Name == "ns1.example.test" && q.Type == dnsmessage.TypeA:
+			return dnstest.Reply{A: []string{"127.0.0.1", "127.0.0.1"}}
+		case q.Name == "ns1.example.test":
+			return dnstest.Reply{}
+		}
+		return dnstest.NXDomain
+	})
+	_, port, err := net.SplitHostPort(srv.Addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := output.New(nil, false, output.FormatText)
+	out.SetStderr(io.Discard)
+	res := zoneTransfer(ctx, cliFlags{timeoutMs: 5000, dnsServer: srv.Addr}, port, "example.test", nil, out)
+	if res.tried != 1 {
+		t.Errorf("addresses asked = %d, want 1: the second came after the cancel", res.tried)
+	}
+	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != 1 {
+		t.Errorf("AXFR queries = %d, want 1", n)
 	}
 }
 
