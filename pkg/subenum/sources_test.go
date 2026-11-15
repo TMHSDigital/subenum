@@ -3,7 +3,7 @@ package subenum_test
 import (
 	"context"
 	"errors"
-	"slices"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -26,12 +26,22 @@ func (failingSource) Names(context.Context, string) ([]string, error) {
 	return nil, errors.New("index unavailable")
 }
 
+// namedSource is a source with a Name method, which labels its results.
+type namedSource struct {
+	name  string
+	names []string
+}
+
+func (s namedSource) Name() string                                    { return s.name }
+func (s namedSource) Names(context.Context, string) ([]string, error) { return s.names, nil }
+
 // TestSources covers #193: a source's names are scanned after Words, and a
-// failing source is a notice, not a failed scan.
+// failing source is a notice, not a failed scan. Each result names what
+// proposed it (#273).
 func TestSources(t *testing.T) {
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		switch q.Name {
-		case "example.test", "www.example.test", "legacy.example.test":
+		case "example.test", "www.example.test", "legacy.example.test", "cmdb.example.test":
 			if q.Type == dnsmessage.TypeA {
 				return dnstest.Reply{A: []string{"192.0.2.10"}}
 			}
@@ -44,24 +54,29 @@ func TestSources(t *testing.T) {
 		Words:    []string{"www"},
 		Resolver: srv.Addr,
 		Types:    []string{"A"},
-		Sources:  []subenum.Source{staticSource{"legacy", "www", "bad name!"}, failingSource{}},
+		Sources: []subenum.Source{staticSource{"legacy", "www", "bad name!"}, failingSource{},
+			namedSource{"inventory", []string{"cmdb", "legacy"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+	sources := map[string][]string{}
 	var notice *subenum.Event
 	for ev := range events {
 		switch {
 		case ev.Kind == subenum.KindResult:
-			names = append(names, ev.Result.Name)
+			sources[ev.Result.Name] = ev.Result.Sources
 		case ev.Kind == subenum.KindNotice && ev.Notice == subenum.NoticeSource:
 			notice = &ev
 		}
 	}
-	slices.Sort(names)
-	if !slices.Equal(names, []string{"legacy.example.test", "www.example.test"}) {
-		t.Errorf("results = %q, want www from Words and legacy from the source", names)
+	want := map[string][]string{
+		"www.example.test":    {"wordlist", "Sources[0]"},
+		"legacy.example.test": {"Sources[0]", "inventory"},
+		"cmdb.example.test":   {"inventory"},
+	}
+	if !reflect.DeepEqual(sources, want) {
+		t.Errorf("results and their sources = %q, want %q", sources, want)
 	}
 	if notice == nil {
 		t.Error("the failing source sent no NoticeSource event")

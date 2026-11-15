@@ -101,6 +101,9 @@ func TestZoneTransferSource(t *testing.T) {
 	if want := []string{"admin-legacy.example.test"}; !slices.Equal(names, want) {
 		t.Errorf("results = %q, want %q", names, want)
 	}
+	if len(results) == 1 && !slices.Equal(results[0].Sources, []string{"axfr"}) {
+		t.Errorf("sources = %q, want [axfr], as the CLI labels a zone transfer (#273)", results[0].Sources)
+	}
 }
 
 // TestProbeZoneErrors: bad options and a domain without name servers are

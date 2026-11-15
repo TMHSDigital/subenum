@@ -34,7 +34,7 @@ for _, r := range results {
 }
 ```
 
-`Takeover` is a lead to check by hand: `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, or `dangling-ns`{% include unreleased.html value="type=NS" %} for a delegation to a name server that does not resolve. `Internal`{% include unreleased.html library="Internal" %} names the non-public scope (`private`, `loopback`, `link-local`, `cgnat`, `unspecified`) of an address a public name answers with, and is empty when every address is public.
+`Takeover` is a lead to check by hand: `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, or `dangling-ns`{% include unreleased.html value="type=NS" %} for a delegation to a name server that does not resolve. `Internal`{% include unreleased.html library="Internal" %} names the non-public scope (`private`, `loopback`, `link-local`, `cgnat`, `unspecified`) of an address a public name answers with, and is empty when every address is public. `Sources`{% include unreleased.html library="Sources" %} names what proposed the result: `wordlist` for `Words`, and each source in `Config.Sources` that returned it, by its `Name()` method when it has one (`ct`, `wayback`, `axfr` for the built-in ones) or else as `Sources[i]`, its index in `Config.Sources`.
 
 Every zero value in `Config` takes the same default as the CLI, so `Config{Domain: "example.com"}` is a complete configuration that uses the bundled 5,000-word list.
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/passive"
 )
 
@@ -45,10 +46,19 @@ func builtinSource(name string) Source {
 	return src
 }
 
+// sourceLabel names sources[i] in Result.Sources (#273).
+func sourceLabel(src Source, i int) string {
+	if n, ok := src.(interface{ Name() string }); ok && n.Name() != "" {
+		return n.Name()
+	}
+	return fmt.Sprintf("Sources[%d]", i)
+}
+
 // withSourceNames asks every source for domain's names at once (#271) and
-// appends the ones entries lack, in the order of sources. A failed source is
-// reported as a NoticeSource event.
-func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, domain string, entries []string) []string {
+// appends the ones entries lack, in the order of sources, in the candidate
+// set the command line uses too, which knows who proposed each name (#273).
+// A failed source is reported as a NoticeSource event.
+func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, domain string, entries []string) *candidates.Set {
 	type answer struct {
 		names []string
 		err   error
@@ -65,6 +75,7 @@ func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, do
 		})
 	}
 	wg.Wait()
+	cands := candidates.New(domain, entries, nil)
 	for i, a := range answers {
 		var tr *passive.Truncated
 		switch {
@@ -77,7 +88,7 @@ func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, do
 				Message: fmt.Sprintf("Sources[%d]: %v; scanning without its names", i, a.err)})
 			continue
 		}
-		entries, _ = passive.Merge(entries, a.names, domain)
+		cands.Add(sourceLabel(sources[i], i), a.names)
 	}
-	return entries
+	return cands
 }

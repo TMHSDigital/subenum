@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/axfr"
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
@@ -88,6 +89,9 @@ func ZoneTransfer(opts ZoneOptions) Source {
 }
 
 type zoneSource ZoneOptions
+
+// Name labels the source in Result.Sources as the CLI does (#273).
+func (zoneSource) Name() string { return candidates.AXFR }
 
 func (z zoneSource) Names(ctx context.Context, domain string) ([]string, error) {
 	info, err := ProbeZone(ctx, domain, ZoneOptions(z))

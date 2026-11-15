@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/TMHSDigital/subenum/data"
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/permute"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -223,6 +224,14 @@ type Result struct {
 	// that answers with one leaks internal addressing. Empty when every
 	// address is public, and always empty in a simulated scan.
 	Internal string
+
+	// Sources names what proposed the name (#273): "wordlist" for Words
+	// (and, with Recursive, an entry below a found name), and each of
+	// Config.Sources that returned it. A source is named by its Name()
+	// string method when it has one ("ct" and "wayback" for the built-in
+	// ones), else as "Sources[i]", its index in Config.Sources. Several
+	// sources are listed in the order of Config.Sources, after "wordlist".
+	Sources []string
 }
 
 // Stats accounts for every candidate name a finished scan looked up.
@@ -482,15 +491,21 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 	out := make(chan Event, 64)
 	go func() {
 		defer close(out)
+		var cands *candidates.Set // nil: every result is the wordlist's
 		if len(cfg.Sources) > 0 && !cfg.Simulate {
-			internal.Entries = withSourceNames(ctx, out, cfg.Sources, internal.Domain, internal.Entries)
+			cands = withSourceNames(ctx, out, cfg.Sources, internal.Domain, internal.Entries)
+			internal.Entries = cands.Entries()
 		}
 		in := make(chan scan.Event, 64)
 		go scan.Run(ctx, internal.Config(), in)
 		// scan.Run always ends with exactly one EventDone (#99), so the
 		// channel ends with exactly one KindDone too.
 		for ev := range in {
-			forward(ctx, out, translate(ev))
+			e := translate(ev)
+			if e.Kind == KindResult {
+				e.Result.Sources = cands.SourcesOf(e.Result.Name)
+			}
+			forward(ctx, out, e)
 		}
 	}()
 	return out, nil
