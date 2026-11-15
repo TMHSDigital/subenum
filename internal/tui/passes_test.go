@@ -301,7 +301,9 @@ func TestPermutationPassStates(t *testing.T) {
 	if m := update(start(func(sv *scanViewModel) { sv.aborted = true }), mainDone); !m.scanView.done || m.scanView.main != nil {
 		t.Error("an aborted main pass was followed by a permutation pass")
 	}
-	if m := update(start(nil), eventMsg{scan.Event{Kind: scan.EventError, Message: "too many failures"}}, mainDone); !m.scanView.done || !m.scanView.failed() {
+	abortedDone := mainDone
+	abortedDone.Failed, abortedDone.Stats.Aborted = true, true
+	if m := update(start(nil), eventMsg{scan.Event{Kind: scan.EventError, Fatal: true, Message: "too many failures"}}, abortedDone); !m.scanView.done || !m.scanView.failed() {
 		t.Error("a main pass the reliability guard aborted was followed by a permutation pass")
 	}
 

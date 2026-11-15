@@ -304,6 +304,7 @@ const (
 	// set, or the reliability guard gave up. Few or no results follow.
 	// The exception is the reliability guard under Config.NoAbort: its
 	// warning arrives as a KindError, and the scan then runs to the end.
+	// Event.Fatal tells the two apart.
 	KindError
 	// KindDone is always the last event, and reports Event.Stats. It
 	// arrives whether the scan completed, never started, was stopped by
@@ -402,6 +403,15 @@ type Event struct {
 	// zone without Force, a failed resolver check) or because ctx was
 	// cancelled during those checks. Stats then covers only the checks.
 	Stopped bool
+
+	// Fatal is set on a KindError that ends the scan. The one KindError
+	// without it is the reliability guard's warning under Config.NoAbort.
+	Fatal bool
+
+	// Failed is set on KindDone when the scan failed: a fatal KindError
+	// was sent, or the reliability guard stopped the scan. A scan cancelled
+	// through the context has not failed.
+	Failed bool
 }
 
 // DefaultWords returns the bundled wordlist: the most common subdomain labels,
@@ -526,25 +536,19 @@ func Scan(ctx context.Context, cfg Config) ([]Result, Stats, error) {
 	var results []Result
 	var stats Stats
 	var failure string
-	completed := false
 	for ev := range events {
 		switch ev.Kind {
 		case KindResult:
 			results = append(results, ev.Result)
 		case KindError:
-			if failure == "" {
+			// The reliability guard's warning under NoAbort is not fatal:
+			// the scan runs to completion and is a success.
+			if ev.Fatal && failure == "" {
 				failure = ev.Message
 			}
 		case KindDone:
 			stats = ev.Stats
-			completed = !ev.Stopped
 		}
-	}
-	// Under NoAbort the reliability guard only warns: it is the one error
-	// after which the scan still runs to completion, so a completed scan
-	// that was not aborted is a success.
-	if cfg.NoAbort && completed && !stats.Aborted {
-		failure = ""
 	}
 	switch {
 	case ctx.Err() != nil:
@@ -740,10 +744,12 @@ func translate(ev scan.Event) Event {
 		out.Notice = notice(ev.Notice)
 	case scan.EventError:
 		out.Kind = KindError
+		out.Fatal = ev.Fatal
 	case scan.EventDone:
 		out.Kind = KindDone
 		out.Stats = stats(ev.Stats)
 		out.Stopped = ev.Stopped
+		out.Failed = ev.Failed
 	}
 	return out
 }

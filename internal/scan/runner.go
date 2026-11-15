@@ -513,7 +513,7 @@ const (
 	EventNotice             // informational notice; see Event.Notice
 	// EventError reports a problem. Usually the scan then stops and its
 	// EventDone has Stopped set; after the reliability guard (with NoAbort)
-	// the scan goes on.
+	// the scan goes on. Event.Fatal tells the two apart.
 	EventError
 	// EventDone is always the last event, sent exactly once (#99).
 	EventDone
@@ -587,6 +587,14 @@ type Event struct {
 	// preflight or wildcard check, wildcard zone without Force) or when ctx
 	// was cancelled during those checks. Its Stats cover only the checks.
 	Stopped bool
+	// Fatal is set on an EventError that ends the scan. The one error
+	// without it is the reliability guard's warning under NoAbort (#308).
+	Fatal bool
+	// Failed is set on EventDone when the scan failed: a fatal EventError
+	// was sent, or the reliability guard aborted the scan. A cancelled scan
+	// has not failed. Consumers read this instead of working it out from
+	// the errors they saw and their own copy of NoAbort (#308).
+	Failed bool
 }
 
 // Run executes the subdomain scan, sending events to the provided channel.
@@ -625,17 +633,18 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	ctx = dns.WithQueryCounter(ctx, &queriesSent)
 	// Every scan ends with exactly one EventDone (#99): one that stops before
 	// the candidates sends it here, with Stopped set, before close(events).
-	doneSent := false
+	doneSent, failed := false, false
 	defer func() {
 		if !doneSent {
-			events <- Event{Kind: EventDone, Stopped: true, Total: int64(len(cfg.Entries)), Stats: Stats{QueriesSent: queriesSent.Load()}}
+			events <- Event{Kind: EventDone, Stopped: true, Failed: failed, Total: int64(len(cfg.Entries)), Stats: Stats{QueriesSent: queriesSent.Load()}}
 		}
 	}()
 
 	cfg.scope = newScope(cfg.Exclude)
 	cfg.takeover = &dns.TakeoverCache{Providers: cfg.TakeoverProviders}
-	wildcardRoot, fingerprint, ok := preflight(ctx, &cfg, maxDepth, events)
+	wildcardRoot, fingerprint, ok, fatal := preflight(ctx, &cfg, maxDepth, events)
 	if !ok {
+		failed = fatal
 		return
 	}
 
@@ -705,6 +714,8 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		Total:     st.total.Load(),
 		Found:     st.found.Load(),
 		Stats:     snap,
+		// The guard's abort is the one fatal error past the preflight.
+		Failed: snap.Aborted,
 	}
 }
 
@@ -712,23 +723,24 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 // the scope of the target (#87), the recursion ceiling, the resolver
 // preflight and wildcard detection. It reports whether the root is a
 // wildcard zone and the wildcard fingerprint to filter with. On false the
-// scan must stop: preflight has sent the EventError explaining why, or ctx
-// was cancelled, and Run's deferred EventDone (Stopped) ends the scan.
-func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Event) (wildcardRoot bool, fp *fingerprint, ok bool) {
+// scan must stop: preflight has sent the fatal EventError explaining why
+// (fatal is then set), or ctx was cancelled, and Run's deferred EventDone
+// (Stopped) ends the scan.
+func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Event) (wildcardRoot bool, fp *fingerprint, ok, fatal bool) {
 	// Out-of-scope names are never queried (#87). A target that is itself
 	// out of scope, or whose every candidate would be, is refused outright.
 	if cfg.scope.excluded(cfg.Domain) || cfg.scope.subtreeExcluded(cfg.Domain) {
-		events <- Event{Kind: EventError, Message: "refusing to scan " + cfg.Domain + ": it is out of scope ({exclude})"}
-		return false, nil, false
+		events <- Event{Kind: EventError, Fatal: true, Message: "refusing to scan " + cfg.Domain + ": it is out of scope ({exclude})"}
+		return false, nil, false, true
 	}
 
 	if cfg.Recursive {
 		ceiling := RecursionCeiling(len(cfg.Entries), maxDepth)
 		if ceiling > recursionRefuseCeiling && cfg.MaxQueries == 0 && !cfg.Force {
-			events <- Event{Kind: EventError, Message: fmt.Sprintf(
+			events <- Event{Kind: EventError, Fatal: true, Message: fmt.Sprintf(
 				"refusing to start: {recursive} {depth} %d with %d entries can generate up to %.1e queries; set {max_queries} or {force}",
 				maxDepth, len(cfg.Entries), ceiling)}
-			return false, nil, false
+			return false, nil, false, true
 		}
 		consider := "Consider {max_queries}."
 		if maxDepth > 1 {
@@ -744,12 +756,12 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 		// scan that -attempts would otherwise complete (#57).
 		_, outcome := cfg.resolve(ctx, cfg.Domain, nil)
 		if ctx.Err() != nil {
-			return false, nil, false // interrupted during preflight: not a resolver failure
+			return false, nil, false, false // interrupted during preflight: not a resolver failure
 		}
 		if outcome != dns.OutcomeFound && outcome != dns.OutcomeNXDomain {
 			msg := fmt.Sprintf("resolver %s failed preflight for %s: %s after %d attempt(s)", cfg.DNSServer, cfg.Domain, outcome, cfg.Attempts)
-			events <- Event{Kind: EventError, Message: msg}
-			return false, nil, false
+			events <- Event{Kind: EventError, Fatal: true, Message: msg}
+			return false, nil, false, true
 		}
 		// An apex the trusted resolver answers is the first canary for
 		// checking that pool members do not hide existing names (#105).
@@ -764,14 +776,14 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 	if !cfg.Simulate {
 		isWildcard, probed, err := cfg.lookup(nil).FingerprintWildcard(ctx, cfg.Domain)
 		if ctx.Err() != nil {
-			return false, nil, false // interrupted during wildcard probes
+			return false, nil, false, false // interrupted during wildcard probes
 		}
 		// An inconclusive check is never "no wildcard": under a real wildcard
 		// every candidate would resolve and flood the results (#47). -force
 		// scans anyway, but without a fingerprint to filter with.
 		if err != nil && !cfg.Force {
-			events <- Event{Kind: EventError, Message: "wildcard detection failed: " + err.Error() + "; results could not be filtered. Use {force} to scan anyway."}
-			return false, nil, false
+			events <- Event{Kind: EventError, Fatal: true, Message: "wildcard detection failed: " + err.Error() + "; results could not be filtered. Use {force} to scan anyway."}
+			return false, nil, false, true
 		}
 		if err != nil {
 			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: "WARNING: wildcard detection failed (" + err.Error() + "); scanning without wildcard filtering because of {force}"}
@@ -782,12 +794,12 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 			msg := "WARNING: Wildcard DNS detected - all subdomains resolve for " + cfg.Domain
 			events <- Event{Kind: EventNotice, Notice: NoticeWildcard, Message: msg}
 			if !cfg.Force {
-				events <- Event{Kind: EventError, Message: "Results would be meaningless. Use {force} to scan anyway."}
-				return false, nil, false
+				events <- Event{Kind: EventError, Fatal: true, Message: "Results would be meaningless. Use {force} to scan anyway."}
+				return false, nil, false, true
 			}
 		}
 	}
-	return wildcardRoot, fp, true
+	return wildcardRoot, fp, true, false
 }
 
 // startTicker sends an EventProgress every second until ctx is done or the
@@ -1167,7 +1179,7 @@ func (s *scanState) checkReliability(processed int64) {
 		}
 		msg := fmt.Sprintf("%s: %.0f%% of %d queries failed (timeout/refused/other); likely resolver rate-limiting at {concurrency} %d and {rate} %d",
 			verb, rate, processed, cfg.Concurrency, cfg.Rate)
-		s.events <- Event{Kind: EventError, Message: msg}
+		s.events <- Event{Kind: EventError, Fatal: !cfg.NoAbort, Message: msg}
 		if !cfg.NoAbort {
 			st.aborted.Store(true)
 			s.cancel()

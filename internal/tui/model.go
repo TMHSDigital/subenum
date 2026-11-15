@@ -269,7 +269,6 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 
 	m.state = stateScan
 	m.scanView = newScanViewModel(m.width, m.height, vals.Simulate)
-	m.scanView.noAbort = vals.NoAbort
 	m.scanView.permute = vals.permute
 	// Same facts the CLI prints: the seed that reproduces a simulation, and
 	// how many wordlist entries were dropped (#80).

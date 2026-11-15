@@ -726,7 +726,6 @@ func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Even
 	go scan.Run(ctx, cfg, events)
 
 	progressStarted := false
-	sawError := false
 	finishProgress := func() {
 		if progressStarted {
 			out.ProgressDone()
@@ -747,16 +746,18 @@ func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Even
 			out.ScanNotice(ev.Notice.String(), ev.Message)
 		case scan.EventError:
 			msg := out.ScanError(ev.Message)
-			if !sawError {
+			if res.err == "" {
 				res.err = msg
 			}
-			sawError = true
 			finishProgress()
 			// Keep draining: EventDone always follows (#99), Stopped after an
 			// early error such as wildcard detection, with Stats after a
 			// reliability abort.
 		case scan.EventDone:
 			finishProgress()
+			// The engine says whether the scan failed (#308): a fatal error
+			// did, the reliability warning under -no-abort did not.
+			res.failed = ev.Failed
 			if ev.Stopped {
 				// Nothing was scanned: the run failed (or was interrupted)
 				// before the candidates, so it does not count as done.
@@ -764,17 +765,13 @@ func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Even
 			}
 			res.done = true
 			res.final = ev
+			res.resolverAbort = ev.Stats.Aborted
 			logScanBreakdown(p.domain, ev, out)
 			if f.verbose {
 				logVerboseDone(ev, f, s.outWriter, out)
 			}
 		}
 	}
-	// An error fails the run unless the scan finished under -no-abort.
-	// The reliability guard is the only error that still lets EventDone
-	// arrive; without -no-abort it cancelled the scan.
-	res.resolverAbort = res.done && sawError && !f.noAbort
-	res.failed = sawError && (!res.done || !f.noAbort)
 	return res
 }
 

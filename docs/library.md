@@ -59,7 +59,7 @@ for ev := range events {
 }
 ```
 
-Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with a deferred `cancel()` is safe: once `ctx` is cancelled the scan stops without waiting for a reader, and its goroutines exit within about a second whether or not the channel is read. A consumer that keeps reading after cancelling still gets `KindDone` with the counts so far. While `ctx` is live, a consumer that stops reading pauses the scan once the buffer fills.
+Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with a deferred `cancel()` is safe: once `ctx` is cancelled the scan stops without waiting for a reader, and its goroutines exit within about a second whether or not the channel is read. A consumer that keeps reading after cancelling still gets `KindDone` with the counts so far. A `KindError` event has `Fatal` set when it ends the scan (the `NoAbort` warning is the one that does not), and `KindDone` has `Failed` set when the scan failed, so a consumer does not have to work either out. While `ctx` is live, a consumer that stops reading pauses the scan once the buffer fills.
 
 ## Permutations: second-pass candidates
 

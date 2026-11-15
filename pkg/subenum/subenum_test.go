@@ -513,6 +513,11 @@ func TestNoAbortScanSucceedsDespiteFailingLookups(t *testing.T) {
 	warned := false
 	for ev := range events {
 		warned = warned || ev.Kind == subenum.KindError
+		// The events say the warning was not fatal and the scan did not
+		// fail, so a consumer needs no rule of its own (#308).
+		if ev.Fatal || ev.Failed {
+			t.Errorf("under NoAbort: %v event with Fatal %v, Failed %v; want neither", ev.Kind, ev.Fatal, ev.Failed)
+		}
 	}
 	if !warned {
 		t.Error("Run sent no KindError warning from the reliability guard")
@@ -521,6 +526,18 @@ func TestNoAbortScanSucceedsDespiteFailingLookups(t *testing.T) {
 	cfg.NoAbort = false
 	if _, stats, err := subenum.Scan(context.Background(), cfg); err == nil || !stats.Aborted {
 		t.Errorf("without NoAbort: err = %v, Aborted = %v; want an error and an aborted scan", err, stats.Aborted)
+	}
+	events, err = subenum.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fatal, failed := false, false
+	for ev := range events {
+		fatal = fatal || (ev.Kind == subenum.KindError && ev.Fatal)
+		failed = failed || (ev.Kind == subenum.KindDone && ev.Failed)
+	}
+	if !fatal || !failed {
+		t.Errorf("without NoAbort: fatal KindError %v, KindDone.Failed %v; want both", fatal, failed)
 	}
 }
 

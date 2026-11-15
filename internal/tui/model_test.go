@@ -338,7 +338,7 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 	}
 
 	// Preflight failure: error, then the channel closes without EventDone.
-	sv := update(newScanViewModel(120, 40, false), eventMsg{scan.Event{Kind: scan.EventError, Message: "resolver failed preflight"}}, eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true}})
+	sv := update(newScanViewModel(120, 40, false), eventMsg{scan.Event{Kind: scan.EventError, Fatal: true, Message: "resolver failed preflight"}}, eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true, Failed: true}})
 	if !sv.failed() || !strings.Contains(sv.View(), "Failed: resolver failed preflight") || strings.Contains(sv.View(), "Aborted") {
 		t.Errorf("preflight failure not shown as Failed:\n%s", sv.View())
 	}
@@ -346,9 +346,9 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 
-	// Reliability warning under -no-abort with a finished scan is not a failure.
+	// Reliability warning under -no-abort with a finished scan is not a
+	// failure: the engine sends it without Fatal, and EventDone without Failed.
 	nv := newScanViewModel(120, 40, false)
-	nv.noAbort = true
 	nv = update(nv, eventMsg{scan.Event{Kind: scan.EventError, Message: "warning: 30% failed"}}, eventMsg{scan.Event{Kind: scan.EventDone, Processed: 5, Total: 5}})
 	if nv.failed() || exitCode(Model{scanView: nv}) != 0 {
 		t.Error("-no-abort warning counted as a failure")

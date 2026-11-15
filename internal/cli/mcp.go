@@ -743,7 +743,9 @@ func runMCPScan(ctx context.Context, cfg subenum.Config, offset int) *mcpReport 
 		case subenum.KindNotice:
 			report.Notices = append(report.Notices, ev.Message)
 		case subenum.KindError:
-			if report.Error == "" {
+			// Only a fatal error is the report's error; mcpVerdict reads it
+			// as the scan having failed.
+			if ev.Fatal && report.Error == "" {
 				report.Error = ev.Message
 			}
 		case subenum.KindDone:

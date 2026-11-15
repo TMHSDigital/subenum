@@ -70,7 +70,7 @@ type scanViewModel struct {
 	aborted      bool   // the user pressed ctrl+c
 	stopped      bool   // the scan stopped before testing candidates (preflight, wildcard abort, #99)
 	errText      string // first scan error; the reason shown for a failed scan
-	noAbort      bool   // -no-abort: an error with a finished scan is only a warning
+	scanFailed   bool   // a pass's EventDone said it failed (#308)
 	outputErr    bool   // the results file could not be written in full (#155)
 	width        int
 	height       int
@@ -310,6 +310,7 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 		}
 
 	case scan.EventDone:
+		m.scanFailed = m.scanFailed || ev.Failed
 		switch {
 		case m.main != nil:
 			// The permutation pass ended. The counters are both passes'; one
@@ -333,7 +334,7 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 			// With Permute on, a finished main pass is followed by the
 			// permutation pass, unless the user or the reliability guard
 			// stopped the scan, as on the command line.
-			if m.permute && !m.aborted && (m.errText == "" || m.noAbort) {
+			if m.permute && !m.aborted && !ev.Failed {
 				m.main = &ev
 			} else {
 				m.done = true
@@ -454,11 +455,13 @@ func (m scanViewModel) extraCounts() string {
 }
 
 // failed reports whether the finished scan failed, mirroring the CLI exit
-// code: an error fails the scan unless it finished under -no-abort. A scan
-// that ended without EventDone after an error (preflight failure, wildcard
-// abort) is a failure, not a user abort (#55).
+// code. The engine says so on each pass's EventDone (#308): a fatal error
+// (preflight failure, wildcard abort, reliability abort) fails the scan, the
+// reliability warning under -no-abort does not, and neither does a user
+// abort (#55). As before #308, a permutation pass that did not get through
+// its candidates also fails a scan that reported an error.
 func (m scanViewModel) failed() bool {
-	return m.done && m.errText != "" && (m.stopped || !m.noAbort || m.perm.unfinished())
+	return m.done && (m.scanFailed || (m.errText != "" && m.perm.unfinished()))
 }
 
 type wordlistLoadedMsg struct {

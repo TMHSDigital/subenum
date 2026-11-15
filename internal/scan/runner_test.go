@@ -1399,3 +1399,64 @@ func TestRunAlwaysEndsWithOneDone(t *testing.T) {
 		})
 	}
 }
+
+// TestRunStatesFatalAndFailed covers #308: the engine says on each EventError
+// whether it was fatal and on EventDone whether the scan failed, so the front
+// ends do not work it out from the errors they saw and their own NoAbort.
+func TestRunStatesFatalAndFailed(t *testing.T) {
+	failing := func(noAbort bool) Config {
+		return Config{
+			Domain: "example.com", Entries: makeEntries(reliabilityMinJobs + 50), Concurrency: 4,
+			Timeout: time.Second, Simulate: true, Attempts: 1, NoAbort: noAbort,
+			resolveHook: hookOutcome(dns.OutcomeTimeout),
+		}
+	}
+	clean := Config{Domain: "example.com", Entries: makeEntries(5), Concurrency: 2, Timeout: time.Second, Simulate: true, HitRate: 50}
+	outOfScope := clean
+	outOfScope.Exclude = []string{"example.com"}
+
+	cases := map[string]struct {
+		cfg       Config
+		cancelled bool // ctx is cancelled before the scan starts
+		wantErrs  bool
+		wantFatal bool // of every EventError
+		stopped   bool
+		aborted   bool
+		failed    bool
+	}{
+		"completed clean":                    {cfg: clean},
+		"stopped before candidates by error": {cfg: outOfScope, wantErrs: true, wantFatal: true, stopped: true, failed: true},
+		"reliability abort":                  {cfg: failing(false), wantErrs: true, wantFatal: true, aborted: true, failed: true},
+		"reliability warning under NoAbort":  {cfg: failing(true), wantErrs: true},
+		"cancelled":                          {cfg: clean, cancelled: true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if c.cancelled {
+				cancel()
+			}
+			events := make(chan Event, 64)
+			go Run(ctx, c.cfg, events)
+			done, errs, _ := collect(events)
+			if done == nil {
+				t.Fatal("no EventDone")
+			}
+			if (len(errs) > 0) != c.wantErrs {
+				t.Fatalf("EventErrors %+v, want any: %v", errs, c.wantErrs)
+			}
+			for _, e := range errs {
+				if e.Fatal != c.wantFatal {
+					t.Errorf("EventError %q: Fatal = %v, want %v", e.Message, e.Fatal, c.wantFatal)
+				}
+			}
+			if done.Stopped != c.stopped || done.Stats.Aborted != c.aborted {
+				t.Errorf("EventDone: Stopped %v, Aborted %v; want %v, %v", done.Stopped, done.Stats.Aborted, c.stopped, c.aborted)
+			}
+			if done.Failed != c.failed {
+				t.Errorf("EventDone: Failed = %v, want %v", done.Failed, c.failed)
+			}
+		})
+	}
+}
