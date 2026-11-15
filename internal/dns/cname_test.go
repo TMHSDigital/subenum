@@ -366,9 +366,9 @@ func TestDNSErrorFor(t *testing.T) {
 	}
 }
 
-// TestCNAMEInvalidNameSendsNoQuery covers #305: a name that cannot be put in
-// a DNS message is never sent. One too long for dnsmessage.NewName is
-// reported as not found without a connection.
+// TestCNAMEInvalidNameSendsNoQuery covers #305 and #344: a name that cannot be
+// put in a DNS message is never sent. One too long for dnsmessage.NewName, or
+// with a label over 63 bytes, is reported as not found without a connection.
 func TestCNAMEInvalidNameSendsNoQuery(t *testing.T) {
 	var dials, writes atomic.Int64
 	srv, queries := scriptedUDP(t, func(h dnsmessage.Header, q dnsmessage.Question) [][]byte {
@@ -394,10 +394,16 @@ func TestCNAMEInvalidNameSendsNoQuery(t *testing.T) {
 		t.Errorf("name over 255 bytes: %d connections, want 0", n)
 	}
 
-	// A label over 63 bytes passes NewName and fails when the query is built.
+	// A label over 63 bytes passes NewName and used to dial before failing
+	// when the query was built; it must be caught with no connection at all
+	// (#344).
 	label := strings.Repeat("a", 64) + ".example.com."
-	if got, err := lookupCNAME(contextWithTimeout(t, 5*time.Second), r, label); err == nil {
-		t.Errorf("label over 63 bytes: lookupCNAME = %q, want an error", got)
+	_, err = lookupCNAME(contextWithTimeout(t, 5*time.Second), r, label)
+	if !errors.As(err, &de) || !de.IsNotFound || Classify(err) != OutcomeNXDomain {
+		t.Errorf("label over 63 bytes: %v, want a not-found error", err)
+	}
+	if n := dials.Load(); n != 0 {
+		t.Errorf("invalid names: %d connections, want 0", n)
 	}
 	if w, q := writes.Load(), queries.Load(); w != 0 || q != 0 {
 		t.Errorf("invalid names: %d writes and %d queries on the wire, want 0", w, q)

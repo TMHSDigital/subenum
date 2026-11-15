@@ -31,7 +31,7 @@ func lookupCNAME(ctx context.Context, resolver *net.Resolver, name string) (stri
 		return resolver.LookupCNAME(ctx, name)
 	}
 	qname, err := dnsmessage.NewName(name)
-	if err != nil {
+	if err != nil || longLabel(name) {
 		return "", &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 	}
 	msg, err := cnameExchange(ctx, resolver, "udp", qname)
@@ -51,6 +51,19 @@ func lookupCNAME(ctx context.Context, resolver *net.Resolver, name string) (stri
 		return "", &net.DNSError{Err: "server misbehaving", Name: name, IsTemporary: msg.RCode == dnsmessage.RCodeServerFailure}
 	}
 	return canonicalName(msg, name), nil
+}
+
+// longLabel reports whether name has a label over the 63 bytes DNS allows.
+// dnsmessage.NewName only bounds the 255-byte total, so a single long label
+// used to pass it, take a connection and a query slot, and fail when the
+// message was built (#344).
+func longLabel(name string) bool {
+	for _, label := range strings.Split(name, ".") {
+		if len(label) > 63 {
+			return true
+		}
+	}
+	return false
 }
 
 // canonicalName follows the CNAME records in msg's answer from name, at
