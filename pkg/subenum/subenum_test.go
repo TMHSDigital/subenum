@@ -20,7 +20,13 @@ import (
 // resolver without leaving the machine.
 func zone(t *testing.T) string {
 	t.Helper()
-	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+	return labServer(t).Addr
+}
+
+// labServer is zone's server, for tests that count the queries it gets.
+func labServer(t *testing.T) *dnstest.Server {
+	t.Helper()
+	return dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		switch strings.TrimSuffix(q.Name, ".lab.example") {
 		case "www":
 			return dnstest.Reply{A: []string{"192.0.2.10"}, AAAA: []string{"2001:db8::10"}}
@@ -33,7 +39,6 @@ func zone(t *testing.T) string {
 		}
 		return dnstest.NXDomain
 	})
-	return srv.Addr
 }
 
 func names(results []subenum.Result) []string {
@@ -614,5 +619,164 @@ func TestStoppedScanEndsWithOneDone(t *testing.T) {
 	}
 	if len(kinds) != 2 || kinds[0] != subenum.KindError || last.Kind != subenum.KindDone || !last.Stopped {
 		t.Errorf("events %v, last %+v; want an error, then one done with Stopped", kinds, last)
+	}
+}
+
+// TestScanThroughResolverPool covers #322: Config.ResolverPool reaches the
+// engine. Every name is found, both members take lookups, and the names that
+// do not exist are asked only of the pool; Config.Resolver, the trusted
+// resolver, confirms the hits and is not asked about the misses.
+func TestScanThroughResolverPool(t *testing.T) {
+	trusted, a, b := labServer(t), labServer(t), labServer(t)
+	results, stats, err := subenum.Scan(context.Background(), subenum.Config{
+		Domain:       "lab.example",
+		Words:        []string{"www", "mail", "nope", "gone"},
+		Types:        []string{"A"},
+		Resolver:     trusted.Addr,
+		ResolverPool: []string{a.Addr, b.Addr},
+		Timeout:      10 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := names(results), []string{"mail.lab.example", "www.lab.example"}; !slices.Equal(got, want) {
+		t.Errorf("found %v, want %v", got, want)
+	}
+	if stats.PoolHits != 2 || stats.Confirmed != 2 {
+		t.Errorf("PoolHits = %d, Confirmed = %d; want both 2", stats.PoolHits, stats.Confirmed)
+	}
+	if a.Queries() == 0 || b.Queries() == 0 {
+		t.Errorf("pool members got %d and %d queries, want both to take part", a.Queries(), b.Queries())
+	}
+	for _, name := range []string{"nope.lab.example", "gone.lab.example"} {
+		if n := trusted.QueriesFor(name, dnsmessage.TypeA); n != 0 {
+			t.Errorf("Config.Resolver got %d queries for %s, want the pool to answer it", n, name)
+		}
+	}
+}
+
+// TestRatePerResolverIsApplied covers #322: RatePerResolver caps each pool
+// member. Only the lower bound the cap implies is checked, as
+// TestRateLimitIsApplied does.
+func TestRatePerResolverIsApplied(t *testing.T) {
+	trusted, a, b := labServer(t), labServer(t), labServer(t)
+	words := make([]string, 0, 10)
+	for i := range 10 {
+		words = append(words, fmt.Sprintf("host%d", i))
+	}
+	const perSecond = 5
+	start := time.Now()
+	if _, _, err := subenum.Scan(context.Background(), subenum.Config{
+		Domain:          "lab.example",
+		Words:           words,
+		Types:           []string{"A"},
+		Resolver:        trusted.Addr,
+		ResolverPool:    []string{a.Addr, b.Addr},
+		RatePerResolver: perSecond,
+		Timeout:         10 * time.Second,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	// 10 lookups over two members: the busier one takes at least 5, and the
+	// cap spaces them a fifth of a second apart.
+	busiest := max(a.Queries(), b.Queries())
+	if busiest < 5 {
+		t.Fatalf("pool members got %d and %d queries, want at least 10 between them", a.Queries(), b.Queries())
+	}
+	if floor := time.Duration(5-1) * time.Second / perSecond; elapsed < floor {
+		t.Errorf("scan took %s, under the %s that 5 lookups on one member need at %d/s", elapsed, floor, perSecond)
+	}
+}
+
+// TestConfigErrorsNameTheField covers #322's error returns that
+// TestConfigErrors does not reach: a pool entry that is not an address, and
+// a provider suffix the takeover list parser rejects.
+func TestConfigErrorsNameTheField(t *testing.T) {
+	cases := []struct {
+		name   string
+		cfg    subenum.Config
+		prefix string
+	}{
+		{"bad pool entry", subenum.Config{Domain: "example.com", ResolverPool: []string{"not an address"}}, "subenum: ResolverPool: "},
+		{"bad provider suffix", subenum.Config{Domain: "example.com", TakeoverProviders: []subenum.TakeoverProvider{{Suffix: "example.net/path", Name: "example-host"}}}, "subenum: TakeoverProviders: line 1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			events, err := subenum.Run(context.Background(), c.cfg)
+			if err == nil || events != nil {
+				t.Fatalf("err = %v, events %v; want an error and no channel", err, events)
+			}
+			if !strings.HasPrefix(err.Error(), c.prefix) {
+				t.Errorf("err = %q, want it to start with %q", err, c.prefix)
+			}
+		})
+	}
+}
+
+// notices runs cfg and returns the Notice of each KindNotice event.
+func notices(t *testing.T, cfg subenum.Config) []subenum.Notice {
+	t.Helper()
+	events, err := subenum.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []subenum.Notice
+	for ev := range events {
+		if ev.Kind == subenum.KindNotice {
+			out = append(out, ev.Notice)
+		}
+	}
+	return out
+}
+
+// TestRecursiveWildcardBranchNotice covers #322: a recursive scan that finds
+// a subdomain answering for every name below it skips that branch with a
+// NoticeSkip.
+func TestRecursiveWildcardBranchNotice(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Type != dnsmessage.TypeA {
+			return dnstest.NXDomain
+		}
+		switch name := strings.TrimSuffix(q.Name, "."); {
+		case name == "dev.lab.example", strings.HasSuffix(name, ".dev.lab.example"):
+			return dnstest.Reply{A: []string{"192.0.2.30"}}
+		case name == "www.lab.example", name == "lab.example":
+			return dnstest.Reply{A: []string{"192.0.2.10"}}
+		}
+		return dnstest.NXDomain
+	})
+	got := notices(t, subenum.Config{
+		Domain: "lab.example", Words: []string{"dev", "www"}, Types: []string{"A"},
+		Resolver: srv.Addr, Timeout: 10 * time.Second, Recursive: true, Depth: 2,
+	})
+	if !slices.Contains(got, subenum.NoticeSkip) {
+		t.Errorf("notices = %v, want a %v", got, subenum.NoticeSkip)
+	}
+}
+
+// TestAutoRateNotice covers #322: under AutoRate, a run of failing lookups
+// slows the scan down with a NoticeRate instead of stopping it.
+func TestAutoRateNotice(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if strings.HasPrefix(q.Name, "bad") {
+			return dnstest.Refused
+		}
+		return dnstest.NXDomain
+	})
+	// Failures first, so the first window AutoRate judges is a bad one.
+	words := make([]string, 0, 400)
+	for i := range 300 {
+		words = append(words, fmt.Sprintf("bad%d", i))
+	}
+	for i := range 100 {
+		words = append(words, fmt.Sprintf("ok%d", i))
+	}
+	got := notices(t, subenum.Config{
+		Domain: "lab.example", Words: words, Types: []string{"A"}, Resolver: srv.Addr,
+		Timeout: 10 * time.Second, Attempts: 1, AutoRate: true,
+	})
+	if !slices.Contains(got, subenum.NoticeRate) {
+		t.Errorf("notices = %v, want a %v", got, subenum.NoticeRate)
 	}
 }
