@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"math/rand/v2"
 	"os"
 	"os/signal"
@@ -189,7 +188,7 @@ func (s *session) parse() (code int, done bool) {
 	// -tui counts only as a real flag, not as the value of another flag
 	// (-o -tui) or an argument after "--" (#58).
 	if f.tui {
-		return tui.Start(tuiOptions(f, fs, positionals, defaults, a.stderr)), true
+		return tui.Start(tuiOptions(f, fs, positionals, defaults, diag)), true
 	}
 
 	if f.printConfig {
@@ -209,7 +208,7 @@ func (s *session) parse() (code int, done bool) {
 // argument and every flag the form has a field for, over SUBENUM_* and config
 // file values. Flags the form has no field for are named in a warning, as are
 // extra domain arguments and extra -w files (the form takes one wordlist).
-func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *defaultsLoader, stderr io.Writer) tui.Options {
+func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *defaultsLoader, diag *output.Writer) tui.Options {
 	settings := defaults.settings(fs)
 	wired := map[string]bool{}
 	for _, name := range tui.Flags() {
@@ -227,7 +226,7 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 	})
 	if len(f.wordlists.paths) > 1 {
 		settings["w"] = f.wordlists.paths[0]
-		_, _ = fmt.Fprintf(stderr, "Warning: the TUI takes one wordlist; using %s\n", f.wordlists.paths[0])
+		diag.Notice("Warning: the TUI takes one wordlist; using %s", f.wordlists.paths[0])
 	}
 	opts := tui.Options{Version: resolveVersion(), Settings: settings}
 	if len(positionals) > 0 {
@@ -237,7 +236,7 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 		ignored = append(ignored, positionals[1:]...)
 	}
 	if len(ignored) > 0 {
-		_, _ = fmt.Fprintf(stderr, "Warning: -tui has no form field for %s; ignored\n", strings.Join(ignored, " "))
+		diag.Notice("Warning: -tui has no form field for %s; ignored", strings.Join(ignored, " "))
 	}
 	return opts
 }

@@ -473,10 +473,19 @@ func StderrLogf(format string, args ...any) {
 // by the CLI, returning the resolved records for the requested types.
 func (l Lookup) resolveWithLog(ctx context.Context, domain string) ([]Record, time.Duration, error) {
 	records, elapsed, err := l.ResolveTypes(ctx, domain)
-	if l.Logf != nil && len(records) > 0 {
-		l.Logf("Resolved: %s (%s: %s) in %s", domain, records[0].Type, records[0].Value, elapsed)
-	} else if l.Logf != nil {
-		l.Logf("Failed to resolve: %s (Error: %v) in %s", domain, err, elapsed)
+	if l.Logf != nil {
+		switch {
+		case len(records) > 0:
+			l.Logf("Resolved: %s (%s: %s) in %s", domain, records[0].Type, records[0].Value, elapsed)
+		case err == nil:
+			types := l.Types
+			if len(types) == 0 {
+				types = DefaultTypes
+			}
+			l.Logf("No records: %s (%s) in %s", domain, strings.Join(types, ","), elapsed)
+		default:
+			l.Logf("Failed to resolve: %s (Error: %v) in %s", domain, err, elapsed)
+		}
 	}
 	return records, elapsed, err
 }

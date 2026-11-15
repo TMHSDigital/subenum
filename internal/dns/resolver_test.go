@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -224,6 +225,43 @@ func TestResolveDomainWithRetryCNAMENoData(t *testing.T) {
 	_, _ = Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 1, Types: []string{"CNAME"}}.Resolve(context.Background(), "www.example.com")
 	if got := srv.Queries() - first; got != first {
 		t.Fatalf("attempts=3 issued %d queries, attempts=1 issued %d; NODATA must not be retried", first, got)
+	}
+}
+
+func TestResolveVerboseNoData(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{
+		"www.example.com":   {A: "192.0.2.10"},
+		"alias.example.com": {CNAME: "www.example.com"},
+	})
+	for _, tc := range []struct {
+		domain  string
+		prefix  string
+		outcome Outcome
+	}{
+		{"www.example.com", "No records: www.example.com (CNAME) in ", OutcomeNXDomain},
+		{"alias.example.com", "Resolved: alias.example.com (CNAME: www.example.com) in ", OutcomeFound},
+		{"missing.example.com", "Failed to resolve: missing.example.com (Error: ", OutcomeNXDomain},
+	} {
+		t.Run(tc.domain, func(t *testing.T) {
+			var lines []string
+			lookup := Lookup{
+				Resolver: srv.Resolver(time.Second), Timeout: time.Second,
+				Attempts: 1, Types: []string{"CNAME"},
+				Logf: func(format string, args ...any) {
+					lines = append(lines, fmt.Sprintf(format, args...))
+				},
+			}
+			_, outcome := lookup.Resolve(context.Background(), tc.domain)
+			if outcome != tc.outcome {
+				t.Errorf("outcome = %v, want %v", outcome, tc.outcome)
+			}
+			if len(lines) != 1 || !strings.HasPrefix(lines[0], tc.prefix) {
+				t.Fatalf("verbose lines = %q, want one beginning %q", lines, tc.prefix)
+			}
+			if strings.Contains(lines[0], "Error: <nil>") {
+				t.Errorf("successful NODATA lookup logged a nil error: %q", lines[0])
+			}
+		})
 	}
 }
 
