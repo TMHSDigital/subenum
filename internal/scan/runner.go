@@ -645,7 +645,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	}()
 
 	cfg.scope = newScope(cfg.Exclude)
-	cfg.takeover = &dns.TakeoverCache{Providers: cfg.TakeoverProviders}
+	cfg.takeover = &dns.TakeoverCache{Providers: cfg.TakeoverProviders, Skip: cfg.scope.excluded}
 	wildcardRoot, fingerprint, ok, fatal := preflight(ctx, &cfg, maxDepth, events)
 	if !ok {
 		failed = fatal
@@ -1036,7 +1036,8 @@ func (s *scanState) report(ctx context.Context, name string, records []dns.Recor
 	// Unguarded: CLI and TUI drain until close. A ctx.Done() guard here would
 	// only matter for a consumer that stops reading with a full buffer.
 	// A CNAME result gets a DNS-only takeover hint; its target is resolved
-	// with the trusted resolver. Simulated records are never checked.
+	// with the trusted resolver, unless it is out of scope (#316). Simulated
+	// records are never checked.
 	takeover := ""
 	if !cfg.Simulate && cfg.resolveHook == nil {
 		takeover = cfg.takeover.Hint(ctx, cfg.lookup(nil), records)

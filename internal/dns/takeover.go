@@ -199,6 +199,11 @@ type TakeoverCache struct {
 	// Providers are the takeover-prone services to match; nil is the
 	// built-in list (#219).
 	Providers TakeoverProviders
+	// Skip, when set, reports names that must never be looked up, such as
+	// out-of-scope names (#316). A skipped CNAME target still gets its
+	// provider match but is never called dangling; a skipped NS host is
+	// ignored.
+	Skip func(name string) bool
 
 	mu      sync.Mutex
 	entries map[string]*takeoverEntry
@@ -216,16 +221,24 @@ func (c *TakeoverCache) Lookups() int64 { return c.lookups.Load() }
 // Hint is TakeoverHint through the cache.
 func (c *TakeoverCache) Hint(ctx context.Context, l Lookup, records []Record) string {
 	if target := cnameTarget(records); target != "" {
+		if c.skip(target) {
+			return c.Providers.marker(target, OutcomeFound)
+		}
 		return c.Providers.marker(target, c.outcome(ctx, l, target))
 	}
 	// A delegated name (#194): whoever registers a name server that does
 	// not exist answers for the whole subzone.
 	for _, r := range records {
-		if r.Type == "NS" && c.outcome(ctx, l, r.Value) == OutcomeNXDomain {
+		if r.Type == "NS" && !c.skip(r.Value) && c.outcome(ctx, l, r.Value) == OutcomeNXDomain {
 			return DanglingNS
 		}
 	}
 	return ""
+}
+
+// skip reports whether name must not be looked up.
+func (c *TakeoverCache) skip(name string) bool {
+	return c.Skip != nil && c.Skip(strings.TrimSuffix(name, "."))
 }
 
 // outcome resolves target (A and AAAA) once for the life of the cache.
