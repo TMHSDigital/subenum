@@ -17,7 +17,9 @@ func TestNewFormModelDefaults(t *testing.T) {
 	if m.focus != fieldDomain {
 		t.Errorf("expected initial focus on domain, got %d", m.focus)
 	}
-	if got := m.inputs[fieldWordlist].Value(); got != "examples/sample_wordlist.txt" {
+	// No repo-relative default: an empty field means the bundled list, so a
+	// binary run outside a checkout works on the first try (#288).
+	if got := m.inputs[fieldWordlist].Value(); got != "" {
 		t.Errorf("default wordlist = %q", got)
 	}
 	if got := m.inputs[fieldConcurrency].Value(); got != "100" {
@@ -328,7 +330,7 @@ func TestFormViewRows(t *testing.T) {
 	}
 	want := []string{
 		"▸ Domain*:            > e.g. example.com",
-		"  Wordlist*:          > examples/sample_wordlist.txt",
+		"  Wordlist:           > empty = bundled top-5000 list",
 		"  Simulate:           OFF",
 		"  Hit Rate (%):         (enable Simulate)",
 		"  DNS Server:         > 8.8.8.8:53",

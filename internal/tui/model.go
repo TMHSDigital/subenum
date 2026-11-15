@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/TMHSDigital/subenum/data"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
@@ -169,10 +171,25 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 // pool, in a tea.Cmd goroutine.
 func loadWordlistCmd(vals formValues) tea.Cmd {
 	return func() tea.Msg {
-		entries, _, skipped, err := wordlist.LoadWordlist(vals.wordlist, vals.domain)
+		entries, skipped, err := loadWordlist(vals)
 		pool, poolErr := loadPool(vals)
 		return wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err, pool: pool, poolErr: poolErr}
 	}
+}
+
+// loadWordlist reads the file named on the form, or the bundled list when the
+// field is empty, the way the CLI treats a missing -w (#288).
+func loadWordlist(vals formValues) (entries []string, skipped int, err error) {
+	if vals.wordlist != "" {
+		entries, _, skipped, err = wordlist.LoadWordlist(vals.wordlist, vals.domain)
+		return entries, skipped, err
+	}
+	pr := wordlist.NewPreparer()
+	if err := wordlist.EachLine(strings.NewReader(data.Subdomains5k), pr.Add); err != nil {
+		return nil, 0, err
+	}
+	entries, _, skipped = pr.Prepared().For(vals.domain)
+	return entries, skipped, nil
 }
 
 // loadPool builds the resolver pool from the Resolver Pool file, as the CLI
@@ -237,6 +254,11 @@ func (m Model) beginScan(vals formValues, entries []string, skipped int, pool *d
 
 	if vals.resolvers != "" && vals.simulate {
 		m.scanView.addMessage(dimStyle.Render("Note: the resolver pool is ignored in simulation mode, which sends no DNS queries"))
+	}
+
+	// Same notice as the CLI's, so the TUI user knows which list ran (#288).
+	if vals.wordlist == "" {
+		m.scanView.addMessage(dimStyle.Render("Note: empty wordlist field: using the bundled top-5000 list (SecLists)"))
 	}
 
 	opts := vals.options(entries, seed)
