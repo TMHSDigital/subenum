@@ -328,18 +328,22 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 // resume position indexes the wordlist plus every source's names, so a
 // resumed run must replay exactly the names the interrupted one scanned: a
 // failed source fetched again could now succeed and shift every later
-// candidate, skipping names silently (#237).
-func savedSources(sources []targetSource) map[string][]string {
-	if len(sources) == 0 {
-		return nil
-	}
+// candidate, skipping names silently (#237). That holds once the target's
+// scan has started (scanned). Before it, no position depends on the lookup,
+// and the failure may only be the interrupt cutting it short: the source is
+// left out, so the resumed run asks it again (#299).
+func savedSources(sources []targetSource, scanned bool) map[string][]string {
 	saved := make(map[string][]string, len(sources))
 	for _, src := range sources {
-		if src.fetched {
+		switch {
+		case src.fetched:
 			saved[src.source] = src.names
-		} else {
+		case scanned:
 			saved[src.source] = []string{}
 		}
+	}
+	if len(saved) == 0 {
+		return nil
 	}
 	return saved
 }
@@ -371,9 +375,17 @@ func saveResumeState(s *session) bool {
 		}
 		res := s.results[i]
 		ct := sourceByName(res.sources, "ct")
+		// Whether the target's scan has started, in this run or the one it
+		// resumed. Until then a failed source lookup or zone transfer may
+		// only have been cut short by the interrupt, so it is not saved as
+		// final and the resumed run tries it again (#299). A transfer the
+		// earlier state had already settled stays settled.
+		scanned := res.done || (saved != nil && saved.RootDone > 0)
 		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: ct.names, CTFetched: ct.fetched,
-			AXFR: res.axfr.names, AXFRServers: res.axfr.allowed, AXFRDone: res.axfr.done, Denial: string(res.axfr.denial),
-			Sources: savedSources(res.sources)}
+			Sources: savedSources(res.sources, scanned)}
+		if res.axfr.done && (scanned || (saved != nil && saved.AXFRDone)) {
+			t.AXFR, t.AXFRServers, t.AXFRDone, t.Denial = res.axfr.names, res.axfr.allowed, true, string(res.axfr.denial)
+		}
 		switch {
 		case res.done:
 			t.Stats, t.Processed, t.Total = res.final.Stats, res.final.Processed, res.final.Total

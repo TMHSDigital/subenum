@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -598,7 +599,7 @@ func TestSaveResumeStateKeepsFailedSources(t *testing.T) {
 		targets:      []string{"a.example"},
 		status:       []string{"interrupted"},
 		entryDigests: []string{"d1"},
-		results: []targetResult{{sources: []targetSource{
+		results: []targetResult{{done: true, sources: []targetSource{
 			{source: "ct", err: "crt.sh: 502 Bad Gateway"},
 			{source: "wayback", names: []string{"old-shop"}, fetched: true},
 		}}},
@@ -621,6 +622,112 @@ func TestSaveResumeStateKeepsFailedSources(t *testing.T) {
 	}
 	if _, ok := tg.sourceNames("dns"); ok {
 		t.Error("a source the run never asked reads as saved")
+	}
+}
+
+// TestSaveResumeStateRetriesLookupsCutShort covers #299: a source lookup or
+// zone transfer that failed before the target's scan started is not saved as
+// final, so the resumed run tries it again; once the scan has started, in
+// this run or the one it resumed, it stays as saved (#237).
+func TestSaveResumeStateRetriesLookupsCutShort(t *testing.T) {
+	sources := []targetSource{
+		{source: "ct", err: "crt.sh: context canceled"},
+		{source: "wayback", names: []string{"old-shop"}, fetched: true},
+	}
+	axfr := targetAXFR{done: true}
+	for name, tc := range map[string]struct {
+		res    targetResult
+		prev   *resumeState
+		pinned bool
+	}{
+		"before the scan":          {targetResult{sources: sources, axfr: axfr}, nil, false},
+		"scan started":             {targetResult{done: true, sources: sources, axfr: axfr}, nil, true},
+		"resumed a started scan":   {targetResult{sources: sources, axfr: axfr}, &resumeState{Targets: []resumeTarget{{Domain: "a.example", RootDone: 5}}}, true},
+		"resumed an unstarted one": {targetResult{sources: sources, axfr: axfr}, &resumeState{Targets: []resumeTarget{{Domain: "a.example"}}}, false},
+	} {
+		f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json")}
+		saveResumeState(&session{
+			f: f, out: output.New(nil, false, output.FormatText), resume: tc.prev,
+			targets:      []string{"a.example"},
+			status:       []string{"interrupted"},
+			entryDigests: []string{"d1"},
+			results:      []targetResult{tc.res},
+			runs:         []resultLog{{}},
+		})
+		data, err := os.ReadFile(f.stateFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var st resumeState
+		if err := json.Unmarshal(data, &st); err != nil {
+			t.Fatal(err)
+		}
+		tg := &st.Targets[0]
+		if _, ok := tg.sourceNames("ct"); ok != tc.pinned {
+			t.Errorf("%s: failed ct source saved as final = %v, want %v", name, ok, tc.pinned)
+		}
+		if names, ok := tg.sourceNames("wayback"); !ok || len(names) != 1 {
+			t.Errorf("%s: wayback replays %v (saved %v), want [old-shop]", name, names, ok)
+		}
+		if tg.AXFRDone != tc.pinned {
+			t.Errorf("%s: zone transfer saved as done = %v, want %v", name, tg.AXFRDone, tc.pinned)
+		}
+	}
+}
+
+// TestE2EResumeRefetchesInterruptedSource covers #299: an interrupt during a
+// passive source's lookup, before the scan, leaves the source out of the
+// state, so the resumed run asks it again and scans its names.
+func TestE2EResumeRefetchesInterruptedSource(t *testing.T) {
+	t.Parallel()
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Name == "late.example.com" && q.Type == dnsmessage.TypeA {
+			return dnstest.Reply{A: []string{"192.0.2.10"}}
+		}
+		return dnstest.NXDomain
+	})
+	signals := make(chan os.Signal, 1)
+	var hits atomic.Int32
+	ct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) == 1 {
+			// The interrupt arrives while the first lookup is waiting.
+			signals <- os.Interrupt
+			select {
+			case <-r.Context().Done():
+			case <-time.After(30 * time.Second):
+			}
+			return
+		}
+		_, _ = w.Write([]byte(`[{"name_value": "late.example.com"}]`))
+	}))
+	defer ct.Close()
+	urls := map[string]string{"ct": ct.URL + "/"}
+
+	wl := writeFile(t, "wl.txt", "www\n")
+	path := filepath.Join(t.TempDir(), "state.json")
+	code, out := runCLIMergedWith(t, runArgs{sourceURLs: urls, signals: signals,
+		args: []string{"-ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-state", path, "-w", wl, "example.com"}})
+	if code != 130 {
+		t.Fatalf("interrupted run: exit %d, want 130\n%s", code, out)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("no resume state saved: %v\n%s", err, out)
+	}
+	var st resumeState
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.target("example.com").sourceNames("ct"); ok {
+		t.Errorf("the interrupted lookup was saved as final: %s", data)
+	}
+
+	code, out = runCLIMergedWith(t, runArgs{sourceURLs: urls, args: []string{"-resume", path}})
+	if code != 0 || !strings.Contains(out, "late.example.com") {
+		t.Errorf("resumed run: exit %d, want late.example.com from a new lookup\n%s", code, out)
+	}
+	if hits.Load() < 2 {
+		t.Errorf("the resumed run did not ask the source again (%d requests)", hits.Load())
 	}
 }
 
