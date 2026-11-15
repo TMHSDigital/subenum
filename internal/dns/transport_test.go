@@ -204,12 +204,16 @@ func TestTimedOutLookupSendsNoLateQueries(t *testing.T) {
 func TestDoTDiscardsClosedConnections(t *testing.T) {
 	srv, servers := startAllTransports(t)
 	srv.CloseStreamsAfter(1)
-	r := NewResolver(2*time.Second, servers[TransportTLS])
+	// Each lookup pays a TLS handshake, which a loaded machine can stretch
+	// past a couple of seconds; the server answers at once, so a long timeout
+	// costs nothing (#289).
+	const timeout = 10 * time.Second
+	r := NewResolver(timeout, servers[TransportTLS])
 	var sent atomic.Int64
 	ctx := WithQueryCounter(context.Background(), &sent)
 	before := srv.Connections()
 	for i := 0; i < 10; i++ {
-		if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(ctx, "www.example.com"); err != nil {
+		if _, _, err := (Lookup{Resolver: r, Timeout: timeout, Types: []string{"A"}}).ResolveTypes(ctx, "www.example.com"); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(5 * time.Millisecond) // let the server's close arrive

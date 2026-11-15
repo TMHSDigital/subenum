@@ -54,7 +54,7 @@ func runAXFR(t *testing.T, srv *dnstest.Server, args ...string) (int, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runCLIMergedWith(t, runArgs{axfrPort: port, args: args})
+	return runCLIMergedWith(t, runArgs{axfrPort: port, args: localArgs(args...)})
 }
 
 // TestE2EZoneTransfer covers #85: a name server that allows AXFR gives

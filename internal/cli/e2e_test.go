@@ -110,6 +110,12 @@ func writeFile(t *testing.T, name, content string) string {
 	return p
 }
 
+// localArgs puts labTimingArgs in front of args, for a run that expects real
+// answers from an in-process DNS server (#289).
+func localArgs(args ...string) []string {
+	return append(slices.Clone(labTimingArgs), args...)
+}
+
 const e2eWords = "www\nmail\napi\ndev\nshop\nblog\n"
 
 func TestE2ESimulateJSON(t *testing.T) {
@@ -511,8 +517,8 @@ func TestE2EResolverPool(t *testing.T) {
 	wl := writeFile(t, "wl.txt", e2eWords)
 	list := writeFile(t, "resolvers.txt", "# pool\n"+r1+"\n"+r2+"\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
-	code, _ := runCLI(t, "", "-dns-server", trusted, "-r", list, "-type", "A", "-progress=false",
-		"-stats", stats, "-w", wl, "example.com")
+	code, _ := runCLI(t, "", append(localArgs("-dns-server", trusted, "-r", list, "-type", "A", "-progress=false",
+		"-stats", stats, "-w", wl), "example.com")...)
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
@@ -562,7 +568,7 @@ func TestE2EDiff(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	zone := writeFile(t, "now.zone", "www A 192.0.2.10\nmail A 192.0.2.20\ndev A 192.0.2.30\nextra A 192.0.2.40\nlegacy TIMEOUT\n")
-	lab := []string{"-simulate-zone", zone, "-timeout", "200", "-progress=false"}
+	lab := append([]string{"-simulate-zone", zone, "-progress=false"}, labSlowTimingArgs...)
 	run := func(words string, extra ...string) (int, string) {
 		wl := writeFile(t, "wl.txt", words)
 		return runCLI(t, "", append(append(append([]string{}, lab...), extra...), "-w", wl, "lab.example")...)
@@ -671,8 +677,8 @@ func TestE2EPermute(t *testing.T) {
 	})
 	wl := writeFile(t, "wl.txt", "api\nwww\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
-	code, out := runCLI(t, "", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-permute",
-		"-format", "jsonl", "-stats", stats, "-w", wl, "example.com")
+	code, out := runCLI(t, "", append(localArgs("-dns-server", srv.Addr, "-type", "A", "-progress=false", "-permute",
+		"-format", "jsonl", "-stats", stats, "-w", wl), "example.com")...)
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
@@ -742,8 +748,8 @@ func TestE2EInconclusive(t *testing.T) {
 		dir := t.TempDir()
 		incon, stats := filepath.Join(dir, "incon.txt"), filepath.Join(dir, "run.json")
 		before := srv.QueriesFor("down.example.com", dnsmessage.TypeA)
-		args := []string{"-dns-server", srv.Addr, "-type", "A", "-progress=false", "-no-abort",
-			"-inconclusive", incon, "-stats", stats, "-w", wl, "example.com"}
+		args := append(localArgs("-dns-server", srv.Addr, "-type", "A", "-progress=false", "-no-abort",
+			"-inconclusive", incon, "-stats", stats, "-w", wl), "example.com")
 		if retry {
 			args = append([]string{"-retry-inconclusive"}, args...)
 		}
@@ -800,8 +806,8 @@ func TestE2EInternalAddresses(t *testing.T) {
 	})
 	wl := writeFile(t, "wl.txt", "www\nintranet\nlo\nnope\n")
 	stats := filepath.Join(t.TempDir(), "run.json")
-	code, out := runCLI(t, "", "-dns-server", srv.Addr, "-type", "A", "-progress=false",
-		"-format", "jsonl", "-stats", stats, "-w", wl, "example.com")
+	code, out := runCLI(t, "", append(localArgs("-dns-server", srv.Addr, "-type", "A", "-progress=false",
+		"-format", "jsonl", "-stats", stats, "-w", wl), "example.com")...)
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
@@ -833,7 +839,7 @@ func TestE2EInternalAddresses(t *testing.T) {
 		t.Errorf("report internal_addresses: %s (err %v), want 2", raw, err)
 	}
 
-	_, text := runCLI(t, "", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-show-records", "-w", wl, "example.com")
+	_, text := runCLI(t, "", append(localArgs("-dns-server", srv.Addr, "-type", "A", "-progress=false", "-show-records", "-w", wl), "example.com")...)
 	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
 		hasMarker := strings.Contains(line, " INTERNAL=")
 		if strings.HasPrefix(line, "www.") == hasMarker {
@@ -866,7 +872,7 @@ func TestE2ETakeoverProviders(t *testing.T) {
 	})
 	wl := writeFile(t, "wl.txt", "docs\nwww\n")
 	scan := func(extra ...string) (int, string) {
-		args := append([]string{"-dns-server", srv.Addr, "-type", "A,CNAME", "-progress=false", "-show-records", "-w", wl}, extra...)
+		args := append(localArgs("-dns-server", srv.Addr, "-type", "A,CNAME", "-progress=false", "-show-records", "-w", wl), extra...)
 		return runCLI(t, "", append(args, "example.com")...)
 	}
 	if _, out := scan(); strings.Contains(out, "TAKEOVER?") {
@@ -921,10 +927,13 @@ func TestE2EResume(t *testing.T) {
 	}
 
 	// Interrupted run: -rate 20 makes 40 names take ~2s; interrupt once
-	// three results are out, whatever the runner's speed (#260).
+	// three results are out, whatever the runner's speed (#260). One worker
+	// takes its rate slot only after the previous lookup, so a stalled
+	// process cannot run the rest in a burst before the interrupt is handled,
+	// as many workers holding slots reserved up front could (#289).
 	signals := make(chan os.Signal, 1)
 	code, first := runCLIUntilLines(t, 3, func() { signals <- os.Interrupt }, runArgs{signals: signals,
-		args: append(append([]string{}, base...), "-rate", "20", "-state", statePath, "-o", outPath, "example.com")})
+		args: append(append([]string{}, base...), "-t", "1", "-rate", "20", "-state", statePath, "-o", outPath, "example.com")})
 	if code != 130 {
 		t.Fatalf("interrupted run: exit %d, want 130", code)
 	}

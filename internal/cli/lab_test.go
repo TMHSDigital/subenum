@@ -12,10 +12,18 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dns"
 )
 
-// labTimingArgs gives lab runs a generous per-query timeout and retries. The
-// lab server is in-process, so the CLI's 1 s default is ample on an idle
-// machine but not under -race and coverage on a busy CI runner (#167).
+// labTimingArgs gives lab runs, and any other run against an in-process DNS
+// server, a generous per-query timeout and retries. The server is in-process,
+// so the CLI's 1 s default is ample on an idle machine but not under -race
+// and coverage on a busy CI runner (#167), or beside other parallel tests and
+// packages (#289).
 var labTimingArgs = []string{"-timeout", "5000", "-attempts", "3"}
+
+// labSlowTimingArgs is for zones with TIMEOUT records, where each name that
+// never answers costs every attempt's full timeout: shorter than
+// labTimingArgs to keep the test quick, but still two tries of two seconds
+// for the names that do answer (#289).
+var labSlowTimingArgs = []string{"-timeout", "2000", "-attempts", "2"}
 
 // TestE2ELabs runs the shipped -simulate-zone scenarios end to end (#76) and
 // checks the answers the Labs page gives for them.
@@ -96,9 +104,11 @@ func TestE2ELabVerdicts(t *testing.T) {
 		zone, verdict string
 		args          []string
 	}{
-		{zone: "lab3-rate-limit.zone", verdict: "unreliable"},
-		{zone: "lab3-rate-limit.zone", verdict: "complete", args: []string{"-rate", "30"}},
-		{zone: "lab5-failures.zone", verdict: "degraded", args: []string{"-timeout", "200"}},
+		// One attempt: a retry lands in a later one-second window and gets
+		// answered, which on a slow machine turns the verdict into degraded.
+		{zone: "lab3-rate-limit.zone", verdict: "unreliable", args: []string{"-timeout", "5000", "-attempts", "1"}},
+		{zone: "lab3-rate-limit.zone", verdict: "complete", args: append([]string{"-rate", "30"}, labTimingArgs...)},
+		{zone: "lab5-failures.zone", verdict: "degraded", args: labSlowTimingArgs},
 	} {
 		t.Run(c.zone+strings.Join(c.args, ""), func(t *testing.T) {
 			stats := filepath.Join(t.TempDir(), "run.json")
@@ -132,8 +142,8 @@ func TestE2EMaxDuration(t *testing.T) {
 	t.Parallel()
 	stats := filepath.Join(t.TempDir(), "run.json")
 	// -rate 10 with 30 words needs about 3 s; the budget is a third of that.
-	code, out := runCLI(t, "", "-progress=false", "-w", "examples/labs/words.txt", "-t", "2", "-rate", "10",
-		"-max-duration", "1s", "-stats", stats, "-state", filepath.Join(t.TempDir(), "state.json"), "-simulate-zone", filepath.Join("examples", "labs", "lab1-first-scan.zone"), "lab.example")
+	code, out := runCLI(t, "", append(localArgs("-progress=false", "-w", "examples/labs/words.txt", "-t", "2", "-rate", "10",
+		"-max-duration", "1s", "-stats", stats, "-state", filepath.Join(t.TempDir(), "state.json"), "-simulate-zone", filepath.Join("examples", "labs", "lab1-first-scan.zone")), "lab.example")...)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}

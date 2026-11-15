@@ -421,7 +421,8 @@ func TestE2EAbortSavesResumeState(t *testing.T) {
 	defer srv.Close()
 	dir := t.TempDir()
 	state, stats := filepath.Join(dir, "state.json"), filepath.Join(dir, "run.json")
-	code, out := runCLIMerged(t, "-progress=false", "-dns-server", srv.Addr, "-timeout", "2000", "-attempts", "1", "-type", "A",
+	// The server answers at once, so the long timeout costs nothing (#289).
+	code, out := runCLIMerged(t, "-progress=false", "-dns-server", srv.Addr, "-timeout", "10000", "-attempts", "1", "-type", "A",
 		"-t", "4", "-state", state, "-stats", stats, "-w", writeFile(t, "wl.txt", words.String()), "example.com")
 	if code != exitFailure {
 		t.Fatalf("aborted run: exit %d, want %d\n%s", code, exitFailure, out)
@@ -543,7 +544,7 @@ func TestE2EResumeReplaysSourceNames(t *testing.T) {
 		"sources": {"-sources=ct", resumeTarget{Domain: "example.com", Sources: map[string][]string{"ct": {"legacy"}}}},
 		"legacy":  {"-ct", resumeTarget{Domain: "example.com", CT: []string{"legacy"}, CTFetched: true}},
 	} {
-		args := []string{tc.flag, "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.com"}
+		args := append(localArgs(tc.flag, "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl), "example.com")
 		path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{tc.saved}})
 		hits.Store(0)
 		code, out := runCLIWith(t, runArgs{sourceURLs: urls, args: []string{"-resume", path}})
@@ -709,7 +710,7 @@ func TestE2EResumeRefetchesInterruptedSource(t *testing.T) {
 	wl := writeFile(t, "wl.txt", "www\n")
 	path := filepath.Join(t.TempDir(), "state.json")
 	code, out := runCLIMergedWith(t, runArgs{sourceURLs: urls, signals: signals,
-		args: []string{"-ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-state", path, "-w", wl, "example.com"}})
+		args: append(localArgs("-ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-state", path, "-w", wl), "example.com")})
 	if code != 130 {
 		t.Fatalf("interrupted run: exit %d, want 130\n%s", code, out)
 	}

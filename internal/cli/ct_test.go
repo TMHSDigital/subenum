@@ -45,7 +45,7 @@ func TestE2ECertificateTransparency(t *testing.T) {
 	stats := filepath.Join(t.TempDir(), "run.json")
 	scan := func(base string) (int, string, output.Summary) {
 		code, out := runCLIWith(t, runArgs{sourceURLs: map[string]string{"ct": base + "/"},
-			args: []string{"-ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com"}})
+			args: append(localArgs("-ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl), "example.com")})
 		var s output.Summary
 		if data, err := os.ReadFile(stats); err == nil {
 			_ = json.Unmarshal(data, &s)
@@ -113,7 +113,7 @@ func TestE2EPassiveSources(t *testing.T) {
 	}
 
 	code, out := runCLIWith(t, runArgs{sourceURLs: map[string]string{"ct": ctUp.URL + "/", "wayback": wayback.URL},
-		args: []string{"-ct", "-sources", "wayback", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com"}})
+		args: append(localArgs("-ct", "-sources", "wayback", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl), "example.com")})
 	if code != 0 || !strings.Contains(out, "legacy-billing.example.com") || !strings.Contains(out, "old-shop.example.com") {
 		t.Fatalf("exit %d, results %q: want the CT and the Wayback name", code, out)
 	}
@@ -133,7 +133,7 @@ func TestE2EPassiveSources(t *testing.T) {
 		"old-shop.example.com":       "wayback",
 	}
 	sourceArgs := runArgs{sourceURLs: map[string]string{"ct": ctUp.URL + "/", "wayback": wayback.URL}}
-	scanArgs := []string{"-sources", "ct,wayback", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.com"}
+	scanArgs := append(localArgs("-sources", "ct,wayback", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl), "example.com")
 	sourceArgs.args = append([]string{"-format", "jsonl"}, scanArgs...)
 	code, out = runCLIWith(t, sourceArgs)
 	got := map[string]string{}
@@ -168,7 +168,7 @@ func TestE2EPassiveSources(t *testing.T) {
 	}
 
 	code, out = runCLIWith(t, runArgs{sourceURLs: map[string]string{"ct": ctUp.URL + "/", "wayback": down.URL},
-		args: []string{"-sources", "wayback,ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl, "example.com"}})
+		args: append(localArgs("-sources", "wayback,ct", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-stats", stats, "-w", wl), "example.com")})
 	if code != 0 || !strings.Contains(out, "legacy-billing.example.com") || strings.Contains(out, "old-shop") {
 		t.Errorf("wayback down: exit %d, results %q; want the CT name only", code, out)
 	}

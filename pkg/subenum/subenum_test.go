@@ -489,7 +489,9 @@ func TestNoAbortScanSucceedsDespiteFailingLookups(t *testing.T) {
 		Domain:   "lab.example",
 		Words:    words,
 		Resolver: srv.Addr,
-		Timeout:  2 * time.Second,
+		// The server answers every query at once, so a long timeout costs
+		// nothing and keeps a loaded machine from failing the preflight (#289).
+		Timeout:  10 * time.Second,
 		Attempts: 1,
 		NoAbort:  true,
 	}
