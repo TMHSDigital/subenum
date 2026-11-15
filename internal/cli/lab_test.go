@@ -137,36 +137,50 @@ func TestE2ELabVerdicts(t *testing.T) {
 
 // TestE2EMaxDuration covers #190: a run that hits its time budget still ends
 // with a report, a degraded verdict and stopped_by "duration", and a negative
-// budget is a usage error.
+// budget is a usage error. The checks before the first name do not use up
+// the budget, so the run and each -resume of it test names (#340).
 func TestE2EMaxDuration(t *testing.T) {
 	t.Parallel()
 	stats := filepath.Join(t.TempDir(), "run.json")
-	// -rate 10 with 30 words needs about 3 s; the budget is a third of that.
-	code, out := runCLI(t, "", append(localArgs("-progress=false", "-w", "examples/labs/words.txt", "-t", "2", "-rate", "10",
-		"-max-duration", "1s", "-stats", stats, "-state", filepath.Join(t.TempDir(), "state.json"), "-simulate-zone", filepath.Join("examples", "labs", "lab1-first-scan.zone")), "lab.example")...)
-	if code != 0 {
-		t.Fatalf("exit %d\n%s", code, out)
-	}
-	data, err := os.ReadFile(stats)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sum struct {
+	state := filepath.Join(t.TempDir(), "state.json")
+	type summary struct {
 		Verdict string `json:"verdict"`
 		Reason  string `json:"reason"`
 		Targets []struct {
+			Processed int64  `json:"processed"`
 			Skipped   int64  `json:"skipped_by_cap"`
 			StoppedBy string `json:"stopped_by"`
 		} `json:"targets"`
 	}
-	if err := json.Unmarshal(data, &sum); err != nil {
-		t.Fatal(err)
+	check := func(run string, code int, out string) summary {
+		t.Helper()
+		if code != 0 {
+			t.Fatalf("%s: exit %d\n%s", run, code, out)
+		}
+		data, err := os.ReadFile(stats)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sum summary
+		if err := json.Unmarshal(data, &sum); err != nil {
+			t.Fatal(err)
+		}
+		if sum.Verdict != "degraded" || !strings.Contains(sum.Reason, "-max-duration") {
+			t.Errorf("%s: verdict %q (%s), want degraded naming -max-duration", run, sum.Verdict, sum.Reason)
+		}
+		if len(sum.Targets) != 1 || sum.Targets[0].StoppedBy != "duration" || sum.Targets[0].Skipped == 0 || sum.Targets[0].Processed == 0 {
+			t.Fatalf("%s: targets %+v, want one stopped by duration with names tested and names skipped", run, sum.Targets)
+		}
+		return sum
 	}
-	if sum.Verdict != "degraded" || !strings.Contains(sum.Reason, "-max-duration") {
-		t.Errorf("verdict %q (%s), want degraded naming -max-duration", sum.Verdict, sum.Reason)
-	}
-	if len(sum.Targets) != 1 || sum.Targets[0].StoppedBy != "duration" || sum.Targets[0].Skipped == 0 {
-		t.Errorf("targets %+v, want one stopped by duration with names skipped", sum.Targets)
+	// -rate 10 with 30 words needs about 3 s; the budget is a third of that,
+	// and the preflight and wildcard probes take about half of it.
+	code, out := runCLI(t, "", append(localArgs("-progress=false", "-w", "examples/labs/words.txt", "-t", "2", "-rate", "10",
+		"-max-duration", "1s", "-stats", stats, "-state", state, "-simulate-zone", filepath.Join("examples", "labs", "lab1-first-scan.zone")), "lab.example")...)
+	first := check("first run", code, out)
+	code, out = runCLI(t, "", "-resume", state, "-rate", "10", "-max-duration", "1s")
+	if resumed := check("resumed run", code, out); resumed.Targets[0].Skipped >= first.Targets[0].Skipped {
+		t.Errorf("resumed run skipped %d names, the first run %d: the resume point did not advance", resumed.Targets[0].Skipped, first.Targets[0].Skipped)
 	}
 
 	if code, _ := runCLI(t, "", "-simulate", "-max-duration", "-1s", "example.com"); code != exitUsage {

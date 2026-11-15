@@ -628,6 +628,9 @@ func TestRunDeadlineStopsAdmission(t *testing.T) {
 			if !strings.Contains(notice, "time budget reached ({max_duration})") {
 				t.Errorf("notice %q, want the time budget named", notice)
 			}
+			if untested := strings.Contains(notice, "before any name was tested"); untested != (c.wantProcessed == 0) {
+				t.Errorf("notice %q: says no name was tested %v, want %v (#340)", notice, untested, c.wantProcessed == 0)
+			}
 			if v, reason := done.Stats.Verdict(false); v != VerdictDegraded || !strings.Contains(reason, "{max_duration}") {
 				t.Errorf("verdict %s (%s), want degraded naming the time budget", v, reason)
 			}

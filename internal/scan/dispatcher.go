@@ -448,7 +448,10 @@ func (d *dispatcher) finish(ctx context.Context, stats *counters, events chan<- 
 		return
 	}
 	msg := fmt.Sprintf("query cap reached ({max_queries} %d); skipped %d additional jobs", d.cfg.MaxQueries, d.skipped)
-	if d.expired {
+	switch {
+	case d.expired && d.admitted == 0:
+		msg = fmt.Sprintf("time budget reached ({max_duration}) before any name was tested; skipped %d jobs. Raise {max_duration}", d.skipped)
+	case d.expired:
 		msg = fmt.Sprintf("time budget reached ({max_duration}); skipped %d additional jobs", d.skipped)
 	}
 	select {

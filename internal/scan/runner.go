@@ -657,10 +657,18 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 
 	cfg.scope = newScope(cfg.Exclude)
 	cfg.takeover = &dns.TakeoverCache{Providers: cfg.TakeoverProviders, Skip: cfg.scope.excluded}
+	checksStarted := time.Now()
 	wildcardRoot, fingerprint, ok, fatal := preflight(ctx, &cfg, maxDepth, events)
 	if !ok {
 		failed = fatal
 		return
+	}
+	if !cfg.Deadline.IsZero() && checksStarted.Before(cfg.Deadline) {
+		// The preflight and wildcard probes do not use up the budget: under a
+		// low -rate they can take all of a short one, and a -resume probes
+		// again, so it would never test a name (#340). A budget already spent
+		// when the scan started (a later -dL target) stays spent.
+		cfg.Deadline = cfg.Deadline.Add(time.Since(checksStarted))
 	}
 	cfg.resumeDepth = resumeDepths(cfg)
 
