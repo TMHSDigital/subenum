@@ -30,8 +30,11 @@ func lookupCNAME(ctx context.Context, resolver *net.Resolver, name string) (stri
 	if resolver == nil || resolver.Dial == nil {
 		return resolver.LookupCNAME(ctx, name)
 	}
+	// NewName checks only the 255-byte total; a label of 0 or over 63 bytes
+	// fails later, when the query is built, after a dial, a rate slot and a
+	// counted query (#344). No such name can exist, so neither is asked.
 	qname, err := dnsmessage.NewName(name)
-	if err != nil {
+	if err != nil || !validLabels(name) {
 		return "", &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 	}
 	msg, err := cnameExchange(ctx, resolver, "udp", qname)
@@ -156,6 +159,17 @@ const ednsPayload = 1232
 
 // cnameQuery builds a recursive CNAME query with an EDNS(0) OPT record
 // advertising 1232-byte UDP answers, as Go's resolver sends.
+// validLabels reports whether every label of name, which may end in a dot,
+// is 1 to 63 bytes long.
+func validLabels(name string) bool {
+	for label := range strings.SplitSeq(strings.TrimSuffix(name, "."), ".") {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+	}
+	return true
+}
+
 func cnameQuery(id uint16, qname dnsmessage.Name) ([]byte, error) {
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
 	b.EnableCompression()
