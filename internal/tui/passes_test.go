@@ -334,7 +334,7 @@ func TestPermutationPassStates(t *testing.T) {
 	m.out, m.outFile = output.NewFile(f.Writer, false, output.FormatJSON), f
 	m.out.Emit(found("www.example.com", nil))
 	m.scanView.perm = &permutationPass{seeds: 1, candidates: 90}
-	m = update(m, eventMsg{scan.Event{Kind: scan.EventError, Message: "resolver failed preflight"}}, eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true}})
+	m = update(m, eventMsg{scan.Event{Kind: scan.EventError, Fatal: true, Message: "resolver failed preflight"}}, eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true, Failed: true}})
 	if !m.scanView.done || !m.scanView.failed() || exitCode(m) != 1 || !strings.Contains(m.scanView.View(), "processed 5/5") {
 		t.Errorf("failed permutation pass: done %v, failed %v\n%s", m.scanView.done, m.scanView.failed(), m.scanView.View())
 	}

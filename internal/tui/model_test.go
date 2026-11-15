@@ -353,6 +353,9 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 	if nv.failed() || exitCode(Model{scanView: nv}) != 0 {
 		t.Error("-no-abort warning counted as a failure")
 	}
+	if v := nv.View(); !strings.Contains(v, "⚠ warning: 30% failed") || strings.Contains(v, "✗") || nv.errText != "" {
+		t.Errorf("-no-abort warning shown as an error (errText %q):\n%s", nv.errText, v)
+	}
 
 	// A user abort stays "Aborted" and exits 0.
 	av := newScanViewModel(120, 40, false)

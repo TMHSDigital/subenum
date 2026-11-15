@@ -189,6 +189,18 @@ func (w *Writer) ScanNotice(kind, msg string) {
 	w.diagLocked(LevelWarn, kind, scan.Render(msg, scan.FlagName), scan.SettingsIn(msg))
 }
 
+// ScanWarning writes a non-fatal engine error (the reliability guard's
+// warning under -no-abort) at warning level. The engine's message starts
+// with "warning: ", which becomes the "Warning: " marker (#308). Like
+// ScanError, and unlike ScanNotice, it is shown under SetQuiet: with over a fifth of
+// lookups failed, the results are incomplete.
+func (w *Writer) ScanWarning(msg string) {
+	text := scan.Render(strings.TrimPrefix(msg, "warning: "), scan.FlagName)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.diagLocked(LevelWarn, KindScan, "Warning: "+text, scan.SettingsIn(msg))
+}
+
 // ScanError writes an engine error like Error, with its {setting} tokens
 // rendered as flag names and listed as codes in JSON output. It returns the
 // rendered message.

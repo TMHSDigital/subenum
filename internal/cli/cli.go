@@ -818,6 +818,13 @@ func scanTarget(ctx context.Context, s *session, p scanPass, emit func(scan.Even
 		case scan.EventNotice:
 			out.ScanNotice(ev.Notice.String(), ev.Message)
 		case scan.EventError:
+			if !ev.Fatal {
+				// The reliability guard's warning under -no-abort: the scan
+				// goes on, so it is neither an error line nor the target's
+				// error in the report (#308).
+				out.ScanWarning(ev.Message)
+				break
+			}
 			msg := out.ScanError(ev.Message)
 			if res.err == "" {
 				res.err = msg

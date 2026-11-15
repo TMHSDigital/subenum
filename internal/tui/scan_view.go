@@ -380,6 +380,12 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 
 	case scan.EventError:
 		text := scan.Render(ev.Message, settingLabel)
+		if !ev.Fatal {
+			// The reliability warning under No Abort: the scan goes on, so
+			// it is a warning, not the scan's error (#308).
+			m.addMessage(wildcardStyle.Render("⚠ " + text))
+			break
+		}
 		m.addMessage(errorStyle.Render("✗ " + text))
 		if m.errText == "" {
 			m.errText = text

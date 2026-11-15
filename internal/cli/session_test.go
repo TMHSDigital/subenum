@@ -104,8 +104,9 @@ func TestE2EResolverAbortSkipsRemainingTargets(t *testing.T) {
 
 	// run scans the list against a resolver that answers for each apex and
 	// fails every wordlist name. It returns the exit code, stderr, each
-	// target's status and the number of queries the server saw per target.
-	run := func(t *testing.T, extra ...string) (int, string, []string, map[string]int) {
+	// target's status and error from the -stats report, and the number of
+	// queries the server saw per target.
+	run := func(t *testing.T, extra ...string) (int, string, []string, []string, map[string]int) {
 		t.Helper()
 		var mu sync.Mutex
 		queries := map[string]int{}
@@ -138,18 +139,19 @@ func TestE2EResolverAbortSkipsRemainingTargets(t *testing.T) {
 		if data, err := os.ReadFile(stats); err != nil || json.Unmarshal(data, &summary) != nil {
 			t.Fatalf("reading -stats: %v\n%s", err, stderr)
 		}
-		var status []string
+		var status, errs []string
 		for _, tg := range summary.Targets {
 			status = append(status, tg.Status)
+			errs = append(errs, tg.Error)
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		return code, stderr, status, queries
+		return code, stderr, status, errs, queries
 	}
 
 	t.Run("abort", func(t *testing.T) {
 		t.Parallel()
-		code, stderr, status, queries := run(t)
+		code, stderr, status, _, queries := run(t)
 		if code != exitFailure {
 			t.Errorf("exit %d, want %d (every target failed or was skipped)\n%s", code, exitFailure, stderr)
 		}
@@ -165,9 +167,17 @@ func TestE2EResolverAbortSkipsRemainingTargets(t *testing.T) {
 	})
 	t.Run("no-abort", func(t *testing.T) {
 		t.Parallel()
-		code, stderr, status, queries := run(t, "-no-abort")
+		code, stderr, status, errs, queries := run(t, "-no-abort")
 		if code != exitOK {
 			t.Errorf("exit %d, want %d\n%s", code, exitOK, stderr)
+		}
+		// The guard's warning is a warning, not an error, and a target that
+		// went on to finish does not report it as its error (#308).
+		if !strings.Contains(stderr, "Warning: ") || strings.Contains(stderr, "Error: ") {
+			t.Errorf("stderr shows the -no-abort warning as an error, or not at all:\n%s", stderr)
+		}
+		if got := strings.Join(errs, ""); got != "" {
+			t.Errorf("target errors %q, want none", errs)
 		}
 		if strings.Contains(stderr, "remaining targets") {
 			t.Errorf("targets were skipped under -no-abort:\n%s", stderr)
