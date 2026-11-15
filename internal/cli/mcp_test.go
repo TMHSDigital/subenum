@@ -343,7 +343,7 @@ func TestMCPExplainStatsBranches(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Overall verdict: unreliable", "too many lookups failed", "lab run", "a limit of 50 per second",
-		"Error: resolver stopped answering", "Next time: lower -rate", "because -max-duration ran out",
+		"Error: resolver stopped answering", "Next time: lower -rate", "because -max-duration ran out", "subenum -resume",
 		"(a wildcard)", "2 results have a subdomain-takeover hint", "1 public names answer with internal",
 		"Zone transfer (AXFR) was allowed by ns1.lab.example", "plain NSEC", "Passive source wayback failed (503)",
 		"Permutation pass: 40 candidates from 4 seeds, 1 found", "Compared with prev.jsonl: 1 added, 2 removed",

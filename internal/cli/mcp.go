@@ -881,13 +881,14 @@ func explainTarget(p func(string, ...any), t output.TargetSummary) {
 		p("  %d names got no answer; -retry-inconclusive looks them up again at the end of the scan.", failed)
 	}
 	if t.SkippedCap > 0 {
-		budget := "-max-queries"
+		// A run that ends on -max-queries writes no resume state, so -resume
+		// is not offered for it (#320). The command line saves one when
+		// -max-duration runs out (#294); this server's scans never do.
 		if t.StoppedBy == "duration" {
-			budget = "-max-duration"
+			p("  %d names were not tested because -max-duration ran out; raise it and run the scan again, or continue a command-line run with subenum -resume and the state file it saved.", t.SkippedCap)
+		} else {
+			p("  %d names were not tested because -max-queries ran out; raise it and run the scan again.", t.SkippedCap)
 		}
-		// No resume state is written for a run that ends on a budget (only an
-		// interrupted run saves one), so -resume is not offered here (#320).
-		p("  %d names were not tested because %s ran out; raise it and run the scan again.", t.SkippedCap, budget)
 	}
 	if t.Wildcard {
 		p("  The domain answers every name (a wildcard), so subenum dropped %d answers matching the wildcard; a real name that answers the same way is dropped too.", o.WildcardFiltered)

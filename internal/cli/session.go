@@ -769,6 +769,19 @@ func (s *session) inconclusiveNames() []string {
 	return slices.Compact(names)
 }
 
+// stoppedEarly reports whether a pass ended with candidates left that a
+// resume can still test: -max-duration ran out, or the reliability guard
+// aborted it. Such a run ends without a signal, but is saved like an
+// interrupted one (#294).
+func (s *session) stoppedEarly() bool {
+	for _, res := range s.results {
+		if res.unfinished() || (res.permutation != nil && res.permutation.pass.unfinished()) {
+			return true
+		}
+	}
+	return false
+}
+
 // finish saves or removes the resume state, writes the run-quality report
 // and the -stats and -sarif files, closes the structured output and returns
 // the exit code. The deferred -o file close in runWith runs after it.
@@ -776,7 +789,7 @@ func (s *session) finish(ctx context.Context) int {
 	f, out := s.f, s.out
 	logPoolHealth(s.in.pool, out)
 
-	if s.signalCode.Load() != 0 {
+	if s.signalCode.Load() != 0 || s.stoppedEarly() {
 		saveResumeState(s)
 	} else if s.resume != nil && !s.anyFailed {
 		// The resumed run finished: its state file is spent (#109).

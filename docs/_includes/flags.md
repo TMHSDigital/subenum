@@ -19,7 +19,7 @@
 | `-hit-rate <int>` | 15 | In simulation mode, percentage of names that resolve (1-100) |
 | `-inconclusive <string>` {% include unreleased.html flag="inconclusive" %} | - | Write the names still without an answer (timeout, refused, other) to this file, one per line, to rescan with -w |
 | `-log-format <string>` {% include unreleased.html flag="log-format" %} | text | Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged |
-| `-max-duration <duration>` {% include unreleased.html flag="max-duration" %} | 0s | Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report and a degraded verdict |
+| `-max-duration <duration>` {% include unreleased.html flag="max-duration" %} | 0s | Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report, a degraded verdict and saved state for -resume to continue from |
 | `-max-queries <int>` | - | Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt |
 | `-no-abort` | - | Do not abort when the resolver failure rate exceeds 20% (warning is still emitted) |
 | `-o <string>` | - | Write results to file (in addition to stdout) |
@@ -30,7 +30,7 @@
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |
 | `-rate-per-resolver <int>` {% include unreleased.html flag="rate-per-resolver" %} | - | With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited) |
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
-| `-resume <string>` | - | Resume an interrupted run from its state file (no other arguments) |
+| `-resume <string>` | - | Resume a run that was interrupted, ran out of -max-duration or was aborted, from its state file (no other arguments) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
 | `-retry-inconclusive` {% include unreleased.html flag="retry-inconclusive" %} | - | After each scan, look up once more (against -dns-server) every name that timed out, was refused or failed; names it resolves are reported, but not expanded by -recursive |
 | `-sarif <string>` | - | Write takeover candidates to this file as SARIF 2.1.0, for GitHub code scanning (needs CNAME or NS in -type) |
@@ -41,7 +41,7 @@
 | `-simulate` | - | Run in simulation mode without actual DNS queries (for testing) |
 | `-simulate-zone <string>` | - | Lab mode: answer every query from this scenario file via a local DNS server, so no traffic leaves the machine (see the Labs page) |
 | `-sources <string>` {% include unreleased.html flag="sources" %} | - | Comma-separated keyless passive sources whose names become candidates and -permute seeds: ct (Certificate Transparency, crt.sh), wayback (Wayback Machine); one HTTPS request per source and target |
-| `-state <string>` | subenum-resume.json | Where an interrupted run saves its state for -resume |
+| `-state <string>` | subenum-resume.json | Where a run that was interrupted, ran out of -max-duration or was aborted saves its state for -resume |
 | `-stats <string>` | - | Write a JSON run-quality report (outcomes, queries sent, verdict) to this file |
 | `-t <int>` | 100 | Number of concurrent workers |
 | `-takeover-providers <string>` {% include unreleased.html flag="takeover-providers" %} | - | File of takeover-prone services, one "&lt;suffix&gt; &lt;name&gt;" per line (.example-cdn.net example-cdn; # comments allowed; name - removes a suffix), added to the built-in list for takeover hints |

@@ -116,7 +116,7 @@ jobs:
 | `previous` | | A previous results file to diff against (add `-diff-records` to `args` to also catch record changes) |
 | `baseline-artifact` | | Artifact name for the baseline: downloaded before, replaced after a complete run |
 | `sarif` | | Write takeover candidates as SARIF |
-| `max-duration`{% include unreleased.html action="max-duration" %} | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report |
+| `max-duration`{% include unreleased.html action="max-duration" %} | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report. The CLI also saves a resume state then (`subenum-resume.json`, or the `-state` path), and `subenum -resume <file>` tests the names the budget left; the action does not carry that file to the next run |
 | `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never` |
 | `version` | `latest` | Release to install, or `source` to build the action's checkout |
 | `token` | `github.token` | Token for downloading the release and the baseline artifact |

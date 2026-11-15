@@ -133,7 +133,7 @@ func TestE2EMaxDuration(t *testing.T) {
 	stats := filepath.Join(t.TempDir(), "run.json")
 	// -rate 10 with 30 words needs about 3 s; the budget is a third of that.
 	code, out := runCLI(t, "", "-progress=false", "-w", "examples/labs/words.txt", "-t", "2", "-rate", "10",
-		"-max-duration", "1s", "-stats", stats, "-simulate-zone", filepath.Join("examples", "labs", "lab1-first-scan.zone"), "lab.example")
+		"-max-duration", "1s", "-stats", stats, "-state", filepath.Join(t.TempDir(), "state.json"), "-simulate-zone", filepath.Join("examples", "labs", "lab1-first-scan.zone"), "lab.example")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}

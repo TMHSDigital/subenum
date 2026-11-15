@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -217,6 +218,154 @@ func TestE2EResumeKeepsQueryBudget(t *testing.T) {
 		if _, s := jsonlRecords(t, out); s.Targets[0].Processed != c.want {
 			t.Errorf("saved %d processed: the resumed run ended at %d, want %d (-max-queries 30)", c.processed, s.Targets[0].Processed, c.want)
 		}
+	}
+}
+
+// TestE2EMaxDurationSavesResumeState covers #294: a run that -max-duration
+// stops with names untested exits 0, saves a resume state and says how to
+// continue; a resumed run that expires again keeps a state file, further
+// along; and the run that tests the last names removes it and is complete.
+func TestE2EMaxDurationSavesResumeState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	state, stats := filepath.Join(dir, "state.json"), filepath.Join(dir, "run.json")
+	const n = 120
+	var words strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&words, "host%d\n", i)
+	}
+	// -rate 50 with 120 words needs about 2.4 s; each run's budget is 1 s, so
+	// the first two runs cannot finish.
+	code, out := runCLIMerged(t, "-simulate", "-seed", "3", "-progress=false", "-t", "2", "-rate", "50",
+		"-max-duration", "1s", "-state", state, "-stats", stats, "-w", writeFile(t, "wl.txt", words.String()), "example.com")
+	if code != 0 {
+		t.Fatalf("exit %d, want 0 for a spent budget\n%s", code, out)
+	}
+	if want := "continue with: subenum -resume " + state; !strings.Contains(out, want) {
+		t.Fatalf("output lacks %q\n%s", want, out)
+	}
+	position := func() int {
+		t.Helper()
+		data, err := os.ReadFile(state)
+		if err != nil {
+			t.Fatalf("no resume state: %v", err)
+		}
+		var st resumeState
+		if err := json.Unmarshal(data, &st); err != nil {
+			t.Fatal(err)
+		}
+		if len(st.Targets) != 1 || st.Targets[0].Done {
+			t.Fatalf("saved targets %+v, want one that is not done", st.Targets)
+		}
+		return st.Targets[0].RootDone
+	}
+	first := position()
+	if first <= 0 || first >= n {
+		t.Fatalf("resume point %d, want within the %d words", first, n)
+	}
+
+	// The budget is per invocation, so the resumed run expires again.
+	if code, out := runCLIMerged(t, "-resume", state); code != 0 {
+		t.Fatalf("resumed run: exit %d\n%s", code, out)
+	}
+	if second := position(); second <= first {
+		t.Fatalf("resume point %d after the resumed run, want past %d", second, first)
+	}
+
+	for i := 0; ; i++ {
+		if _, err := os.Stat(state); err != nil {
+			break // the run that finished removed its state
+		}
+		if i == 20 {
+			t.Fatal("the scan did not finish in 20 more resumed runs")
+		}
+		if code, out := runCLIMerged(t, "-resume", state); code != 0 {
+			t.Fatalf("resumed run: exit %d\n%s", code, out)
+		}
+	}
+	data, err := os.ReadFile(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum struct {
+		Verdict string `json:"verdict"`
+		Targets []struct {
+			Processed  int64  `json:"processed"`
+			SkippedCap int64  `json:"skipped_by_cap"`
+			StoppedBy  string `json:"stopped_by"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(data, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if sum.Verdict != "complete" || len(sum.Targets) != 1 || sum.Targets[0].SkippedCap != 0 || sum.Targets[0].StoppedBy != "" || sum.Targets[0].Processed < n {
+		t.Errorf("finished scan: verdict %q, targets %+v; want complete with all %d words tested and none skipped", sum.Verdict, sum.Targets, n)
+	}
+}
+
+// TestE2EAbortSavesResumeState covers #294: a scan the reliability guard
+// aborts fails as before, but saves a resume state, and the resumed run
+// tests the rest once the resolver answers again.
+func TestE2EAbortSavesResumeState(t *testing.T) {
+	t.Parallel()
+	const n = 600
+	var words strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&words, "host%d\n", i)
+	}
+	var healthy atomic.Bool
+	srv, err := dnsserver.Listen(dnsserver.Options{}, func(q dnsserver.Query) dnsserver.Reply {
+		if strings.HasPrefix(q.Name, "host") && !healthy.Load() {
+			return dnsserver.Refused
+		}
+		return dnsserver.NXDomain
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	dir := t.TempDir()
+	state, stats := filepath.Join(dir, "state.json"), filepath.Join(dir, "run.json")
+	code, out := runCLIMerged(t, "-progress=false", "-dns-server", srv.Addr, "-timeout", "2000", "-attempts", "1", "-type", "A",
+		"-t", "4", "-state", state, "-stats", stats, "-w", writeFile(t, "wl.txt", words.String()), "example.com")
+	if code != exitFailure {
+		t.Fatalf("aborted run: exit %d, want %d\n%s", code, exitFailure, out)
+	}
+	if want := "continue with: subenum -resume " + state; !strings.Contains(out, want) {
+		t.Fatalf("output lacks %q\n%s", want, out)
+	}
+	data, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st resumeState
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Targets) != 1 || st.Targets[0].Done || st.Targets[0].RootDone <= 0 || st.Targets[0].RootDone >= n {
+		t.Fatalf("saved targets %+v, want one stopped within the %d words", st.Targets, n)
+	}
+
+	healthy.Store(true)
+	if code, out := runCLIMerged(t, "-resume", state); code != 0 {
+		t.Fatalf("resumed run: exit %d\n%s", code, out)
+	}
+	if _, err := os.Stat(state); err == nil {
+		t.Error("the finished run left its resume state behind")
+	}
+	if data, err = os.ReadFile(stats); err != nil {
+		t.Fatal(err)
+	}
+	var sum struct {
+		Targets []struct {
+			Processed int64 `json:"processed"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(data, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if len(sum.Targets) != 1 || sum.Targets[0].Processed < n {
+		t.Errorf("targets %+v, want all %d words tested over both runs", sum.Targets, n)
 	}
 }
 
@@ -481,15 +630,15 @@ func TestPermutationCandidatesRespectNameLength(t *testing.T) {
 
 // TestMergeStatsCoversEveryField is the drift guard of #162: a field added to
 // scan.Stats that mergeStats drops fails here. Each field set in either the
-// saved or the resumed run must survive the merge; RootDone is the one field
-// taken from the resumed run alone.
+// saved or the resumed run must survive the merge; RootDone, and Aborted and
+// Expired (how the scan ended, #294), are taken from the resumed run alone.
 func TestMergeStatsCoversEveryField(t *testing.T) {
 	zero := mergeStats(scan.Stats{}, scan.Stats{})
 	st := reflect.TypeOf(scan.Stats{})
 	for i := range st.NumField() {
 		name := st.Field(i).Name
 		for _, side := range []string{"saved", "resumed"} {
-			if side == "saved" && name == "RootDone" {
+			if side == "saved" && (name == "RootDone" || name == "Aborted" || name == "Expired") {
 				continue
 			}
 			var a, b scan.Stats

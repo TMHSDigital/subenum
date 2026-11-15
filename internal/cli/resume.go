@@ -18,7 +18,8 @@ import (
 
 // An interrupted run (Ctrl+C, SIGTERM) writes a state file; `subenum
 // -resume <file>` replays the original command line and continues where it
-// stopped (#73).
+// stopped (#73). So does a run that -max-duration or the reliability guard
+// stopped (#294).
 
 const (
 	resumeStateVersion = 1
@@ -296,7 +297,6 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 	a.Other += b.Other
 	a.WildcardFiltered += b.WildcardFiltered
 	a.QueriesSent += b.QueriesSent
-	a.Skipped += b.Skipped
 	a.Excluded += b.Excluded
 	a.PoolHits += b.PoolHits
 	a.Confirmed += b.Confirmed
@@ -310,8 +310,15 @@ func mergeStats(a, b scan.Stats) scan.Stats {
 	if b.RateBackoffs > 0 || b.FinalRate > 0 {
 		a.FinalRate = b.FinalRate // where the resumed run ended
 	}
-	a.Aborted = a.Aborted || b.Aborted
-	a.Expired = a.Expired || b.Expired
+	// A part that ran out of -max-duration or was aborted left its remaining
+	// candidates to the resumed part, so how that one ended is how the scan
+	// ended, and the names the budget skipped are no longer skipped (#294).
+	if a.Expired {
+		a.Skipped = 0
+	}
+	a.Skipped += b.Skipped
+	a.Aborted = b.Aborted
+	a.Expired = b.Expired
 	a.Wildcard = a.Wildcard || b.Wildcard
 	if len(b.Fingerprint) > 0 {
 		a.Fingerprint = b.Fingerprint
@@ -341,8 +348,9 @@ func savedSources(sources []targetSource) map[string][]string {
 	return saved
 }
 
-// saveResumeState writes the state file after an interrupt and tells the
-// user how to continue. Runs that read stdin cannot be replayed. prev is the
+// saveResumeState writes the state file after an interrupt, or a run that
+// -max-duration or the reliability guard stopped (#294), and tells the user
+// how to continue. Runs that read stdin cannot be replayed. prev is the
 // state this run resumed from, if any: a target interrupted again before its
 // scan reported progress keeps the earlier resume point (#109), and one this
 // run never reached keeps its saved state unchanged.
@@ -360,7 +368,7 @@ func saveResumeState(s *session) {
 	st := resumeState{Version: resumeStateVersion, Args: withSeed(s.args, f), Inputs: inputs, Settings: s.settings}
 	for i, domain := range s.targets {
 		saved := prev.target(domain)
-		if s.status[i] == "" && saved != nil {
+		if (s.status[i] == "" || s.status[i] == "skipped") && saved != nil {
 			st.Targets = append(st.Targets, *saved)
 			continue
 		}
@@ -384,8 +392,9 @@ func saveResumeState(s *session) {
 			t.Permute = saved.Permute
 		}
 		// A target is finished only if its scan (and any -permute pass)
-		// completed before the interrupt.
-		t.Done = s.status[i] == "ok" && res.done && (res.permutation == nil || res.permutation.pass.done || res.permutation.candidates == 0)
+		// completed before the interrupt, with nothing left by -max-duration.
+		t.Done = s.status[i] == "ok" && res.done && !res.unfinished() &&
+			(res.permutation == nil || res.permutation.candidates == 0 || (res.permutation.pass.done && !res.permutation.pass.unfinished()))
 		st.Targets = append(st.Targets, t)
 	}
 	if err := writeResumeState(f.stateFile, st); err != nil {

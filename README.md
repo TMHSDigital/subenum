@@ -271,7 +271,7 @@ make help           # list all targets
 | `-no-abort` | `false` | Keep scanning after the 20% resolver failure-rate abort (warning is still emitted) |
 | `-auto-rate` | `false` | When more than 20% of the last 200 lookups failed, halve the query rate (from the rate reached so far when `-rate` is 0) and keep going, with a `rate` notice; speed back up by a quarter at a time, to the rate it started from, once a window of lookups is healthy. Only after 6 back-offs, or at 5 queries/s, does the reliability guard abort. The report counts `rate_backoffs` and the `final_rate`. Pairs well with `-retry-inconclusive`, which retries the names that failed while the resolver was overloaded |
 | `-max-queries <n>` | `0` | Max candidate names to test (0 = unlimited). Each name sends one query per record type per attempt |
-| `-max-duration <d>` | `0` | Time budget for the whole run, e.g. `20m` (0 = unlimited). Then no new names are tested, lookups already under way finish, and the run ends normally with its results, report (`stopped_by: "duration"`) and a `degraded` verdict. Under `-dL` it covers all targets |
+| `-max-duration <d>` | `0` | Time budget for the whole run, e.g. `20m` (0 = unlimited). Then no new names are tested, lookups already under way finish, and the run ends normally with its results, report (`stopped_by: "duration"`) and a `degraded` verdict, and saves a `-state` file so `-resume` tests the rest. Under `-dL` it covers all targets |
 | `-retry-inconclusive` | `false` | After each scan, look up once more (against `-dns-server`, never the `-r` pool) every name that timed out, was refused or failed. An answer replaces the first outcome in the counts; a name that resolves is reported, but not expanded by `-recursive`. Skipped after an abort, an interrupt or once `-max-duration` runs out. The report counts `retried` and `recovered` |
 | `-inconclusive <file>` | n/a | Write the names still without an answer (timeout, refused, other) to this file, one per line, sorted, so a later run can retry them with `-w <file>` |
 | `-o <file>` | n/a | Write results to file in addition to stdout |
@@ -305,9 +305,9 @@ make help           # list all targets
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query), then exit; JSON with `-format json` or `jsonl` |
 | `-version` | n/a | Print version and exit |
 | `-retries <n>` | n/a | **Deprecated** - alias for `-attempts`, prints a warning |
-| `-resume <file>` | n/a | Resume an interrupted run from its state file; takes no other arguments |
+| `-resume <file>` | n/a | Resume a run that was interrupted, ran out of `-max-duration` or was aborted, from its state file; takes no other arguments |
 | `-seeds <file>` | n/a | Results file (any `-format`) whose names also seed `-permute`; implies `-permute` |
-| `-state <file>` | `subenum-resume.json` | Where an interrupted run saves its state for `-resume` |
+| `-state <file>` | `subenum-resume.json` | Where a run that was interrupted, ran out of `-max-duration` or was aborted saves its state for `-resume` |
 
 <br>
 
@@ -378,7 +378,7 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 subenum -resume subenum-resume.json
 ```
 
-The resumed run refuses to start if an input file, the wordlist (including the bundled one, which changes with the binary) or an effective setting (for example a `SUBENUM_*` variable or the config file) changed. It re-emits the earlier results (so `-o` and JSON output end up complete), skips targets that had finished, and continues the interrupted one from the first wordlist entry not yet fully looked up; a `-permute` pass resumes from its own position. At most about one worker pool's worth (`-t`) of lookups is repeated, and `-max-queries` covers the whole scan, so a resumed run only gets what is left of it. In recursive mode, names found before the interrupt have their children re-scanned. A resumed run that finishes deletes its state file. Runs that read the wordlist or domain list from stdin cannot be resumed.
+The resumed run refuses to start if an input file, the wordlist (including the bundled one, which changes with the binary) or an effective setting (for example a `SUBENUM_*` variable or the config file) changed. It re-emits the earlier results (so `-o` and JSON output end up complete), skips targets that had finished, and continues the interrupted one from the first wordlist entry not yet fully looked up; a `-permute` pass resumes from its own position. At most about one worker pool's worth (`-t`) of lookups is repeated, and `-max-queries` covers the whole scan, so a resumed run only gets what is left of it. In recursive mode, names found before the interrupt have their children re-scanned. A resumed run that finishes deletes its state file. A run that `-max-duration` stopped with names untested, or that the reliability guard aborted, saves the same state (its exit code does not change), so `-resume` continues it too: a scheduled job with a time budget can work through a large wordlist over several runs. Runs that read the wordlist or domain list from stdin cannot be resumed.
 
 **Exit codes**
 
