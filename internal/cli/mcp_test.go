@@ -19,6 +19,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
@@ -182,6 +183,146 @@ func TestE2EMCPScanAllowList(t *testing.T) {
 	} {
 		if text, isErr := toolText(t, replies[i]); !isErr || !strings.Contains(text, want) {
 			t.Errorf("call %d: %q (isError %v), want an error containing %q", i, text, isErr, want)
+		}
+	}
+}
+
+// TestE2EMCPScanOffset covers #313: a report whose max_queries left words
+// untested gives next_offset, and a call with that offset tests the words
+// after them, so an agent can work through a list longer than the cap.
+func TestE2EMCPScanOffset(t *testing.T) {
+	t.Parallel()
+	const words = `"words": ["www", "mail", "nope", "vpn", "WWW", "shop"]`
+	_, replies := runMCPSession(t, []string{"-max-queries", "100"},
+		mcpCall{"lab_scan", `{` + words + `, "max_queries": 2}`},
+		mcpCall{"lab_scan", `{` + words + `, "max_queries": 2, "offset": 2}`},
+		mcpCall{"lab_scan", `{` + words + `, "max_queries": 2, "offset": 4}`},
+		mcpCall{"lab_scan", `{` + words + `, "max_queries": 2, "exclude": ["mail.lab.example", "vpn.lab.example"]}`},
+		mcpCall{"lab_scan", `{` + words + `, "offset": 5}`},
+		mcpCall{"lab_scan", `{` + words + `, "offset": -1}`},
+	)
+	for i, want := range []struct {
+		names []string
+		next  int
+	}{
+		{[]string{"mail", "www"}, 2},
+		{[]string{"vpn"}, 4},
+		{[]string{"shop"}, 0}, // the repeated www is not a candidate: 5 in all
+		{[]string{"www"}, 4},  // www and nope tested; mail and vpn are out of scope
+	} {
+		r := mcpReportOf(t, replies[i])
+		if !slices.Equal(reportNames(r), want.names) || r.NextOffset != want.next {
+			t.Errorf("call %d: names %v, next_offset %d; want %v, %d (%+v)", i, reportNames(r), r.NextOffset, want.names, want.next, r)
+		}
+		if named := strings.Contains(r.Reason, fmt.Sprintf("offset %d", want.next)); named != (want.next > 0) {
+			t.Errorf("call %d: reason %q, next_offset %d", i, r.Reason, want.next)
+		}
+		if (r.Verdict == "complete") != (want.next == 0) {
+			t.Errorf("call %d: verdict %s with next_offset %d", i, r.Verdict, want.next)
+		}
+	}
+	for i, want := range map[int]string{4: "offset 5 is past the end of the word list, which has 5 candidates", 5: "offset must be 0 or more"} {
+		if text, isErr := toolText(t, replies[i]); !isErr || !strings.Contains(text, want) {
+			t.Errorf("call %d: %q (isError %v), want an error containing %q", i, text, isErr, want)
+		}
+	}
+
+	// The default list, a few names per call: following next_offset tests
+	// every word once and finds what one uncapped scan finds.
+	var found []string
+	var tested int64
+	for offset, calls := 0, 0; ; calls++ {
+		if calls > len(labWords()) {
+			t.Fatalf("next_offset did not reach the end of the list after %d calls", calls)
+		}
+		_, replies := runMCPSession(t, nil, mcpCall{"lab_scan", fmt.Sprintf(`{"max_queries": 7, "offset": %d}`, offset)})
+		r := mcpReportOf(t, replies[0])
+		found = append(found, reportNames(r)...)
+		tested += int64(r.Found) + r.Outcomes.NXDomain
+		if r.NextOffset == 0 {
+			if r.Verdict != "complete" {
+				t.Errorf("last call at offset %d: %s (%s), want complete", offset, r.Verdict, r.Reason)
+			}
+			break
+		}
+		if r.NextOffset != offset+7 {
+			t.Fatalf("offset %d: next_offset %d, want %d", offset, r.NextOffset, offset+7)
+		}
+		offset = r.NextOffset
+	}
+	slices.Sort(found)
+	entries, _, _ := wordlist.Build(labWords(), labDomain)
+	if want := []string{"jenkins", "mail", "shop", "vpn", "www"}; !slices.Equal(found, want) || tested != int64(len(entries)) {
+		t.Errorf("following next_offset: found %v after testing %d names, want %v and %d", found, tested, want, len(entries))
+	}
+}
+
+// TestE2EMCPScanOffsetLive checks offset on the scan tool, whose default is
+// the bundled list and whose cap is the operator's (#313).
+func TestE2EMCPScanOffsetLive(t *testing.T) {
+	t.Parallel()
+	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := dnsserver.Listen(dnsserver.Options{}, zone.Handler([]string{"lab.example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	bundled, _, _ := wordlist.Build(subenum.DefaultWords(), "lab.example")
+	_, replies := runMCPSession(t,
+		[]string{"-allow", "lab.example", "-dns-server", srv.Addr, "-rate", "1000", "-max-queries", "3", "-timeout", "5000"},
+		mcpCall{"scan", `{"domain": "lab.example", "words": ["www", "mail", "nope", "vpn"]}`},
+		mcpCall{"scan", `{"domain": "lab.example", "words": ["www", "mail", "nope", "vpn"], "offset": 3}`},
+		mcpCall{"scan", `{"domain": "lab.example"}`},
+		mcpCall{"scan", fmt.Sprintf(`{"domain": "lab.example", "offset": %d}`, len(bundled)-2)},
+		mcpCall{"scan", fmt.Sprintf(`{"domain": "lab.example", "offset": %d}`, len(bundled))},
+	)
+	if r := mcpReportOf(t, replies[0]); r.NextOffset != 3 || r.Skipped != 1 {
+		t.Errorf("capped scan: next_offset %d, skipped %d; want 3 and 1", r.NextOffset, r.Skipped)
+	}
+	if r := mcpReportOf(t, replies[1]); r.NextOffset != 0 || r.Verdict != "complete" || !slices.Equal(reportNames(r), []string{"vpn"}) {
+		t.Errorf("scan at offset 3: %+v, want vpn and complete", r)
+	}
+	if r := mcpReportOf(t, replies[2]); r.NextOffset != 3 || r.Skipped != int64(len(bundled)-3) {
+		t.Errorf("bundled list: next_offset %d, skipped %d; want 3 and %d", r.NextOffset, r.Skipped, len(bundled)-3)
+	}
+	if r := mcpReportOf(t, replies[3]); r.NextOffset != 0 || r.Verdict != "complete" || r.Found+int(r.Outcomes.NXDomain) != 2 {
+		t.Errorf("the bundled list's last two words: %+v, want 2 tested and complete", r)
+	}
+	if text, isErr := toolText(t, replies[4]); !isErr || !strings.Contains(text, "past the end of the word list") {
+		t.Errorf("offset at the end of the bundled list: %q (isError %v)", text, isErr)
+	}
+}
+
+// TestMCPNextOffset: next_offset is given only when max_queries stopped the
+// scan among the words and every admitted name was tested (#313).
+func TestMCPNextOffset(t *testing.T) {
+	cfg := subenum.Config{Domain: "lab.example", Words: []string{"a", "b", "c", "d"}, MaxQueries: 2}
+	for _, tc := range []struct {
+		name    string
+		words   []string
+		exclude []string
+		stats   subenum.Stats
+		want    int
+	}{
+		{name: "capped", stats: subenum.Stats{NXDomain: 2, Skipped: 2}, want: 12},
+		{name: "nothing skipped", stats: subenum.Stats{NXDomain: 2}},
+		{name: "stopped by the time budget", stats: subenum.Stats{NXDomain: 1, Skipped: 3, Expired: true}},
+		{name: "admitted names left untested", stats: subenum.Stats{NXDomain: 1, Skipped: 3}},
+		{name: "words all tested, a source's names skipped", words: []string{"a", "b"}, stats: subenum.Stats{NXDomain: 2, Skipped: 5}},
+		{name: "exclusions passed over", exclude: []string{"b.lab.example"}, stats: subenum.Stats{NXDomain: 2, Skipped: 1, Excluded: 1}, want: 13},
+		{name: "only excluded words left", exclude: []string{"c.lab.example", "*.d.lab.example", "d.lab.example"}, stats: subenum.Stats{NXDomain: 2, Skipped: 5, Excluded: 2}},
+	} {
+		c := cfg
+		if tc.words != nil {
+			c.Words = tc.words
+		}
+		c.Exclude = tc.exclude
+		if got := nextOffset(c, tc.stats, 10); got != tc.want {
+			t.Errorf("%s: next offset %d, want %d", tc.name, got, tc.want)
 		}
 	}
 }

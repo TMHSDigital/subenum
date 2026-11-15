@@ -358,6 +358,11 @@ func wordsSchema(description string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": maxMCPWords, "description": description}
 }
 
+// offsetSchema is the offset argument (#313): with the report's next_offset
+// it lets an agent work through a word list longer than max_queries, one
+// call at a time, each within the operator's caps.
+var offsetSchema = schemaField{"offset", map[string]any{"type": "integer", "minimum": 0, "description": "Skip this many candidates at the start of the word list (after dedupe); default 0. When max_queries leaves words untested the report gives next_offset: call again with the same words and that offset to test the following ones."}}
+
 // remediationProps are the scan settings an agent can change after a verdict
 // that is not complete (#269). None can raise the operator's caps.
 var remediationProps = schemaObject{
@@ -405,6 +410,7 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 		{"types", recordTypeSchema},
 		{"rate", map[string]any{"type": "integer", "minimum": 0, "maximum": 1000, "description": "Queries per second; 0 or absent is unlimited. Lab traffic stays on this machine."}},
 		{"max_queries", map[string]any{"type": "integer", "minimum": 1, "maximum": cfg.maxQueries, "description": "Most names to test."}},
+		offsetSchema,
 		{"force", map[string]any{"type": "boolean", "description": "Scan a wildcard zone anyway, filtering answers that match the wildcard."}},
 	}, remediationProps...))
 	return mcp.Tool{
@@ -421,6 +427,7 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 				Types      []string `json:"types"`
 				Rate       int      `json:"rate"`
 				MaxQueries int      `json:"max_queries"`
+				Offset     int      `json:"offset"`
 				Force      bool     `json:"force"`
 				remediation
 			}
@@ -440,7 +447,7 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 			if err != nil {
 				return mcp.Errorf("%v", err)
 			}
-			words, err := callWords(args.Words, labWords())
+			words, err := callWords(args.Words, labWords(), labDomain, args.Offset)
 			if err != nil {
 				return mcp.Errorf("%v", err)
 			}
@@ -466,7 +473,7 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 			}
 			defer srv.Close()
 			scanCfg.Resolver = srv.Addr
-			report := runMCPScan(ctx, scanCfg)
+			report := runMCPScan(ctx, scanCfg, args.Offset)
 			report.Scenario = args.Scenario
 			return report.result()
 		},
@@ -479,6 +486,7 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 		{"words", wordsSchema("Subdomain labels to try; default subenum's bundled list of the most common ones.")},
 		{"types", recordTypeSchema},
 		{"max_queries", map[string]any{"type": "integer", "minimum": 1, "maximum": cfg.maxQueries, "description": fmt.Sprintf("Most names to test; default and ceiling %d.", cfg.maxQueries)}},
+		offsetSchema,
 	}
 	if len(cfg.sources) > 0 {
 		props = append(props, schemaField{"sources", map[string]any{"type": "array", "items": map[string]any{"enum": cfg.sources}, "description": "Passive sources to seed candidates from before the scan; default none. Their names are added to words after dedupe, count against max_queries, and are each verified by a lookup. One HTTPS request per source."}})
@@ -499,6 +507,7 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 				Words      []string `json:"words"`
 				Types      []string `json:"types"`
 				MaxQueries int      `json:"max_queries"`
+				Offset     int      `json:"offset"`
 				Sources    []string `json:"sources"`
 				remediation
 			}
@@ -529,7 +538,7 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			if err != nil {
 				return mcp.Errorf("%v", err)
 			}
-			words, err := callWords(args.Words, nil)
+			words, err := callWords(args.Words, nil, domain, args.Offset)
 			if err != nil {
 				return mcp.Errorf("%v", err)
 			}
@@ -554,7 +563,7 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			if calls.Add(1) > int64(cfg.maxCalls) {
 				return mcp.Errorf("session budget spent: the operator allows %d scan calls per session (-max-calls)", cfg.maxCalls)
 			}
-			report := runMCPScan(ctx, scanCfg)
+			report := runMCPScan(ctx, scanCfg, args.Offset)
 			for _, c := range counted {
 				s := mcpSource{Name: c.name, Names: c.names}
 				var tr *passive.Truncated
@@ -595,14 +604,63 @@ func callBudget(cfg mcpConfig, asked int) (int, error) {
 	return asked, nil
 }
 
-func callWords(words, fallback []string) ([]string, error) {
+// callWords is the word list a call scans: its words, or fallback (nil is
+// the bundled list) without any, as a scan of domain builds it (valid
+// labels, deduplicated, in order) and without its first offset candidates,
+// so a call can go on where max_queries stopped an earlier one (#313).
+func callWords(words, fallback []string, domain string, offset int) ([]string, error) {
 	if len(words) > maxMCPWords {
 		return nil, fmt.Errorf("words has %d entries; at most %d", len(words), maxMCPWords)
 	}
-	if words == nil {
-		return fallback, nil
+	if offset < 0 {
+		return nil, fmt.Errorf("offset must be 0 or more, got %d", offset)
 	}
-	return words, nil
+	if words == nil {
+		words = fallback
+	}
+	if words == nil {
+		words = subenum.DefaultWords()
+	}
+	entries, _, _ := wordlist.Build(words, domain)
+	switch {
+	case offset == 0 && len(entries) == 0:
+		return words, nil // the scan says why it cannot start
+	case offset >= len(entries):
+		return nil, fmt.Errorf("offset %d is past the end of the word list, which has %d candidates", offset, len(entries))
+	}
+	return entries[offset:], nil
+}
+
+// nextOffset is the offset of the first candidate a scan left untested
+// because max_queries was reached, for a call that continues it, or 0 when
+// there is nothing to continue from: no candidate was skipped, the words
+// were all tested (the skipped ones came from recursion or a source), or
+// the scan stopped for another reason (the time budget, an abort, a
+// cancellation), which leaves gaps among the names it tested. offset is the
+// one the scan itself started at.
+func nextOffset(cfg subenum.Config, stats subenum.Stats, offset int) int {
+	if stats.Skipped == 0 || cfg.MaxQueries == 0 || stats.Total() != int64(cfg.MaxQueries) {
+		return 0
+	}
+	// Candidates are admitted in order, the words before anything else, so
+	// the names tested are the first MaxQueries the exclusions let through.
+	if len(cfg.Exclude) == 0 {
+		if cfg.MaxQueries < len(cfg.Words) {
+			return offset + cfg.MaxQueries
+		}
+		return 0
+	}
+	tested := 0
+	for i, word := range cfg.Words {
+		if scan.IsExcluded(cfg.Exclude, word+"."+cfg.Domain) {
+			continue
+		}
+		if tested == cfg.MaxQueries {
+			return offset + i
+		}
+		tested++
+	}
+	return 0
 }
 
 // strictUnmarshal decodes tool arguments, rejecting unknown ones so a
@@ -625,6 +683,7 @@ type mcpReport struct {
 	Results    []mcpResult `json:"results"`
 	Outcomes   mcpOutcomes `json:"outcomes"`
 	Skipped    int64       `json:"skipped_by_cap,omitempty"`
+	NextOffset int         `json:"next_offset,omitempty"` // the offset that continues a scan max_queries cut short
 	Excluded   int64       `json:"excluded,omitempty"`
 	Retried    int64       `json:"retried,omitempty"`   // retry_inconclusive looked these up again
 	Recovered  int64       `json:"recovered,omitempty"` // and these then got an answer
@@ -659,7 +718,9 @@ type mcpOutcomes struct {
 	WildcardFiltered int64 `json:"wildcard_filtered"`
 }
 
-func runMCPScan(ctx context.Context, cfg subenum.Config) *mcpReport {
+// runMCPScan runs one scan and reports it. offset is where cfg.Words starts
+// in the call's word list, for the report's next_offset.
+func runMCPScan(ctx context.Context, cfg subenum.Config, offset int) *mcpReport {
 	report := &mcpReport{Domain: cfg.Domain, Results: []mcpResult{}, MaxQueries: cfg.MaxQueries, Rate: cfg.Rate}
 	cfg.Logf = func(string, ...any) {} // standard output carries the protocol
 	events, err := subenum.Run(ctx, cfg)
@@ -695,6 +756,9 @@ func runMCPScan(ctx context.Context, cfg subenum.Config) *mcpReport {
 	report.Excluded, report.Retried, report.Recovered, report.Backoffs = stats.Excluded, stats.Retried, stats.Recovered, stats.RateBackoffs
 	report.Wildcard = stats.Wildcard
 	report.Verdict, report.Reason = mcpVerdict(stats, report.Error, ctx.Err() != nil)
+	if report.NextOffset = nextOffset(cfg, stats, offset); report.NextOffset > 0 {
+		report.Reason += fmt.Sprintf("; call again with offset %d to test the words after these", report.NextOffset)
+	}
 	return report
 }
 
@@ -760,6 +824,7 @@ var mcpReportSchema = json.RawMessage(`{
       "wildcard_filtered": {"type": "integer"}
     }},
     "skipped_by_cap": {"type": "integer"},
+    "next_offset": {"type": "integer", "description": "max_queries left words untested: call again with the same words and this offset to test the following ones"},
     "excluded": {"type": "integer"},
     "retried": {"type": "integer"},
     "recovered": {"type": "integer"},

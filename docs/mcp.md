@@ -18,7 +18,7 @@ safety. The model chooses only what to scan within those limits.
 | :--- | :--- |
 | Which domains a live scan may target (`-allow`) | A domain within the allow-list |
 | The resolver (`-dns-server`) and the lookup timeout (`-timeout`) | The words to try, and the record types |
-| The query rate (`-rate`) | A smaller `max_queries`, never a larger one |
+| The query rate (`-rate`) | A smaller `max_queries`, never a larger one, and an `offset` into the word list |
 | The most names one call may test (`-max-queries`) and its time budget (`-max-duration`) | For lab scans only: the scenario, a rate, and `force` |
 
 Tool calls run one at a time, so a model cannot multiply the budget by calling
@@ -106,8 +106,17 @@ apply to it, so `SUBENUM_DNS_SERVER` does not change the agent's resolver: pass
 
 A `scan` call without `words` uses the bundled list of 5,000 common labels, but
 tests no more than `-max-queries` of them (1,000 by default), so its verdict is
-`degraded` with the rest counted as skipped. Raise `-max-queries` to cover the
-whole list, or have the agent pass a shorter `words` list.
+`degraded` with the rest counted as skipped. The report then carries a
+`next_offset`, and its `reason` says to call again with it: `scan` and
+`lab_scan` take an `offset` argument that skips that many candidates at the
+start of the word list (after dedupe), so the agent can work through the
+whole list in five calls (at the default `-max-queries` of 1000) with the same `words`. Every call stays within
+`-max-queries`, `-max-duration` and `-max-calls`. `next_offset` is given only
+when `max_queries` was what stopped the scan among the words: a call the time
+budget ended has gaps among the names it tested, so repeat that one with a
+smaller `max_queries`. Names from `sources` come after the words and are not
+counted by `offset`. To cover the list in one call instead, raise
+`-max-queries`.
 
 In a container, keep standard input open with `-i`, since the protocol runs over
 it:
