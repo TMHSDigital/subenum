@@ -361,10 +361,12 @@ func (d *dispatcher) expand(parent job) {
 		return
 	}
 	switch {
-	case d.capped:
-		d.skipped += d.n
+	// An excluded subtree is excluded whether or not a budget has run out,
+	// as countUnbuilt counts it, so it cannot lower the verdict (#238).
 	case d.cfg.scope.subtreeExcluded(parent.domain):
 		d.excluded += d.n
+	case d.capped:
+		d.skipped += d.n
 	default:
 		d.frontier = append(d.frontier, expansion{parent: parent.domain, depth: parent.depth + 1})
 		d.remaining += d.n
@@ -372,14 +374,19 @@ func (d *dispatcher) expand(parent job) {
 }
 
 // expire applies the deadline when its timer fires (#190). held is how many
-// jobs were admitted but not yet handed to a worker; they are skipped.
+// jobs were admitted but not yet handed to a worker; they are skipped, even
+// when -max-queries stopped admission first, so tested plus skipped still
+// adds up to every candidate (#317).
 func (d *dispatcher) expire(held int) {
+	d.admitted -= held
+	d.skipped += held
+	if held > 0 {
+		d.expired = true
+	}
 	if d.capped {
 		return
 	}
 	d.expired = true
-	d.admitted -= held
-	d.skipped += held
 	d.stopAdmitting()
 }
 
@@ -407,11 +414,12 @@ func (d *dispatcher) nextChunk(workers int) []job {
 func (d *dispatcher) complete(c completion) {
 	d.pending--
 	if c.skipped {
-		// Taken after the deadline and never looked up.
+		// Taken after the deadline and never looked up: the time budget
+		// skipped it, even when -max-queries had already stopped admission.
 		d.skipped++
 		d.admitted--
+		d.expired = true
 		if !d.capped {
-			d.expired = true
 			d.stopAdmitting()
 		}
 	}

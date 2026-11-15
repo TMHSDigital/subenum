@@ -309,3 +309,50 @@ func TestDispatcherDeadline(t *testing.T) {
 		t.Errorf("expired %v skipped %d pending %d watermark %d, want true 3 0 0", d.expired, d.skipped, d.pending, d.watermark)
 	}
 }
+
+// TestDispatcherCapThenDeadline covers #317: when -max-queries stops
+// admission and the deadline then fires with a chunk still held, the held
+// jobs are skipped, so tested plus skipped is every candidate, and the scan
+// is marked expired because the time budget skipped admitted work.
+func TestDispatcherCapThenDeadline(t *testing.T) {
+	d := testDispatcher(Config{Entries: makeEntries(10), MaxQueries: 4}, 1)
+	held := drain(d) // the cap admits 4 and skips the other 6
+	if len(held) != 4 || !d.capped || d.skipped != 6 {
+		t.Fatalf("admitted %d capped %v skipped %d, want 4 true 6", len(held), d.capped, d.skipped)
+	}
+	d.expire(len(held))
+	if d.admitted != 0 || d.skipped != 10 || !d.expired || d.total() != 0 {
+		t.Errorf("admitted %d skipped %d expired %v total %d, want 0 10 true 0", d.admitted, d.skipped, d.expired, d.total())
+	}
+
+	// A deadline with nothing held after the cap changes nothing.
+	d = testDispatcher(Config{Entries: makeEntries(10), MaxQueries: 4}, 1)
+	drain(d)
+	d.expire(0)
+	if d.expired || d.skipped != 6 {
+		t.Errorf("empty expire after the cap: expired %v skipped %d, want false 6", d.expired, d.skipped)
+	}
+
+	// A worker skips a job after the cap: the time budget skipped it.
+	d = testDispatcher(Config{Entries: makeEntries(10), MaxQueries: 4}, 1)
+	drain(d)
+	d.pending = 1
+	d.complete(completion{root: 0, skipped: true})
+	if !d.expired || d.skipped != 7 || d.admitted != 3 {
+		t.Errorf("skipped job after the cap: expired %v skipped %d admitted %d, want true 7 3", d.expired, d.skipped, d.admitted)
+	}
+}
+
+// A parent found after a budget stop whose whole subtree is excluded has its
+// children counted as excluded, not skipped, as countUnbuilt does, so they
+// cannot make a complete scan look incomplete (#238).
+func TestCappedExpandOfExcludedSubtree(t *testing.T) {
+	d := testDispatcher(Config{Entries: makeEntries(5), MaxQueries: 2, Recursive: true,
+		Exclude: []string{"*.p0.example.com"}}, 3)
+	drain(d)
+	skipped := d.skipped
+	d.expand(job{domain: "p0.example.com", depth: 1})
+	if d.excluded != 5 || d.skipped != skipped {
+		t.Errorf("excluded %d skipped %d, want the 5 children excluded and skipped unchanged at %d", d.excluded, d.skipped, skipped)
+	}
+}
