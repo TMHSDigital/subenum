@@ -31,7 +31,8 @@ type savedConfig struct {
 	Recursive       bool   `json:"recursive"`
 	NoAbort         bool   `json:"no_abort"`
 	// AutoRate, MaxDuration and RetryInconclusive are -auto-rate,
-	// -max-duration (as typed, e.g. "20m") and -retry-inconclusive (#274).
+	// -max-duration (as Go prints a duration, e.g. "20m0s") and
+	// -retry-inconclusive (#274).
 	AutoRate          bool   `json:"auto_rate,omitempty"`
 	MaxDuration       string `json:"max_duration,omitempty"`
 	RetryInconclusive bool   `json:"retry_inconclusive,omitempty"`

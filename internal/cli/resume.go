@@ -32,7 +32,9 @@ type resumeState struct {
 	Args    []string          `json:"args"`   // the original command line, without -resume
 	Inputs  map[string]string `json:"inputs"` // input file -> sha256, checked before resuming
 	// Settings are the effective flag values, including those from the
-	// environment and config file, which a resume re-applies (#109).
+	// environment and config file. A resume does not re-apply them: it
+	// compares them with its own (checkSettings) and refuses to run on a
+	// difference (#109).
 	Settings map[string]string `json:"settings,omitempty"`
 	Targets  []resumeTarget    `json:"targets"`
 

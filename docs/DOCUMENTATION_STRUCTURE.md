@@ -39,5 +39,5 @@ Where each piece of subenum's documentation lives and who it is for. The files u
 
 ## Keeping docs current
 
-- Regenerate the site's flag table with `make docs-flags`; `go test .` fails when it or the README flag table drifts from the CLI.
+- Regenerate the site's flag table with `make docs-flags`; `go test ./internal/cli` fails when it or the README flag table drifts from the CLI.
 - List anything on `main` but not yet released (a new value of an existing flag included) in [`_data/unreleased.yml`](_data/unreleased.yml) so the site tags it, and empty the lists in the release commit.

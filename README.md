@@ -393,8 +393,8 @@ The resumed run refuses to start if an input file, the wordlist (including the b
 | `2` | Invalid flags or arguments |
 | `3` | `-dL`: some targets failed while others completed |
 | `4` | `-diff`: names were added or removed (or, with `-diff-records`, changed) since the previous run; `subenum diff`: the two files differ |
-| `130` | Interrupted (SIGINT, `Ctrl+C`); partial results are kept |
-| `143` | Terminated (SIGTERM); partial results are kept |
+| `130` | Interrupted (SIGINT, `Ctrl+C`); partial results are kept, in the resume state when the `-o` file is also the `-diff` baseline, which is left unchanged |
+| `143` | Terminated (SIGTERM); partial results are kept as for `130` |
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
 
@@ -649,7 +649,7 @@ It offers `lab_scan` (the lab scenarios, on a local DNS server, always safe), `s
 | Key | Action |
 | :--- | :--- |
 | `tab` / `shift+tab` / `↑` `↓` | Navigate fields |
-| `space` | Toggle Simulate, Recursive, Force or No-abort |
+| `space` | Toggle Simulate, Recursive, Permute, Auto Rate, Force, No Abort or Retry Inconclusive |
 | `ctrl+r` | Start scan |
 | `ctrl+c` | Abort a running scan; quit the form or a finished scan |
 | `r` | New scan - restores last-used values |

@@ -68,8 +68,9 @@ const exitCodesHelp = `Exit codes:
   2    invalid flags or arguments
   3    -dL: some targets failed while others completed
   4    -diff: names were added or removed (or, with -diff-records, changed) since the previous run; subenum diff: the files differ
-  130  interrupted (SIGINT, Ctrl+C); partial results are kept
-  143  terminated (SIGTERM); partial results are kept
+  130  interrupted (SIGINT, Ctrl+C); partial results are kept (in the resume
+       state when the -o file is also the -diff baseline, left unchanged)
+  143  terminated (SIGTERM); partial results are kept as for 130
 `
 
 // Version is the release identifier, passed to Main by the main package,

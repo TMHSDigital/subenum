@@ -291,8 +291,8 @@ The tool listens for `SIGINT` and `SIGTERM`. On the first signal it cancels the 
 *   `2` - invalid flags or arguments.
 *   `3` - `-dL`: some targets failed while others completed.
 *   `4` - `-diff`: names were added or removed (or, with `-diff-records`, changed) since the previous run; `subenum diff`: the two files differ.
-*   `130` - interrupted (SIGINT, Ctrl+C); partial results are kept.
-*   `143` - terminated (SIGTERM); partial results are kept.
+*   `130` - interrupted (SIGINT, Ctrl+C); partial results are kept, in the resume state when the `-o` file is also the `-diff` baseline, which is left unchanged (#297).
+*   `143` - terminated (SIGTERM); partial results are kept as for `130`.
 
 With `-dL`, a reliability-guard abort means the resolver is overloaded, so the remaining targets are skipped (and counted as failed) rather than sent to it too; `-no-abort` keeps going.
 
