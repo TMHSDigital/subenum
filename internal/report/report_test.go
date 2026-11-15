@@ -42,6 +42,8 @@ func TestTargetReportsEveryStatsField(t *testing.T) {
 		// The names themselves go to the -inconclusive file (#217); the
 		// outcomes already count them.
 		"Inconclusive": true,
+		// What a -resume repeats; the CLI takes it off before the report (#341).
+		"Repeat": true,
 	}
 	// Skipped and Wildcard are set so Expired and Fingerprint show.
 	base := scan.Stats{Skipped: 1, Wildcard: true}
