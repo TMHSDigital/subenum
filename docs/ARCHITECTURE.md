@@ -74,7 +74,11 @@ internal/cli/summary.go        - assemble the run-quality report (-stats, JSONL 
 internal/cli/explain.go        - parseSummary, explainSummary: a run-quality report in plain language (explain_stats)
 internal/cli/wordlist.go       - prepareWordlist: the -w file, or the bundled list when -w is not given
 internal/scan/options.go       - Options: Config plus the settings only checked, shared by CLI, TUI and library (Validate, Fields)
-internal/scan/runner.go        - Scan engine: Config, Event/EventKind/NoticeKind, Stats, Run
+internal/scan/runner.go        - Scan engine: Config, Run, preflight, the workers and job processing
+internal/scan/events.go        - Event, EventKind, NoticeKind, Result: what Run sends
+internal/scan/stats.go         - Stats, Repeat: the run's counters (a -resume file format)
+internal/scan/pending.go       - The inconclusive list and the -retry-inconclusive pass
+internal/scan/wildcard.go      - Wildcard cache, fingerprint and near-miss matching
 internal/scan/dispatcher.go    - dispatcher: lazy candidate generation in chunks, budgets, resume watermark
 internal/scan/autorate.go      - autoRate: the -auto-rate back-off controller
 internal/scan/scope.go         - -exclude patterns (ValidateExcludes, IsExcluded)

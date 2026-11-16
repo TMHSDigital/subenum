@@ -142,7 +142,11 @@ subenum/
 │   ├── retryhttp/              # Retrying HTTP client for the passive sources
 │   ├── scan/
 │   │   ├── options.go          # Options: Config plus the settings only checked (Validate, Fields)
-│   │   ├── runner.go           # Scan engine: Config, Event/NoticeKind, Stats, Run
+│   │   ├── runner.go           # Scan engine: Config, Run, workers, job processing
+│   │   ├── events.go           # Event, EventKind, NoticeKind, Result
+│   │   ├── stats.go            # Stats, Repeat: the run's counters
+│   │   ├── pending.go          # Inconclusive list and the retry pass
+│   │   ├── wildcard.go         # Wildcard cache and fingerprint matching
 │   │   ├── dispatcher.go       # Lazy candidate generation in chunks, budgets, resume watermark
 │   │   ├── autorate.go         # -auto-rate back-off controller
 │   │   ├── scope.go            # -exclude patterns (ValidateExcludes, IsExcluded)
