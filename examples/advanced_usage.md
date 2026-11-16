@@ -102,7 +102,7 @@ Pass a file of apex domains (one per line, `#` comments allowed) with `-dL`. Eac
 ./subenum -w wordlist.txt -dL examples/sample_domains.txt -format jsonl -o results.jsonl
 ```
 
-Either input can come from standard input with `-` (but not both):
+Either input can come from standard input with `-`, but only one flag can read it (this holds for `-r`, `-exclude-file` and `-takeover-providers` too):
 
 ```bash
 cat targets.txt | ./subenum -w wordlist.txt -dL -

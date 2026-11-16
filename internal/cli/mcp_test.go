@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
@@ -801,6 +802,40 @@ func TestE2EMCPSessionBudget(t *testing.T) {
 	}
 	if refused != 1 {
 		t.Errorf("%d calls refused by the session budget, want 1", refused)
+	}
+}
+
+// TestMCPInvalidCallsSpendNoBudget covers #378: a scan call that cannot
+// start sends no query, so it does not use up the session's -max-calls.
+func TestMCPInvalidCallsSpendNoBudget(t *testing.T) {
+	t.Parallel()
+	zone, err := labzone.Load(filepath.Join("examples", "labs", "lab1-first-scan.zone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := dnsserver.Listen(dnsserver.Options{}, zone.Handler([]string{"lab.example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	tool := scanTool(mcpConfig{allow: []string{"lab.example"}, dnsServer: srv.Addr, maxQueries: 10, rate: 1000,
+		maxDuration: time.Minute, timeout: 5 * time.Second, maxCalls: 1})
+	for _, bad := range []string{
+		`{"domain": "lab.example", "words": ["www"], "types": ["SRV"]}`,
+		`{"domain": "lab.example", "words": []}`,
+		`{"domain": "lab.example", "words": ["www"], "exclude": ["*."]}`,
+	} {
+		r := tool.Call(t.Context(), json.RawMessage(bad))
+		if !r.IsError || !strings.Contains(r.Text, verdictNotRun) {
+			t.Errorf("%s: want a not_run error, got %+v", bad, r)
+		}
+	}
+	r := tool.Call(t.Context(), json.RawMessage(`{"domain": "lab.example", "words": ["www"]}`))
+	if r.IsError {
+		t.Errorf("valid call after invalid ones: %s", r.Text)
+	}
+	if r := tool.Call(t.Context(), json.RawMessage(`{"domain": "lab.example", "words": ["www"]}`)); !strings.Contains(r.Text, "allows 1 scan calls per session") {
+		t.Errorf("second valid call: want the budget spent, got %s", r.Text)
 	}
 }
 

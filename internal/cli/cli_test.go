@@ -98,7 +98,7 @@ func TestValidateFlagsDomainListConflicts(t *testing.T) {
 		t.Error("domain argument plus -dL should be rejected")
 	}
 	f.wordlists.paths, f.domainList = []string{"-"}, "-"
-	if _, ok := validateFlags(f, &runtimeInputs{maxAttempts: 1}, nil, fs, out); ok {
+	if validateArgs(f, nil, fs, out) {
 		t.Error("-w - with -dL - should be rejected")
 	}
 	f = base()

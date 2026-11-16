@@ -58,17 +58,23 @@ type mcpOutcomes struct {
 	WildcardFiltered int64 `json:"wildcard_filtered"`
 }
 
+// notRunReport reports a scan that cfg's error kept from starting.
+func notRunReport(cfg subenum.Config, err error) *mcpReport {
+	report := &mcpReport{Domain: cfg.Domain, Results: []mcpResult{}, MaxQueries: cfg.MaxQueries, Rate: cfg.Rate}
+	report.Verdict, report.Reason, report.Error = verdictNotRun, "the scan did not start; see error", err.Error()
+	return report
+}
+
 // runMCPScan runs one scan and reports it. offset is where cfg.Words starts
 // in the call's word list, for the report's next_offset.
 func runMCPScan(ctx context.Context, cfg subenum.Config, offset int) *mcpReport {
-	report := &mcpReport{Domain: cfg.Domain, Results: []mcpResult{}, MaxQueries: cfg.MaxQueries, Rate: cfg.Rate}
 	cfg.Logf = func(string, ...any) {} // standard output carries the protocol
 	// The report never lists inconclusive names, so the scan keeps none (#349).
 	events, err := subenum.Run(scan.WithoutInconclusiveList(ctx), cfg)
 	if err != nil {
-		report.Verdict, report.Reason, report.Error = verdictNotRun, "the scan did not start; see error", err.Error()
-		return report
+		return notRunReport(cfg, err)
 	}
+	report := &mcpReport{Domain: cfg.Domain, Results: []mcpResult{}, MaxQueries: cfg.MaxQueries, Rate: cfg.Rate}
 	var stats subenum.Stats
 	for ev := range events {
 		switch ev.Kind {

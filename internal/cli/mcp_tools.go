@@ -292,6 +292,12 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			if err := args.apply(&scanCfg); err != nil {
 				return mcp.Errorf("%v", err)
 			}
+			// A call that cannot start (bad types, exclude patterns, no
+			// usable words) sends no query, so it spends none of the
+			// session's scan calls (#378).
+			if err := scanCfg.Validate(); err != nil {
+				return notRunReport(scanCfg, err).result()
+			}
 			if calls.Add(1) > int64(cfg.maxCalls) {
 				return mcp.Errorf("session budget spent: the operator allows %d scan calls per session (-max-calls)", cfg.maxCalls)
 			}

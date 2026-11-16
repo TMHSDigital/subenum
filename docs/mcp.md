@@ -96,7 +96,7 @@ subenum mcp -allow example.com,example.org    # adds scan, for these domains
 | `-max-duration` | 2m | Longest one call may scan |
 | `-timeout` | 1000 | Live-scan lookup timeout in milliseconds |
 | `-sources` | none | Passive sources (`ct`, `wayback`) a `scan` call may ask for |
-| `-max-calls` | 100 | Most `scan` calls one session may make; with `-max-queries` it caps the session's live lookups |
+| `-max-calls` | 100 | Most `scan` calls one session may make; with `-max-queries` it caps the session's live lookups. A call refused for its arguments (`not_run` before any query) does not count |
 
 Passive sources are off unless you enable them, because they send the domain
 to third parties (crt.sh, the Wayback Machine). With `-sources ct,wayback`,

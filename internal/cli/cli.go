@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -309,20 +308,41 @@ func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *outpu
 		out.Error("expected exactly one domain, got %d arguments: %s (use -dL for several)", len(positionals), strings.Join(positionals, " "))
 		return false
 	}
+	// Standard input can only be read once: the first reader drains it and
+	// every later one would see an empty file (#378).
+	if n := countStdin(f.wordlists.paths); n > 1 {
+		out.Error("-w - is given %d times; standard input can only be read once", n)
+		return false
+	}
+	if readers := stdinReaders(f); len(readers) > 1 {
+		out.Error("%s cannot all read standard input (-); it can only be read once, so give all but one a file", strings.Join(readers, ", "))
+		return false
+	}
 	return true
+}
+
+// stdinReaders names the flags set to "-", standard input.
+func stdinReaders(f cliFlags) []string {
+	var names []string
+	if f.wordlists.readsStdin() {
+		names = append(names, "-w")
+	}
+	for _, c := range []struct{ name, path string }{
+		{"-dL", f.domainList},
+		{"-r", f.resolvers},
+		{"-exclude-file", f.excludeFile},
+		{"-takeover-providers", f.providersFile},
+	} {
+		if c.path == wordlist.Stdin {
+			names = append(names, c.name)
+		}
+	}
+	return names
 }
 
 // validateFlags checks options after validateArgs has checked the domain
 // arguments. configure does that before reading any input files.
 func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag.FlagSet, out *output.Writer) (string, bool) {
-	if f.wordlists.readsStdin() && f.domainList == wordlist.Stdin {
-		out.Error("-w and -dL cannot both read standard input")
-		return "", false
-	}
-	if n := countStdin(f.wordlists.paths); n > 1 {
-		out.Error("-w - is given %d times; standard input can only be read once", n)
-		return "", false
-	}
 	if f.simZone != "" {
 		// Effective values, not just command-line flags: a resolver list or
 		// simulation mode from the config file or SUBENUM_* would otherwise
@@ -559,11 +579,10 @@ type outputTarget struct {
 }
 
 // parseOutputs resolves the -o values; a file without a prefix takes def,
-// the -format of stdout. The same path given twice is refused: both would
-// replace one file.
+// the -format of stdout. The same file given twice, however it is spelled,
+// is refused: both would replace one file (#378).
 func parseOutputs(specs []string, def output.Format) ([]outputTarget, error) {
 	targets := make([]outputTarget, 0, len(specs))
-	seen := map[string]bool{}
 	for _, spec := range specs {
 		name, path := splitOutputSpec(spec)
 		format := def
@@ -573,14 +592,37 @@ func parseOutputs(specs []string, def output.Format) ([]outputTarget, error) {
 				return nil, err
 			}
 		}
-		key := filepath.Clean(path)
-		if seen[key] {
-			return nil, fmt.Errorf("-o %s is given more than once", path)
+		for _, t := range targets {
+			if samePath(t.path, path) {
+				return nil, fmt.Errorf("-o %s and -o %s name the same file; each -o needs its own", t.path, path)
+			}
 		}
-		seen[key] = true
 		targets = append(targets, outputTarget{path: path, format: format})
 	}
 	return targets, nil
+}
+
+// checkOutputFiles refuses an -inconclusive, -stats or -sarif file that is
+// also an -o file or another of them: the last one written would replace the
+// others (#378).
+func checkOutputFiles(f cliFlags, outputs []outputTarget) error {
+	type named struct{ flag, path string }
+	var files []named
+	for _, t := range outputs {
+		files = append(files, named{"-o", t.path})
+	}
+	for _, n := range []named{{"-inconclusive", f.inconFile}, {"-stats", f.statsFile}, {"-sarif", f.sarifFile}} {
+		if n.path == "" {
+			continue
+		}
+		for _, prev := range files {
+			if samePath(prev.path, n.path) {
+				return fmt.Errorf("%s %s and %s %s name the same file; give each its own", prev.flag, prev.path, n.flag, n.path)
+			}
+		}
+		files = append(files, n)
+	}
+	return nil
 }
 
 // isTerminal reports whether w is a character device (a terminal) rather than

@@ -60,6 +60,10 @@ tail -n 1 results.jsonl | jq -e '.verdict == "complete"' > /dev/null || exit 1
 httpx -silent -l names.txt
 ```
 
+Each `-o`, `-stats`, `-sarif` and `-inconclusive` file must be its own: one
+file named twice, however it is spelled, is a usage error rather than one
+output silently replacing the other.
+
 ## Takeover candidates first
 
 With CNAME lookups, subenum marks names whose alias target does not resolve or

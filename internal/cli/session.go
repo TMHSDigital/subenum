@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -300,6 +301,9 @@ func (s *session) configure() (domain string, code int, ok bool) {
 		return "", exitUsage, false
 	}
 	outputs, outputsErr := parseOutputs(f.outputs.specs, format)
+	if outputsErr == nil {
+		outputsErr = checkOutputFiles(*f, outputs)
+	}
 	if outputsErr != nil {
 		out.Error("%v", outputsErr)
 		return "", exitUsage, false
@@ -868,7 +872,15 @@ func samePath(a, b string) bool {
 	}
 	absA, errA := filepath.Abs(a)
 	absB, errB := filepath.Abs(b)
-	return errA == nil && errB == nil && absA == absB
+	if errA != nil || errB != nil {
+		return false
+	}
+	// Files that do not exist yet: Windows and macOS file systems ignore
+	// case by default (#378).
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(absA, absB)
+	}
+	return absA == absB
 }
 
 // finish saves or removes the resume state, writes the run-quality report

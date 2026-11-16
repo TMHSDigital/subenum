@@ -588,6 +588,14 @@ func Scan(ctx context.Context, cfg Config) ([]Result, Stats, error) {
 	return results, stats, nil
 }
 
+// Validate reports the error Run would return for cfg, without starting a
+// scan or sending a query: an invalid Domain, Types or Exclude pattern, an
+// empty word list, and the other problems with the config itself.
+func (c Config) Validate() error {
+	_, err := c.options()
+	return err
+}
+
 // options validates the config, applies defaults and builds the internal
 // options. Messages name Config fields, since a library caller has no flags.
 func (c Config) options() (scan.Options, error) {

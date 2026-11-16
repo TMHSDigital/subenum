@@ -276,6 +276,31 @@ func TestZeroConfigUsesDefaults(t *testing.T) {
 	}
 }
 
+// TestValidateMatchesRun covers #378: Validate reports what Run would refuse,
+// without starting a scan.
+func TestValidateMatchesRun(t *testing.T) {
+	for name, cfg := range map[string]subenum.Config{
+		"types":   {Domain: "example.com", Simulate: true, Types: []string{"SRV"}},
+		"words":   {Domain: "example.com", Simulate: true, Words: []string{}},
+		"exclude": {Domain: "example.com", Simulate: true, Exclude: []string{"*."}},
+	} {
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("%s: Validate accepted an invalid config", name)
+			continue
+		}
+		if _, runErr := subenum.Run(context.Background(), cfg); runErr == nil || runErr.Error() != err.Error() {
+			t.Errorf("%s: Validate %v, Run %v", name, err, runErr)
+		}
+	}
+	if err := (subenum.Config{Domain: "example.com", Simulate: true}).Validate(); err != nil {
+		t.Errorf("valid config: %v", err)
+	}
+	if err := (subenum.Config{Domain: "example.com", Words: []string{}}).Validate(); !errors.Is(err, subenum.ErrNoWords) {
+		t.Errorf("empty words: got %v, want ErrNoWords", err)
+	}
+}
+
 func TestDefaultWordsAreUsable(t *testing.T) {
 	words := subenum.DefaultWords()
 	if len(words) < 1000 {
