@@ -1,0 +1,9 @@
+# Lab 6: IPv6-only services. Compare A and AAAA lookups to see which
+# services a scan of only one address family misses. Run:
+#   subenum -w examples/labs/words.txt -simulate-zone examples/labs/lab6-ipv6.zone -show-records lab.example
+@         A      192.0.2.1
+@         AAAA   2001:db8::1
+www       A      192.0.2.10
+www       AAAA   2001:db8::10
+api       AAAA   2001:db8::20
+legacy    A      192.0.2.30

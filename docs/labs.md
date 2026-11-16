@@ -168,6 +168,33 @@ subenum $W -simulate-zone $L/lab5-failures.zone -timeout 300 -stats lab5.json la
 
 </details>
 
+## Lab 6: IPv6-only services
+
+```bash
+subenum $W -simulate-zone $L/lab6-ipv6.zone -show-records lab.example
+subenum $W -simulate-zone $L/lab6-ipv6.zone -type A -show-records lab.example
+subenum $W -simulate-zone $L/lab6-ipv6.zone -type AAAA -show-records lab.example
+```
+
+1. Which three names does the default scan find, and which address families
+   does each have?
+2. Which name disappears with `-type A`? Does that mean the service is absent?
+3. Which name disappears with `-type AAAA`? Why does the default scan find both?
+
+<details markdown="1">
+<summary>Answers</summary>
+
+1. `www` has both `A=192.0.2.10` and `AAAA=2001:db8::10`; `api` has only
+   `AAAA=2001:db8::20`; `legacy` has only `A=192.0.2.30`.
+2. `api` disappears. It exists but has no IPv4 address: an A-only lookup
+   cannot discover an IPv6-only service.
+3. `legacy` disappears because it has no IPv6 address. The default types are
+   `A,AAAA`, and a record of either type is enough to report a name. Querying
+   both families does not require the machine to have IPv6 connectivity:
+   this lab's DNS server still answers on IPv4 loopback (`127.0.0.1`).
+
+</details>
+
 ## Writing your own scenario
 
 A scenario is a plain text file. Names are relative to the domain you scan,

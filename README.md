@@ -72,7 +72,7 @@ Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://
 | **Trust the output** | Multi-probe wildcard fingerprinting · per-outcome accounting and a run-quality verdict (`-stats`) · reliability guard · retry of inconclusive names (`-retry-inconclusive`) · resumable runs (`-resume`) |
 | **Spot problems** | Dangling CNAME and NS takeover hints, with a provider list you can extend · internal addresses leaked into public DNS · SARIF for GitHub code scanning (`-sarif`) |
 | **Fit your workflow** | `text`, `json`, streaming `jsonl` and `csv` · pipe-clean stdout (`-silent`) · `-diff` monitoring and a GitHub Action · interactive TUI · Go library · MCP server for AI agents |
-| **Teach and test** | `-simulate` with zero network I/O · lab scenarios served by a local DNS server (`-simulate-zone`), with [five guided exercises](docs/labs.md) |
+| **Teach and test** | `-simulate` with zero network I/O · lab scenarios served by a local DNS server (`-simulate-zone`), with [six guided exercises](docs/labs.md) |
 
 ## How it works
 
@@ -283,7 +283,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 > Simulation mode (`-simulate`) generates synthetic results and performs zero network I/O. Do not confuse simulated output with real DNS data. Simulated output marks itself: JSON and JSONL results carry `"simulated": true`, CSV gets a `simulated` column, and `-o` text files start with a `# SIMULATED` comment line. Bare names piped to stdout stay unmarked so they still pipe cleanly.
 
 > [!TIP]
-> For teaching, `-simulate-zone lab.zone` goes further than `-simulate`: a scenario file defines exact names, records, wildcards, failures and resolver rate limits, and a DNS server on `127.0.0.1` answers from it. The real resolver, wildcard filtering, `-rate` and the run-quality report all run unchanged, deterministically and with no traffic leaving the machine. [docs/labs.md](docs/labs.md) has five guided exercises with answers, built on the scenarios in `examples/labs/`.
+> For teaching, `-simulate-zone lab.zone` goes further than `-simulate`: a scenario file defines exact names, records, wildcards, failures and resolver rate limits, and a DNS server on `127.0.0.1` answers from it. The real resolver, wildcard filtering, `-rate` and the run-quality report all run unchanged, deterministically and with no traffic leaving the machine. [docs/labs.md](docs/labs.md) has six guided exercises with answers, built on the scenarios in `examples/labs/`.
 
 ### Defaults, completions and the man page
 
