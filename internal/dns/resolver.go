@@ -516,37 +516,61 @@ func (l Lookup) resolveWithLog(ctx context.Context, domain string) ([]Record, ti
 // Resolve looks domain up to l.Attempts times (at least once), logging each
 // try through l.Logf and respecting ctx cancellation between attempts with a
 // linear backoff delay. It returns the resolved records and a classified
-// outcome for the last attempt.
+// outcome for the last attempt. It is ResolvePartial without the partial flag.
 func (l Lookup) Resolve(ctx context.Context, domain string) ([]Record, Outcome) {
+	records, outcome, _ := l.ResolvePartial(ctx, domain)
+	return records, outcome
+}
+
+// ResolvePartial is Resolve that also reports a partial answer (#357): some
+// requested types answered while another timed out, was refused or failed.
+// Such an answer is tried again like a failed one, and a complete answer on
+// a later attempt replaces it. When every attempt stays partial, the records
+// of the last partial answer are returned as OutcomeFound with partial set,
+// so the caller can tell that records of a type may be missing.
+func (l Lookup) ResolvePartial(ctx context.Context, domain string) (records []Record, outcome Outcome, partial bool) {
 	maxAttempts := max(l.Attempts, 1)
 	last := OutcomeOther
+	var kept []Record // the last partial answer, returned if nothing better comes
+	settle := func(o Outcome) ([]Record, Outcome, bool) {
+		if kept != nil {
+			return kept, OutcomeFound, true
+		}
+		return nil, o, false
+	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
-			return nil, OutcomeCanceled
+			return settle(OutcomeCanceled)
 		}
-		records, _, err := l.resolveWithLog(ctx, domain)
-		if len(records) > 0 {
-			return records, OutcomeFound
-		}
+		got, _, err := l.resolveWithLog(ctx, domain)
 		last = Classify(err)
-		if last == OutcomeFound {
+		if len(got) > 0 {
+			// Every type answered, or the ones without records said so.
+			if last == OutcomeFound || last == OutcomeNXDomain {
+				return got, OutcomeFound, false
+			}
+			kept = got
+		} else if last == OutcomeFound {
 			// Lookup succeeded but produced no records of the requested types
 			// (for example -type CNAME on a name with only A records). That is a
 			// definitive negative, not a resolver failure (#28).
 			last = OutcomeNXDomain
 		}
-		if last == OutcomeNXDomain || last == OutcomeCanceled {
-			return nil, last
+		switch last {
+		case OutcomeNXDomain:
+			return nil, last, false
+		case OutcomeCanceled:
+			return settle(last)
 		}
 		if attempt < maxAttempts-1 {
 			select {
 			case <-time.After(time.Duration(50*(attempt+1)) * time.Millisecond):
 			case <-ctx.Done():
-				return nil, OutcomeCanceled
+				return settle(OutcomeCanceled)
 			}
 		}
 	}
-	return nil, last
+	return settle(last)
 }
 
 // RandomLabel returns a 32-character random hex label, the kind wildcard

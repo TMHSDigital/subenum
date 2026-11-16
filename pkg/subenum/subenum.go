@@ -225,6 +225,11 @@ type Result struct {
 	// address is public, and always empty in a simulated scan.
 	Internal string
 
+	// Partial is set when a lookup of one of Types failed (timeout,
+	// refusal or other error) on every attempt while another type
+	// answered, so Records may lack records of the failed type.
+	Partial bool
+
 	// Sources names what proposed the name (#273): "wordlist" for Words
 	// (and, with Recursive, an entry below a found name), and each of
 	// Config.Sources that returned it. A source is named by its Name()
@@ -249,6 +254,7 @@ type Stats struct {
 	Excluded    int64 // candidates left untested because Exclude covered them
 	Takeover    int64 // results carrying a Takeover hint
 	Internal    int64 // results with an Internal address scope
+	Partial     int64 // results marked Partial
 
 	PoolHits    int64 // names a ResolverPool member reported
 	Confirmed   int64 // of those, the ones Resolver confirmed
@@ -757,7 +763,7 @@ func translate(ev scan.Event) Event {
 	switch ev.Kind {
 	case scan.EventResult:
 		out.Kind = KindResult
-		out.Result = Result{Name: ev.Result.Subdomain, Records: records(ev.Result.Records), Takeover: ev.Result.Takeover, Internal: ev.Result.Internal}
+		out.Result = Result{Name: ev.Result.Subdomain, Records: records(ev.Result.Records), Takeover: ev.Result.Takeover, Internal: ev.Result.Internal, Partial: ev.Result.Partial}
 	case scan.EventProgress:
 		out.Kind = KindProgress
 	case scan.EventNotice:
@@ -839,6 +845,7 @@ func engineStats(s Stats) scan.Stats {
 		Excluded:    s.Excluded,
 		Takeover:    s.Takeover,
 		Internal:    s.Internal,
+		Partial:     s.Partial,
 
 		PoolHits:    s.PoolHits,
 		Confirmed:   s.Confirmed,
@@ -871,6 +878,7 @@ func stats(s scan.Stats) Stats {
 		Excluded:    s.Excluded,
 		Takeover:    s.Takeover,
 		Internal:    s.Internal,
+		Partial:     s.Partial,
 
 		PoolHits:    s.PoolHits,
 		Confirmed:   s.Confirmed,

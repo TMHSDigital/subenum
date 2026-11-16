@@ -32,7 +32,7 @@ func (l *resultLog) add(r output.Result) {
 	if len(l.names) == 0 {
 		l.simulated = r.Simulated
 	}
-	if r.Takeover != "" || r.Internal != "" || r.Permutation || r.Simulated != l.simulated {
+	if r.Takeover != "" || r.Internal != "" || r.Partial || r.Permutation || r.Simulated != l.simulated {
 		if l.extra == nil {
 			l.extra = map[int]output.Result{}
 		}

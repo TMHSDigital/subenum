@@ -223,6 +223,9 @@ func (w *Writer) writeText(res Result) {
 		if res.Internal != "" {
 			line += " INTERNAL=" + res.Internal
 		}
+		if res.Partial {
+			line += " PARTIAL"
+		}
 		if len(res.PreviousRecords) > 0 {
 			line += " (was" + formatRecords(res.PreviousRecords) + ")"
 		}

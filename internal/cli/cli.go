@@ -655,6 +655,9 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	if s.Internal > 0 {
 		out.Info("  internal addresses: %d (public names answering with loopback, private, link-local or CGNAT addresses)", s.Internal)
 	}
+	if s.Partial > 0 {
+		out.Info("  partial answers: %d (found names a requested record type got no answer for; records may be missing)", s.Partial)
+	}
 	if s.RateBackoffs > 0 {
 		out.Info("  rate back-offs: %d (ended at %d queries/s)", s.RateBackoffs, s.FinalRate)
 	}

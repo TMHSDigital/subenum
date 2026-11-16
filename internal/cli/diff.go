@@ -265,8 +265,10 @@ func compareBaselines(prev, cur baseline, records bool, types []string) baseline
 }
 
 // observe records a found name and says how it differs from the baseline:
-// "added", "changed" (with the baseline's records), or "" for unchanged.
-func (d *differ) observe(name string, records []dns.Record) (change string, previous []dns.Record) {
+// "added", "changed" (with the baseline's records), or "" for unchanged. A
+// partial answer, where a requested type got no answer (#357), is never
+// "changed": its missing records say nothing about the name.
+func (d *differ) observe(name string, records []dns.Record, partial bool) (change string, previous []dns.Record) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	name = strings.ToLower(name)
@@ -277,7 +279,7 @@ func (d *differ) observe(name string, records []dns.Record) (change string, prev
 	}
 	// d.types is the run's record types, never empty, so only the types
 	// this run looked up are compared.
-	if prev, ok := d.records[name]; ok && diff.RecordsChanged(prev, records, d.types) {
+	if prev, ok := d.records[name]; ok && !partial && diff.RecordsChanged(prev, records, d.types) {
 		d.changed++
 		return "changed", prev
 	}

@@ -104,6 +104,7 @@ func addStats(a, b scan.Stats) scan.Stats {
 	a.Excluded += b.Excluded
 	a.Takeover += b.Takeover
 	a.Internal += b.Internal
+	a.Partial += b.Partial
 	a.Retried += b.Retried
 	a.Recovered += b.Recovered
 	a.RateBackoffs += b.RateBackoffs

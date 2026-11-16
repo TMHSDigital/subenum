@@ -603,7 +603,7 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 		s.out.Emit(res)
 		return
 	}
-	if change, previous := s.diff.observe(res.Subdomain, res.Records); change != "" {
+	if change, previous := s.diff.observe(res.Subdomain, res.Records, res.Partial); change != "" {
 		res.Change, res.PreviousRecords = change, previous
 		s.out.Emit(res)
 	}

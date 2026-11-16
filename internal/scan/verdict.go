@@ -32,6 +32,13 @@ func (s Stats) Verdict(interrupted bool) (verdict, reason string) {
 	fails := s.failures()
 	detail := fmt.Sprintf("%d of %d lookups failed (timeout %d, refused %d, other %d)",
 		fails, processed, s.Timeout, s.Refused, s.Other)
+	// A found name whose lookup of a requested type failed may lack records
+	// (#357): it lowers the verdict as a failed lookup does, but is not one
+	// for the reliability line, since the name did answer.
+	unknown := fails + s.Partial
+	if s.Partial > 0 {
+		detail += fmt.Sprintf(", %d found with a record type unanswered", s.Partial)
+	}
 	switch {
 	case s.Aborted:
 		return VerdictUnreliable, "the reliability guard aborted the scan: " + detail
@@ -39,13 +46,13 @@ func (s Stats) Verdict(interrupted bool) (verdict, reason string) {
 		return VerdictUnreliable, detail
 	case interrupted:
 		return VerdictDegraded, fmt.Sprintf("interrupted after %d lookups", processed)
-	case fails > 0 && fails*100 >= processed*degradedFailPercent:
+	case unknown > 0 && unknown*100 >= processed*degradedFailPercent:
 		return VerdictDegraded, detail
 	case s.Skipped > 0 && s.Expired:
 		return VerdictDegraded, fmt.Sprintf("time budget ({max_duration}) reached; %d candidates not tested", s.Skipped)
 	case s.Skipped > 0:
 		return VerdictDegraded, fmt.Sprintf("{max_queries} reached; %d candidates not tested", s.Skipped)
-	case fails > 0:
+	case unknown > 0:
 		return VerdictComplete, detail + ", under 1%"
 	}
 	return VerdictComplete, fmt.Sprintf("all %d lookups got a definitive answer", processed)

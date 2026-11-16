@@ -634,6 +634,8 @@ A public name that answers with an internal address leaks how the network behind
 
 The scope is an `internal_address` field in JSON and JSONL, `INTERNAL=<scope>` in text with `-show-records`, and a count in the breakdown and the run-quality report (`internal_addresses`). CSV is unchanged: each row already holds one address in its `value` column. Simulated results are never marked, since their addresses are invented.
 
+A name that answered for one `-type` while another type's lookup still timed out, was refused or failed after `-attempts` is reported with the records that came back and marked partial: a `"partial": true` field in JSON and JSONL, `PARTIAL` in text with `-show-records`, and a `partial answers` count in the breakdown. Partial answers lower the run's verdict as failed lookups do, and `-diff-records` never reports a partial name as changed.
+
 ### Monitoring for new subdomains
 
 `-diff previous.jsonl` reports only what changed since an earlier run: `+ name` for new subdomains and `- name` for ones that disappeared (only when the run's verdict is `complete`, and only after a fresh lookup of the name returns NXDOMAIN, so names this run did not test and failed lookups are never mistaken for removals). The `-o` file keeps the full current results for the next comparison, and the exit code is `4` when anything changed. The repository is also a GitHub Action (`uses: TMHSDigital/subenum@<release>`) that installs a verified release, keeps the baseline as an artifact, writes a job summary and fails on a bad verdict; [docs/monitoring.md](docs/monitoring.md) documents it and a hand-written scheduled workflow that opens an issue when new names appear.

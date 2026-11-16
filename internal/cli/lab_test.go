@@ -11,7 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/net/dns/dnsmessage"
+
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/dnstest"
 )
 
 // labTimingArgs gives lab runs, and any other run against an in-process DNS
@@ -296,6 +299,52 @@ func TestE2EDiffRecords(t *testing.T) {
 	}
 	if code, _ := runCLI(t, "", "-simulate", "-diff-records", "example.com"); code != exitUsage {
 		t.Errorf("-diff-records without -diff: exit %d, want %d", code, exitUsage)
+	}
+}
+
+// TestE2EDiffRecordsPartial covers #357: a name whose A lookup answers while
+// its AAAA lookup times out on every attempt is flagged partial, lowers the
+// verdict, and is not reported as changed by -diff-records.
+func TestE2EDiffRecordsPartial(t *testing.T) {
+	t.Parallel()
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if !strings.EqualFold(strings.TrimSuffix(q.Name, "."), "www.example.com") {
+			return dnstest.NXDomain
+		}
+		if q.Type == dnsmessage.TypeAAAA {
+			return dnstest.Dropped
+		}
+		return dnstest.Reply{A: []string{"192.0.2.10"}}
+	})
+	baseline := writeFile(t, "previous.jsonl",
+		`{"subdomain":"www.example.com","records":[{"type":"A","value":"192.0.2.10"},{"type":"AAAA","value":"2001:db8::10"}]}`+"\n")
+	args := append([]string{"-progress=false", "-format", "jsonl", "-dns-server", srv.Addr, "-type", "A,AAAA"}, labSlowTimingArgs...)
+	code, out := runCLI(t, "", append(args, "-w", writeFile(t, "wl.txt", "www\n"),
+		"-diff", baseline, "-diff-records", "example.com")...)
+	if code != exitOK {
+		t.Fatalf("exit %d, want %d (a partial answer is not a change)\n%s", code, exitOK, out)
+	}
+	var summary struct {
+		Verdict string `json:"verdict"`
+		Diff    *struct {
+			Changed int `json:"changed"`
+		} `json:"diff"`
+	}
+	for _, raw := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.Contains(raw, `"change"`) {
+			t.Errorf("unexpected diff line: %s", raw)
+		}
+		if strings.Contains(raw, `"type":"summary"`) {
+			if err := json.Unmarshal([]byte(raw), &summary); err != nil {
+				t.Fatalf("%v: %s", err, raw)
+			}
+		}
+	}
+	if summary.Verdict != "degraded" {
+		t.Errorf("verdict %q, want degraded\n%s", summary.Verdict, out)
+	}
+	if summary.Diff == nil || summary.Diff.Changed != 0 {
+		t.Errorf("summary diff %+v, want changed 0", summary.Diff)
 	}
 }
 

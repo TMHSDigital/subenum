@@ -125,17 +125,25 @@ func (c Config) live() bool {
 // simulation, else the trusted resolver with retries. The resolver pool is not
 // consulted here; processJob layers it on top for candidate names.
 func (c Config) resolve(ctx context.Context, name string, logf dns.Logf) ([]dns.Record, dns.Outcome) {
+	records, outcome, _ := c.resolvePartial(ctx, name, logf)
+	return records, outcome
+}
+
+// resolvePartial is resolve that also says when a found name's answer is
+// partial: a requested type failed on every attempt (#357).
+func (c Config) resolvePartial(ctx context.Context, name string, logf dns.Logf) ([]dns.Record, dns.Outcome, bool) {
 	switch {
 	case c.resolveHook != nil:
-		return c.resolveHook(ctx, name)
+		records, outcome := c.resolveHook(ctx, name)
+		return records, outcome, false
 	case c.Simulate:
 		records, ok := dns.Simulation{HitRate: c.HitRate, Seed: c.Seed}.Resolve(name, logf, c.Types)
 		if ok {
-			return records, dns.OutcomeFound
+			return records, dns.OutcomeFound, false
 		}
-		return nil, dns.OutcomeNXDomain
+		return nil, dns.OutcomeNXDomain, false
 	default:
-		return c.lookup(logf).Resolve(ctx, name)
+		return c.lookup(logf).ResolvePartial(ctx, name)
 	}
 }
 
@@ -172,6 +180,7 @@ type Stats struct {
 	Unconfirmed int64 `json:"Unconfirmed"` // pool hits the trusted resolver said do not exist
 	Takeover    int64 `json:"Takeover"`    // results flagged as subdomain-takeover candidates
 	Internal    int64 `json:"Internal"`    // results with a non-public address (Result.Internal, #218)
+	Partial     int64 `json:"Partial"`     // found names a requested type's lookup failed for (Result.Partial, #357)
 	// RootDone is the resume point: every wordlist entry before this index
 	// has been fully looked up (#73). Entries at or after it may also be
 	// done; resuming repeats at most one chunk (maxChunk jobs) per worker,
@@ -280,6 +289,7 @@ type counters struct {
 	unconfirmed      atomic.Int64
 	takeover         atomic.Int64
 	internal         atomic.Int64
+	partial          atomic.Int64
 	rootDone         atomic.Int64
 	retried          atomic.Int64
 	recovered        atomic.Int64
@@ -389,6 +399,7 @@ func (c *counters) snapshot() Stats {
 		Unconfirmed:      c.unconfirmed.Load(),
 		Takeover:         c.takeover.Load(),
 		Internal:         c.internal.Load(),
+		Partial:          c.partial.Load(),
 		RootDone:         c.rootDone.Load(),
 		Retried:          c.retried.Load(),
 		Recovered:        c.recovered.Load(),
@@ -639,6 +650,10 @@ type Result struct {
 	// "cgnat"), see dns.InternalScope; empty when every address is public.
 	// A public name that answers with one leaks internal addressing (#218).
 	Internal string `json:"internal_address,omitempty"`
+	// Partial is set when a requested record type's lookup failed (timeout,
+	// refusal or other error) on every attempt while another type answered:
+	// Records may lack records of the failed type (#357).
+	Partial bool `json:"partial,omitempty"`
 }
 
 // Event is emitted on the events channel during a scan.
@@ -1088,10 +1103,11 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 
 	var outcome dns.Outcome
 	var records []dns.Record
+	var partial bool
 	if cfg.Pool != nil && cfg.live() {
-		records, outcome = resolveViaPool(ctx, cfg, j.domain, st)
+		records, outcome, partial = resolveViaPool(ctx, cfg, j.domain, st)
 	} else {
-		records, outcome = cfg.resolve(ctx, j.domain, cfg.logf())
+		records, outcome, partial = cfg.resolvePartial(ctx, j.domain, cfg.logf())
 	}
 
 	// A lookup cut short by cancellation (Ctrl+C, or the reliability guard's own
@@ -1121,7 +1137,7 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 		return true
 	}
 
-	s.report(ctx, j.domain, records)
+	s.report(ctx, j.domain, records, partial)
 
 	if cfg.Recursive && j.depth < maxDepth && s.expandable(ctx, j.domain) {
 		// Hand the parent to the dispatcher, which generates its children.
@@ -1198,9 +1214,12 @@ func (s *scanState) gateResumeParents(ctx context.Context, workers int) []string
 }
 
 // report counts a found name and sends it as a result.
-func (s *scanState) report(ctx context.Context, name string, records []dns.Record) {
+func (s *scanState) report(ctx context.Context, name string, records []dns.Record, partial bool) {
 	cfg := s.cfg
 	s.found.Add(1)
+	if partial {
+		s.stats.partial.Add(1)
+	}
 	// Unguarded: CLI and TUI drain until close. A ctx.Done() guard here would
 	// only matter for a consumer that stops reading with a full buffer.
 	// A CNAME result gets a DNS-only takeover hint; its target is resolved
@@ -1223,7 +1242,7 @@ func (s *scanState) report(ctx context.Context, name string, records []dns.Recor
 	if internal != "" {
 		s.stats.internal.Add(1)
 	}
-	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: name, Records: records, Simulated: cfg.Simulate, Takeover: takeover, Internal: internal}}
+	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: name, Records: records, Simulated: cfg.Simulate, Takeover: takeover, Internal: internal, Partial: partial}}
 }
 
 // retryPending is the RetryInconclusive pass (#217): once every candidate
@@ -1273,7 +1292,7 @@ func (s *scanState) retry(ctx context.Context, it pendingLookup) {
 		return
 	}
 	name := it.domain(&s.cfg)
-	records, outcome := cfg.resolve(ctx, name, cfg.logf())
+	records, outcome, partial := cfg.resolvePartial(ctx, name, cfg.logf())
 	if outcome = settle(ctx, outcome); outcome == dns.OutcomeCanceled {
 		s.pending.add(it)
 		return
@@ -1294,7 +1313,7 @@ func (s *scanState) retry(ctx context.Context, it pendingLookup) {
 	}
 	st.add(outcome)
 	if outcome == dns.OutcomeFound {
-		s.report(ctx, name, records)
+		s.report(ctx, name, records, partial)
 	}
 }
 
@@ -1308,18 +1327,18 @@ func (s *scanState) retry(ctx context.Context, it pendingLookup) {
 // opinions, #105); the trusted resolver's verdict on each hit is fed back so
 // a member that hid the name or injected it is flagged, and every confirmed
 // name becomes a canary.
-func resolveViaPool(ctx context.Context, cfg Config, name string, st *counters) ([]dns.Record, dns.Outcome) {
+func resolveViaPool(ctx context.Context, cfg Config, name string, st *counters) ([]dns.Record, dns.Outcome, bool) {
 	trustedLookup := cfg.lookup(cfg.logf())
 	a := cfg.Pool.Resolve(ctx, trustedLookup, name)
 	if a.NoResolver {
 		// Every pool member was caught lying: the trusted resolver answers.
-		return trustedLookup.Resolve(ctx, name)
+		return trustedLookup.ResolvePartial(ctx, name)
 	}
 	if a.Outcome != dns.OutcomeFound {
-		return nil, a.Outcome
+		return nil, a.Outcome, false
 	}
 	st.poolHits.Add(1)
-	records, trusted := trustedLookup.Resolve(ctx, name)
+	records, trusted, partial := trustedLookup.ResolvePartial(ctx, name)
 	switch trusted {
 	case dns.OutcomeFound:
 		st.confirmed.Add(1)
@@ -1328,7 +1347,7 @@ func resolveViaPool(ctx context.Context, cfg Config, name string, st *counters) 
 		st.unconfirmed.Add(1)
 	}
 	cfg.Pool.Disagree(a, trusted)
-	return records, trusted
+	return records, trusted, partial
 }
 
 // checkReliability runs the reliability guard once processed lookups are

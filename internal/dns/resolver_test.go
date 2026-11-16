@@ -7,8 +7,13 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
+
+	"github.com/TMHSDigital/subenum/internal/dnstest"
 )
 
 // resolveDomain reports whether one lookup of domain (DefaultTypes, no
@@ -393,6 +398,48 @@ func TestResolveTypesServFailOutranksNXDomain(t *testing.T) {
 	_, _ = Lookup{Resolver: r, Timeout: time.Second, Attempts: 3, Types: DefaultTypes}.Resolve(context.Background(), "flaky.example.com")
 	if retried := srv.Queries() - single; retried <= single {
 		t.Fatalf("attempts=3 sent %d queries vs %d for attempts=1; the failure was not retried", retried, single)
+	}
+}
+
+// TestResolvePartialRetriesAndFlags covers #357: an A answer with an AAAA
+// timeout is not a plain found. The whole lookup is tried again, and when the
+// AAAA lookup fails on every attempt the A records come back flagged partial.
+func TestResolvePartialRetriesAndFlags(t *testing.T) {
+	var aQueries atomic.Int64
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch q.Type {
+		case dnsmessage.TypeA:
+			aQueries.Add(1)
+			return dnstest.Reply{A: []string{"192.0.2.1"}}
+		case dnsmessage.TypeAAAA:
+			return dnstest.Dropped
+		}
+		return dnstest.Reply{}
+	})
+	timeout := 200 * time.Millisecond
+	l := Lookup{Resolver: NewResolver(timeout, srv.Addr), Timeout: timeout, Attempts: 3, Types: []string{"A", "AAAA"}}
+	recs, outcome, partial := l.ResolvePartial(context.Background(), "half.example.com")
+	if outcome != OutcomeFound || !partial {
+		t.Fatalf("outcome = %v, partial = %v; want Found, partial", outcome, partial)
+	}
+	if len(recs) != 1 || recs[0] != (Record{Type: "A", Value: "192.0.2.1"}) {
+		t.Fatalf("records = %v, want only the A record", recs)
+	}
+	if got := aQueries.Load(); got != 3 {
+		t.Fatalf("A queries = %d, want 3 (the partial answer must be retried)", got)
+	}
+}
+
+// TestResolvePartialCompleteAnswer: an AAAA NODATA is a complete answer, not
+// a partial one, and is not retried.
+func TestResolvePartialCompleteAnswer(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"v4.example.com": {A: "192.0.2.1"}})
+	recs, outcome, partial := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 3, Types: DefaultTypes}.ResolvePartial(context.Background(), "v4.example.com")
+	if outcome != OutcomeFound || partial || len(recs) != 1 {
+		t.Fatalf("records = %v, outcome = %v, partial = %v; want one A record, Found, not partial", recs, outcome, partial)
+	}
+	if got := srv.Queries(); got != 2 {
+		t.Fatalf("queries = %d, want 2 (one A, one AAAA)", got)
 	}
 }
 

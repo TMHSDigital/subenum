@@ -69,6 +69,10 @@ subenum -w wordlist.txt -format jsonl -type A,AAAA,CNAME -diff previous.jsonl -d
   every TTL and would otherwise flag every CDN host.
 - The previous file must carry records: JSON, JSONL or CSV. A text file has
   none, so the comparison falls back to names with a note.
+- A name whose lookup of one type still failed after `-attempts` while another
+  type answered is marked `"partial": true` and is never reported as changed:
+  its missing records may only be a lookup that timed out. Partial answers
+  lower the run's verdict as failed lookups do.
 
 ## The subenum GitHub Action
 

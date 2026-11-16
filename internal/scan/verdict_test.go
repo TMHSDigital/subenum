@@ -20,6 +20,8 @@ func TestStatsVerdict(t *testing.T) {
 		{"few failures", Stats{NXDomain: 999, Timeout: 1}, false, VerdictComplete, "under 1%"},
 		{"some failures", Stats{NXDomain: 860, Timeout: 140}, false, VerdictDegraded, "140 of 1000"},
 		{"many failures", Stats{NXDomain: 700, Timeout: 300}, false, VerdictUnreliable, "300 of 1000"},
+		{"partial answers", Stats{Found: 20, NXDomain: 980, Partial: 20}, false, VerdictDegraded, "20 found with a record type unanswered"},
+		{"few partial answers", Stats{Found: 1, NXDomain: 999, Partial: 1}, false, VerdictComplete, "under 1%"},
 		{"guard abort", Stats{NXDomain: 10, Timeout: 190, Aborted: true}, false, VerdictUnreliable, "reliability guard"},
 		{"capped", Stats{NXDomain: 10, Skipped: 90}, false, VerdictDegraded, "90 candidates"},
 		{"interrupted", Stats{NXDomain: 10}, true, VerdictDegraded, "interrupted"},
