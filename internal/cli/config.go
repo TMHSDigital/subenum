@@ -40,37 +40,64 @@ var noDefaultFlags = map[string]bool{"tui": true, "version": true, "print-config
 
 // listFlags take comma-separated values, so the config file may also give
 // them as a JSON array of strings.
-var listFlags = map[string]bool{"exclude": true, "type": true}
+var listFlags = map[string]bool{"exclude": true, "type": true, "sources": true}
+
+// repeatFlags may be given more than once on the command line (-w, -o). Like
+// the listFlags, a config-file or SUBENUM_* string is a comma-separated list
+// and the config file may give a JSON array; each array entry is one value,
+// commas and all (#353).
+var repeatFlags = map[string]bool{"w": true, "o": true}
+
+// repeatValue is the Value of a repeatFlag: the values given, in order.
+type repeatValue interface{ list() []string }
 
 // sourceRank orders sources by precedence, highest last.
 var sourceRank = map[string]int{sourceDefault: 0, sourceConfig: 1, sourceEnv: 2, sourceFlag: 3}
 
-// configValue turns one config-file value into a flag value. Only strings,
-// numbers and booleans are settings; fmt.Sprint of null or an object would
-// silently become a bogus value such as "<nil>".
-func configValue(name string, v any) (string, error) {
+// splitRepeat splits a config-file or environment string for a repeatFlag
+// into the values to Set, one per comma-separated entry.
+func splitRepeat(name, v string) []string {
+	if !repeatFlags[name] {
+		return []string{v}
+	}
+	parts := strings.Split(v, ",")
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	return parts
+}
+
+// configValues turns one config-file value into the flag values to Set: one
+// value, or one per entry for a repeatFlag. Only strings, numbers and
+// booleans are settings; fmt.Sprint of null or an object would silently
+// become a bogus value such as "<nil>".
+func configValues(name string, v any) ([]string, error) {
+	list := listFlags[name] || repeatFlags[name]
 	switch v := v.(type) {
 	case string:
-		return v, nil
+		return splitRepeat(name, v), nil
 	case json.Number, bool:
-		return fmt.Sprint(v), nil
+		return []string{fmt.Sprint(v)}, nil
 	case []any:
-		if listFlags[name] {
+		if list {
 			parts := make([]string, len(v))
 			for i, p := range v {
 				s, ok := p.(string)
 				if !ok {
-					return "", fmt.Errorf("list entries must be strings")
+					return nil, fmt.Errorf("list entries must be strings")
 				}
 				parts[i] = s
 			}
-			return strings.Join(parts, ","), nil
+			if repeatFlags[name] {
+				return parts, nil
+			}
+			return []string{strings.Join(parts, ",")}, nil
 		}
 	}
-	if listFlags[name] {
-		return "", fmt.Errorf("must be a string or a list of strings")
+	if list {
+		return nil, fmt.Errorf("must be a string or a list of strings")
 	}
-	return "", fmt.Errorf("must be a string, number or boolean")
+	return nil, fmt.Errorf("must be a string, number or boolean")
 }
 
 // defaultsLoader applies config-file and environment defaults to a FlagSet
@@ -106,15 +133,18 @@ func (d *defaultsLoader) apply(fs *flag.FlagSet) error {
 	d.sources = map[string]string{}
 	d.values = map[string]string{}
 	var errs []error
-	set := func(name, value, source string) bool {
-		if err := fs.Lookup(name).Value.Set(value); err != nil {
-			errs = append(errs, fmt.Errorf("%w: %s value %q for %s: %w", errConfig, source, value, name, err))
-			return false
+	// set applies values in order: one, or each entry of a repeatFlag list.
+	set := func(name string, values []string, source string) bool {
+		for _, value := range values {
+			if err := fs.Lookup(name).Value.Set(value); err != nil {
+				errs = append(errs, fmt.Errorf("%w: %s value %q for %s: %w", errConfig, source, value, name, err))
+				return false
+			}
 		}
 		if v, ok := fs.Lookup(name).Value.(interface{ markDefault() }); ok {
 			v.markDefault()
 		}
-		d.values[name] = value
+		d.values[name] = strings.Join(values, ",")
 		return true
 	}
 
@@ -148,12 +178,12 @@ func (d *defaultsLoader) apply(fs *flag.FlagSet) error {
 					errs = append(errs, fmt.Errorf("%w: %s sets unknown setting %q", errConfig, source, name))
 					continue
 				}
-				value, err := configValue(name, cfg[name])
+				values, err := configValues(name, cfg[name])
 				if err != nil {
 					errs = append(errs, fmt.Errorf("%w: %s value for %s %w", errConfig, source, name, err))
 					continue
 				}
-				if set(name, value, source) {
+				if set(name, values, source) {
 					d.sources[name] = sourceConfig
 				}
 			}
@@ -164,7 +194,7 @@ func (d *defaultsLoader) apply(fs *flag.FlagSet) error {
 		if noDefaultFlags[fl.Name] {
 			return
 		}
-		if v := d.getenv(envName(fl.Name)); v != "" && set(fl.Name, v, envName(fl.Name)) {
+		if v := d.getenv(envName(fl.Name)); v != "" && set(fl.Name, splitRepeat(fl.Name, v), envName(fl.Name)) {
 			d.sources[fl.Name] = sourceEnv
 		}
 	})
@@ -215,6 +245,12 @@ func (d *defaultsLoader) printConfig(w io.Writer, fset *flag.FlagSet) {
 		}
 		if given[fl.Name] {
 			source = sourceFlag
+		}
+		if rv, ok := fl.Value.(repeatValue); ok {
+			// A JSON array, so ["a,b"] (one file) and ["a","b"] differ (#353).
+			list, _ := json.Marshal(append([]string{}, rv.list()...))
+			_, _ = fmt.Fprintf(w, "%-14s = %-24s (%s)\n", fl.Name, list, source)
+			return
 		}
 		value := fl.Value.String()
 		if fl.Name == "attempts" {

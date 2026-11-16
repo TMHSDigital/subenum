@@ -72,6 +72,9 @@ func (w *wordlistPaths) Set(v string) error {
 // the environment rather than the command line.
 func (w *wordlistPaths) markDefault() { w.replace = true }
 
+// list returns the paths, for -print-config.
+func (w *wordlistPaths) list() []string { return w.paths }
+
 // readsStdin reports whether any -w entry is "-".
 func (w *wordlistPaths) readsStdin() bool { return countStdin(w.paths) > 0 }
 

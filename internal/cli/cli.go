@@ -528,6 +528,9 @@ func (o *outputSpecs) Set(v string) error {
 // the environment rather than the command line.
 func (o *outputSpecs) markDefault() { o.replace = true }
 
+// list returns the specs, for -print-config.
+func (o *outputSpecs) list() []string { return o.specs }
+
 // describe names the -o files for notices: the paths, comma-separated.
 func (o *outputSpecs) describe() string {
 	paths := make([]string, len(o.specs))

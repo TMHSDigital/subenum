@@ -82,6 +82,58 @@ func TestDefaultsPrecedence(t *testing.T) {
 	}
 }
 
+// TestRepeatFlagDefaults covers #353: the config file sets several -w or -o
+// values as a JSON array (one value per entry, commas kept), a config or
+// SUBENUM_* string is a comma-separated list, and -print-config shows them as
+// a JSON array. -sources takes an array like -exclude and -type.
+func TestRepeatFlagDefaults(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfg, []byte(`{"o": ["a.txt", "jsonl:b,c.jsonl"], "w": ["x.txt", "y.txt"], "sources": ["ct", "wayback"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name      string
+		env       map[string]string
+		wantW     []string
+		wantO     []string
+		printWant []string
+	}{
+		{"config arrays", nil, []string{"x.txt", "y.txt"}, []string{"a.txt", "jsonl:b,c.jsonl"},
+			[]string{`w              = ["x.txt","y.txt"]`, `o              = ["a.txt","jsonl:b,c.jsonl"]`, `sources        = "ct,wayback"`}},
+		{"env lists replace config", map[string]string{"SUBENUM_W": "w1.txt, w2.txt", "SUBENUM_O": "out.txt,jsonl:out.jsonl"},
+			[]string{"w1.txt", "w2.txt"}, []string{"out.txt", "jsonl:out.jsonl"},
+			[]string{`w              = ["w1.txt","w2.txt"]`, `o              = ["out.txt","jsonl:out.jsonl"] (env)`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &defaultsLoader{path: cfg, getenv: func(k string) string { return tc.env[k] }}
+			f, _, fs, err := parseFlagsWith([]string{"example.com"}, d.apply, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(f.wordlists.paths, tc.wantW) || !slices.Equal(f.outputs.specs, tc.wantO) || f.sources != "ct,wayback" {
+				t.Errorf("w %q, o %q, sources %q; want %q, %q, ct,wayback", f.wordlists.paths, f.outputs.specs, f.sources, tc.wantW, tc.wantO)
+			}
+			var out bytes.Buffer
+			d.printConfig(&out, fs)
+			for _, want := range tc.printWant {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("-print-config lacks %q:\n%s", want, out.String())
+				}
+			}
+		})
+	}
+
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte(`{"w": ["x.txt", 1]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := &defaultsLoader{path: bad, getenv: func(string) string { return "" }}
+	if _, _, _, err := parseFlagsWith(nil, d.apply, nil); err == nil || !strings.Contains(err.Error(), "list entries must be strings") {
+		t.Errorf("non-string -w entry: err = %v", err)
+	}
+}
+
 func TestDefaultsErrors(t *testing.T) {
 	dir := t.TempDir()
 	for name, content := range map[string]string{
