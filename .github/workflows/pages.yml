@@ -2,6 +2,11 @@ name: GitHub Pages
 
 # Only site changes redeploy, so a code-only push does not publish docs for
 # behaviour that is not released yet (#125).
+#
+# The `release` trigger below only fires for a release published outside the
+# release workflow. GoReleaser publishes with GITHUB_TOKEN, and GitHub does not
+# start a workflow for an event caused by that token, so go.yml starts this
+# workflow directly after the release is public (#370).
 on:
   push:
     branches:
