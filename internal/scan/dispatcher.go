@@ -30,11 +30,14 @@ type dispatcher struct {
 	// one name through two parents ("a.b" under the root, "a" under
 	// "b.root"), and only then is visited, the set of generated candidates,
 	// kept (#301). Both are nil for a non-recursive scan.
-	expanded  map[string]struct{}
-	visited   map[string]struct{}
-	frontier  []expansion
-	head      int // first unconsumed expansion in frontier
-	remaining int // candidates not yet generated
+	expanded map[string]struct{}
+	visited  map[string]struct{}
+	frontier []expansion
+	// multiLabel is set when an entry holds more than one label ("dev.api"),
+	// which countUnbuilt cannot place under an exclusion (#361).
+	multiLabel bool
+	head       int // first unconsumed expansion in frontier
+	remaining  int // candidates not yet generated
 
 	// Resume point: rootDone[i-start] is set once entry i is settled (looked
 	// up, or skipped as a duplicate or out of scope); watermark is the first
@@ -58,21 +61,27 @@ type dispatcher struct {
 
 // visitedSet is the dispatcher's set of generated candidates: a map for a
 // recursive scan whose entries include a multi-label one, nil otherwise.
-func visitedSet(recursive bool, entries []string) map[string]struct{} {
-	if !recursive {
+func visitedSet(recursive, multiLabel bool, n int) map[string]struct{} {
+	if !recursive || !multiLabel {
 		return nil
 	}
+	return make(map[string]struct{}, n)
+}
+
+// hasMultiLabel reports whether any entry holds more than one label.
+func hasMultiLabel(entries []string) bool {
 	for _, e := range entries {
 		if strings.Contains(e, ".") {
-			return make(map[string]struct{}, len(entries))
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 	n := len(cfg.Entries)
 	start := min(max(cfg.ResumeFrom, 0), n)
+	multiLabel := hasMultiLabel(cfg.Entries)
 	d := &dispatcher{
 		cfg: cfg,
 		n:   n,
@@ -81,12 +90,13 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		// one name twice, needs to remember what it visited. Without it a
 		// multi-million-entry list skips a map as large as the list (#248),
 		// and a recursive scan one that grows with every candidate (#301).
-		visited:   visitedSet(cfg.Recursive, cfg.Entries),
-		frontier:  []expansion{{parent: cfg.Domain, depth: 1, next: start}},
-		remaining: n - start,
-		start:     start,
-		rootDone:  make([]bool, n-start),
-		watermark: start,
+		visited:    visitedSet(cfg.Recursive, multiLabel, n),
+		multiLabel: multiLabel,
+		frontier:   []expansion{{parent: cfg.Domain, depth: 1, next: start}},
+		remaining:  n - start,
+		start:      start,
+		rootDone:   make([]bool, n-start),
+		watermark:  start,
 	}
 	// Resumed recursive scans re-expand the names found before the
 	// interrupt, whose children may not all have been tested (#73). Run
@@ -216,13 +226,15 @@ func (d *dispatcher) settle(i int) {
 // counted as they would have been, not as skipped, so a budget that ran out
 // only past them still leaves the verdict complete (#238). Without
 // exclusions a cap stays O(1), and with them no candidate is built (see
-// countUnbuilt); only a visited set (multi-label entries in a recursive
-// scan) needs every remaining candidate walked (#301).
+// countUnbuilt). Multi-label entries need every remaining candidate walked:
+// countUnbuilt cannot place them under a pattern (#361), and a visited set
+// must drop the names generated twice (#301), so each walked name joins it
+// and is counted once.
 func (d *dispatcher) stopAdmitting() {
 	switch {
 	case d.visited == nil && d.cfg.scope.empty():
 		d.skipped += d.remaining
-	case d.visited == nil:
+	case !d.multiLabel:
 		d.countUnbuilt()
 	default:
 		for _, e := range d.frontier[d.head:] {
@@ -237,6 +249,7 @@ func (d *dispatcher) stopAdmitting() {
 					if _, dup := d.visited[key]; dup {
 						continue
 					}
+					d.visited[key] = struct{}{}
 				}
 				if d.cfg.scope.excluded(name) {
 					d.excluded++
@@ -252,8 +265,8 @@ func (d *dispatcher) stopAdmitting() {
 }
 
 // countUnbuilt splits the candidates not yet generated into excluded and
-// skipped without building them, for a scan with no visited set (so every
-// entry is a single label). An expansion whose parent's subtree is excluded
+// skipped without building them, for a scan whose entries are all single
+// labels. An expansion whose parent's subtree is excluded
 // is excluded whole. Otherwise only an exact pattern can exclude a child,
 // and only the child made of its first label under its parent, so one pass
 // over the entries finds where those labels sit, and each expansion then

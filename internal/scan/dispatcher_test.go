@@ -177,6 +177,59 @@ func TestCapCountsRecursiveRemainderWithoutBuildingIt(t *testing.T) {
 	}
 }
 
+// TestCapCountsExcludedMultiLabelEntries covers #361: in a flat scan whose
+// entries hold several labels, a budget counts the ones -exclude would have
+// removed as excluded, not skipped, as generating them would.
+func TestCapCountsExcludedMultiLabelEntries(t *testing.T) {
+	for _, exclude := range []string{"*.dev.example.com", "a.dev.example.com"} {
+		cfg := Config{Entries: []string{"www", "a.dev", "b.dev"}, MaxQueries: 1, Exclude: []string{exclude}}
+		full := cfg
+		full.MaxQueries = 0
+		all := testDispatcher(full, 1)
+		candidates := len(drain(all)) + all.excluded
+
+		d := testDispatcher(cfg, 1)
+		admitted := len(drain(d))
+		if admitted != 1 || d.excluded != all.excluded || d.skipped != candidates-admitted-all.excluded {
+			t.Errorf("%s: admitted %d skipped %d excluded %d, want 1, %d and %d",
+				exclude, admitted, d.skipped, d.excluded, candidates-1-all.excluded, all.excluded)
+		}
+	}
+}
+
+// TestCapCountsRecursiveMultiLabelRemainderOnce covers #361: when a recursive
+// scan with multi-label entries is stopped by a budget, a name the rest of
+// the scan would have generated twice ("a.b" under the root, "a" under
+// b.example.com) is counted once, so admitted, skipped and excluded add up to
+// the candidates the scan with no budget generates.
+func TestCapCountsRecursiveMultiLabelRemainderOnce(t *testing.T) {
+	for _, exclude := range [][]string{nil, {"a.b.example.com"}, {"*.b.example.com"}} {
+		cfg := Config{Entries: []string{"b", "x", "a.b", "a"}, Recursive: true, MaxQueries: 2, Exclude: exclude}
+		run := func(cfg Config) (admitted int, d *dispatcher) {
+			d = testDispatcher(cfg, 2)
+			b, ok := d.next()
+			if !ok {
+				t.Fatal("no job")
+			}
+			d.expand(job{domain: b.domain, depth: 1})
+			return 1 + len(drain(d)), d
+		}
+		full := cfg
+		full.MaxQueries = 0
+		allAdmitted, all := run(full)
+		candidates := allAdmitted + all.excluded
+
+		admitted, d := run(cfg)
+		if admitted != 2 || !d.capped {
+			t.Fatalf("%v: admitted %d capped %v, want 2 and true", exclude, admitted, d.capped)
+		}
+		if d.excluded != all.excluded || admitted+d.skipped+d.excluded != candidates {
+			t.Errorf("%v: skipped %d excluded %d, want %d and %d",
+				exclude, d.skipped, d.excluded, candidates-admitted-all.excluded, all.excluded)
+		}
+	}
+}
+
 // A resumed parent that the resumed scan finds again is expanded once, and
 // counted once when a budget stops admission (#301).
 func TestDispatcherExpandsAResumedParentOnce(t *testing.T) {
