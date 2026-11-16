@@ -2,6 +2,7 @@ package scan
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -106,6 +107,63 @@ func TestDispatcherVisitedSetOnlyForMultiLabelEntries(t *testing.T) {
 	if want := []string{"a.b.b.example.com", "b.b.example.com"}; !slices.Equal(got, want) {
 		t.Errorf("children %v, want %v", got, want)
 	}
+}
+
+// TestDispatcherVisitedHoldsOnlyCollidableNames covers #359: one multi-label
+// entry no longer makes the set remember every candidate. Only a name with a
+// multi-label entry as a prefix ("a.b" in "a.b.c") can be reached twice, so
+// only those are recorded, and the duplicate is dropped whichever path
+// generates the name first.
+func TestDispatcherVisitedHoldsOnlyCollidableNames(t *testing.T) {
+	cfg := Config{Entries: []string{"a.b", "a", "b", "c"}, Recursive: true}
+	d := testDispatcher(cfg, 3)
+	drain(d)
+	d.expand(job{domain: "c.example.com", depth: 1})
+	drain(d)
+	// a.b, then a.b.c from c's children; a, b, c, a.c, b.c, c.c are not kept.
+	if len(d.visited) != 2 {
+		t.Errorf("visited holds %d names, want 2 (a.b and a.b.c)", len(d.visited))
+	}
+
+	// x.a.b.example.com is "x.a" under b.example.com and "x" under
+	// a.b.example.com; either expansion may run first.
+	entries := []string{"x.a", "x", "a", "b"}
+	for _, order := range [][]string{
+		{"b.example.com", "a.b.example.com"},
+		{"a.b.example.com", "b.example.com"},
+	} {
+		d := testDispatcher(Config{Entries: entries, Recursive: true}, 3)
+		drain(d)
+		for _, p := range order {
+			d.expand(job{domain: p, depth: strings.Count(p, ".") - 1})
+		}
+		got := drain(d)
+		if n := slices.Index(got, "x.a.b.example.com"); n < 0 || slices.Contains(got[n+1:], "x.a.b.example.com") {
+			t.Errorf("order %v: x.a.b.example.com generated %d times in %v, want once",
+				order, strings.Count(strings.Join(got, " "), "x.a.b.example.com"), got)
+		}
+	}
+}
+
+// BenchmarkDispatcherRecursiveDotted measures a recursive scan's memory when
+// its 100,000 entries include one with a dot, as a CT or Wayback name does
+// (#359): the root and ten found parents, 1.1 million candidates.
+func BenchmarkDispatcherRecursiveDotted(b *testing.B) {
+	entries := append(makeEntries(100_000), "dev.api")
+	b.ReportAllocs()
+	var d *dispatcher
+	for b.Loop() {
+		d = testDispatcher(Config{Entries: entries, Recursive: true}, 2)
+		for i := range 10 {
+			d.expand(job{domain: entries[i] + ".example.com", depth: 1})
+		}
+		for {
+			if _, ok := d.next(); !ok {
+				break
+			}
+		}
+	}
+	b.ReportMetric(float64(len(d.visited)), "visited")
 }
 
 // Jobs settle as they complete, in any order, and the watermark is the first
