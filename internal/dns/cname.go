@@ -37,23 +37,51 @@ func lookupCNAME(ctx context.Context, resolver *net.Resolver, name string) (stri
 	if err != nil || !validLabels(name) {
 		return "", &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 	}
-	msg, err := cnameExchange(ctx, resolver, "udp", qname)
+	msg, err := rawLookup(ctx, resolver, name, qname, dnsmessage.TypeCNAME)
+	if err != nil {
+		return "", err
+	}
+	return canonicalName(msg, name), nil
+}
+
+// rawLookup sends one qtype query for name over resolver.Dial, asking again
+// over TCP when the UDP answer is truncated, and returns a NOERROR answer.
+// Any other RCODE comes back as the *net.DNSError Go's resolver would give.
+func rawLookup(ctx context.Context, resolver *net.Resolver, name string, qname dnsmessage.Name, qtype dnsmessage.Type) (*dnsmessage.Message, error) {
+	msg, err := cnameExchange(ctx, resolver, "udp", qname, qtype)
 	if err == nil && msg.Truncated {
-		msg, err = cnameExchange(ctx, resolver, "tcp", qname)
+		msg, err = cnameExchange(ctx, resolver, "tcp", qname, qtype)
 	}
 	if err != nil {
-		return "", dnsErrorFor(ctx, name, err)
+		return nil, dnsErrorFor(ctx, name, err)
 	}
 	switch msg.RCode {
 	case dnsmessage.RCodeSuccess:
 	case dnsmessage.RCodeNameError:
-		return "", &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
+		return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 	default:
 		// SERVFAIL, REFUSED and the rest, as Go reports them; fixErr names
 		// REFUSED from the RCODE the connection saw.
-		return "", &net.DNSError{Err: "server misbehaving", Name: name, IsTemporary: msg.RCode == dnsmessage.RCodeServerFailure}
+		return nil, &net.DNSError{Err: "server misbehaving", Name: name, IsTemporary: msg.RCode == dnsmessage.RCodeServerFailure}
 	}
-	return canonicalName(msg, name), nil
+	return msg, nil
+}
+
+// nameExists sends one A query for name and returns nil when the answer is
+// NOERROR, with or without addresses: the name, or the end of its alias
+// chain, exists (#362). Go's resolver reports NODATA as not-found, the same
+// as NXDOMAIN; only RCODE 3 comes back here as a not-found error.
+func nameExists(ctx context.Context, resolver *net.Resolver, name string) error {
+	if resolver == nil || resolver.Dial == nil {
+		_, err := resolver.LookupIPAddr(ctx, name)
+		return err
+	}
+	qname, err := dnsmessage.NewName(name)
+	if err != nil || !validLabels(name) {
+		return &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
+	}
+	_, err = rawLookup(ctx, resolver, name, qname, dnsmessage.TypeA)
+	return err
 }
 
 // canonicalName follows the CNAME records in msg's answer from name, at
@@ -77,11 +105,11 @@ func canonicalName(msg *dnsmessage.Message, name string) string {
 	return canonical
 }
 
-// cnameExchange sends one CNAME query for qname over a connection from
-// resolver.Dial and returns the matching reply. On UDP, replies to other
-// queries (a pooled socket can hold a late answer to an earlier one) are
-// skipped until the deadline.
-func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, qname dnsmessage.Name) (*dnsmessage.Message, error) {
+// cnameExchange sends one qtype query (CNAME for lookupCNAME) for qname over
+// a connection from resolver.Dial and returns the matching reply. On UDP,
+// replies to other queries (a pooled socket can hold a late answer to an
+// earlier one) are skipped until the deadline.
+func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, qname dnsmessage.Name, qtype dnsmessage.Type) (*dnsmessage.Message, error) {
 	conn, err := resolver.Dial(ctx, network, "")
 	if err != nil {
 		return nil, err
@@ -98,7 +126,7 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 		return nil, err
 	}
 	id := binary.BigEndian.Uint16(idb[:])
-	query, err := cnameQuery(id, qname)
+	query, err := cnameQuery(id, qname, qtype)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +172,7 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 			return nil, err
 		}
 		if msg.ID != id || !msg.Response || len(msg.Questions) != 1 ||
-			msg.Questions[0].Type != dnsmessage.TypeCNAME || !strings.EqualFold(msg.Questions[0].Name.String(), qname.String()) {
+			msg.Questions[0].Type != qtype || !strings.EqualFold(msg.Questions[0].Name.String(), qname.String()) {
 			if packet {
 				continue // a late answer to an earlier query on this socket
 			}
@@ -157,7 +185,7 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 // ednsPayload is the UDP answer size cnameQuery advertises, Go's resolver's.
 const ednsPayload = 1232
 
-// cnameQuery builds a recursive CNAME query with an EDNS(0) OPT record
+// cnameQuery builds a recursive qtype query with an EDNS(0) OPT record
 // advertising 1232-byte UDP answers, as Go's resolver sends.
 // validLabels reports whether every label of name, which may end in a dot,
 // is 1 to 63 bytes long.
@@ -170,13 +198,13 @@ func validLabels(name string) bool {
 	return true
 }
 
-func cnameQuery(id uint16, qname dnsmessage.Name) ([]byte, error) {
+func cnameQuery(id uint16, qname dnsmessage.Name, qtype dnsmessage.Type) ([]byte, error) {
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
 	b.EnableCompression()
 	if err := b.StartQuestions(); err != nil {
 		return nil, err
 	}
-	if err := b.Question(dnsmessage.Question{Name: qname, Type: dnsmessage.TypeCNAME, Class: dnsmessage.ClassINET}); err != nil {
+	if err := b.Question(dnsmessage.Question{Name: qname, Type: qtype, Class: dnsmessage.ClassINET}); err != nil {
 		return nil, err
 	}
 	if err := b.StartAdditionals(); err != nil {

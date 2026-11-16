@@ -391,6 +391,21 @@ func (l Lookup) lookupOne(ctx context.Context, domain, t string) ([]Record, erro
 	return recs, nil
 }
 
+// probeExists is nameExists under one rate slot, l.Timeout and a wire
+// budget, as lookupOne runs a type's lookup.
+func (l Lookup) probeExists(ctx context.Context, domain string) error {
+	if err := limiterFrom(ctx).Wait(ctx); err != nil {
+		return err
+	}
+	b := &wireBudget{prepaid: 1}
+	probeCtx, cancel := context.WithTimeout(context.WithValue(ctx, budgetKey{}, b), l.Timeout)
+	defer cancel()
+	if err := nameExists(probeCtx, l.Resolver, fqdn(domain)); err != nil {
+		return b.fixErr(err)
+	}
+	return nil
+}
+
 // worse keeps the more severe of two lookup errors. Any infrastructure failure
 // (timeout, refused, SERVFAIL, cancellation) outranks a not-found answer: a name
 // is a definitive negative only if every requested type said so. Otherwise an

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -196,9 +197,50 @@ func TestTakeoverCache(t *testing.T) {
 	if c.Lookups() != 2 {
 		t.Errorf("cache sent %d target lookups, want 2", c.Lookups())
 	}
-	for target := range targets {
-		if n := srv.QueriesFor(target, dnsmessage.TypeA); n != 1 {
-			t.Errorf("server saw %d A queries for %s, want 1", n, target)
+	// A negative is checked once more for its RCODE (#362): the address
+	// lookup plus one A query for the missing target.
+	for target, want := range map[string]int64{"gone.example.net": 2, "acme.herokuapp.com": 1} {
+		if n := srv.QueriesFor(target, dnsmessage.TypeA); n != want {
+			t.Errorf("server saw %d A queries for %s, want %d", n, target, want)
+		}
+	}
+}
+
+// TestTakeoverHintNODATA covers #362: a CNAME target or name server that
+// exists without addresses (NOERROR, no answer) is not dangling, while one
+// that does not exist (NXDOMAIN) still is, and a probe that fails is not
+// called dangling either.
+func TestTakeoverHintNODATA(t *testing.T) {
+	var flakyCalls atomic.Int32
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch q.Name {
+		case "mail-only.example.net", "ns-noaddr.example.net":
+			if q.Type == dnsmessage.TypeMX {
+				return dnstest.Reply{MX: []string{"10 mx1.example.net"}}
+			}
+			return dnstest.Reply{} // NODATA
+		case "flaky.example.net":
+			if q.Type == dnsmessage.TypeA && flakyCalls.Add(1) > 1 {
+				return dnstest.ServFail // the RCODE probe
+			}
+			return dnstest.Reply{}
+		}
+		return dnstest.NXDomain
+	})
+	l := Lookup{Resolver: NewResolver(time.Second, srv.Addr), Timeout: time.Second, Attempts: 1}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		records []Record
+		want    string
+	}{
+		{[]Record{{Type: "CNAME", Value: "mail-only.example.net"}}, ""},
+		{[]Record{{Type: "CNAME", Value: "gone.example.net"}}, "dangling"},
+		{[]Record{{Type: "CNAME", Value: "flaky.example.net"}}, ""},
+		{[]Record{{Type: "NS", Value: "ns-noaddr.example.net"}}, ""},
+		{[]Record{{Type: "NS", Value: "ns-gone.example.net"}}, DanglingNS},
+	} {
+		if got := TakeoverHint(ctx, l, tc.records); got != tc.want {
+			t.Errorf("TakeoverHint(%v) = %q, want %q", tc.records, got, tc.want)
 		}
 	}
 }

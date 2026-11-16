@@ -147,10 +147,11 @@ func HintsTakeover(types []string) bool {
 const DanglingNS = "dangling-ns"
 
 // TakeoverHint inspects a result's CNAME and NS records and returns a
-// takeover marker: "dangling" when the CNAME target does not resolve
+// takeover marker: "dangling" when the CNAME target does not exist
 // (NXDOMAIN), "provider:<name>" when it points at a takeover-prone service,
 // "dangling:<name>" when both hold, and "dangling-ns" when the name is
-// delegated to a name server that does not resolve. It returns "" when there
+// delegated to a name server that does not exist. A target that exists
+// without addresses (NODATA) is not dangling (#362). It returns "" when there
 // is nothing suspicious. Targets are resolved with l.Resolver, l.Timeout and
 // l.Attempts for DefaultTypes, without logging (l.Types and l.Logf are
 // unused); an inconclusive lookup (timeout, SERVFAIL) is not called dangling.
@@ -241,6 +242,20 @@ func (c *TakeoverCache) skip(name string) bool {
 	return c.Skip != nil && c.Skip(strings.TrimSuffix(name, "."))
 }
 
+// targetOutcome resolves target (A and AAAA). Go reports a name that exists
+// without addresses (NODATA) as not-found, the same as one that does not
+// exist, but only the second can be registered by someone else (#362). So a
+// negative is checked with one A query whose RCODE tells them apart: NOERROR
+// is OutcomeFound (the target exists), NXDOMAIN stays OutcomeNXDomain, and
+// anything else is inconclusive.
+func targetOutcome(ctx context.Context, l Lookup, target string) Outcome {
+	_, outcome := l.forTarget().Resolve(ctx, target)
+	if outcome != OutcomeNXDomain {
+		return outcome
+	}
+	return Classify(l.probeExists(ctx, target))
+}
+
 // outcome resolves target (A and AAAA) once for the life of the cache.
 func (c *TakeoverCache) outcome(ctx context.Context, l Lookup, target string) Outcome {
 	key := strings.ToLower(strings.TrimSuffix(target, "."))
@@ -255,7 +270,7 @@ func (c *TakeoverCache) outcome(ctx context.Context, l Lookup, target string) Ou
 			c.entries[key] = e
 			c.mu.Unlock()
 			c.lookups.Add(1)
-			_, e.outcome = l.forTarget().Resolve(ctx, target)
+			e.outcome = targetOutcome(ctx, l, target)
 			if e.outcome != OutcomeFound && e.outcome != OutcomeNXDomain {
 				c.mu.Lock()
 				delete(c.entries, key) // inconclusive: let a later name retry
