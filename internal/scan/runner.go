@@ -790,11 +790,11 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	disp.rootOutcome = st.rootOutcome // it marks the entries out of scope
 	go disp.run(ctx, workers, jobs, enqueue, completed, &st.total, &st.stats, events)
 	st.runWorkers(ctx, workers, jobs, completed)
-	// Before the retry pass, which runs only when nothing is left to resume.
-	repeat := st.repeat()
 	if cfg.RetryInconclusive {
 		st.retryPending(ctx, workers)
 	}
+	// After the retry pass, which moves the names it recovers (#374).
+	repeat := st.repeat()
 	// Stop the ticker and wait for it to fully exit before emitting
 	// EventDone, so the deferred close(events) can never race an in-flight
 	// ticker send.
@@ -1015,6 +1015,21 @@ func (s *scanState) recordRepeat(j job, code uint8) {
 	}
 	if i := j.root - s.rootStart; i >= 0 && i < len(s.rootOutcome) {
 		s.rootOutcome[i] = code
+	}
+}
+
+// moveRepeat moves a name the retry pass recovered to its new repeat code,
+// as retry moves it between the counters (#374): a resume that looks it up
+// again must take it off the counter it ends in now. A name from an earlier
+// part (RetryPrior) is not looked up again.
+func (s *scanState) moveRepeat(it pendingLookup, code uint8) {
+	switch {
+	case it.prior:
+	case it.root < 0:
+		s.deep[repeatCode(it.outcome)].Add(-1)
+		s.deep[code].Add(1)
+	default:
+		s.recordRepeat(job{root: it.root}, code)
 	}
 }
 
@@ -1309,9 +1324,11 @@ func (s *scanState) retry(ctx context.Context, it pendingLookup) {
 	st.counter(it.outcome).Add(-1)
 	if outcome == dns.OutcomeFound && isWildcardAnswer(ctx, cfg, s.fp, name, records) {
 		st.wildcardFiltered.Add(1)
+		s.moveRepeat(it, repeatWildcard)
 		return
 	}
 	st.add(outcome)
+	s.moveRepeat(it, repeatCode(outcome))
 	if outcome == dns.OutcomeFound {
 		s.report(ctx, name, records, partial)
 	}

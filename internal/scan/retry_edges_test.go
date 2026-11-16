@@ -86,6 +86,55 @@ func TestRetryCancelledKeepsNamesPending(t *testing.T) {
 	}
 }
 
+// TestRetryMovesRepeatedLookup: a depth-2 name the retry pass recovers moves
+// in Stats.Repeat as it does in the counters, so a stop during the pass, less
+// what a resume repeats, leaves only the depth-1 lookups (#374).
+func TestRetryMovesRepeatedLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls sync.Map
+	var recovered atomic.Bool
+	cfg := Config{
+		Domain: "example.com", Entries: []string{"a", "b", "c"}, Concurrency: 1,
+		Timeout: time.Second, Simulate: true, Attempts: 1, Recursive: true, Depth: 2, RetryInconclusive: true,
+		resolveHook: func(ctx context.Context, name string) ([]dns.Record, dns.Outcome) {
+			n, _ := calls.LoadOrStore(name, new(atomic.Int32))
+			retry := n.(*atomic.Int32).Add(1) == 2
+			switch name {
+			case "a.example.com":
+				return []dns.Record{{Type: "A", Value: "192.0.2.1"}}, dns.OutcomeFound
+			case "b.a.example.com": // times out, then is recovered
+				if retry {
+					recovered.Store(true)
+					return nil, dns.OutcomeNXDomain
+				}
+				return nil, dns.OutcomeTimeout
+			case "c.a.example.com": // the interrupt arrives with its retry
+				if retry && recovered.Load() {
+					cancel()
+					<-ctx.Done()
+				}
+				return nil, dns.OutcomeTimeout
+			}
+			return nil, dns.OutcomeNXDomain
+		},
+	}
+	events := make(chan Event, 64)
+	go Run(ctx, cfg, events)
+	done, errs, _ := collect(events)
+	if len(errs) != 0 || done == nil {
+		t.Fatalf("errors %v, done %v", errs, done)
+	}
+	st, r := done.Stats, done.Stats.Repeat
+	if st.Recovered != 1 || st.RootDone != 3 {
+		t.Fatalf("recovered %d, RootDone %d; want 1 and the whole wordlist", st.Recovered, st.RootDone)
+	}
+	// What stays after the repeat is taken off: a found, b and c NXDOMAIN.
+	if nx, to, n := st.NXDomain-r.NXDomain, st.Timeout-r.Timeout, done.Processed-(r.Processed-r.Found); nx != 2 || to != 0 || n != 3 {
+		t.Errorf("without the repeat: nxdomain %d timeout %d processed %d, want 2 0 3 (stats %+v, repeat %+v)", nx, to, n, st, r)
+	}
+}
+
 // TestPoolOfLiarsFallsBackToTrusted: once every pool member is flagged for
 // injecting names, lookups go to the trusted resolver, and no injected name
 // is ever reported.
