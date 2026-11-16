@@ -434,8 +434,11 @@ jobs:
     # workflow for an event caused by GITHUB_TOKEN, so a GoReleaser publish
     # never fires it (#370). Start the rebuild directly. It checks out main and
     # the header reads the latest release from the Pages metadata, so the site
-    # shows the tag that was just published.
+    # shows the tag that was just published. The release is already public
+    # here and publish-image needs this job, so a failed rebuild is a warning,
+    # not a failed release; rerun pages.yml by hand if it happens.
     - name: Rebuild GitHub Pages
+      continue-on-error: true
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       shell: bash
