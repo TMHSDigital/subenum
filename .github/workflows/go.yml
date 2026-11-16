@@ -20,6 +20,7 @@ jobs:
   # passes; "stable" is the toolchain releases are built with, and is where
   # lint and govulncheck run (#38).
   build:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -140,6 +141,7 @@ jobs:
   # replacement, signals and paths differ there (#170). The race detector
   # runs on Linux, in build.
   test-os:
+    timeout-minutes: 20
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -162,6 +164,7 @@ jobs:
   # Runs the composite action (action.yml, #126) from this checkout against
   # a lab zone on every runner OS: a scan, then a diff against its results.
   action:
+    timeout-minutes: 20
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -230,6 +233,7 @@ jobs:
   # rather than a lab zone file from this checkout, whose format can be
   # newer than the release.
   action-release:
+    timeout-minutes: 15
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
     permissions:
@@ -260,6 +264,7 @@ jobs:
   # Builds the Dockerfile for both published platforms without pushing, so a
   # broken image is caught on the PR rather than during a release.
   docker:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -282,6 +287,7 @@ jobs:
   # (no signing, no publishing), so .goreleaser.yaml is exercised long before
   # a tag depends on it (#61).
   release-snapshot:
+    timeout-minutes: 30
     needs: build
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
@@ -340,6 +346,7 @@ jobs:
   # failed draft). It waits for every test job, the macOS and Windows tests
   # and the action included, since their binaries and the action ship too.
   release:
+    timeout-minutes: 30
     needs: [ build, test-os, action, docker ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -423,6 +430,7 @@ jobs:
   # (#40). The Dockerfile cross-compiles in a build-platform builder stage, so
   # arm64 needs no QEMU. `latest` only moves for non-prerelease tags.
   publish-image:
+    timeout-minutes: 30
     needs: release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -489,6 +497,7 @@ jobs:
   # deletes a draft (never a published release) and is a no-op when there is
   # nothing to clean, so it is safe and idempotent.
   cleanup-failed-release:
+    timeout-minutes: 5
     needs: [release]
     if: ${{ failure() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
