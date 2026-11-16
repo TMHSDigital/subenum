@@ -69,6 +69,21 @@ func TestE2ELabs(t *testing.T) {
 			args: []string{"-simulate-zone", lab("lab4-recursive.zone"), "-recursive", "-depth", "3", "lab.example"},
 			want: []string{"admin.staging.dev", "api.dev", "corp", "dev", "git.dev", "staging.dev", "vpn.corp", "www"},
 		},
+		{
+			name: "lab6 default finds both address families",
+			args: []string{"-simulate-zone", lab("lab6-ipv6.zone"), "lab.example"},
+			want: []string{"api", "legacy", "www"},
+		},
+		{
+			name: "lab6 A misses the IPv6-only service",
+			args: []string{"-simulate-zone", lab("lab6-ipv6.zone"), "-type", "A", "lab.example"},
+			want: []string{"legacy", "www"},
+		},
+		{
+			name: "lab6 AAAA misses the IPv4-only service",
+			args: []string{"-simulate-zone", lab("lab6-ipv6.zone"), "-type", "AAAA", "lab.example"},
+			want: []string{"api", "www"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
