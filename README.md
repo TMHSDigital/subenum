@@ -624,6 +624,8 @@ To compare two results files you already have, without scanning, use `subenum di
 
 No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-used values are saved to `last.json` in your user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows) and restored on next launch.
 
+Leaving a numeric field blank uses its built-in default.
+
 <img src="docs/assets/tui-form.png" alt="subenum interactive TUI" width="640"/>
 
 <details>

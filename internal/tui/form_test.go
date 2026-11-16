@@ -45,8 +45,8 @@ func TestValidateNonPositiveConcurrency(t *testing.T) {
 	}
 }
 
-// Empty hit rate must be accepted when Simulate is OFF (it is never used),
-// and rejected when Simulate is ON.
+// Empty hit rate uses the default; explicit invalid values only matter
+// when Simulate is ON.
 func TestValidateHitRateOnlyWhenSimulate(t *testing.T) {
 	live := newFormModel(savedConfig{})
 	live.inputs[fieldDomain].SetValue("example.com")
@@ -64,13 +64,51 @@ func TestValidateHitRateOnlyWhenSimulate(t *testing.T) {
 	sim.inputs[fieldDomain].SetValue("example.com")
 	sim.inputs[fieldHitRate].SetValue("") // blank hit rate
 	sim.toggles[fieldSimulate] = true
-	if _, errStr := sim.validate(); errStr == "" {
-		t.Error("simulate mode should reject blank hit rate")
+	if vals, errStr := sim.validate(); errStr != "" || vals.HitRate != scan.DefaultHitRate {
+		t.Errorf("simulate mode with blank hit rate: rate %d, error %q", vals.HitRate, errStr)
 	}
 
 	sim.inputs[fieldHitRate].SetValue("500") // out of range
 	if _, errStr := sim.validate(); errStr == "" {
 		t.Error("simulate mode should reject out-of-range hit rate")
+	}
+}
+
+func TestValidateBlankNumericFieldsUseDefaults(t *testing.T) {
+	for _, field := range []int{fieldConcurrency, fieldTimeout, fieldAttempts, fieldHitRate,
+		fieldDepth, fieldRate, fieldMaxQueries, fieldRatePerResolver} {
+		t.Run(formFields[field].name(), func(t *testing.T) {
+			for _, blank := range []string{"", " \t "} {
+				m := newFormModel(savedConfig{Domain: "example.com", Simulate: true, Recursive: true})
+				want, errStr := m.validate()
+				if errStr != "" {
+					t.Fatal(errStr)
+				}
+				m.inputs[field].SetValue(blank)
+				got, errStr := m.validate()
+				if errStr != "" {
+					t.Errorf("blank %q: %s", blank, errStr)
+					continue
+				}
+				if !reflect.DeepEqual(got.Options, want.Options) || !reflect.DeepEqual(got.saved, want.saved) {
+					t.Errorf("blank %q changed scan or saved defaults: got %+v, want %+v", blank, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateExplicitInvalidNumericFields(t *testing.T) {
+	for _, field := range []int{fieldConcurrency, fieldTimeout, fieldAttempts, fieldHitRate} {
+		t.Run(formFields[field].name(), func(t *testing.T) {
+			for _, value := range []string{"0", "-1", "not-a-number"} {
+				m := newFormModel(savedConfig{Domain: "example.com", Simulate: true})
+				m.inputs[field].SetValue(value)
+				if _, errStr := m.validate(); errStr == "" {
+					t.Errorf("explicit %q must still fail validation", value)
+				}
+			}
+		})
 	}
 }
 
