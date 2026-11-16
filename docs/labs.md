@@ -18,19 +18,18 @@ against a live zone, and the results are the same on every run.
 
 ## Setup
 
-You need a subenum binary (see [Installation](https://github.com/TMHSDigital/subenum#installation))
-and a copy of the repository for the scenario files. For a zero-install
-classroom, [open the labs in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum?devcontainer_path=.devcontainer/labs/devcontainer.json&quickstart=1):
+You need a subenum binary (see [Installation](https://github.com/TMHSDigital/subenum#installation)).
+The scenarios and their wordlist are built into it, so the labs run from any
+directory: `-simulate-zone lab1` (or `lab1-first-scan`) picks the built-in
+scenario, and without `-w` the scan uses the labs' short wordlist. For a
+zero-install classroom, [open the labs in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum?devcontainer_path=.devcontainer/labs/devcontainer.json&quickstart=1):
 the container builds `./subenum`, opens this page and the first scenario, and
 prints the lab 1 command.
 
-Every lab scans `lab.example` with the short wordlist `examples/labs/words.txt`.
-Run the commands from the repository root:
-
-```bash
-L=examples/labs
-W="-w $L/words.txt"
-```
+Every lab scans `lab.example`. To edit a scenario or write your own, copy one
+from [`examples/labs`](https://github.com/TMHSDigital/subenum/tree/main/examples/labs)
+and pass its path instead, for example `-simulate-zone ./my-lab.zone`; a path
+uses the bundled 5,000-word list unless you add `-w`.
 
 Labs run from the command line. Combining `-tui` with an active `-simulate-zone`
 setting (including `SUBENUM_SIMULATE_ZONE` or a config-file value) exits with
@@ -41,7 +40,7 @@ Each lab ends with questions. The answers are folded underneath; try first.
 ## Lab 1: a first scan
 
 ```bash
-subenum $W -simulate-zone $L/lab1-first-scan.zone -show-records lab.example
+subenum -simulate-zone lab1 -show-records lab.example
 ```
 
 `-show-records` prints the records behind each name.
@@ -73,7 +72,7 @@ subenum $W -simulate-zone $L/lab1-first-scan.zone -show-records lab.example
 ## Lab 2: spot the wildcard
 
 ```bash
-subenum $W -simulate-zone $L/lab2-wildcard.zone lab.example
+subenum -simulate-zone lab2 lab.example
 ```
 
 1. What does subenum report, and why does it refuse to continue?
@@ -100,8 +99,8 @@ This resolver answers REFUSED once it gets more than 40 queries in a second,
 as many public and corporate resolvers do.
 
 ```bash
-subenum $W -simulate-zone $L/lab3-rate-limit.zone -stats lab3.json lab.example
-subenum $W -simulate-zone $L/lab3-rate-limit.zone -stats lab3-paced.json -rate 30 lab.example
+subenum -simulate-zone lab3 -stats lab3.json lab.example
+subenum -simulate-zone lab3 -stats lab3-paced.json -rate 30 lab.example
 ```
 
 1. Compare the `refused` counts of the two runs.
@@ -126,14 +125,14 @@ subenum $W -simulate-zone $L/lab3-rate-limit.zone -stats lab3-paced.json -rate 3
 ## Lab 4: recursive discovery
 
 ```bash
-subenum $W -simulate-zone $L/lab4-recursive.zone lab.example
-subenum $W -simulate-zone $L/lab4-recursive.zone -recursive -depth 3 lab.example
+subenum -simulate-zone lab4 lab.example
+subenum -simulate-zone lab4 -recursive -depth 3 lab.example
 ```
 
 1. How many names does the flat scan find? How many does the recursive scan
    find?
 2. Which name needed `-depth 3`?
-3. Try the recursive scan with the bundled 5,000-word list (drop `$W`). What
+3. Try the recursive scan with the bundled 5,000-word list (add `-w ""`). What
    happens, and why?
 
 <details markdown="1">
@@ -153,7 +152,7 @@ subenum $W -simulate-zone $L/lab4-recursive.zone -recursive -depth 3 lab.example
 ## Lab 5: when lookups fail
 
 ```bash
-subenum $W -simulate-zone $L/lab5-failures.zone -timeout 300 -stats lab5.json lab.example
+subenum -simulate-zone lab5 -timeout 300 -stats lab5.json lab.example
 ```
 
 1. Which outcome lines in the breakdown are non-zero besides `resolved` and
@@ -175,9 +174,9 @@ subenum $W -simulate-zone $L/lab5-failures.zone -timeout 300 -stats lab5.json la
 ## Lab 6: IPv6-only services
 
 ```bash
-subenum $W -simulate-zone $L/lab6-ipv6.zone -show-records lab.example
-subenum $W -simulate-zone $L/lab6-ipv6.zone -type A -show-records lab.example
-subenum $W -simulate-zone $L/lab6-ipv6.zone -type AAAA -show-records lab.example
+subenum -simulate-zone lab6 -show-records lab.example
+subenum -simulate-zone lab6 -type A -show-records lab.example
+subenum -simulate-zone lab6 -type AAAA -show-records lab.example
 ```
 
 1. Which three names does the default scan find, and which address families

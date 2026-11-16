@@ -231,7 +231,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
 	fs.IntVar(&f.testHitRate, "hit-rate", scan.DefaultHitRate, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
-	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file via a local DNS server, so no traffic leaves the machine (see the Labs page)")
+	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6), via a local DNS server, so no traffic leaves the machine (see the Labs page)")
 	fs.Var(&f.outputs, "o", "Write results to `file` (in addition to stdout); repeat for several files, each in -format or in the format named as a prefix, format:path (jsonl:results.jsonl)")
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain, 1 = no retry (default 1)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
@@ -607,7 +607,7 @@ func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Wri
 	}
 	out.Info("Target domain: %s", domain)
 	if len(f.wordlists.paths) == 0 {
-		out.Info("Wordlist: %s", bundledWordlistName)
+		out.Info("Wordlist: %s", defaultWordlistName(f))
 	} else {
 		out.Info("Wordlist: %s", f.wordlists.describe())
 	}

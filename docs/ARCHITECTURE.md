@@ -346,7 +346,7 @@ With `-ct`, `ct.Client.Names` makes one HTTPS request per target to crt.sh (no A
 
 ### 5.6. Lab Mode
 
-`-simulate-zone <file>` loads a scenario with `labzone.Load` (exact names, records, `*.name` wildcards, and `TIMEOUT`, `SERVFAIL`, `REFUSED` or `NXDOMAIN` entries, plus `$DELAY` and `$REFUSE-ABOVE` directives), serves it with `dnsserver.Listen` on a loopback port and points `-dns-server` at it (`startLabZone`). Unlike `-simulate`, the scan then runs the real resolver, wildcard detection, `-rate` pacing and reliability guard, and no traffic leaves the machine. The same `internal/dnsserver` backs the hermetic tests through `internal/dnstest`.
+`-simulate-zone <file>` loads a scenario with `labzone.Load`, or, for a name such as `lab1` that is not a file, the scenario compiled in from `examples/labs` with its wordlist as the `-w` default (`builtinLab`) (exact names, records, `*.name` wildcards, and `TIMEOUT`, `SERVFAIL`, `REFUSED` or `NXDOMAIN` entries, plus `$DELAY` and `$REFUSE-ABOVE` directives), serves it with `dnsserver.Listen` on a loopback port and points `-dns-server` at it (`startLabZone`). Unlike `-simulate`, the scan then runs the real resolver, wildcard detection, `-rate` pacing and reliability guard, and no traffic leaves the machine. The same `internal/dnsserver` backs the hermetic tests through `internal/dnstest`.
 
 ### 5.7. SARIF Output
 

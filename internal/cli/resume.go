@@ -382,7 +382,11 @@ func fileDigest(path string) (string, error) {
 // state leaves it as it was (#297).
 func inputDigests(f cliFlags) (map[string]string, error) {
 	out := map[string]string{}
-	paths := append(slices.Clone(f.wordlists.paths), f.domainList, f.excludeFile, f.resolvers, f.simZone, f.seedsFile, f.diff)
+	simZone := f.simZone
+	if _, ok := builtinLab(simZone); ok {
+		simZone = "" // compiled in, not a file; it does not move a saved position (#354)
+	}
+	paths := append(slices.Clone(f.wordlists.paths), f.domainList, f.excludeFile, f.resolvers, simZone, f.seedsFile, f.diff)
 	for _, p := range paths {
 		d, err := fileDigest(p)
 		if err != nil {

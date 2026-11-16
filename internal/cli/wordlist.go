@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"bytes"
+	"io"
+	"path"
 	"strings"
 
 	"github.com/TMHSDigital/subenum/data"
@@ -9,6 +12,29 @@ import (
 
 // bundledWordlistName is how notices refer to the embedded list (#63).
 const bundledWordlistName = "bundled top-5000 list (SecLists)"
+
+// labWordlistName is how notices refer to the lab scenarios' embedded list,
+// the default under a built-in -simulate-zone scenario (#354).
+const labWordlistName = "built-in lab wordlist"
+
+// usesLabWords reports whether a run reads the lab wordlist: a built-in
+// -simulate-zone scenario with no -w at all. -w "" still picks the bundled
+// list, as Lab 4 asks.
+func usesLabWords(f cliFlags) bool {
+	if f.wordlists.chosen {
+		return false
+	}
+	_, ok := builtinLab(f.simZone)
+	return ok
+}
+
+// defaultWordlistName names the list a run without -w reads.
+func defaultWordlistName(f cliFlags) string {
+	if usesLabWords(f) {
+		return labWordlistName
+	}
+	return bundledWordlistName
+}
 
 // wordlistPaths is the repeatable -w flag (#199). Each -w adds a file; the
 // files are read in order and their lines concatenated, so Prepare dedupes
@@ -19,6 +45,7 @@ const bundledWordlistName = "bundled top-5000 list (SecLists)"
 type wordlistPaths struct {
 	paths   []string
 	replace bool // the current paths are a default; the next Set replaces them
+	chosen  bool // -w was given, even as "": no lab-wordlist default (#354)
 }
 
 func (w *wordlistPaths) String() string {
@@ -31,6 +58,7 @@ func (w *wordlistPaths) String() string {
 // Set adds a path. An empty value adds nothing, so -w "" still means the
 // bundled list.
 func (w *wordlistPaths) Set(v string) error {
+	w.chosen = true
 	if w.replace {
 		w.paths, w.replace = nil, false
 	}
@@ -56,7 +84,16 @@ func (w *wordlistPaths) describe() string { return strings.Join(w.paths, ", ") }
 func prepareWordlist(f cliFlags, in *runtimeInputs) (*wordlist.Prepared, error) {
 	pr := wordlist.NewPreparer()
 	if len(f.wordlists.paths) == 0 {
-		if err := wordlist.EachLine(strings.NewReader(data.Subdomains5k), pr.Add); err != nil {
+		src := io.Reader(strings.NewReader(data.Subdomains5k))
+		if usesLabWords(f) {
+			// A built-in scenario brings its own list (#354).
+			b, err := labFiles.ReadFile(path.Join(labDir, "words.txt"))
+			if err != nil {
+				return nil, err
+			}
+			src = bytes.NewReader(b)
+		}
+		if err := wordlist.EachLine(src, pr.Add); err != nil {
 			return nil, err
 		}
 		return pr.Prepared(), nil

@@ -414,7 +414,7 @@ func (s *session) loadInputs() bool {
 	// The wordlist is read once (stdin can only be read once) and normalized
 	// per target, since the name-length limit depends on the domain.
 	if len(f.wordlists.paths) == 0 {
-		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", bundledWordlistName)
+		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", defaultWordlistName(f))
 	}
 	s.settings = effectiveSettings(s.fs)
 	if s.resume != nil {

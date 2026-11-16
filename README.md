@@ -287,7 +287,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
-| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
+| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab6`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
 | **Modes** | | |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query), then exit; JSON with `-format json` or `jsonl` |
@@ -303,7 +303,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 > Simulation mode (`-simulate`) generates synthetic results and performs zero network I/O. Do not confuse simulated output with real DNS data. Simulated output marks itself: JSON and JSONL results carry `"simulated": true`, CSV gets a `simulated` column, and `-o` text files start with a `# SIMULATED` comment line. Bare names piped to stdout stay unmarked so they still pipe cleanly.
 
 > [!TIP]
-> For teaching, `-simulate-zone lab.zone` goes further than `-simulate`: a scenario file defines exact names, records, wildcards, failures and resolver rate limits, and a DNS server on `127.0.0.1` answers from it. The real resolver, wildcard filtering, `-rate` and the run-quality report all run unchanged, deterministically and with no traffic leaving the machine. [docs/labs.md](docs/labs.md) has six guided exercises with answers, built on the scenarios in `examples/labs/`.
+> For teaching, `-simulate-zone lab.zone` goes further than `-simulate`: a scenario file defines exact names, records, wildcards, failures and resolver rate limits, and a DNS server on `127.0.0.1` answers from it. The real resolver, wildcard filtering, `-rate` and the run-quality report all run unchanged, deterministically and with no traffic leaving the machine. [docs/labs.md](docs/labs.md) has six guided exercises with answers, built on the scenarios in `examples/labs/`, which every binary carries: `subenum -simulate-zone lab1 lab.example` runs the first one from any directory.
 
 ### Defaults, completions and the man page
 

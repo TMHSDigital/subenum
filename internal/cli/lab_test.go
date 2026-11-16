@@ -117,6 +117,72 @@ func TestE2ELabs(t *testing.T) {
 	}
 }
 
+// TestE2EBuiltinLabs runs the scenarios compiled into the binary by name, as
+// a release binary does away from a checkout (#354): without -w the lab
+// wordlist is the default, and an unknown name lists the built-in ones.
+func TestE2EBuiltinLabs(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"lab1", "lab1-first-scan", "lab1-first-scan.zone"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			args := append(append([]string{"-progress=false"}, labTimingArgs...), "-simulate-zone", name, "lab.example")
+			code, out := runCLIMerged(t, args...)
+			if code != exitOK {
+				t.Fatalf("exit %d\n%s", code, out)
+			}
+			for _, want := range []string{"built-in scenario lab1-first-scan", "No -w given: using the " + labWordlistName} {
+				if !strings.Contains(out, want) {
+					t.Errorf("output lacks %q:\n%s", want, out)
+				}
+			}
+			var got []string
+			for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+				line = strings.TrimSpace(line)
+				if !strings.ContainsAny(line, " \t") && strings.HasSuffix(line, ".lab.example") {
+					got = append(got, strings.TrimSuffix(line, ".lab.example"))
+				}
+			}
+			slices.Sort(got)
+			if want := []string{"jenkins", "mail", "shop", "vpn", "www"}; !slices.Equal(got, want) {
+				t.Errorf("found %v, want %v", got, want)
+			}
+		})
+	}
+	t.Run("-w empty keeps the bundled list", func(t *testing.T) {
+		t.Parallel()
+		code, out := runCLIMerged(t, "-dry-run", "-w", "", "-simulate-zone", "lab4", "lab.example")
+		if code != exitOK || !strings.Contains(out, "No -w given: using the "+bundledWordlistName) {
+			t.Fatalf("exit %d, want the bundled list\n%s", code, out)
+		}
+	})
+	t.Run("unknown", func(t *testing.T) {
+		t.Parallel()
+		code, out := runCLIMerged(t, "-simulate-zone", "lab9", "lab.example")
+		if code != exitFailure || !strings.Contains(out, "lab1-first-scan, lab2-wildcard") {
+			t.Fatalf("exit %d, want %d and the built-in names\n%s", code, exitFailure, out)
+		}
+	})
+}
+
+// TestBuiltinLabKeepsPaths checks that a value with a path separator, or a
+// file that exists, is still read from disk (#354).
+func TestBuiltinLabKeepsPaths(t *testing.T) {
+	t.Parallel()
+	for value, want := range map[string]string{
+		"lab2":                     "lab2-wildcard",
+		"lab6-ipv6":                "lab6-ipv6",
+		"lab":                      "",
+		"lab1-first":               "lab1-first-scan",
+		"./lab1":                   "",
+		filepath.Join("x", "lab1"): "",
+		filepath.Join("examples", "labs", "lab1-first-scan.zone"): "",
+	} {
+		if got, _ := builtinLab(value); got != want {
+			t.Errorf("builtinLab(%q) = %q, want %q", value, got, want)
+		}
+	}
+}
+
 // TestE2ELabVerdicts checks the run-quality verdicts of the failure labs.
 func TestE2ELabVerdicts(t *testing.T) {
 	t.Parallel()
