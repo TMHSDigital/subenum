@@ -392,6 +392,42 @@ func TestE2ELabFlagConflicts(t *testing.T) {
 	}
 }
 
+// A lab request must be rejected before the TUI can discard it (#356).
+func TestE2ETUIRefusesLab(t *testing.T) {
+	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
+	cfg := writeFile(t, "config.json", `{"simulate-zone": "`+filepath.ToSlash(zone)+`"}`)
+	for _, tc := range []struct {
+		name, env, value, want string
+		args                   []string
+	}{
+		{name: "flags", want: "-simulate-zone", args: []string{"-tui", "-simulate-zone", zone, "lab.example"}},
+		{name: "interspersed", want: "-simulate-zone", args: []string{"-simulate-zone", zone, "lab.example", "--tui"}},
+		{name: "no domain", want: "-simulate-zone", args: []string{"-tui", "-simulate-zone", zone}},
+		{name: "environment", env: "SUBENUM_SIMULATE_ZONE", value: zone, want: "SUBENUM_SIMULATE_ZONE", args: []string{"-tui", "lab.example"}},
+		{name: "config", env: configEnv, value: cfg, want: "config file", args: []string{"-tui", "lab.example"}},
+		{name: "json", want: "-simulate-zone", args: []string{"-tui", "-simulate-zone", zone, "-log-format", "json", "lab.example"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env != "" {
+				t.Setenv(tc.env, tc.value)
+			}
+			code, stdout, stderr := runCLIStreams(t, tc.args...)
+			if code != exitUsage || stdout != "" {
+				t.Errorf("exit %d, stdout %q; want exit %d and no scan output", code, stdout, exitUsage)
+			}
+			if !strings.Contains(stderr, "-tui") || !strings.Contains(stderr, tc.want) || !strings.Contains(stderr, "run the lab without -tui") {
+				t.Errorf("missing lab/TUI conflict diagnostic naming %q: %s", tc.want, stderr)
+			}
+			if tc.name == "json" {
+				lines := parseLogLines(t, stderr)
+				if len(lines) != 1 || lines[0].Level != "error" {
+					t.Errorf("diagnostics = %+v, want one JSON error", lines)
+				}
+			}
+		})
+	}
+}
+
 // TestE2ELabRefusesEnvAndConfigResolvers covers #106: a resolver list or
 // simulation mode from SUBENUM_* or the config file must not turn a lab run
 // into one that sends queries off the machine.
