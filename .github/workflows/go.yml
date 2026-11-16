@@ -354,6 +354,10 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      # Needed to start the GitHub Pages rebuild after the release is public
+      # (#370). Pages cannot be started by the release event itself, because
+      # GITHUB_TOKEN events do not trigger other workflows.
+      actions: write
 
     steps:
     # GoReleaser and gh take the token from the environment, so the checkout
@@ -425,6 +429,35 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       shell: bash
       run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
+
+    # pages.yml has a `release: published` trigger, but GitHub does not start a
+    # workflow for an event caused by GITHUB_TOKEN, so a GoReleaser publish
+    # never fires it (#370). Start the rebuild directly. It checks out main and
+    # the header reads the latest release from the Pages metadata, so the site
+    # shows the tag that was just published.
+    - name: Rebuild GitHub Pages
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        before=$(date -u -d '10 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
+        gh workflow run "GitHub Pages" --repo "${GITHUB_REPOSITORY}" --ref main
+        run_id=""
+        for _ in $(seq 1 10); do
+          run_id=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "GitHub Pages" \
+            --event workflow_dispatch --limit 10 --json databaseId,createdAt \
+            | jq -r --arg before "$before" '[.[] | select(.createdAt > $before)][0].databaseId // empty')
+          if [ -n "${run_id}" ]; then
+            break
+          fi
+          sleep 3
+        done
+        if [ -z "${run_id}" ]; then
+          echo "GitHub Pages workflow run did not start" >&2
+          exit 1
+        fi
+        gh run watch "${run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status
 
   # Publishes a multi-arch image to GHCR once the release itself is public
   # (#40). The Dockerfile cross-compiles in a build-platform builder stage, so

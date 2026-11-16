@@ -4,6 +4,11 @@ name: GitHub Pages
 # header shows the new tag. Docs for a feature that is on main but not
 # released yet go live with that push; docs/_data/unreleased.yml tags them
 # "unreleased" until the release (#213).
+#
+# The `release` trigger below only fires for a release published outside the
+# release workflow. GoReleaser publishes with GITHUB_TOKEN, and GitHub does not
+# start a workflow for an event caused by that token, so go.yml starts this
+# workflow directly after the release is public (#370).
 on:
   push:
     branches:
