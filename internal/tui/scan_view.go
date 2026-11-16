@@ -420,9 +420,9 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 			m.found = ev.Found
 			m.stats = ev.Stats
 			// With Permute on, a finished main pass is followed by the
-			// permutation pass, unless the user or the reliability guard
-			// stopped the scan, as on the command line.
-			if m.permute && !m.aborted && !ev.Failed {
+			// permutation pass, unless the user, the reliability guard or
+			// the time budget stopped the scan, as on the command line.
+			if m.permute && !m.aborted && !ev.Failed && !ev.Stats.Expired {
 				m.main = &ev
 			} else {
 				m.done = true

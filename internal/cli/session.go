@@ -717,10 +717,10 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	}
 	res := s.mainPass(ctx, pass, mainSaved)
 	// -permute: a second pass over permutations of what was found (#72),
-	// skipped after an interrupt or a resolver abort. Its seeds are the
+	// skipped after an interrupt, a resolver abort or a spent time budget. Its seeds are the
 	// main pass's names only, so a resumed pass rebuilds the same
 	// candidate list, and it resumes from its own position (#107).
-	if s.f.permute && res.done && !res.resolverAbort && s.signalCode.Load() == 0 {
+	if s.f.permute && res.done && !res.unfinished() && s.signalCode.Load() == 0 {
 		p := permuteInput{target: target, entries: entries, found: s.targetResults.mainPassNames(), seeds: seeds, restoredHits: restoredHits}
 		if saved != nil {
 			p.prev = saved.Permute
