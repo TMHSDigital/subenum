@@ -365,6 +365,72 @@ func TestTruncateRetriesOverTCP(t *testing.T) {
 	}
 }
 
+// TestOversizedUDPAnswerTruncates covers #371: a UDP answer larger than the
+// query's EDNS payload (512 bytes without one) goes out with TC=1 and no
+// records, as a real server sends it, and TCP still gets all of it.
+func TestOversizedUDPAnswerTruncates(t *testing.T) {
+	many := make([]string, 100) // 100 A records: about 1.6 KB with compression
+	for i := range many {
+		many[i] = netip.AddrFrom4([4]byte{192, 0, 2, byte(i + 1)}).String()
+	}
+	srv, err := Listen(Options{}, func(q Query) Reply {
+		if strings.HasPrefix(q.Name, "few.") {
+			return Reply{A: many[:3]}
+		}
+		return Reply{A: many}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	withEDNS := func(name string, size uint16) []byte {
+		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 1, RecursionDesired: true})
+		if err := b.StartQuestions(); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName(name), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.StartAdditionals(); err != nil {
+			t.Fatal(err)
+		}
+		var opt dnsmessage.ResourceHeader
+		if err := opt.SetEDNS0(int(size), dnsmessage.RCodeSuccess, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.OPTResource(opt, dnsmessage.OPTResource{}); err != nil {
+			t.Fatal(err)
+		}
+		msg, err := b.Finish()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+
+	for _, tc := range []struct {
+		desc      string
+		msg       []byte
+		truncated bool
+		records   int
+	}{
+		{"plain query, big answer", query(t, "big.example.com."), true, 0},
+		{"plain query, small answer", query(t, "few.example.com."), false, 3},
+		{"EDNS 1232, big answer", withEDNS("big.example.com.", 1232), true, 0},
+		{"EDNS 4096, big answer", withEDNS("big.example.com.", 4096), false, len(many)},
+	} {
+		got := parseAnswer(t, udpExchange(t, srv.Addr, tc.msg))
+		if got.hdr.Truncated != tc.truncated || len(got.a) != tc.records {
+			t.Errorf("%s: TC=%v with %d records, want TC=%v with %d", tc.desc, got.hdr.Truncated, len(got.a), tc.truncated, tc.records)
+		}
+	}
+	tcp := parseAnswer(t, tcpExchange(t, srv.Addr, query(t, "big.example.com.")))
+	if tcp.hdr.Truncated || len(tcp.a) != len(many) {
+		t.Errorf("TCP: TC=%v with %d records, want TC=0 with %d", tcp.hdr.Truncated, len(tcp.a), len(many))
+	}
+}
+
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -401,6 +467,7 @@ func TestReplies(t *testing.T) {
 		"aaaa.example.com":    {AAAA: []string{"2001:db8::1", "192.0.2.1", "::ffff:192.0.2.1"}, A: []string{"192.0.2.1"}},
 		"alias.example.com":   {CNAME: "target.example.net", A: []string{"192.0.2.5"}, AAAA: []string{"2001:db8::5", "bad"}},
 		"bare.example.com":    {CNAME: "target.example.net."},
+		"chain.example.com":   {CNAME: "b.example.com", Chain: []string{"c.example.com"}, A: []string{"192.0.2.6"}},
 		"nxalias.example.com": {RCode: dnsmessage.RCodeNameError, CNAME: "target.example.net", A: []string{"192.0.2.5"}},
 		"nx.sub.example.com":  NXDomain,
 		"empty.example.com":   {},
@@ -427,6 +494,8 @@ func TestReplies(t *testing.T) {
 		{"alias.example.com.", dnsmessage.TypeAAAA, dnsmessage.RCodeSuccess, []string{"alias.example.com. TypeCNAME target.example.net.", "target.example.net. TypeAAAA 2001:db8::5"}, ""},
 		{"alias.example.com.", dnsmessage.TypeTXT, dnsmessage.RCodeSuccess, []string{"alias.example.com. TypeCNAME target.example.net."}, ""},
 		{"bare.example.com.", dnsmessage.TypeA, dnsmessage.RCodeSuccess, []string{"bare.example.com. TypeCNAME target.example.net."}, ""},
+		{"chain.example.com.", dnsmessage.TypeA, dnsmessage.RCodeSuccess, []string{"chain.example.com. TypeCNAME b.example.com.", "b.example.com. TypeCNAME c.example.com.", "c.example.com. TypeA 192.0.2.6"}, ""},
+		{"chain.example.com.", dnsmessage.TypeCNAME, dnsmessage.RCodeSuccess, []string{"chain.example.com. TypeCNAME b.example.com."}, ""},
 		{"nxalias.example.com.", dnsmessage.TypeA, dnsmessage.RCodeNameError, nil, "example.com."},
 		{"a.example.com.", dnsmessage.TypeAAAA, dnsmessage.RCodeSuccess, []string{"a.example.com. TypeAAAA 2001:db8::1"}, ""},
 		{"a.example.com.", dnsmessage.TypeTXT, dnsmessage.RCodeSuccess, nil, "example.com."},

@@ -25,7 +25,8 @@
 // Names the file does not define are NXDOMAIN (or NODATA when a deeper
 // name exists under them). The server stands in for the student's resolver
 // and the scenario is the whole world, so names outside the scanned domain
-// (an external CNAME target, say) are NXDOMAIN too.
+// (an external CNAME target, say) are NXDOMAIN too. An in-zone CNAME target
+// is followed, through further CNAMEs and wildcards, as that resolver would.
 package labzone
 
 import (
@@ -183,7 +184,9 @@ type recordType struct {
 
 var recordTypes = []recordType{
 	{name: "A", add: addrRecord("A", netip.Addr.Is4, func(e *entry) *[]string { return &e.a })},
-	{name: "AAAA", add: addrRecord("AAAA", func(ip netip.Addr) bool { return !ip.Is4() }, func(e *entry) *[]string { return &e.aaaa })},
+	// The server's own rule: an IPv4-mapped address (::ffff:192.0.2.1) is
+	// not served as AAAA, so it is rejected here rather than lost (#371).
+	{name: "AAAA", add: addrRecord("AAAA", func(ip netip.Addr) bool { return ip.Is6() && !ip.Is4In6() }, func(e *entry) *[]string { return &e.aaaa })},
 	{name: "CNAME", add: func(e *entry, owner, value string) error {
 		if e.cname != "" || e.hasRecords() {
 			return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
@@ -384,17 +387,9 @@ func parent(name string) string {
 // the domain itself). origin is the scanned domain, used to resolve
 // relative CNAME targets.
 func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
-	e := z.entries[rel]
-	if e == nil && !z.exists[rel] {
-		// RFC 4592: a wildcard applies at the closest existing ancestor.
-		enc := parent(rel)
-		for !z.exists[enc] {
-			enc = parent(enc)
-		}
-		e = z.wildcards[enc]
-		if e == nil {
-			return dnsserver.NXDomain
-		}
+	e, ok := z.lookup(rel)
+	if !ok {
+		return dnsserver.NXDomain
 	}
 	if e == nil {
 		return dnsserver.Reply{} // NODATA: a deeper name exists
@@ -415,14 +410,48 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 	}
 	target := absolute(e.cname, origin)
 	r := dnsserver.Reply{CNAME: target}
-	// Follow an in-zone target one step, as an authoritative server includes
-	// the target's addresses when it holds them.
-	if t, ok := relative(target, origin); ok {
-		if te := z.entries[t]; te != nil && te.fail == nil && te.cname == "" {
-			r.A, r.AAAA = te.a, te.aaaa
+	// Follow in-zone targets, through further CNAMEs and wildcards, as the
+	// recursive resolver the server stands in for does (#371), and answer
+	// with the addresses at the end of the chain. A loop or a chain longer
+	// than maxCNAMEChain ends without addresses.
+	seen := map[string]bool{rel: true}
+	for range maxCNAMEChain {
+		t, ok := relative(target, origin)
+		if !ok || seen[t] {
+			break
 		}
+		seen[t] = true
+		te, _ := z.lookup(t)
+		if te == nil || te.fail != nil {
+			break
+		}
+		if te.cname == "" {
+			r.A, r.AAAA = te.a, te.aaaa
+			break
+		}
+		target = absolute(te.cname, origin)
+		r.Chain = append(r.Chain, target)
 	}
 	return r
+}
+
+// maxCNAMEChain bounds how many in-zone aliases Answer follows.
+const maxCNAMEChain = 8
+
+// lookup returns the entry answering rel: its own, or a wildcard's (RFC
+// 4592: at the closest existing ancestor). A nil entry with ok true is a
+// name that exists only as an ancestor of a deeper one (NODATA); ok false is
+// NXDOMAIN.
+func (z *Zone) lookup(rel string) (e *entry, ok bool) {
+	if e := z.entries[rel]; e != nil || z.exists[rel] {
+		return e, true
+	}
+	enc := parent(rel)
+	for !z.exists[enc] {
+		enc = parent(enc)
+	}
+	e = z.wildcards[enc]
+	return e, e != nil
 }
 
 // absolute resolves a target as written in the file (a CNAME target, an NS

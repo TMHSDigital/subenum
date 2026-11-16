@@ -68,6 +68,44 @@ func TestAnswer(t *testing.T) {
 	}
 }
 
+// TestAnswerCNAMEChain covers #371: an in-zone CNAME is followed through
+// further CNAMEs and wildcards to the addresses at the end, as a recursive
+// resolver does; a loop or a failing target ends the chain without them.
+func TestAnswerCNAMEChain(t *testing.T) {
+	z := mustParse(t, strings.Join([]string{
+		"www   A     192.0.2.10",
+		"www   AAAA  2001:db8::10",
+		"b     CNAME www",
+		"a     CNAME b",
+		"shop  CNAME x.dev",
+		"*.dev A     192.0.2.99",
+		"l1    CNAME l2",
+		"l2    CNAME l1",
+		"f     CNAME broken",
+		"broken SERVFAIL",
+	}, "\n"))
+	const origin = "lab.example"
+	cases := []struct {
+		rel, cname string
+		chain, a   []string
+	}{
+		{rel: "b", cname: "www.lab.example", a: []string{"192.0.2.10"}},
+		{rel: "a", cname: "b.lab.example", chain: []string{"www.lab.example"}, a: []string{"192.0.2.10"}},
+		{rel: "shop", cname: "x.dev.lab.example", a: []string{"192.0.2.99"}},
+		{rel: "l1", cname: "l2.lab.example", chain: []string{"l1.lab.example"}},
+		{rel: "f", cname: "broken.lab.example"},
+	}
+	for _, c := range cases {
+		r := z.Answer(c.rel, origin)
+		if r.CNAME != c.cname || !slices.Equal(r.Chain, c.chain) || !slices.Equal(r.A, c.a) {
+			t.Errorf("Answer(%q) = %+v, want cname %q chain %q a %v", c.rel, r, c.cname, c.chain, c.a)
+		}
+	}
+	if r := z.Answer("a", origin); !slices.Equal(r.AAAA, []string{"2001:db8::10"}) {
+		t.Errorf("Answer(a).AAAA = %v, want the chain end's", r.AAAA)
+	}
+}
+
 // TestAnswerNSMXTXT covers #194: NS and MX hosts resolve against the scanned
 // domain like CNAME targets, and a TXT value is the rest of the line.
 func TestAnswerNSMXTXT(t *testing.T) {
@@ -131,6 +169,7 @@ func TestParseErrors(t *testing.T) {
 		{"www", "line 1: want <name> <type> [value]"},
 		{"www A 2001:db8::1", `line 1: bad A address "2001:db8::1"`},
 		{"www AAAA 192.0.2.1", `line 1: bad AAAA address "192.0.2.1"`},
+		{"www AAAA ::ffff:192.0.2.1", `line 1: bad AAAA address "::ffff:192.0.2.1"`}, // the server never serves it (#371)
 		{"www A nope", `line 1: bad A address "nope"`},
 		{"www A", "line 1: want <name> A <value>"},
 		{"www a 192.0.2.1 extra", "line 1: want <name> A <value>"},
@@ -185,7 +224,6 @@ $refuse-above 7
 WWW  a     192.0.2.10
 www  A     192.0.2.11
 www  aaaa  2001:DB8:0::10
-v4m  AAAA  ::ffff:192.0.2.1
 shop cname WWW.Example.NET.
 home CNAME @
 *.dev A 192.0.2.99
@@ -204,7 +242,6 @@ n    nxdomain
 		want entry
 	}{
 		{name: "www", want: entry{a: []string{"192.0.2.10", "192.0.2.11"}, aaaa: []string{"2001:db8::10"}}},
-		{name: "v4m", want: entry{aaaa: []string{"::ffff:192.0.2.1"}}},
 		{name: "shop", want: entry{cname: "www.example.net."}},
 		{name: "home", want: entry{cname: "@"}},
 		{name: "dev", wild: true, want: entry{a: []string{"192.0.2.99"}}},

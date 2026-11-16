@@ -46,6 +46,10 @@ type Reply struct {
 	A     []string // IPv4 answers for A queries
 	AAAA  []string // IPv6 answers for AAAA queries
 	CNAME string   // alias answered for every qtype; the records here are then owned by the target
+	// Chain continues the alias past CNAME: each name is the target of the
+	// one before, and the records are then owned by the last. A CNAME query
+	// gets only the first alias, as a recursive resolver does not chase it.
+	Chain []string
 	NS    []string // name servers for NS queries
 	MX    []string // "<preference> <host>" (or just "<host>", preference 10) for MX queries
 	TXT   []string // texts for TXT queries, one record each
@@ -450,7 +454,34 @@ func (s *Server) handle(msg []byte, tcp bool, h Handler) []byte {
 	if err != nil {
 		return nil
 	}
+	if !tcp && len(resp) > udpPayload(&p) {
+		// As a real server does: an answer too big for the client's UDP
+		// buffer goes out truncated, so the client asks again over TCP.
+		r.Truncate = true
+		if resp, err = build(hdr, question, q, r); err != nil {
+			return nil
+		}
+	}
 	return resp
+}
+
+// udpPayload returns the UDP answer size the query advertises in its EDNS
+// OPT record, or 512 (RFC 1035) without one. p is past the question.
+func udpPayload(p *dnsmessage.Parser) int {
+	const plain = 512
+	if p.SkipAllQuestions() != nil || p.SkipAllAnswers() != nil || p.SkipAllAuthorities() != nil {
+		return plain
+	}
+	extra, err := p.AllAdditionals()
+	if err != nil {
+		return plain
+	}
+	for _, rr := range extra {
+		if rr.Header.Type == dnsmessage.TypeOPT {
+			return max(plain, int(rr.Header.Class))
+		}
+	}
+	return plain
 }
 
 func build(qh dnsmessage.Header, question dnsmessage.Question, q Query, r Reply) ([]byte, error) {
@@ -581,15 +612,21 @@ func rrHeader(name dnsmessage.Name, t dnsmessage.Type) dnsmessage.ResourceHeader
 func addAnswers(b *dnsmessage.Builder, owner dnsmessage.Name, qtype dnsmessage.Type, r Reply) (int, error) {
 	answered := 0
 	if r.CNAME != "" {
-		target, err := dnsmessage.NewName(fqdn(r.CNAME))
-		if err != nil {
-			return 0, err
+		aliases := []string{r.CNAME}
+		if qtype != dnsmessage.TypeCNAME {
+			aliases = append(aliases, r.Chain...)
 		}
-		if err := b.CNAMEResource(rrHeader(owner, dnsmessage.TypeCNAME), dnsmessage.CNAMEResource{CNAME: target}); err != nil {
-			return 0, err
+		for _, alias := range aliases {
+			target, err := dnsmessage.NewName(fqdn(alias))
+			if err != nil {
+				return answered, err
+			}
+			if err := b.CNAMEResource(rrHeader(owner, dnsmessage.TypeCNAME), dnsmessage.CNAMEResource{CNAME: target}); err != nil {
+				return answered, err
+			}
+			answered++
+			owner = target
 		}
-		answered++
-		owner = target
 	}
 	add, ok := answerBuilders[qtype]
 	if !ok {

@@ -226,7 +226,12 @@ scenario.
 
 Names the file does not define are NXDOMAIN. The scenario is the whole world
 during a lab, so names outside the scanned domain (such as an external CNAME
-target) are NXDOMAIN too. Use the
+target) are NXDOMAIN too. A CNAME to a name in the scenario is followed as a
+recursive resolver follows it, through further CNAMEs (up to 8) and
+wildcards, so `a CNAME b`, `b CNAME www` answers with `www`'s addresses. An
+AAAA value must be a real IPv6 address: an IPv4-mapped one such as
+`::ffff:192.0.2.1` is rejected. An answer too big for the client's UDP
+buffer comes back truncated, so the client asks again over TCP. Use the
 documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
 `2001:db8::/32`) and reserved names such as `lab.example`, so nothing in a
 lab points at a real host.
