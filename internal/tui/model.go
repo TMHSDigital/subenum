@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -356,6 +357,7 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if m.scanView.done {
 				m.scanView.saving = true
+				m.scanView.overwritePath = ""
 				if m.scanView.savePath == "" {
 					m.scanView.savePath = m.defaultSavePath()
 				}
@@ -561,6 +563,13 @@ func saveFormat(path string, fallback output.Format) output.Format {
 // leaves an existing file unchanged and does not change the exit code.
 func (m *Model) saveResults(path string) {
 	sv := &m.scanView
+	if _, err := os.Lstat(path); err == nil && sv.overwritePath != path {
+		// The viewport may be filtered or have discarded earlier results.
+		// Never replace an existing file on the first Enter (#360).
+		sv.saving, sv.overwritePath = true, path
+		return
+	}
+	sv.overwritePath = ""
 	results := sv.toSave()
 	format := saveFormat(path, m.vals.format)
 	err := func() error {

@@ -649,7 +649,7 @@ Flags and a domain given with `-tui` fill the form, so a prepared command line o
 | `/` | Filter the results by name (during or after a scan); `enter` keeps the filter, `esc` clears it. While typing, every key but `ctrl+c` goes to the filter |
 | `t` | Show takeover candidates only (toggle) |
 | `v` | Show each result's records under it (toggle) |
-| `s` | Save the results after the scan: type a path and press `enter` (`esc` cancels). The extension picks the format (`.txt`, `.json`, `.jsonl`, `.csv`; otherwise the form's Format), and with a filter on only the results it shows are saved |
+| `s` | Save the results after the scan: type a path and press `enter` (`esc` cancels). An existing file requires a second `enter` to confirm overwriting. The extension picks the format (`.txt`, `.json`, `.jsonl`, `.csv`; otherwise the form's Format), and with a filter on only the results it shows are saved |
 | `esc` | Clear the filter |
 
 </details>
