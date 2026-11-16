@@ -25,6 +25,7 @@ concurrency:
 
 jobs:
   build:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,6 +46,7 @@ jobs:
           path: ./_site
 
   deploy:
+    timeout-minutes: 10
     permissions:
       contents: read
       pages: write
