@@ -50,6 +50,12 @@ type ZoneInfo struct {
 // The error reports an invalid domain or option, a name server lookup that
 // failed, or a cancelled ctx.
 func ProbeZone(ctx context.Context, domain string, opts ZoneOptions) (ZoneInfo, error) {
+	return probeZone(ctx, domain, opts, nil)
+}
+
+// probeZone is ProbeZone that neither resolves nor contacts the name servers
+// skip reports (#372); nil skips none.
+func probeZone(ctx context.Context, domain string, opts ZoneOptions, skip func(string) bool) (ZoneInfo, error) {
 	domain, _, err := validate.NormalizeDomain(domain)
 	if err != nil {
 		return ZoneInfo{}, fmt.Errorf("subenum: domain: %w", err)
@@ -65,7 +71,7 @@ func ProbeZone(ctx context.Context, domain string, opts ZoneOptions) (ZoneInfo, 
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}
-	r := axfr.Try(ctx, domain, axfr.Options{Resolver: resolver, Port: zonePort, Timeout: timeout})
+	r := axfr.Try(ctx, domain, axfr.Options{Resolver: resolver, Port: zonePort, Timeout: timeout, Skip: skip})
 	info := ZoneInfo{Names: r.Names, TransferAllowed: r.Allowed, Denial: string(r.Denial)}
 	if err := ctx.Err(); err != nil {
 		return info, err
@@ -94,7 +100,13 @@ type zoneSource ZoneOptions
 func (zoneSource) Name() string { return candidates.AXFR }
 
 func (z zoneSource) Names(ctx context.Context, domain string) ([]string, error) {
-	info, err := ProbeZone(ctx, domain, ZoneOptions(z))
+	return z.names(ctx, domain, nil)
+}
+
+// names is Names skipping the name servers skip rules out of scope: a scan
+// passes its Exclude test (#372).
+func (z zoneSource) names(ctx context.Context, domain string, skip func(string) bool) ([]string, error) {
+	info, err := probeZone(ctx, domain, ZoneOptions(z), skip)
 	if err != nil {
 		return nil, err
 	}

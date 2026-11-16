@@ -238,7 +238,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-w <file>` | bundled top-5000 | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin. Repeat it to combine lists (`-w general.txt -w target.txt`); entries found in more than one are scanned once. Omit it to use the built-in list (see [Choosing a wordlist](#choosing-a-wordlist)) |
 | `-dL <file>` | n/a | File of apex domains to scan, one per line (`-` reads stdin), instead of a `<domain>` argument. Each domain is an independent scan; results share one output |
 | `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT`. A name is found when it has a record of any listed type. `CNAME` and `NS` also check for [takeovers](#subdomain-takeover-hints); `MX` values are `<preference> <host>` |
-| `-exclude <list>` | n/a | Comma-separated out-of-scope names: exact (`vpn.example.com`) or `*.parent` (every name below `parent`, not `parent` itself). Excluded names are never queried, probed or expanded, and are counted as `excluded` |
+| `-exclude <list>` | n/a | Comma-separated out-of-scope names: exact (`vpn.example.com`) or `*.parent` (every name below `parent`, not `parent` itself). Excluded names are never queried, probed or expanded, and are counted as `excluded`. A target that is itself out of scope is refused before `-axfr`, `-ct`/`-sources` or the `-dry-run` preflight touch it, and `-axfr` never resolves or contacts an excluded name server |
 | `-exclude-file <file>` | n/a | Same patterns, one per line (`#` comments allowed), e.g. a bug-bounty program's out-of-scope list |
 | **Finding more names** | | |
 | `-sources <list>` | n/a | Keyless passive sources whose names become candidates and `-permute` seeds: `ct` (crt.sh), `wayback` (Wayback Machine). One HTTPS request per source and target |
@@ -290,7 +290,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab6`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
 | **Modes** | | |
 | `-tui` | `false` | Launch the interactive Terminal UI |
-| `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query), then exit; JSON with `-format json` or `jsonl` |
+| `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query, paced by `-rate` and skipped for a target `-exclude` rules out), then exit; JSON with `-format json` or `jsonl` |
 | `-print-config` | `false` | Print every setting's effective value and source (`flag`, env, config or default), then exit |
 | `-version` | n/a | Print version and exit |
 

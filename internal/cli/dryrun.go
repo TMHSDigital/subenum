@@ -32,6 +32,9 @@ type dryRunTarget struct {
 	// preflight check gets it; empty in simulation mode.
 	Preflight   string `json:"preflight,omitempty"`
 	PreflightOK bool   `json:"preflight_ok"`
+	// OutOfScope is set for a target -exclude rules out: a scan refuses it,
+	// so it has no candidates and gets no preflight query (#372).
+	OutOfScope bool `json:"out_of_scope,omitempty"`
 }
 
 // dryRun prints what a scan would do without scanning: the candidates per
@@ -45,9 +48,17 @@ func (s *session) dryRun() int {
 	plans := make([]dryRunTarget, 0, len(s.targets))
 	failed := false
 	excluded := scan.Excluder(s.in.excludes)
+	// The preflights are paced by -rate like a scan's queries (#372).
+	ctx := dns.WithLimiter(context.Background(), dns.NewRateLimiter(f.rate))
 	for _, target := range s.targets {
 		entries, duplicates, skipped := s.words.For(target)
 		p := dryRunTarget{Domain: target, Duplicates: duplicates, Skipped: skipped, PreflightOK: true}
+		if scan.TargetOutOfScope(s.in.excludes, target) {
+			// A scan refuses it before any query, so the plan sends none.
+			p.OutOfScope = true
+			plans = append(plans, p)
+			continue
+		}
 		for _, e := range entries {
 			if len(s.in.excludes) > 0 && excluded(e+"."+target) {
 				p.Excluded++
@@ -68,7 +79,7 @@ func (s *session) dryRun() int {
 		}
 		if !f.testMode {
 			lookup := dns.Lookup{Resolver: resolver, Timeout: timeout, Attempts: s.in.maxAttempts, Types: s.in.recordTypes}
-			_, outcome := lookup.Resolve(context.Background(), target)
+			_, outcome := lookup.Resolve(ctx, target)
 			p.Preflight = outcome.String()
 			p.PreflightOK = outcome == dns.OutcomeFound || outcome == dns.OutcomeNXDomain
 			failed = failed || !p.PreflightOK
@@ -110,6 +121,10 @@ func (s *session) printDryRun(plans []dryRunTarget) {
 	w := s.a.stdout
 	for _, p := range plans {
 		_, _ = fmt.Fprintf(w, "%s\n", p.Domain)
+		if p.OutOfScope {
+			_, _ = fmt.Fprintf(w, "  out of scope under -exclude: not scanned, no queries\n")
+			continue
+		}
 		_, _ = fmt.Fprintf(w, "  candidates  %d (%d duplicates removed, %d invalid skipped, %d excluded)\n", p.Candidates, p.Duplicates, p.Skipped, p.Excluded)
 		_, _ = fmt.Fprintf(w, "  queries     %d (up to %d with retries)\n", p.Queries, p.QueriesMax)
 		if p.Seconds > 0 {

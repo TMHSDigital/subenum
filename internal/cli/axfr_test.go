@@ -6,11 +6,14 @@ import (
 	"io"
 	"maps"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -315,6 +318,63 @@ func TestE2EZoneTransferSkipsUnresolvableServer(t *testing.T) {
 	}
 }
 
+// TestE2EZoneTransferOutOfScopeTarget covers #372: a target -exclude rules
+// out, by name or as a branch, is refused before -axfr or -ct asks anyone
+// anything about it.
+func TestE2EZoneTransferOutOfScopeTarget(t *testing.T) {
+	t.Parallel()
+	var ctHits atomic.Int64
+	ct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		ctHits.Add(1)
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer ct.Close()
+	wl := writeFile(t, "wl.txt", "www\n")
+	for _, exclude := range []string{"example.test", "*.example.test"} {
+		srv := axfrZone(t, true, "")
+		_, port, err := net.SplitHostPort(srv.Addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, out := runCLIMergedWith(t, runArgs{axfrPort: port, sourceURLs: map[string]string{"ct": ct.URL + "/"},
+			args: localArgs("-axfr", "-ct", "-exclude", exclude, "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.test")})
+		if code == exitOK || !strings.Contains(out, "out of scope") {
+			t.Errorf("-exclude %s: exit %d; want the target refused\n%s", exclude, code, out)
+		}
+		if n := srv.Queries(); n != 0 {
+			t.Errorf("-exclude %s: %d DNS queries for an out-of-scope target, want 0\n%s", exclude, n, out)
+		}
+	}
+	if n := ctHits.Load(); n != 0 {
+		t.Errorf("-ct was asked %d times about an out-of-scope target, want 0", n)
+	}
+}
+
+// TestE2EZoneTransferSkipsExcludedServer covers #372: a name server -exclude
+// rules out is neither resolved nor asked for a transfer; the in-scope one
+// still is.
+func TestE2EZoneTransferSkipsExcludedServer(t *testing.T) {
+	t.Parallel()
+	srv := nsZone(t, map[string][]string{"ns1.example.test": {"127.0.0.1"}, "ns2.corp.example.test": {"127.0.0.1"}},
+		[]string{"www.example.test", "admin-legacy.example.test"})
+	wl := writeFile(t, "wl.txt", "www\n")
+	code, out := runAXFR(t, srv, "-axfr", "-v", "-exclude", "*.corp.example.test", "-dns-server", srv.Addr, "-type", "A", "-progress=false", "-w", wl, "example.test")
+	if code != exitOK || !strings.Contains(out, "ns1.example.test (127.0.0.1) allowed AXFR") {
+		t.Fatalf("exit %d; want the transfer from ns1\n%s", code, out)
+	}
+	for _, qt := range []dnsmessage.Type{dnsmessage.TypeA, dnsmessage.TypeAAAA} {
+		if n := srv.QueriesFor("ns2.corp.example.test", qt); n != 0 {
+			t.Errorf("the excluded name server got %d %v lookups, want 0", n, qt)
+		}
+	}
+	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != 1 {
+		t.Errorf("AXFR queries = %d, want 1 (ns1 only)", n)
+	}
+	if !strings.Contains(out, "skipping name server ns2.corp.example.test: it is out of scope") {
+		t.Errorf("-v does not say the excluded name server was skipped\n%s", out)
+	}
+}
+
 // TestE2EResumeReusesZoneTransfer covers #303: a resumed run scans the names
 // the interrupted run's transfer gave and asks no name server again, so its
 // candidate list is the one the saved position counts in.
@@ -453,7 +513,7 @@ func TestZoneTransferStopsWhenCancelled(t *testing.T) {
 	}
 	out := output.New(nil, false, output.FormatText)
 	out.SetStderr(io.Discard)
-	res := zoneTransfer(ctx, cliFlags{timeoutMs: 5000, dnsServer: srv.Addr}, port, "example.test", nil, out)
+	res := zoneTransfer(ctx, cliFlags{timeoutMs: 5000, dnsServer: srv.Addr}, port, "example.test", nil, out, nil)
 	if res.tried != 1 {
 		t.Errorf("addresses asked = %d, want 1: the second came after the cancel", res.tried)
 	}

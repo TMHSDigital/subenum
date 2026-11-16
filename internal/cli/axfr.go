@@ -23,8 +23,9 @@ type targetAXFR struct {
 // zoneTransfer tries a full zone transfer of target from each of its name
 // servers, found through the trusted resolver, with the library's shared
 // implementation (#314). A resumed run reuses the names the interrupted run
-// got, so its candidate list matches.
-func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *resumeTarget, out *output.Writer) targetAXFR {
+// got, so its candidate list matches. Name servers skip rules out of scope
+// are neither resolved nor contacted (#372).
+func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *resumeTarget, out *output.Writer, skip func(string) bool) targetAXFR {
 	if saved != nil && saved.AXFRDone {
 		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, denial: dns.Denial(saved.Denial), done: true}
 	}
@@ -36,6 +37,7 @@ func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *r
 		Port:     port,
 		Timeout:  time.Duration(f.timeoutMs) * time.Millisecond,
 		Info:     out.Info,
+		Skip:     skip,
 	}
 	if f.verbose {
 		opts.Debug = out.Info

@@ -106,6 +106,35 @@ func TestZoneTransferSource(t *testing.T) {
 	}
 }
 
+// TestZoneTransferSourceExclude covers #372: a Domain that Exclude rules out
+// gets no zone transfer and no query at all, and a name server it rules out
+// is neither resolved nor asked for a transfer.
+func TestZoneTransferSourceExclude(t *testing.T) {
+	for name, exclude := range map[string]string{"domain": "example.test", "name server": "ns1.example.test"} {
+		srv := zoneServer(t, true, "")
+		_, _, _ = subenum.Scan(context.Background(), subenum.Config{
+			Domain:   "example.test",
+			Words:    []string{"mail"},
+			Resolver: srv.Addr,
+			Types:    []string{"A"},
+			Exclude:  []string{exclude},
+			Sources:  []subenum.Source{subenum.ZoneTransfer(subenum.ZoneOptions{Resolver: srv.Addr})},
+		})
+		if name == "domain" {
+			if n := srv.Queries(); n != 0 {
+				t.Errorf("%s: %d queries for an excluded Domain, want 0", name, n)
+			}
+			continue
+		}
+		if n := srv.QueriesFor("ns1.example.test", dnsmessage.TypeA) + srv.QueriesFor("ns1.example.test", dnsmessage.TypeAAAA); n != 0 {
+			t.Errorf("%s: the excluded name server was looked up %d times, want 0", name, n)
+		}
+		if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != 0 {
+			t.Errorf("%s: AXFR queries = %d, want 0", name, n)
+		}
+	}
+}
+
 // TestProbeZoneErrors: bad options and a domain without name servers are
 // errors.
 func TestProbeZoneErrors(t *testing.T) {

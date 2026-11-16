@@ -835,7 +835,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Event) (wildcardRoot bool, fp *fingerprint, ok, fatal bool) {
 	// Out-of-scope names are never queried (#87). A target that is itself
 	// out of scope, or whose every candidate would be, is refused outright.
-	if cfg.scope.excluded(cfg.Domain) || cfg.scope.subtreeExcluded(cfg.Domain) {
+	if cfg.scope.targetExcluded(cfg.Domain) {
 		events <- Event{Kind: EventError, Fatal: true, Message: "refusing to scan " + cfg.Domain + ": it is out of scope ({exclude})"}
 		return false, nil, false, true
 	}

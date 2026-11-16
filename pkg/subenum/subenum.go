@@ -500,8 +500,10 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 	go func() {
 		defer close(out)
 		var cands *candidates.Set // nil: every result is the wordlist's
-		if len(cfg.Sources) > 0 && !cfg.Simulate {
-			cands = withSourceNames(ctx, out, cfg.Sources, internal.Domain, internal.Entries)
+		// A Domain that Exclude rules out is refused by the scan before any
+		// query, so its sources are not asked either (#372).
+		if len(cfg.Sources) > 0 && !cfg.Simulate && !scan.TargetOutOfScope(cfg.Exclude, internal.Domain) {
+			cands = withSourceNames(ctx, out, cfg.Sources, internal.Domain, internal.Entries, scan.Excluder(cfg.Exclude))
 			internal.Entries = cands.Entries()
 		}
 		in := make(chan scan.Event, 64)

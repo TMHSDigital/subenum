@@ -687,7 +687,13 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	// every source and the zone transfer (#248).
 	cands := candidates.New(target, entries, s.seeds)
 	s.cands, s.foundBy = cands, map[string]int{}
-	sourceInfo := passiveNames(ctx, s.in.sources, target, saved, out, s.a.sourceURLs)
+	// A target -exclude rules out is refused by the scan's preflight; it gets
+	// no passive lookup and no zone transfer before that either (#372).
+	inScope := !scan.TargetOutOfScope(s.in.excludes, target)
+	var sourceInfo []targetSource
+	if inScope {
+		sourceInfo = passiveNames(ctx, s.in.sources, target, saved, out, s.a.sourceURLs)
+	}
 	for _, src := range sourceInfo {
 		added := cands.Add(src.Source, src.Names)
 		if src.Fetched {
@@ -695,10 +701,10 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		}
 	}
 	var axfrInfo targetAXFR
-	if s.f.axfr {
+	if s.f.axfr && inScope {
 		// Transferred names are candidates like -ct's: each is still looked
 		// up, so only names that resolve are reported (#85).
-		axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, out)
+		axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, out, scan.Excluder(s.in.excludes))
 		added := cands.Add(candidates.AXFR, axfrInfo.names)
 		if len(axfrInfo.allowed) > 0 {
 			out.Info("%s", passive.AddedLine("Zone transfer", len(axfrInfo.names), target, added))

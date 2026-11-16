@@ -35,6 +35,9 @@ type Options struct {
 	// Info receives findings and unexpected failures; Debug receives detail
 	// worth showing only on request. Nil discards them.
 	Info, Debug func(format string, args ...any)
+	// Skip, when set, reports name server hosts that are out of scope
+	// (-exclude): they are neither resolved nor contacted (#372).
+	Skip func(host string) bool
 }
 
 // Result is what an attempt found.
@@ -107,6 +110,10 @@ func Try(ctx context.Context, target string, o Options) Result {
 	transferTimeout := max(MinTimeout, o.Timeout)
 	for _, ns := range servers {
 		host := strings.ToLower(strings.TrimSuffix(ns.Host, "."))
+		if o.Skip != nil && o.Skip(host) {
+			logf(o.Debug, "-axfr: skipping name server %s: it is out of scope", host)
+			continue
+		}
 		lookupCtx, cancel := context.WithTimeout(ctx, o.Timeout)
 		addrs, err := resolver.LookupHost(lookupCtx, host+".")
 		cancel()

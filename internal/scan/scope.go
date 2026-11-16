@@ -95,3 +95,17 @@ func parentOf(name string) string {
 func Excluder(patterns []string) func(name string) bool {
 	return newScope(patterns).excluded
 }
+
+// targetExcluded reports whether a scan of domain is refused: domain is out
+// of scope itself, or every name below it is.
+func (s *scope) targetExcluded(domain string) bool {
+	return s.excluded(domain) || s.subtreeExcluded(domain)
+}
+
+// TargetOutOfScope reports whether the -exclude patterns rule out a scan of
+// domain, by the rule a scan's preflight refuses it with. Work done for a
+// target before its scan (-axfr, passive sources, the -dry-run preflight)
+// checks it first, so a refused target gets no query at all (#372).
+func TargetOutOfScope(patterns []string, domain string) bool {
+	return len(patterns) > 0 && newScope(patterns).targetExcluded(domain)
+}

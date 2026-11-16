@@ -55,12 +55,16 @@ func sourceLabel(src Source, i int) string {
 // withSourceNames asks every source for domain's names at once (#271) and
 // appends the ones entries lack, in the order of sources, in the candidate
 // set the command line uses too, which knows who proposed each name (#273).
-// A failed source is reported as a NoticeSource event.
-func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, domain string, entries []string) *candidates.Set {
+// A failed source is reported as a NoticeSource event. ZoneTransfer skips
+// the name servers excluded rules out of scope (#372).
+func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, domain string, entries []string, excluded func(string) bool) *candidates.Set {
 	// The command line's fan-out (#355), over the caller's sources.
 	answers := passive.Gather(len(sources), func(i int) ([]string, error) {
 		if sources[i] == nil {
 			return nil, nil
+		}
+		if z, ok := sources[i].(zoneSource); ok {
+			return z.names(ctx, domain, excluded)
 		}
 		return sources[i].Names(ctx, domain)
 	})
