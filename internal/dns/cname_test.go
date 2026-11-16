@@ -332,6 +332,79 @@ func TestCNAMEOverTCPRejectsBadReplies(t *testing.T) {
 	}
 }
 
+// TestCNAMEOversizedUDPAnswer covers #375: a UDP answer over the advertised
+// 1232 bytes, without TC, is cut by the read; it is asked again over TCP as
+// if truncated, not skipped until the lookup times out. A matching answer
+// that fits but does not parse fails at once.
+func TestCNAMEOversizedUDPAnswer(t *testing.T) {
+	const name, target = "big.example.com.", "edge.example.net."
+	oversized := func(h dnsmessage.Header, q dnsmessage.Question) []byte {
+		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true})
+		_ = b.StartQuestions()
+		_ = b.Question(q)
+		_ = b.StartAnswers()
+		_ = b.CNAMEResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.CNAMEResource{CNAME: dnsmessage.MustNewName(target)})
+		_ = b.StartAdditionals()
+		pad := strings.Repeat("x", 250)
+		_ = b.TXTResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.TXTResource{TXT: []string{pad, pad, pad, pad, pad, pad}})
+		msg, err := b.Finish()
+		if err != nil {
+			t.Error(err)
+		}
+		if len(msg) <= ednsPayload {
+			t.Errorf("padded answer is %d bytes, want over %d", len(msg), ednsPayload)
+		}
+		return msg
+	}
+	for _, tc := range []struct {
+		name      string
+		udpReply  func(h dnsmessage.Header, q dnsmessage.Question) []byte
+		wantTCP   int64
+		wantFound bool
+	}{
+		{name: "over 1232 bytes", udpReply: oversized, wantTCP: 1, wantFound: true},
+		{name: "fits but does not parse", udpReply: func(h dnsmessage.Header, q dnsmessage.Question) []byte {
+			msg := cnameMsg(t, dnsmessage.Header{ID: h.ID, Response: true}, q, q.Name, target)
+			return msg[:len(msg)-3] // the CNAME record stops short
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			udp, udpQueries := scriptedUDP(t, func(h dnsmessage.Header, q dnsmessage.Question) [][]byte {
+				return [][]byte{tc.udpReply(h, q)}
+			})
+			var tcpQueries atomic.Int64
+			q := dnsmessage.Question{Name: dnsmessage.MustNewName(name), Type: dnsmessage.TypeCNAME, Class: dnsmessage.ClassINET}
+			tcp := tcpServer(t, func(id uint16, conn net.Conn) {
+				tcpQueries.Add(1)
+				writeFramed(conn, cnameMsg(t, dnsmessage.Header{ID: id, Response: true}, q, q.Name, target))
+			})
+			r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				addr := udp.LocalAddr().String()
+				if network == "tcp" {
+					addr = tcp
+				}
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			}}
+			start := time.Now()
+			got, err := lookupCNAME(contextWithTimeout(t, 5*time.Second), r, name)
+			if d := time.Since(start); d > 2*time.Second {
+				t.Errorf("lookup took %v, want an answer well before the 5s deadline", d)
+			}
+			if tc.wantFound {
+				if err != nil || got != target {
+					t.Errorf("lookupCNAME = %q, %v; want %q", got, err, target)
+				}
+			} else if err == nil || Classify(err) != OutcomeOther {
+				t.Errorf("lookupCNAME = %q, %v; want an error classed other", got, err)
+			}
+			if u, c := udpQueries.Load(), tcpQueries.Load(); u != 1 || c != tc.wantTCP {
+				t.Errorf("%d UDP and %d TCP queries, want 1 and %d", u, c, tc.wantTCP)
+			}
+		})
+	}
+}
+
 // timeoutError is a net.Error that reports a timeout, as a read past a
 // connection's deadline does.
 type timeoutError struct{}

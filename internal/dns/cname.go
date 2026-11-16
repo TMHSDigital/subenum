@@ -108,7 +108,8 @@ func canonicalName(msg *dnsmessage.Message, name string) string {
 // cnameExchange sends one qtype query (CNAME for lookupCNAME) for qname over
 // a connection from resolver.Dial and returns the matching reply. On UDP,
 // replies to other queries (a pooled socket can hold a late answer to an
-// earlier one) are skipped until the deadline.
+// earlier one) are skipped until the deadline, and an answer cut to the read
+// buffer comes back marked truncated.
 func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, qname dnsmessage.Name, qtype dnsmessage.Type) (*dnsmessage.Message, error) {
 	conn, err := resolver.Dial(ctx, network, "")
 	if err != nil {
@@ -148,12 +149,15 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 	}
 	for {
 		var reply []byte
+		cut := false
 		if packet {
 			n, err := conn.Read(buf)
-			if err != nil {
+			// A datagram longer than buf is cut to fit: silently on Linux,
+			// with WSAEMSGSIZE on Windows. Its header is still there to match.
+			if err != nil && n < len(buf) {
 				return nil, err
 			}
-			reply = buf[:n]
+			reply, cut = buf[:n], n == len(buf)
 		} else {
 			var lenb [2]byte
 			if _, err := io.ReadFull(conn, lenb[:]); err != nil {
@@ -164,29 +168,47 @@ func cnameExchange(ctx context.Context, resolver *net.Resolver, network string, 
 				return nil, err
 			}
 		}
-		var msg dnsmessage.Message
-		if err := msg.Unpack(reply); err != nil {
+		h, ok := replyMatches(reply, id, qname, qtype)
+		if !ok {
 			if packet {
-				continue // not a DNS message for us
-			}
-			return nil, err
-		}
-		if msg.ID != id || !msg.Response || len(msg.Questions) != 1 ||
-			msg.Questions[0].Type != qtype || !strings.EqualFold(msg.Questions[0].Name.String(), qname.String()) {
-			if packet {
-				continue // a late answer to an earlier query on this socket
+				continue // a late answer to an earlier query on this socket, or not DNS
 			}
 			return nil, errors.New("reply does not match the query")
+		}
+		var msg dnsmessage.Message
+		if err := msg.Unpack(reply); err != nil {
+			if cut {
+				// The server ignored the advertised size and did not set TC:
+				// ask again over TCP as if it had, rather than skip the
+				// answer and wait out the deadline (#375).
+				h.Truncated = true
+				return &dnsmessage.Message{Header: h}, nil
+			}
+			return nil, err
 		}
 		return &msg, nil
 	}
 }
 
+// replyMatches reports whether reply answers the query with this ID, name
+// and type, reading only its header and question, and returns the header.
+func replyMatches(reply []byte, id uint16, qname dnsmessage.Name, qtype dnsmessage.Type) (dnsmessage.Header, bool) {
+	var p dnsmessage.Parser
+	h, err := p.Start(reply)
+	if err != nil || h.ID != id || !h.Response {
+		return h, false
+	}
+	q, err := p.Question()
+	if err != nil || q.Type != qtype || !strings.EqualFold(q.Name.String(), qname.String()) {
+		return h, false
+	}
+	_, err = p.Question()
+	return h, errors.Is(err, dnsmessage.ErrSectionDone) // exactly one question
+}
+
 // ednsPayload is the UDP answer size cnameQuery advertises, Go's resolver's.
 const ednsPayload = 1232
 
-// cnameQuery builds a recursive qtype query with an EDNS(0) OPT record
-// advertising 1232-byte UDP answers, as Go's resolver sends.
 // validLabels reports whether every label of name, which may end in a dot,
 // is 1 to 63 bytes long.
 func validLabels(name string) bool {
@@ -198,6 +220,8 @@ func validLabels(name string) bool {
 	return true
 }
 
+// cnameQuery builds a recursive qtype query with an EDNS(0) OPT record
+// advertising 1232-byte UDP answers, as Go's resolver sends.
 func cnameQuery(id uint16, qname dnsmessage.Name, qtype dnsmessage.Type) ([]byte, error) {
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
 	b.EnableCompression()
