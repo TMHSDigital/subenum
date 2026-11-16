@@ -839,8 +839,8 @@ func TestSaveResumeStateKeepsFailedSources(t *testing.T) {
 		status:       []report.Status{report.StatusInterrupted},
 		entryDigests: []string{"d1"},
 		results: []targetResult{{done: true, sources: []targetSource{
-			{source: "ct", err: "crt.sh: 502 Bad Gateway"},
-			{source: "wayback", names: []string{"old-shop"}, fetched: true},
+			{Source: "ct", Err: "crt.sh: 502 Bad Gateway"},
+			{Source: "wayback", Names: []string{"old-shop"}, Fetched: true},
 		}}},
 		runs: []resultLog{{}},
 	})
@@ -870,8 +870,8 @@ func TestSaveResumeStateKeepsFailedSources(t *testing.T) {
 // this run or the one it resumed, it stays as saved (#237).
 func TestSaveResumeStateRetriesLookupsCutShort(t *testing.T) {
 	sources := []targetSource{
-		{source: "ct", err: "crt.sh: context canceled"},
-		{source: "wayback", names: []string{"old-shop"}, fetched: true},
+		{Source: "ct", Err: "crt.sh: context canceled"},
+		{Source: "wayback", Names: []string{"old-shop"}, Fetched: true},
 	}
 	axfr := targetAXFR{done: true}
 	for name, tc := range map[string]struct {

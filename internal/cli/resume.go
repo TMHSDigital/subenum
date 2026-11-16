@@ -488,10 +488,10 @@ func savedSources(sources []targetSource, scanned bool) map[string][]string {
 	saved := make(map[string][]string, len(sources))
 	for _, src := range sources {
 		switch {
-		case src.fetched:
-			saved[src.source] = src.names
+		case src.Fetched:
+			saved[src.Source] = src.Names
 		case scanned:
-			saved[src.source] = []string{}
+			saved[src.Source] = []string{}
 		}
 	}
 	if len(saved) == 0 {
@@ -535,7 +535,7 @@ func saveResumeState(s *session) bool {
 		// final and the resumed run tries it again (#299). A transfer the
 		// earlier state had already settled stays settled.
 		scanned := res.done || (saved != nil && saved.RootDone > 0)
-		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: ct.names, CTFetched: ct.fetched,
+		t := resumeTarget{Domain: domain, Results: s.runs[i].results(), Entries: s.entryDigests[i], CT: ct.Names, CTFetched: ct.Fetched,
 			Sources: savedSources(res.sources, scanned)}
 		if res.axfr.done && (scanned || (saved != nil && saved.AXFRDone)) {
 			t.AXFR, t.AXFRServers, t.AXFRDone, t.Denial = res.axfr.names, res.axfr.allowed, true, string(res.axfr.denial)

@@ -39,7 +39,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/diff` | Compares two runs' results: new and missing names, changed records (shared by `-diff` and `pkg/subenum`'s `Diff`) |
 | `internal/cliargs` | Parses command lines whose flags may follow positional arguments, shared by subenum and wordlist-gen |
 | `internal/ct` | Looks up subdomain names in Certificate Transparency logs through crt.sh |
-| `internal/passive` | The `Source` interface behind `-sources`, the source registry, the merge of source names into candidates (shared by the CLI and `pkg/subenum`), and the Wayback Machine source |
+| `internal/passive` | The `Source` interface behind `-sources`, the source registry, the fan-out that asks every source at once and the merge of source names into candidates (shared by the CLI, the TUI and `pkg/subenum`), and the Wayback Machine source |
 | `internal/axfr` | Zone transfer attempts and the DNSSEC denial probe within fixed bounds (shared by `-axfr` and `pkg/subenum`'s `ProbeZone`) |
 | `internal/labzone` | Parses `-simulate-zone` scenario files for lab mode |
 | `internal/mcp` | Minimal Model Context Protocol server (JSON-RPC over stdio, tools only) behind `subenum mcp` |
@@ -103,6 +103,7 @@ internal/candidates/candidates.go - Set (New, Add, SourcesOf), RelativeSeeds, Pe
 internal/diff/diff.go          - Name, RecordsChanged: the comparison behind -diff-records and subenum.Diff
 internal/ct/ct.go              - Client.Names: crt.sh lookup
 internal/passive/passive.go    - Source, Known, ParseList, New: the -sources registry; Merge: source names into candidates
+internal/passive/fetch.go      - Gather, FetchAll, Lookup: the source fan-out the CLI, TUI and pkg/subenum share
 internal/passive/wayback.go    - Wayback.Names: hostnames from the Wayback Machine's CDX index
 internal/mcp/mcp.go            - Server.Serve: MCP over stdio (initialize, ping, tools/list, tools/call, cancellation)
 pkg/subenum/sources.go         - Source, CertificateTransparency, WaybackMachine: Config.Sources
@@ -341,7 +342,7 @@ With `-permute` (or `-seeds`, which implies it), each target that finished gets 
 
 ### 5.5. Certificate Transparency Seeding
 
-With `-ct`, `ct.Client.Names` makes one HTTPS request per target to crt.sh (no API key) and returns the names its certificates cover, relative to the target. `passiveNames` gathers the names, and `passive.Merge` appends those not already in the wordlist after the wordlist entries, so wordlist resume positions stay put. They are only candidates and are resolved like any other; those that resolve also seed `-permute`. A failed lookup is a warning, not a failed scan. A resumed run reuses the saved CT names so its candidate list is the same.
+With `-ct`, `ct.Client.Names` makes one HTTPS request per target to crt.sh (no API key) and returns the names its certificates cover, relative to the target. `passiveNames` gathers the names through `passive.FetchAll`, and `passive.Merge` appends those not already in the wordlist after the wordlist entries, so wordlist resume positions stay put. They are only candidates and are resolved like any other; those that resolve also seed `-permute`. A failed lookup is a warning, not a failed scan. A resumed run reuses the saved CT names so its candidate list is the same.
 
 ### 5.6. Lab Mode
 

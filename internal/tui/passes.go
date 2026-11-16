@@ -2,8 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
-	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -21,44 +19,24 @@ import (
 
 // sourceLookup is one passive source's answer for the scan's domain.
 type sourceLookup struct {
-	name      string   // -sources name: ct, wayback
-	names     []string // relative to the domain
-	added     int      // names that were not candidates already
-	fetched   bool     // the lookup succeeded (names may still be empty)
-	err       string
-	truncated string // why a source that succeeded stopped at one of its limits
+	passive.Lookup
+	added int // names that were not candidates already
 }
 
-// fetchSources asks every source for the domain's names at once. A failed
-// lookup is reported on the scan screen; the scan goes on without its names.
+// fetchSources asks every source for the domain's names at once, with the
+// command line's code (#355). A failed lookup is reported on the scan
+// screen; the scan goes on without its names.
 func fetchSources(ctx context.Context, domain string, sources []string, o Options) []sourceLookup {
 	opts := passive.Options{
-		UserAgent: "subenum/" + o.Version + " (+https://github.com/TMHSDigital/subenum)",
+		UserAgent: passive.UserAgent("subenum/" + o.Version),
 		BaseURLs:  o.SourceURLs,
 	}
-	res := make([]sourceLookup, len(sources))
-	var wg sync.WaitGroup
-	for i, name := range sources {
-		res[i].name = name
-		src, err := passive.New(name, opts)
-		if err != nil { // the form admitted only known names
-			res[i].err = err.Error()
-			continue
-		}
-		wg.Go(func() {
-			names, err := src.Names(ctx, domain)
-			var tr *passive.Truncated
-			switch {
-			case errors.As(err, &tr):
-				res[i].truncated = tr.Error()
-			case err != nil:
-				res[i].err = err.Error()
-				return
-			}
-			res[i].names, res[i].fetched = names, true
-		})
+	// The form admitted only known names.
+	lookups := passive.FetchAll(ctx, sources, opts, domain)
+	res := make([]sourceLookup, len(lookups))
+	for i, l := range lookups {
+		res[i].Lookup = l
 	}
-	wg.Wait()
 	return res
 }
 

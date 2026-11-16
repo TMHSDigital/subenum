@@ -36,9 +36,9 @@ func buildSummary(s *session, elapsed time.Duration) output.Summary {
 func targetSummary(domain string, status report.Status, res targetResult) output.TargetSummary {
 	t := report.Target(domain, status, res.err, res.done, res.final, scan.FlagName)
 	ct := sourceByName(res.sources, "ct")
-	t.CTNames, t.CTError = len(ct.names), ct.err
+	t.CTNames, t.CTError = len(ct.Names), ct.Err
 	for _, src := range res.sources {
-		t.Sources = append(t.Sources, output.SourceSummary{Name: src.source, Names: len(src.names), Found: res.foundBy[src.source], Error: src.err, Truncated: src.truncated != ""})
+		t.Sources = append(t.Sources, output.SourceSummary{Name: src.Source, Names: len(src.Names), Found: res.foundBy[src.Source], Error: src.Err, Truncated: src.Truncated != ""})
 	}
 	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
 	t.AXFRFound = res.foundBy[candidates.AXFR]

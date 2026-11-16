@@ -2,9 +2,7 @@ package subenum
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/passive"
@@ -20,7 +18,7 @@ type Source interface {
 	Names(ctx context.Context, domain string) ([]string, error)
 }
 
-const sourceUserAgent = "subenum-library (+https://github.com/TMHSDigital/subenum)"
+var sourceUserAgent = passive.UserAgent("subenum-library")
 
 // CertificateTransparency returns the source behind the CLI's -ct: names in
 // Certificate Transparency logs, through crt.sh. One HTTPS request per scan,
@@ -59,36 +57,26 @@ func sourceLabel(src Source, i int) string {
 // set the command line uses too, which knows who proposed each name (#273).
 // A failed source is reported as a NoticeSource event.
 func withSourceNames(ctx context.Context, out chan<- Event, sources []Source, domain string, entries []string) *candidates.Set {
-	type answer struct {
-		names []string
-		err   error
-	}
-	answers := make([]answer, len(sources))
-	var wg sync.WaitGroup
-	for i, src := range sources {
-		if src == nil {
-			continue
+	// The command line's fan-out (#355), over the caller's sources.
+	answers := passive.Gather(len(sources), func(i int) ([]string, error) {
+		if sources[i] == nil {
+			return nil, nil
 		}
-		wg.Go(func() {
-			names, err := src.Names(ctx, domain)
-			answers[i] = answer{names, err}
-		})
-	}
-	wg.Wait()
+		return sources[i].Names(ctx, domain)
+	})
 	cands := candidates.New(domain, entries, nil)
 	for i, a := range answers {
-		var tr *passive.Truncated
 		switch {
-		case errors.As(a.err, &tr):
+		case a.Truncated != "":
 			// The names are good, only incomplete (#272).
 			forward(ctx, out, Event{Kind: KindNotice, Notice: NoticeSource,
-				Message: fmt.Sprintf("Sources[%d]: %v; scanning its %d names", i, a.err, len(a.names))})
-		case a.err != nil:
+				Message: fmt.Sprintf("Sources[%d]: %s; scanning its %d names", i, a.Truncated, len(a.Names))})
+		case !a.Fetched:
 			forward(ctx, out, Event{Kind: KindNotice, Notice: NoticeSource,
-				Message: fmt.Sprintf("Sources[%d]: %v; scanning without its names", i, a.err)})
+				Message: fmt.Sprintf("Sources[%d]: %s; scanning without its names", i, a.Err)})
 			continue
 		}
-		cands.Add(sourceLabel(sources[i], i), a.names)
+		cands.Add(sourceLabel(sources[i], i), a.Names)
 	}
 	return cands
 }

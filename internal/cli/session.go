@@ -685,9 +685,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	s.cands, s.foundBy = cands, map[string]int{}
 	sourceInfo := passiveNames(ctx, s.in.sources, target, saved, out, s.a.sourceURLs)
 	for _, src := range sourceInfo {
-		added := cands.Add(src.source, src.names)
-		if src.fetched {
-			out.Info("%s: %d names under %s, %d of them new candidates", passive.Labels[src.source], len(src.names), target, added)
+		added := cands.Add(src.Source, src.Names)
+		if src.Fetched {
+			out.Info("%s", passive.AddedLine(passive.Labels[src.Source], len(src.Names), target, added))
 		}
 	}
 	var axfrInfo targetAXFR
@@ -697,7 +697,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, out)
 		added := cands.Add(candidates.AXFR, axfrInfo.names)
 		if len(axfrInfo.allowed) > 0 {
-			out.Info("Zone transfer: %d names under %s, %d of them new candidates", len(axfrInfo.names), target, added)
+			out.Info("%s", passive.AddedLine("Zone transfer", len(axfrInfo.names), target, added))
 		}
 	}
 	entries, seeds := cands.Entries(), cands.Seeds()

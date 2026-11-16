@@ -2,23 +2,13 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"sync"
 
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
 )
 
 // targetSource is one passive source's lookup for a target (#130, #193).
-type targetSource struct {
-	source  string   // -sources name: ct, wayback
-	names   []string // relative to the target
-	fetched bool     // the lookup succeeded (names may still be empty)
-	err     string
-	// truncated says why a source that succeeded stopped at one of its
-	// limits, so some hosts may be missing (#272).
-	truncated string
-}
+type targetSource = passive.Lookup
 
 // passiveNames asks every source for target's names at once (#271): the
 // ones a resumed run saved, so its candidate list matches the interrupted
@@ -30,15 +20,16 @@ func passiveNames(ctx context.Context, sources []string, target string, saved *r
 		return nil
 	}
 	opts := passive.Options{
-		UserAgent: ProgramName + "/" + resolveVersion() + " (+https://github.com/TMHSDigital/subenum)",
+		UserAgent: passive.UserAgent(ProgramName + "/" + resolveVersion()),
 		BaseURLs:  baseURLs,
 	}
 	res := make([]targetSource, len(sources))
-	var wg sync.WaitGroup
+	var fetch []string // the sources to ask (ParseList admitted only known names)
+	var at []int       // their places in res
 	for i, name := range sources {
-		res[i].source = name
+		res[i].Source = name
 		if names, ok := saved.sourceNames(name); ok {
-			res[i].names, res[i].fetched = names, true
+			res[i].Names, res[i].Fetched = names, true
 			continue
 		}
 		if saved != nil && saved.Done {
@@ -46,31 +37,17 @@ func passiveNames(ctx context.Context, sources []string, target string, saved *r
 			// needed: no lookup (#315).
 			continue
 		}
-		src, err := passive.New(name, opts)
-		if err != nil { // ParseList admitted only known names
-			res[i].err = err.Error()
-			continue
-		}
-		wg.Go(func() {
-			names, err := src.Names(ctx, target)
-			var tr *passive.Truncated
-			switch {
-			case errors.As(err, &tr):
-				res[i].truncated = tr.Error()
-			case err != nil:
-				res[i].err = err.Error()
-				return
-			}
-			res[i].names, res[i].fetched = names, true
-		})
+		fetch, at = append(fetch, name), append(at, i)
 	}
-	wg.Wait()
+	for j, l := range passive.FetchAll(ctx, fetch, opts, target) {
+		res[at[j]] = l
+	}
 	for _, r := range res {
 		switch {
-		case !r.fetched && r.err != "":
-			out.Info("Warning: %s; scanning %s without %s names", r.err, target, passive.Labels[r.source])
-		case r.truncated != "":
-			out.Info("Note: %s (%s, %d names)", r.truncated, target, len(r.names))
+		case !r.Fetched && r.Err != "":
+			out.Info("Warning: %s; scanning %s without %s names", r.Err, target, passive.Labels[r.Source])
+		case r.Truncated != "":
+			out.Info("Note: %s (%s, %d names)", r.Truncated, target, len(r.Names))
 		}
 	}
 	return res
@@ -94,7 +71,7 @@ func (t *resumeTarget) sourceNames(source string) ([]string, bool) {
 // sourceByName returns the lookup of one source, if it ran.
 func sourceByName(sources []targetSource, name string) targetSource {
 	for _, s := range sources {
-		if s.source == name {
+		if s.Source == name {
 			return s
 		}
 	}

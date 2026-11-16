@@ -199,7 +199,7 @@ func loadWordlistCmd(vals formValues, o Options) tea.Cmd {
 			// The same candidate set as the command line's (#347).
 			msg.cands = candidates.New(vals.Domain, entries, nil)
 			for i := range msg.lookups {
-				msg.lookups[i].added = msg.cands.Add(msg.lookups[i].name, msg.lookups[i].names)
+				msg.lookups[i].added = msg.cands.Add(msg.lookups[i].Source, msg.lookups[i].Names)
 			}
 			msg.entries = msg.cands.Entries()
 		}
@@ -291,15 +291,15 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 	// Same lines as the CLI's: what each source gave, or why the scan runs
 	// without its names (#274).
 	for _, l := range m.lookups {
-		label := passive.Labels[l.name]
+		label := passive.Labels[l.Source]
 		switch {
-		case !l.fetched:
-			m.scanView.addMessage(wildcardStyle.Render(fmt.Sprintf("⚠ %s; scanning without %s names", l.err, label)))
+		case !l.Fetched:
+			m.scanView.addMessage(wildcardStyle.Render(fmt.Sprintf("⚠ %s; scanning without %s names", l.Err, label)))
 			continue
-		case l.truncated != "":
-			m.scanView.addMessage(wildcardStyle.Render("⚠ " + l.truncated))
+		case l.Truncated != "":
+			m.scanView.addMessage(wildcardStyle.Render("⚠ " + l.Truncated))
 		}
-		m.scanView.addMessage(dimStyle.Render(fmt.Sprintf("%s: %d names under %s, %d of them new candidates", label, len(l.names), vals.Domain, l.added)))
+		m.scanView.addMessage(dimStyle.Render(passive.AddedLine(label, len(l.Names), vals.Domain, l.added)))
 	}
 
 	// Same notice as the CLI's, so the TUI user knows which list ran (#288).
@@ -650,9 +650,9 @@ func (m *Model) summary(final scan.Event) output.Summary {
 	}
 	t := report.Target(m.vals.Domain, status, "", true, final, settingLabel)
 	for _, l := range m.lookups {
-		t.Sources = append(t.Sources, output.SourceSummary{Name: l.name, Names: len(l.names), Found: m.foundBy[l.name], Error: l.err, Truncated: l.truncated != ""})
-		if l.name == "ct" {
-			t.CTNames, t.CTError = len(l.names), l.err
+		t.Sources = append(t.Sources, output.SourceSummary{Name: l.Source, Names: len(l.Names), Found: m.foundBy[l.Source], Error: l.Err, Truncated: l.Truncated != ""})
+		if l.Source == "ct" {
+			t.CTNames, t.CTError = len(l.Names), l.Err
 		}
 	}
 	m.scanView.perm.summarize(&t, m.scanView.aborted, m.scanView.errText)

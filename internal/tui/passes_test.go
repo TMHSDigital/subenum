@@ -253,11 +253,11 @@ func TestFailedSourceDoesNotStopTheScan(t *testing.T) {
 	}))
 	defer down.Close()
 	lookups := fetchSources(t.Context(), "example.com", []string{"wayback"}, Options{SourceURLs: map[string]string{"wayback": down.URL}})
-	if len(lookups) != 1 || lookups[0].fetched || lookups[0].err == "" {
+	if len(lookups) != 1 || lookups[0].Fetched || lookups[0].Err == "" {
 		t.Fatalf("lookups = %+v, want one failed lookup", lookups)
 	}
 	cands := candidates.New("example.com", []string{"www"}, nil)
-	if added := cands.Add(lookups[0].name, lookups[0].names); added != 0 || !reflect.DeepEqual(cands.Entries(), []string{"www"}) ||
+	if added := cands.Add(lookups[0].Source, lookups[0].Names); added != 0 || !reflect.DeepEqual(cands.Entries(), []string{"www"}) ||
 		!reflect.DeepEqual(cands.SourcesOf("www.example.com"), candidates.FromWordlist) {
 		t.Errorf("entries %q, sources of www %v; want the wordlist's names alone", cands.Entries(), cands.SourcesOf("www.example.com"))
 	}
