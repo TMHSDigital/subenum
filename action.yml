@@ -19,7 +19,9 @@ inputs:
     required: false
     default: ""
   args:
-    description: Extra subenum flags, space-separated (no quoting), e.g. "-rate 200 -type A,AAAA,CNAME -ct".
+    description: >-
+      Extra subenum flags, separated by spaces or newlines (no quoting), e.g.
+      "-rate 200 -type A,AAAA,CNAME -ct". A multi-line "args: |" block works.
     required: false
     default: ""
   previous:
@@ -46,7 +48,11 @@ inputs:
     required: false
     default: ""
   fail-on:
-    description: "Fail the step when the verdict is at least this bad: unreliable, degraded or never."
+    description: >-
+      Fail the step when the verdict is at least this bad: unreliable, degraded
+      or never. With never, a scan that failed (verdict unreliable) still passes
+      the step; read the verdict output instead. Usage errors and a run with no
+      report always fail.
     required: false
     default: unreliable
   version:
@@ -173,6 +179,8 @@ runs:
         set -o pipefail
         out="$RUNNER_TEMP/subenum-out"
         mkdir -p "$out"
+        # A second use in the same job must not read the first use's report.
+        rm -f "$out/run.json" "$out/results.jsonl" "$out/changes.jsonl"
         flags=(-silent -format jsonl -o "$out/results.jsonl" -stats "$out/run.json")
         [ -n "$WORDLIST" ] && flags+=(-w "$WORDLIST")
         [ -n "$SARIF" ] && flags+=(-sarif "$SARIF")
@@ -182,7 +190,9 @@ runs:
           prev="$RUNNER_TEMP/subenum-baseline/results.jsonl"
         fi
         [ -n "$prev" ] && flags+=(-diff "$prev")
-        read -r -a extra <<< "$ARGS"
+        # -d '' reads past newlines, so every line of an "args: |" block counts;
+        # read then returns 1 at the end of input.
+        read -r -d '' -a extra <<< "$ARGS" || true
         if [ -n "$DOMAINS_FILE" ]; then target=(-dL "$DOMAINS_FILE"); else target=("$DOMAIN"); fi
         if [ -z "$DOMAIN" ] && [ -z "$DOMAINS_FILE" ]; then echo "::error::set domain or domains-file"; exit 2; fi
 
@@ -193,7 +203,8 @@ runs:
 
         verdict=$(jq -r .verdict "$out/run.json")
         reason=$(jq -r .reason "$out/run.json")
-        found=$(jq '[.targets[].found] | add // 0' "$out/run.json")
+        # -permute hits are counted apart from the main pass.
+        found=$(jq '[.targets[] | (.found // 0) + (.permutation.found // 0)] | add // 0' "$out/run.json")
         added=$(jq '.diff.added // 0' "$out/run.json")
         removed=$(jq '.diff.removed // 0' "$out/run.json")
         changed=$(jq '.diff.changed // 0' "$out/run.json")
@@ -214,7 +225,7 @@ runs:
           echo
           echo "| Target | Verdict | Found | Queries | Takeover candidates | Internal addresses |"
           echo "|---|---|---|---|---|---|"
-          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \(.found // 0) | \(.queries_sent // 0) | \(.takeover_candidates // 0) | \(.internal_addresses // 0) |"' "$out/run.json"
+          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \((.found // 0) + (.permutation.found // 0)) | \(.queries_sent // 0) | \(.takeover_candidates // 0) | \(.internal_addresses // 0) |"' "$out/run.json"
           if [ "$takeovers" != 0 ]; then
             echo
             echo "**Takeover candidates:** $takeovers"
@@ -234,8 +245,13 @@ runs:
         if [ -n "$BASELINE" ] && [ "$verdict" = complete ]; then
           echo "upload=true" >> "$GITHUB_OUTPUT"
         fi
-        # 0 = ok, 4 = changes found; 3 = some -dL targets failed (the verdict says how bad).
-        case "$code" in 0 | 3 | 4) ;; *) exit "$code" ;; esac
+        # 0 = ok, 4 = changes found; 3 = some -dL targets failed and 1 = the
+        # scan failed, and the verdict says how bad, so fail-on decides. A 1
+        # with a complete verdict is a failed output file: always fail.
+        case "$code:$verdict" in
+          0:* | 3:* | 4:* | 1:degraded | 1:unreliable) ;;
+          *) exit "$code" ;;
+        esac
         case "$FAIL_ON:$verdict" in
           unreliable:unreliable | degraded:unreliable | degraded:degraded)
             echo "::error::subenum verdict is $verdict: $reason"; exit 1 ;;

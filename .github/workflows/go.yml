@@ -186,7 +186,11 @@ jobs:
       with:
         version: source
         domain: lab.example
-        args: -simulate-zone examples/labs/lab1-first-scan.zone -type A,CNAME
+        # One flag per line: every line must reach subenum (the takeover
+        # check below needs -type CNAME from the second line, #363).
+        args: |
+          -simulate-zone examples/labs/lab1-first-scan.zone
+          -type A,CNAME
         sarif: takeovers.sarif
 
     - name: Check the first scan
@@ -222,6 +226,57 @@ jobs:
         test "${{ steps.diff.outputs.removed }}" = 3001
         grep -q '"change":"removed"' "${{ steps.diff.outputs.changes }}"
         grep -q 'gone.lab.example' "${{ steps.diff.outputs.changes }}"
+
+    # A failed scan (a wildcard zone without -force exits 1 with an
+    # unreliable verdict) passes the step under fail-on: never (#363).
+    - name: Scan a wildcard zone with fail-on never
+      id: wildcard
+      uses: ./
+      with:
+        version: source
+        domain: lab.example
+        args: -simulate-zone examples/labs/lab2-wildcard.zone
+        fail-on: never
+
+    - name: Check the failed scan
+      shell: bash
+      run: test "${{ steps.wildcard.outputs.verdict }}" = unreliable
+
+    # A use that exits before writing its report must not report the
+    # previous use's verdict (#363).
+    - name: Use the action with a bad flag
+      id: bad
+      continue-on-error: true
+      uses: ./
+      with:
+        version: source
+        domain: lab.example
+        args: -simulate -no-such-flag
+
+    - name: Check it reported nothing
+      shell: bash
+      run: |
+        test "${{ steps.bad.outcome }}" = failure
+        test -z "${{ steps.bad.outputs.verdict }}"
+
+    # found counts the -permute hits too (#363).
+    - name: Scan with -permute
+      id: permute
+      uses: ./
+      with:
+        version: source
+        domain: example.com
+        wordlist: examples/labs/words.txt
+        args: -simulate -seed 7 -hit-rate 80 -permute
+
+    - name: Check found counts the permutation hits
+      shell: bash
+      run: |
+        set -euo pipefail
+        names=$(jq -n '[inputs | select(.subdomain)] | length' "${{ steps.permute.outputs.results }}")
+        echo "found=${{ steps.permute.outputs.found }} names=$names"
+        test "${{ steps.permute.outputs.found }}" = "$names"
+        test "$names" -gt 100
 
   # The action's default install path, as users get it: download the latest
   # release, check it against checksums.txt and its attestation, unpack it

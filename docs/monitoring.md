@@ -114,16 +114,16 @@ jobs:
 |---|---|---|
 | `domain` / `domains-file` | | What to scan (one of them) |
 | `wordlist` | bundled top 5000 | `-w` |
-| `args` | | Extra flags, space-separated |
+| `args` | | Extra flags, separated by spaces or newlines (an `args: \|` block works) |
 | `previous` | | A previous results file to diff against (add `-diff-records` to `args` to also catch record changes) |
 | `baseline-artifact` | | Artifact name for the baseline: downloaded before, replaced after a complete run |
 | `sarif` | | Write takeover candidates as SARIF |
 | `max-duration`{% include unreleased.html action="max-duration" %} | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report. The CLI also saves a resume state then (`subenum-resume.json`, or the `-state` path), and `subenum -resume <file>` tests the names the budget left; the action does not carry that file to the next run |
-| `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never` |
+| `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never`. With `never`, a failed scan (verdict `unreliable`) still passes the step; a usage error or a run with no report always fails |
 | `version` | `latest` | Release to install, or `source` to build the action's checkout |
 | `token` | `github.token` | Token for downloading the release and the baseline artifact |
 
-Outputs: `verdict`, `found`, `added`, `removed`, `changed`{% include unreleased.html action="changed" %} (with `-diff-records`),
+Outputs: `verdict`, `found` (including `-permute` hits), `added`, `removed`, `changed`{% include unreleased.html action="changed" %} (with `-diff-records`),
 `takeovers`{% include unreleased.html action="takeovers" %} (takeover candidates among the names found; needs `CNAME` or `NS` in `-type`),
 `internal`{% include unreleased.html action="internal" %} (names answering with an address that is not public), and the paths `results` (JSONL),
 `stats` (the run-quality report) and `changes`{% include unreleased.html action="changes" %} (JSONL, one line per added, removed or
