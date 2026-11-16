@@ -10,14 +10,16 @@ import (
 
 func TestE2EExpiredMainPassDefersPermutation(t *testing.T) {
 	t.Parallel()
-	words := writeFile(t, "words.txt", "www\nmail\n")
+	words := writeFile(t, "words.txt", "www\nmail\nweb\n")
 	seeds := writeFile(t, "seeds.txt", "api.example.com\n")
 	state := filepath.Join(t.TempDir(), "state.json")
-	// An already-spent budget is deterministic even on a slow runner. An
-	// explicit seed ensures the old gate still tries to build a second pass.
+	// One worker at 10 names/s cannot reach the third name before the budget
+	// expires, even with coarse clock resolution: its second lookup may
+	// finish in flight, but the third must be skipped. An explicit seed also
+	// makes the old gate build a second pass if no main-pass name resolves.
 	code, stdout, stderr := runCLIStreams(t, "-simulate", "-seed", "7", "-hit-rate", "100",
 		"-permute", "-w", words, "-seeds", seeds, "-format", "jsonl", "-progress=false",
-		"-max-duration", "1ns", "-state", state, "example.com")
+		"-t", "1", "-rate", "10", "-max-duration", "1ms", "-state", state, "example.com")
 	if code != exitOK {
 		t.Fatalf("budget stop: exit %d\n%s", code, stderr)
 	}
@@ -41,7 +43,7 @@ func TestE2EExpiredMainPassDefersPermutation(t *testing.T) {
 	}
 
 	// The deferred pass must still run after resuming the main pass.
-	code, stdout, stderr = runCLIStreams(t, "-resume", state, "-max-duration", "0")
+	code, stdout, stderr = runCLIStreams(t, "-resume", state, "-max-duration", "0", "-rate", "0")
 	if code != exitOK {
 		t.Fatalf("resume: exit %d\n%s", code, stderr)
 	}
