@@ -207,6 +207,11 @@ make help           # list all targets
 
 This table describes `main`, which can be ahead of the latest release: a release binary rejects a flag or value added since. The website's [CLI reference](https://tmhsdigital.github.io/subenum/cli/) tags what is not released yet.
 
+<details>
+<summary><strong>All 50 flags</strong>, grouped by purpose</summary>
+
+<br>
+
 | Flag | Default | Description |
 | :--- | :---: | :--- |
 | **Targets and scope** | | |
@@ -268,6 +273,8 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query), then exit; JSON with `-format json` or `jsonl` |
 | `-print-config` | `false` | Print every setting's effective value and source (`flag`, env, config or default), then exit |
 | `-version` | n/a | Print version and exit |
+
+</details>
 
 > [!NOTE]
 > Wildcard DNS is detected automatically before scanning begins. If the target resolves wildcard records, or the wildcard probes fail so the check is inconclusive, the tool exits with a warning, since all subdomains would match, making results meaningless. Pass `-force` to override. With `-force`, results whose records are a subset of the wildcard fingerprint are still dropped and counted as `wildcard-filtered`. The fingerprint comes from several random probes, and when the wildcard answers from a rotating CDN or load-balancer pool, subenum keeps probing until it has learned the pool; a result that shares only some records with the fingerprint is re-checked against fresh probes. Recursive scans probe each new parent and skip expanding wildcard branches.
@@ -347,7 +354,10 @@ Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results ar
 
 With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
 
-**Exit codes**
+<details>
+<summary><strong>Exit codes</strong></summary>
+
+<br>
 
 | Code | Meaning |
 |------|---------|
@@ -358,6 +368,8 @@ With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries
 | `4` | `-diff`: names were added or removed (or, with `-diff-records`, changed) since the previous run; `subenum diff`: the two files differ |
 | `130` | Interrupted (SIGINT, `Ctrl+C`); partial results are kept, in the resume state when the `-o` file is also the `-diff` baseline, which is left unchanged |
 | `143` | Terminated (SIGTERM); partial results are kept as for `130` |
+
+</details>
 
 ### Resuming an interrupted scan
 
@@ -422,6 +434,11 @@ The run-quality report counts them per target (`ct_names`). If crt.sh is down or
 subenum -sources ct,wayback example.com
 ```
 
+<details>
+<summary><strong>Retries, limits, and which source proposed each result</strong></summary>
+
+<br>
+
 The sources of a target are asked at the same time, and a busy answer (429, 502, 503, 504) or a dropped connection is retried twice with a short backoff, honouring `Retry-After`, within the source's 60-second limit. The report has one `sources` entry per source, with the names it added or the `error` it hit; a failed source is a warning, and the scan goes on with the others. The Wayback Machine is asked for at most 200,000 URLs and 64 MiB, and crt.sh's answer is read up to 64 MiB; when a source reaches a limit its names are still used, a note says some hosts may be missing, and its entry is marked `truncated`. Simulation ignores `-sources`, lab mode refuses it, and a resumed scan reuses what each source returned.
 
 Each result says what proposed it: a `sources` list in JSON and JSONL, and a `sources` column in CSV (joined with `;`). The values are `wordlist`, `ct`, `wayback` and `axfr`, every one that had the name, in that order, or `permute` alone for a `-permute` hit; text output is unchanged. The report counts the results each source had proposed as `found` in its `sources` entry, and `axfr_found` for a zone transfer, so you can see whether a source earns its request:
@@ -429,6 +446,8 @@ Each result says what proposed it: a `sources` list in JSON and JSONL, and a `so
 ```bash
 subenum -sources ct,wayback -format jsonl example.com | jq -r 'select(.sources == ["wayback"]) | .subdomain'
 ```
+
+</details>
 
 ### Zone transfers: the whole zone in one query
 
@@ -438,25 +457,44 @@ A name server that allows anyone a zone transfer (AXFR) lists every name in the 
 subenum -axfr -type A,AAAA,CNAME example.com
 ```
 
+<details>
+<summary><strong>NSEC zone walking and query budget</strong></summary>
+
+<br>
+
 The same step asks one name server about a name that does not exist, with DNSSEC records requested. A zone signed with plain NSEC proves the absence by naming its neighbours, so anyone can walk the chain to list every name, transfer or not: subenum reports that as `Zone walkable` and records `zone_denial` (`nsec`, `nsec3` or `none`) in the report. It does not walk the zone itself.
 
 The transfers and the probe go straight to the target's name servers, not through `-dns-server`: at most 8 servers and 2 addresses each, one query per address, plus the NS and address lookups and one denial probe, all counted in the report's `queries_sent` but not paced by `-rate`. Simulation ignores `-axfr`, lab mode refuses it, and a resumed scan reuses the names the interrupted run got.
+
+</details>
 
 ### Permutations: a second pass
 
 Once `api.example.com` and `dev.example.com` exist, the next names most likely to exist are `api-dev`, `dev-api`, `dev.api` and `api2`. `-permute` runs a second scan per target over permutations of the names the first pass found: built-in environment and role words (`dev`, `staging`, `prod`, `qa`, `internal`, `v1`, ...) joined with `-` on either side or as a new level, plus number increments (`api2` -> `api1`, `api3`, `api4`). `-seeds results.jsonl` adds names from an earlier run (any format) and implies `-permute`.
 
-The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist, and any whose full name would pass 253 characters, are skipped. It is one level deep even under `-recursive`, so a permutation hit is reported but not expanded further. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates, hits, `processed` and `queries_sent` of the pass per target. The target's `queries_sent` includes the pass, and its `verdict` is the worse of the two passes'; when it is the permutation pass's, the `reason` starts with `permutation pass:`.
-
 ```bash
 subenum -permute -format jsonl -o results.jsonl example.com
 ```
+
+<details>
+<summary><strong>How the pass is scoped and reported</strong></summary>
+
+<br>
+
+The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist, and any whose full name would pass 253 characters, are skipped. It is one level deep even under `-recursive`, so a permutation hit is reported but not expanded further. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates, hits, `processed` and `queries_sent` of the pass per target. The target's `queries_sent` includes the pass, and its `verdict` is the worse of the two passes'; when it is the permutation pass's, the `reason` starts with `permutation pass:`.
+
+</details>
 
 ## Reading the results
 
 ### Run-quality report
 
-Every lookup is accounted for, and subenum says how far the results can be trusted. `-stats run.json` writes a report in any format, and `-format jsonl` ends with the same object as its last line (`"type": "summary"`):
+Every lookup is accounted for, and subenum says how far the results can be trusted. `-stats run.json` writes a report in any format, and `-format jsonl` ends with the same object as its last line (`"type": "summary"`).
+
+<details>
+<summary><strong>Example report</strong></summary>
+
+<br>
 
 ```json
 {
@@ -489,13 +527,22 @@ Every lookup is accounted for, and subenum says how far the results can be trust
 }
 ```
 
+</details>
+
 | Verdict | Meaning |
 |---------|---------|
 | `complete` | Under 1% of lookups failed and nothing was skipped |
 | `degraded` | Usable, but some names are unknown: 1-20% of lookups failed, `-max-queries` or `-max-duration` skipped candidates, or the run was interrupted |
 | `unreliable` | Over 20% of lookups failed (the reliability guard's threshold), the guard aborted the scan, or the target could not be scanned |
 
+<details>
+<summary><strong>Field reference</strong></summary>
+
+<br>
+
 The overall `verdict` is the worst target verdict. `queries_sent` counts DNS messages actually dialed, including retries; it is 0 in simulation mode. SERVFAIL and other errors Go's resolver does not distinguish are counted under `other`. With `-r`, each target also reports `pool_hits`, `confirmed` and `unconfirmed` (hits the trusted resolver denied, so they were dropped), and the top level gains `resolvers`: per-resolver `lookups`, `found`, `nxdomain`, `failed`, `benched` and `throttled` (times `-rate-per-resolver` found its cap spent) counts; `resolver` is then the trusted resolver. `excluded` counts candidates `-exclude` kept out of scope; they are never queried. `status` is one of `ok`, `failed`, `interrupted`, `skipped` or `not_run`. The `schema` number changes only when a field is renamed, removed or changes meaning; new fields can appear at any time.
+
+</details>
 
 Gate a CI job on the verdict with `jq`:
 
@@ -515,6 +562,14 @@ When a result has a CNAME record, subenum resolves the CNAME target with the tru
 | `dangling:<name>` | Both: a takeover-prone service and a target that does not exist |
 | `dangling-ns` | With `-type` including `NS`: the name is a delegated subzone, and one of its name servers does not exist (NXDOMAIN). Whoever registers that name server answers for the whole subzone |
 
+> [!IMPORTANT]
+> Takeover markers are DNS-only hints. subenum sends no HTTP requests to the candidates; a `provider:` match is often a perfectly healthy service. Verify every candidate by hand, and only against targets you are authorized to test.
+
+<details>
+<summary><strong>Output fields, custom providers and SARIF</strong></summary>
+
+<br>
+
 A recursive resolver asked about a subzone whose every name server is gone usually answers SERVFAIL instead of the delegation, so such a name is reported as inconclusive (see `-inconclusive`) rather than marked; scanning against the parent zone's authoritative server finds it.
 
 A CNAME target or name server that `-exclude` puts out of scope is never looked up: it can still get `provider:<name>`, which needs no query, but never `dangling` or `dangling-ns`.
@@ -533,8 +588,7 @@ The provider list is built in, and `-takeover-providers <file>` extends it witho
 
 `-sarif takeovers.sarif` also writes the candidates as a SARIF 2.1.0 log, one rule per kind of finding and a stable fingerprint per name, so GitHub code scanning can track, triage and dismiss them in the Security tab. Upload it from a scheduled workflow (see [Monitoring](docs/monitoring.md)) with `github/codeql-action/upload-sarif` and `security-events: write`.
 
-> [!IMPORTANT]
-> Takeover markers are DNS-only hints. subenum sends no HTTP requests to the candidates; a `provider:` match is often a perfectly healthy service. Verify every candidate by hand, and only against targets you are authorized to test.
+</details>
 
 ### Internal addresses
 
@@ -572,7 +626,14 @@ No flags required. Fill in the form and press `ctrl+r` to start scanning. Last-u
 
 <img src="docs/assets/tui-form.png" alt="subenum interactive TUI" width="640"/>
 
+<details>
+<summary><strong>Form fields and their flags</strong></summary>
+
+<br>
+
 Flags and a domain given with `-tui` fill the form, so a prepared command line opens ready to run: `./subenum -tui example.com -w big.txt -r resolvers.txt`. The form takes one wordlist (the first `-w`), and `-tui` warns about any flag it has no field for. **Wordlist is optional:** leave the field empty to scan with the bundled top-5000 list, as a missing `-w` does on the command line. The **Resolver Pool** and **Rate/Resolver** fields are `-r` and `-rate-per-resolver`; the pool is not used with Simulate on. **Auto Rate**, **Max Duration** (blank for none, or a duration such as `20m`) and **Retry Inconclusive** are `-auto-rate`, `-max-duration` and `-retry-inconclusive`. **Sources** takes what `-sources` does (`ct`, `wayback` or both; `-ct` fills in `ct`): the sources are asked while the wordlist loads, their names are scanned with the wordlist's, and a source that fails is a warning on the scan screen, not a failed scan; they are not asked with Simulate on. **Permute** is `-permute`: when the scan finishes, a second pass scans permutations of the names found, and its results are marked on the scan screen. With either field set, the results file says what proposed each name, as the CLI's does.
+
+</details>
 
 <details>
 <summary><strong>TUI keyboard reference</strong></summary>
