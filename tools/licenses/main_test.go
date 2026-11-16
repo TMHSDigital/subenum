@@ -94,3 +94,25 @@ func TestRepoModules(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestReleaseGOOS keeps releaseGOOS in step with the builds' goos list in
+// .goreleaser.yaml, so a new release OS cannot leave its modules out of the
+// notices (#367).
+func TestReleaseGOOS(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".goreleaser.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lists []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "goos: ["); ok {
+			lists = append(lists, strings.Join(strings.Fields(strings.NewReplacer(",", " ", "]", "", `"`, "").Replace(v)), " "))
+		}
+	}
+	if len(lists) != 1 {
+		t.Fatalf(".goreleaser.yaml has %d goos lists (%q), want one", len(lists), lists)
+	}
+	if got := strings.Join(releaseGOOS, " "); got != lists[0] {
+		t.Errorf("releaseGOOS = %s, .goreleaser.yaml builds for %s", got, lists[0])
+	}
+}

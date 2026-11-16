@@ -28,6 +28,7 @@ import (
 	"github.com/TMHSDigital/subenum/data"
 	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/libhook"
 	"github.com/TMHSDigital/subenum/internal/permute"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/validate"
@@ -489,12 +490,21 @@ var ErrNoWords = errors.New("subenum: wordlist has no usable entries")
 // scan started exits within about a second of cancellation, whether or not
 // the channel is read (#112).
 func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
+	return run(ctx, cfg, nil)
+}
+
+// subenum mcp reaches run through internal/libhook, to change engine
+// settings Config does not expose (#349, #367).
+func init() { libhook.Register(run) }
+
+// run is Run with tweak, if non-nil, applied to the engine's options.
+func run(ctx context.Context, cfg Config, tweak func(*scan.Options)) (<-chan Event, error) {
 	internal, err := cfg.options()
 	if err != nil {
 		return nil, err
 	}
-	if scan.InconclusiveListOff(ctx) {
-		internal.ListInconclusive = false // subenum mcp never reads it (#349)
+	if tweak != nil {
+		tweak(&internal)
 	}
 	out := make(chan Event, 64)
 	go func() {

@@ -127,6 +127,7 @@ subenum/
 │   ├── dnsserver/              # Scriptable loopback DNS server (UDP, TCP, DoT, DoH)
 │   ├── dnstest/                # dnsserver for tests: stops on cleanup, fails the test on error
 │   ├── labzone/                # -simulate-zone scenario parser and answer logic
+│   ├── libhook/                # pkg/subenum's scan with engine settings Config does not expose (subenum mcp)
 │   ├── mcp/                    # MCP server over stdio (JSON-RPC, tools only) for subenum mcp
 │   ├── output/
 │   │   ├── writer.go           # Thread-safe output (results→stdout, rest→stderr)

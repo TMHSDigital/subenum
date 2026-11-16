@@ -26,6 +26,7 @@ import (
 
 // releaseGOOS lists the operating systems .goreleaser.yaml builds for. The
 // module set is the union over all of them, so one file covers every archive.
+// TestReleaseGOOS fails when the two lists differ.
 var releaseGOOS = []string{"linux", "darwin", "windows", "freebsd"}
 
 // module is one third-party module linked into the binary.

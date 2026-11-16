@@ -633,14 +633,6 @@ func (m *Model) finalizeOutput(finish bool) error {
 
 // summary builds the run-quality report for the finished scan.
 func (m *Model) summary(final scan.Event) output.Summary {
-	s := report.New(report.Run{
-		Version:   m.opts.Version,
-		Started:   m.started,
-		Simulated: m.vals.Simulate,
-		Seed:      m.seed,
-		Resolver:  m.vals.DNSServer,
-		RateLimit: m.vals.Rate,
-	})
 	status := report.StatusOK
 	switch {
 	case m.scanView.failed():
@@ -649,15 +641,21 @@ func (m *Model) summary(final scan.Event) output.Summary {
 		status = report.StatusInterrupted
 	}
 	t := report.Target(m.vals.Domain, status, "", true, final, settingLabel)
-	for _, l := range m.lookups {
-		t.Sources = append(t.Sources, output.SourceSummary{Name: l.Source, Names: len(l.Names), Found: m.foundBy[l.Source], Error: l.Err, Truncated: l.Truncated != ""})
-		if l.Source == "ct" {
-			t.CTNames, t.CTError = len(l.Names), l.Err
-		}
+	lookups := make([]passive.Lookup, len(m.lookups))
+	for i, l := range m.lookups {
+		lookups[i] = l.Lookup
 	}
+	report.Sources(&t, lookups, m.foundBy)
 	m.scanView.perm.summarize(&t, m.scanView.aborted, m.scanView.errText)
-	report.Finish(&s, []output.TargetSummary{t}, time.Since(m.started))
-	return s
+	// As the CLI's, with the resolver pool's accounting (#367).
+	return report.Build(report.Run{
+		Version:   m.opts.Version,
+		Started:   m.started,
+		Simulated: m.vals.Simulate,
+		Seed:      m.seed,
+		Resolver:  m.vals.DNSServer,
+		RateLimit: m.vals.Rate,
+	}, []output.TargetSummary{t}, m.pool, time.Since(m.started))
 }
 
 // reportOutputErr surfaces an output-file failure in the scan view.

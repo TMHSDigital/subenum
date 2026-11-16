@@ -20,6 +20,20 @@ func found(name string, records []dns.Record) output.Result {
 	return output.Result{Result: scan.Result{Subdomain: name, Records: records}}
 }
 
+// TestSummaryHasPoolResolvers covers #367: a scan with a resolver pool
+// reports each resolver's accounting in its summary, as the CLI's -r does,
+// and one without a pool reports none.
+func TestSummaryHasPoolResolvers(t *testing.T) {
+	m := Model{scanView: newScanViewModel(120, 40, false), vals: formValues{Options: scan.Options{Config: scan.Config{Domain: "example.com"}}}}
+	if r := m.summary(scan.Event{Kind: scan.EventDone}).Resolvers; r != nil {
+		t.Errorf("no pool: resolvers = %+v, want none", r)
+	}
+	m.pool = dns.NewPool([]string{"192.0.2.1:53", "192.0.2.2:53"}, time.Second)
+	if r := m.summary(scan.Event{Kind: scan.EventDone}).Resolvers; len(r) != 2 {
+		t.Errorf("pool of two: resolvers = %+v, want two", r)
+	}
+}
+
 // TestListenForEventsHandlesEveryKind covers #165: every engine event kind,
 // and one the TUI does not know, becomes a message, and an unknown kind
 // re-arms the listener instead of stalling the scan.

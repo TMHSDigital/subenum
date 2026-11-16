@@ -439,34 +439,18 @@ func withSeed(args []string, f cliFlags) []string {
 // mergeStats adds a resumed run's counters to those saved before the
 // interrupt, so the report covers the whole scan.
 func mergeStats(a, b scan.Stats) scan.Stats {
-	a.Found += b.Found
-	a.NXDomain += b.NXDomain
-	a.Timeout += b.Timeout
-	a.Refused += b.Refused
-	a.Other += b.Other
-	a.WildcardFiltered += b.WildcardFiltered
-	a.QueriesSent += b.QueriesSent
-	a.Excluded += b.Excluded
-	a.PoolHits += b.PoolHits
-	a.Confirmed += b.Confirmed
-	a.Unconfirmed += b.Unconfirmed
-	a.Takeover += b.Takeover
-	a.Internal += b.Internal
-	a.Partial += b.Partial
-	a.Retried += b.Retried
-	a.Recovered += b.Recovered
-	a.Inconclusive = append(append([]string(nil), a.Inconclusive...), b.Inconclusive...)
-	a.RateBackoffs += b.RateBackoffs
-	if b.RateBackoffs > 0 || b.FinalRate > 0 {
-		a.FinalRate = b.FinalRate // where the resumed run ended
-	}
 	// A part that ran out of -max-duration or was aborted left its remaining
 	// candidates to the resumed part, so how that one ended is how the scan
 	// ended, and the names the budget skipped are no longer skipped (#294).
-	if a.Expired {
-		a.Skipped = 0
+	skipped := b.Skipped
+	if !a.Expired {
+		skipped += a.Skipped
 	}
-	a.Skipped += b.Skipped
+	a = a.AddCounts(b)
+	a.Skipped = skipped
+	if b.RateBackoffs > 0 || b.FinalRate > 0 {
+		a.FinalRate = b.FinalRate // where the resumed run ended
+	}
 	a.Aborted = b.Aborted
 	a.Expired = b.Expired
 	a.Wildcard = a.Wildcard || b.Wildcard

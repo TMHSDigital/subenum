@@ -9,6 +9,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
+	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
@@ -136,6 +137,29 @@ func target(domain string, status Status, errMsg string, done bool, final scan.E
 		t.Reason += fmt.Sprintf("; wildcard zone, %d answers filtered by fingerprint", st.WildcardFiltered)
 	}
 	return t
+}
+
+// Sources adds a row per passive-source lookup to t, and the CT fields kept
+// from before the rows existed. foundBy counts, per source, the found names
+// it proposed.
+func Sources(t *output.TargetSummary, lookups []passive.Lookup, foundBy map[string]int) {
+	for _, l := range lookups {
+		t.Sources = append(t.Sources, output.SourceSummary{Name: l.Source, Names: len(l.Names), Found: foundBy[l.Source], Error: l.Err, Truncated: l.Truncated != ""})
+		if l.Source == "ct" {
+			t.CTNames, t.CTError = len(l.Names), l.Err
+		}
+	}
+}
+
+// Build is a finished run's summary: New, then Finish with the targets, and
+// the -r pool's per-resolver accounting when the run had one (pool non-nil).
+func Build(r Run, targets []output.TargetSummary, pool *dns.Pool, elapsed time.Duration) output.Summary {
+	s := New(r)
+	Finish(&s, targets, elapsed)
+	if pool != nil {
+		s.Resolvers = pool.Stats()
+	}
+	return s
 }
 
 // Finish adds the targets to s, sets the overall verdict (the worst

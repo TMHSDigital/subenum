@@ -68,27 +68,6 @@ func (p *permutationPass) summarize(t *output.TargetSummary, interrupted bool, e
 	report.Permutation(t, pass, interrupted, settingLabel)
 }
 
-// addStats sums two passes' counters for the finished screen's counters
-// line. The verdict is not taken from the sum: each pass has its own.
-func addStats(a, b scan.Stats) scan.Stats {
-	a.Found += b.Found
-	a.NXDomain += b.NXDomain
-	a.Timeout += b.Timeout
-	a.Refused += b.Refused
-	a.Other += b.Other
-	a.WildcardFiltered += b.WildcardFiltered
-	a.QueriesSent += b.QueriesSent
-	a.Skipped += b.Skipped
-	a.Excluded += b.Excluded
-	a.Takeover += b.Takeover
-	a.Internal += b.Internal
-	a.Partial += b.Partial
-	a.Retried += b.Retried
-	a.Recovered += b.Recovered
-	a.RateBackoffs += b.RateBackoffs
-	return a
-}
-
 // permutationReadyMsg carries the permutation pass's candidates.
 type permutationReadyMsg struct {
 	seeds      int

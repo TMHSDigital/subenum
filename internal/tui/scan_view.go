@@ -419,7 +419,9 @@ func (m *scanViewModel) applyEvent(ev scan.Event) {
 				m.processed += ev.Processed
 				m.total += ev.Total
 				m.found += ev.Found
-				m.stats = addStats(m.main.Stats, ev.Stats)
+				// The finished screen's counters line shows the sum; the
+				// verdict is not taken from it: each pass has its own.
+				m.stats = m.main.Stats.AddCounts(ev.Stats)
 			}
 		case ev.Stopped:
 			m.done, m.stopped = true, true

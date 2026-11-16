@@ -124,6 +124,34 @@ func (s Stats) failures() int64 {
 	return s.Timeout + s.Refused + s.Other
 }
 
+// AddCounts returns s with o's per-candidate counters added and o's
+// Inconclusive names appended, for two scans reported as one (a resumed
+// run's parts, a permutation pass after the main one). How the scan ended
+// and where it stood (RootDone, Aborted, Expired, Wildcard, Fingerprint,
+// FinalRate, Repeat, Pending) are left as s has them: the caller picks.
+func (s Stats) AddCounts(o Stats) Stats {
+	s.Found += o.Found
+	s.NXDomain += o.NXDomain
+	s.Timeout += o.Timeout
+	s.Refused += o.Refused
+	s.Other += o.Other
+	s.WildcardFiltered += o.WildcardFiltered
+	s.QueriesSent += o.QueriesSent
+	s.Skipped += o.Skipped
+	s.Excluded += o.Excluded
+	s.PoolHits += o.PoolHits
+	s.Confirmed += o.Confirmed
+	s.Unconfirmed += o.Unconfirmed
+	s.Takeover += o.Takeover
+	s.Internal += o.Internal
+	s.Partial += o.Partial
+	s.Retried += o.Retried
+	s.Recovered += o.Recovered
+	s.Inconclusive = append(append([]string(nil), s.Inconclusive...), o.Inconclusive...)
+	s.RateBackoffs += o.RateBackoffs
+	return s
+}
+
 type counters struct {
 	found            atomic.Int64
 	nxdomain         atomic.Int64

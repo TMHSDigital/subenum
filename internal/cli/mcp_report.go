@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/libhook"
 	"github.com/TMHSDigital/subenum/internal/mcp"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
@@ -65,12 +66,16 @@ func notRunReport(cfg subenum.Config, err error) *mcpReport {
 	return report
 }
 
+// noInconclusiveList turns off the engine's list of names without an answer,
+// as the CLI does without -inconclusive (#300, #349).
+func noInconclusiveList(o *scan.Options) { o.ListInconclusive = false }
+
 // runMCPScan runs one scan and reports it. offset is where cfg.Words starts
 // in the call's word list, for the report's next_offset.
 func runMCPScan(ctx context.Context, cfg subenum.Config, offset int) *mcpReport {
 	cfg.Logf = func(string, ...any) {} // standard output carries the protocol
 	// The report never lists inconclusive names, so the scan keeps none (#349).
-	events, err := subenum.Run(scan.WithoutInconclusiveList(ctx), cfg)
+	events, err := libhook.Run[subenum.Config, subenum.Event](ctx, cfg, noInconclusiveList)
 	if err != nil {
 		return notRunReport(cfg, err)
 	}

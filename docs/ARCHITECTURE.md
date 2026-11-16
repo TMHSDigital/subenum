@@ -44,6 +44,7 @@ Every package under `internal/` and `pkg/`, summarized from its `// Package` com
 | `internal/axfr` | Zone transfer attempts and the DNSSEC denial probe within fixed bounds (shared by `-axfr` and `pkg/subenum`'s `ProbeZone`) |
 | `internal/labzone` | Parses `-simulate-zone` scenario files for lab mode |
 | `internal/mcp` | Minimal Model Context Protocol server (JSON-RPC over stdio, tools only) behind `subenum mcp` |
+| `internal/libhook` | Lets `subenum mcp` run a `pkg/subenum` scan with engine settings the library's `Config` does not expose; `pkg/subenum` registers its scan in an `init` |
 | `internal/dnsserver` | Scriptable local DNS server backing lab mode and the hermetic tests |
 | `internal/dnstest` | Runs `internal/dnsserver` for tests: stopped on cleanup, listen failures fail or skip the test |
 | `internal/cli` | The subenum command: flag parsing, the per-run session and its subsystems (config, diff, resume, permute, passive sources, labs, MCP); its files are listed below |
@@ -102,7 +103,7 @@ internal/output/summary.go     - Summary / TargetSummary, WriteSummaryFile
 internal/output/sarif.go       - WriteSARIF: takeover candidates as SARIF 2.1.0
 internal/output/eta.go         - ETA: progress estimate over a sliding window, FormatETA
 internal/output/log.go         - -log-format: text or JSON diagnostics on stderr (ParseLogFormat, SetLogFormat)
-internal/report/report.go      - New, Target, Finish: the run-quality report; Status, a target's status
+internal/report/report.go      - New, Target, Sources, Finish, Build: the run-quality report; Status, a target's status
 internal/report/permutation.go - Permutation: a target's -permute pass in the report (CLI and TUI)
 internal/permute/permute.go    - Generate: permutations of found names
 internal/candidates/candidates.go - Set (New, Add, SourcesOf), RelativeSeeds, Permutations: candidates for the CLI and the TUI

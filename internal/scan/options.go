@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"context"
 	"fmt"
 	"iter"
 	"reflect"
@@ -62,23 +61,6 @@ func (o Options) Fields() iter.Seq2[string, reflect.Value] {
 		}
 		walk(reflect.ValueOf(o))
 	}
-}
-
-type noInconclusiveListKey struct{}
-
-// WithoutInconclusiveList marks ctx for a pkg/subenum scan whose caller
-// never reads Stats.Inconclusive (subenum mcp), so the library does not keep
-// the list, as the CLI does not without -inconclusive (#300, #349). It is not
-// part of the library's API.
-func WithoutInconclusiveList(ctx context.Context) context.Context {
-	return context.WithValue(ctx, noInconclusiveListKey{}, true)
-}
-
-// InconclusiveListOff reports whether ctx was marked by
-// WithoutInconclusiveList.
-func InconclusiveListOff(ctx context.Context) bool {
-	off, _ := ctx.Value(noInconclusiveListKey{}).(bool)
-	return off
 }
 
 // Validate checks the numeric ranges and the resolver address. Messages name

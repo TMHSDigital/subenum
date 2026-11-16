@@ -13,6 +13,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/TMHSDigital/subenum/internal/dnstest"
+	"github.com/TMHSDigital/subenum/internal/libhook"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
@@ -498,11 +499,9 @@ func TestMaxDuration(t *testing.T) {
 	}
 }
 
-// TestNoAbortScanSucceedsDespiteFailingLookups covers #149: under NoAbort
-// the reliability guard only warns, so a completed Scan returns no error,
-// while Run still reports the warning.
 // TestInconclusiveListOff covers #349: Stats.Inconclusive lists the names
-// without an answer, except for a context subenum mcp marks, which keeps none.
+// without an answer, except in a scan subenum mcp starts through
+// internal/libhook with the list turned off, which keeps none (#367).
 func TestInconclusiveListOff(t *testing.T) {
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		if strings.HasPrefix(q.Name, "bad") {
@@ -516,12 +515,24 @@ func TestInconclusiveListOff(t *testing.T) {
 	if err != nil || len(stats.Inconclusive) != 2 {
 		t.Fatalf("Scan: err %v, inconclusive %q; want the two refused names", err, stats.Inconclusive)
 	}
-	_, stats, err = subenum.Scan(scan.WithoutInconclusiveList(context.Background()), cfg)
-	if err != nil || stats.Inconclusive != nil || stats.Refused != 2 {
-		t.Errorf("marked Scan: err %v, inconclusive %q, refused %d; want no list and the two refusals counted", err, stats.Inconclusive, stats.Refused)
+	events, err := libhook.Run[subenum.Config, subenum.Event](context.Background(), cfg, func(o *scan.Options) { o.ListInconclusive = false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats = subenum.Stats{}
+	for ev := range events {
+		if ev.Kind == subenum.KindDone {
+			stats = ev.Stats
+		}
+	}
+	if stats.Inconclusive != nil || stats.Refused != 2 {
+		t.Errorf("list off: inconclusive %q, refused %d; want no list and the two refusals counted", stats.Inconclusive, stats.Refused)
 	}
 }
 
+// TestNoAbortScanSucceedsDespiteFailingLookups covers #149: under NoAbort
+// the reliability guard only warns, so a completed Scan returns no error,
+// while Run still reports the warning.
 func TestNoAbortScanSucceedsDespiteFailingLookups(t *testing.T) {
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
 		if strings.HasPrefix(q.Name, "bad-") {
