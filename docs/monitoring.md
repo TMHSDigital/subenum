@@ -108,7 +108,7 @@ jobs:
           sarif: takeovers.sarif
           fail-on: degraded
       - if: always() && hashFiles('takeovers.sarif') != ''
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           sarif_file: takeovers.sarif
           category: subenum
@@ -246,7 +246,7 @@ jobs:
         run: mv current.jsonl previous.jsonl
 
       - if: steps.scan.outputs.verdict == 'complete'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: subenum-results
           path: |
@@ -275,7 +275,7 @@ add it only once the pinned `SUBENUM_VERSION` does. The job needs
 ```yaml
       - name: Upload takeover candidates
         if: always() && hashFiles('takeovers.sarif') != ''
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           sarif_file: takeovers.sarif
           category: subenum

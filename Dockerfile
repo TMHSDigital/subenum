@@ -56,7 +56,7 @@ CMD ["-version"]
 LABEL org.opencontainers.image.title="subenum"
 LABEL org.opencontainers.image.description="Fast concurrent subdomain enumeration via DNS brute-forcing"
 LABEL org.opencontainers.image.source="https://github.com/TMHSDigital/subenum"
-LABEL org.opencontainers.image.licenses="GPL-3.0"
+LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 LABEL org.opencontainers.image.documentation="https://github.com/TMHSDigital/subenum/blob/main/README.md"
 LABEL org.opencontainers.image.vendor="TMHSDigital"
 LABEL org.opencontainers.image.usage="For educational and legitimate security testing purposes only"

@@ -12,12 +12,13 @@ updates:
     groups:
       go-modules:
         patterns: ["*"]
-    # lipgloss v2.1.0 requires go 1.26.7; the supported minimum stays at
-    # go 1.26.0 until it is raised on purpose. CI's minimum leg installs the
-    # go directive itself (not the patched toolchain line) to test this floor.
+    # lipgloss v2.1.0 alone requires go 1.26.7 (v2.1.1 lowered it back to
+    # 1.26.0); the supported minimum stays at go 1.26.0 until it is raised on
+    # purpose. CI's minimum leg installs the go directive itself (not the
+    # patched toolchain line) to test this floor.
     ignore:
       - dependency-name: "charm.land/lipgloss/v2"
-        versions: [">= 2.1.0"]
+        versions: ["2.1.0"]
     labels:
       - "dependencies"
       - "go"

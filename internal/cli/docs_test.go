@@ -224,6 +224,111 @@ func TestSiteUnreleasedValueTags(t *testing.T) {
 	}
 }
 
+// usesPins maps each action's owner/repo to the commit SHAs that `uses:`
+// lines in text pin it at. Refs that are not a full SHA (a tag, a branch, a
+// local path) are skipped.
+func usesPins(text string) map[string][]string {
+	pins := make(map[string][]string)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimPrefix(strings.TrimSpace(line), "- ")
+		ref, ok := strings.CutPrefix(line, "uses:")
+		if !ok {
+			continue
+		}
+		ref, _, _ = strings.Cut(strings.TrimSpace(ref), " ")
+		name, sha, ok := strings.Cut(ref, "@")
+		if !ok || len(sha) != 40 || strings.Trim(sha, "0123456789abcdef") != "" {
+			continue
+		}
+		parts := strings.Split(name, "/")
+		if len(parts) < 2 {
+			continue
+		}
+		key := parts[0] + "/" + parts[1]
+		pins[key] = append(pins[key], sha)
+	}
+	return pins
+}
+
+// TestDocsActionPinsMatchWorkflows keeps the example workflows in the docs on
+// the action SHAs the repo itself runs. Dependabot bumps the workflows and
+// action.yml but never reads Markdown, so a copied example would otherwise
+// start on an old release (#366).
+func TestDocsActionPinsMatchWorkflows(t *testing.T) {
+	sources, err := filepath.Glob(filepath.Join(".github", "workflows", "*.y*ml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources = append(sources, "action.yml")
+	pinned := make(map[string]map[string]bool)
+	for _, src := range sources {
+		contents, err := os.ReadFile(src) //nolint:gosec // a repo file
+		if err != nil {
+			t.Fatal(err)
+		}
+		for key, shas := range usesPins(string(contents)) {
+			if pinned[key] == nil {
+				pinned[key] = make(map[string]bool)
+			}
+			for _, sha := range shas {
+				pinned[key][sha] = true
+			}
+		}
+	}
+
+	pages, err := filepath.Glob(filepath.Join("docs", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages = append(pages, readmeFlagsFile)
+	checked := 0
+	for _, page := range pages {
+		contents, err := os.ReadFile(page) //nolint:gosec // a docs file
+		if err != nil {
+			t.Fatal(err)
+		}
+		for key, shas := range usesPins(string(contents)) {
+			want, ok := pinned[key]
+			if !ok {
+				continue
+			}
+			for _, sha := range shas {
+				checked++
+				if !want[sha] {
+					t.Errorf("%s pins %s@%s, but the workflows pin it elsewhere", page, key, sha)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("found no action pins in the docs to check; has the parser drifted?")
+	}
+}
+
+// TestDockerLicenseLabelMatchesCitation keeps the image's OCI licence label
+// on the same SPDX identifier as CITATION.cff (#366).
+func TestDockerLicenseLabelMatchesCitation(t *testing.T) {
+	field := func(path, prefix string) string {
+		t.Helper()
+		contents, err := os.ReadFile(path) //nolint:gosec // a repo file
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(contents), "\n") {
+			if _, value, ok := strings.Cut(line, prefix); ok {
+				return strings.Trim(strings.TrimSpace(value), `"`)
+			}
+		}
+		t.Fatalf("%s has no %q", path, prefix)
+		return ""
+	}
+	citation := field("CITATION.cff", "license:")
+	label := field("Dockerfile", "org.opencontainers.image.licenses=")
+	if label != citation {
+		t.Errorf("Dockerfile licence label is %q, CITATION.cff says %q", label, citation)
+	}
+}
+
 // TestREADMEFlagTableCoversCLI keeps the hand-written README table complete
 // when a CLI flag is added. The website table is generated, but the README is
 // maintained separately for quick reference (#137).

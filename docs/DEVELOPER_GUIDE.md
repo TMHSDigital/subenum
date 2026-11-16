@@ -325,7 +325,9 @@ into every binary. Direct third-party deps:
 - [`charm.land/lipgloss/v2`](https://github.com/charmbracelet/lipgloss) - terminal styling
 
 Keep these on versions whose `go` directive is at most the module's `go
-1.26.0`: lipgloss v2.1.0 needs Go 1.26.7, so lipgloss stays on v2.0.x for now.
+1.26.0`. Check the `go` line of a new release before taking it (`go mod
+download -json <module>@<version>` names its go.mod); Dependabot skips
+lipgloss v2.1.0, the one release that needed Go 1.26.7.
 
 If you need to add a further dependency:
 
