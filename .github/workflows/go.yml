@@ -168,6 +168,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+      actions: read # the baseline-artifact download (#352)
     strategy:
       fail-fast: false
       matrix:
@@ -277,6 +278,58 @@ jobs:
         echo "found=${{ steps.permute.outputs.found }} names=$names"
         test "${{ steps.permute.outputs.found }}" = "$names"
         test "$names" -gt 100
+
+    # A time-boxed scan carries its resume state in the baseline artifact,
+    # and the next use continues it rather than starting over (#352). -rate
+    # 5 makes the 31-name wordlist outlast the first use's 2s budget.
+    - name: Stop a scan at its time budget
+      id: stopped
+      uses: ./
+      with:
+        version: source
+        domain: example.com
+        wordlist: examples/labs/words.txt
+        args: -simulate -seed 7 -rate 5 -t 1
+        max-duration: 2s
+        baseline-artifact: subenum-ci-resume-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}
+
+    - name: Continue it
+      id: resumed
+      uses: ./
+      with:
+        version: source
+        domain: example.com
+        wordlist: examples/labs/words.txt
+        args: -simulate -seed 7 -rate 5 -t 1
+        max-duration: 5m
+        baseline-artifact: subenum-ci-resume-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}
+
+    - name: Diff the next scan against the finished one
+      id: after
+      uses: ./
+      with:
+        version: source
+        domain: example.com
+        wordlist: examples/labs/words.txt
+        args: -simulate -seed 7 -rate 5 -t 1
+        baseline-artifact: subenum-ci-resume-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}
+
+    - name: Check the scan resumed and then set the baseline
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "${{ steps.stopped.outputs.verdict }}" = degraded
+        test "${{ steps.stopped.outputs.resumed }}" = false
+        test "${{ steps.resumed.outputs.resumed }}" = true
+        test "${{ steps.resumed.outputs.verdict }}" = complete
+        test "${{ steps.resumed.outputs.found }}" -ge 1
+        # The stopped use had no baseline yet, so neither did its resumption.
+        test -z "${{ steps.resumed.outputs.changes }}"
+        test "${{ steps.after.outputs.resumed }}" = false
+        test "${{ steps.after.outputs.verdict }}" = complete
+        test -n "${{ steps.after.outputs.changes }}"
+        test "${{ steps.after.outputs.added }}" = 0
+        test "${{ steps.after.outputs.removed }}" = 0
 
   # The action's default install path, as users get it: download the latest
   # release, check it against checksums.txt and its attestation, unpack it

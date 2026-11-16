@@ -32,7 +32,9 @@ inputs:
     description: >-
       Name of a workflow artifact holding the previous results. The newest one
       is downloaded and diffed against, and a complete run uploads its results
-      under the same name for next time. Empty disables it.
+      under the same name for next time. A run that max-duration stops saves
+      its resume state there too, and the next run continues that scan rather
+      than starting over. Empty disables it.
     required: false
     default: ""
   sarif:
@@ -43,7 +45,9 @@ inputs:
     description: >-
       Time budget for the scan (-max-duration), e.g. 20m. Keep it under the
       job's timeout-minutes: at the budget the scan stops testing new names
-      and still writes its results and report, with a degraded verdict.
+      and still writes its results and report, with a degraded verdict. With
+      baseline-artifact, the next run resumes where this one stopped, so a
+      scheduled job works through a large wordlist over several runs.
       Empty means no budget. Needs a subenum release newer than v0.10.0.
     required: false
     default: ""
@@ -68,6 +72,9 @@ outputs:
   verdict:
     description: Run-quality verdict, complete, degraded or unreliable.
     value: ${{ steps.scan.outputs.verdict }}
+  resumed:
+    description: true when this run continued a scan that an earlier run's max-duration stopped (with baseline-artifact).
+    value: ${{ steps.scan.outputs.resumed }}
   found:
     description: Names found.
     value: ${{ steps.scan.outputs.found }}
@@ -153,6 +160,8 @@ runs:
       run: |
         set -euo pipefail
         dir="$RUNNER_TEMP/subenum-baseline"
+        # A second use in the same job must not resume or diff the first's.
+        rm -rf "$dir"
         mkdir -p "$dir"
         run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME&per_page=1" \
           --jq '.artifacts[0] | select(.expired == false) | .workflow_run.id // empty')
@@ -180,8 +189,8 @@ runs:
         out="$RUNNER_TEMP/subenum-out"
         mkdir -p "$out"
         # A second use in the same job must not read the first use's report.
-        rm -f "$out/run.json" "$out/results.jsonl" "$out/changes.jsonl"
-        flags=(-silent -format jsonl -o "$out/results.jsonl" -stats "$out/run.json")
+        rm -f "$out/run.json" "$out/results.jsonl" "$out/changes.jsonl" "$out/state.json"
+        flags=(-silent -format jsonl -o "$out/results.jsonl" -stats "$out/run.json" -state "$out/state.json")
         [ -n "$WORDLIST" ] && flags+=(-w "$WORDLIST")
         [ -n "$SARIF" ] && flags+=(-sarif "$SARIF")
         [ -n "$MAX_DURATION" ] && flags+=(-max-duration "$MAX_DURATION")
@@ -198,7 +207,31 @@ runs:
 
         # The runner's bash has -e: capture the exit code instead of dying on 4.
         code=0
-        subenum "${flags[@]}" "${extra[@]}" "${target[@]}" > "$out/changes.jsonl" || code=$?
+        # A run that max-duration stopped left its resume state in the
+        # baseline artifact (#352). The state replays its own command line,
+        # output paths included, so it is only resumed when this run's inputs
+        # (and output directory) are the same; subenum itself refuses a
+        # changed wordlist or other input file, and then a new scan starts.
+        base="$RUNNER_TEMP/subenum-baseline"
+        key=$(printf '%s\n' "$DOMAIN" "$DOMAINS_FILE" "$WORDLIST" "$ARGS" "$SARIF" "$out" "$prev")
+        resumed=false
+        if [ -z "$PREVIOUS" ] && [ -n "$BASELINE" ] && [ -s "$base/state.json" ]; then
+          if [ "$(cat "$base/state.key" 2> /dev/null)" = "$key" ]; then
+            echo "Resuming the scan an earlier run's time budget stopped."
+            subenum -resume "$base/state.json" -max-duration "${MAX_DURATION:-0}" > "$out/changes.jsonl" || code=$?
+            if [ -s "$out/run.json" ]; then
+              resumed=true
+            else
+              echo "::notice::The stopped scan could not be resumed (exit $code, see above); starting a new scan."
+              code=0
+            fi
+          else
+            echo "::notice::The inputs changed since the run that saved the resume state; starting a new scan."
+          fi
+        fi
+        if [ "$resumed" = false ]; then
+          subenum "${flags[@]}" "${extra[@]}" "${target[@]}" > "$out/changes.jsonl" || code=$?
+        fi
         if [ ! -s "$out/run.json" ]; then echo "::error::subenum exited $code without a report"; exit "$code"; fi
 
         verdict=$(jq -r .verdict "$out/run.json")
@@ -211,7 +244,7 @@ runs:
         takeovers=$(jq '[.targets[].takeover_candidates // 0] | add // 0' "$out/run.json")
         internal=$(jq '[.targets[].internal_addresses // 0] | add // 0' "$out/run.json")
         {
-          echo "verdict=$verdict"; echo "found=$found"; echo "added=$added"; echo "removed=$removed"; echo "changed=$changed"
+          echo "verdict=$verdict"; echo "resumed=$resumed"; echo "found=$found";echo "added=$added"; echo "removed=$removed"; echo "changed=$changed"
           echo "takeovers=$takeovers"; echo "internal=$internal"
           echo "results=$out/results.jsonl"; echo "stats=$out/run.json"
           # Without -diff the scan prints every result, not changes.
@@ -242,8 +275,20 @@ runs:
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 
+        # The artifact carries a complete run's results, or a stopped run's
+        # resume state next to the results it still diffs against (#352).
+        carry="$RUNNER_TEMP/subenum-carry"
+        rm -rf "$carry"
+        mkdir -p "$carry"
         if [ -n "$BASELINE" ] && [ "$verdict" = complete ]; then
+          cp "$out/results.jsonl" "$carry/"
           echo "upload=true" >> "$GITHUB_OUTPUT"
+        elif [ -n "$BASELINE" ] && [ -z "$PREVIOUS" ] && [ -s "$out/state.json" ]; then
+          if [ -s "$base/results.jsonl" ]; then cp "$base/results.jsonl" "$carry/"; fi
+          cp "$out/state.json" "$carry/"
+          printf '%s\n' "$key" > "$carry/state.key"
+          echo "carry-state=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::The scan stopped before it finished; the next run with baseline-artifact $BASELINE continues it."
         fi
         # 0 = ok, 4 = changes found; 3 = some -dL targets failed and 1 = the
         # scan failed, and the verdict says how bad, so fail-on decides. A 1
@@ -258,10 +303,12 @@ runs:
         esac
 
     - name: Save the baseline
-      if: steps.scan.outputs.upload == 'true'
+      # A stopped run whose verdict fails the step under fail-on still saves
+      # its state.
+      if: ${{ (success() && steps.scan.outputs.upload == 'true') || (!cancelled() && steps.scan.outputs.carry-state == 'true') }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.baseline-artifact }}
-        path: ${{ runner.temp }}/subenum-out/results.jsonl
+        path: ${{ runner.temp }}/subenum-carry/
         retention-days: 90
         overwrite: true

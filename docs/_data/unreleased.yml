@@ -33,6 +33,7 @@ action:
   - changes
   - takeovers
   - internal
+  - resumed
 # pkg/subenum identifiers
 library:
   - AutoRate
