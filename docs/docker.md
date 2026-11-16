@@ -23,6 +23,12 @@ docker run --rm -v "$(pwd)/data:/data" ghcr.io/tmhsdigital/subenum:latest -w /da
 
 Verify provenance with `gh attestation verify oci://ghcr.io/tmhsdigital/subenum:latest --owner TMHSDigital`.
 
+To serve AI agents from the image with [`subenum mcp`](mcp.html), keep standard input open with `-i`, since the protocol runs over it; an MCP client configuration then uses `docker` as its command with these arguments:
+
+```bash
+docker run -i --rm ghcr.io/tmhsdigital/subenum:latest mcp -allow example.com
+```
+
 ## Building the Docker Image
 
 ### Using docker build
@@ -96,6 +102,8 @@ docker run --rm -v $(pwd)/data:/data subenum \
   -o /data/results.txt \
   example.com
 ```
+
+The image runs as the unprivileged `nonroot` user (uid 65532). If it cannot write to the mounted directory, add `--user $(id -u):$(id -g)` (see [File Permission Problems](#file-permission-problems)).
 
 ### Using Multiple Attempts for Unreliable Networks
 

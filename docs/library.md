@@ -34,6 +34,8 @@ for _, r := range results {
 }
 ```
 
+`Takeover` is a lead to check by hand: `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, or `dangling-ns`{% include unreleased.html value="type=NS" %} for a delegation to a name server that does not resolve. `Internal`{% include unreleased.html library="Internal" %} names the non-public scope (`private`, `loopback`, `link-local`, `cgnat`, `unspecified`) of an address a public name answers with, and is empty when every address is public. `Sources`{% include unreleased.html library="Sources" %} names what proposed the result: `wordlist` for `Words`, and each source in `Config.Sources` that returned it, by its `Name()` method when it has one (`ct`, `wayback`, `axfr` for the built-in ones) or else as `Sources[i]`, its index in `Config.Sources`.
+
 Every zero value in `Config` takes the same default as the CLI, so `Config{Domain: "example.com"}` is a complete configuration that uses the bundled 5,000-word list.
 
 ## Run: a stream of events
@@ -57,7 +59,54 @@ for ev := range events {
 }
 ```
 
-Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with a deferred `cancel()` is safe: once `ctx` is cancelled the scan stops without waiting for a reader, and its goroutines exit within about a second whether or not the channel is read. A consumer that keeps reading after cancelling still gets `KindDone` with the counts so far. While `ctx` is live, a consumer that stops reading pauses the scan once the buffer fills.
+Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with a deferred `cancel()` is safe: once `ctx` is cancelled the scan stops without waiting for a reader, and its goroutines exit within about a second whether or not the channel is read. A consumer that keeps reading after cancelling still gets `KindDone` with the counts so far. A `KindError` event has `Fatal` set when it ends the scan (the `NoAbort` warning is the one that does not), and `KindDone` has `Failed` set when the scan failed, so a consumer does not have to work either out. While `ctx` is live, a consumer that stops reading pauses the scan once the buffer fills.
+
+## Permutations: second-pass candidates
+
+`Permutations`{% include unreleased.html library="Permutations" %} makes the candidates the CLI's `-permute` tries: from names a scan already found, the variants most likely to sit next to them (`api` suggests `api-dev`, `dev-api`, `dev.api`, `api2` and so on). Seeds and results are relative to the apex, like `Words`, so the output feeds a second scan directly. Pass `nil` words for the CLI's built-in list of environment, version and role names. It sends no DNS queries:
+
+```go
+seeds := []string{"api", "mail"} // api.example.com and mail.example.com were found
+more, _, err := subenum.Scan(ctx, subenum.Config{
+    Domain: "example.com",
+    Words:  subenum.Permutations(seeds, nil),
+})
+```
+
+The result is sorted and duplicate-free, and names that are not valid in DNS are left out.
+
+## Diff: what changed since last time
+
+`Diff`{% include unreleased.html library="Diff" %} compares two sets of results the way the CLI's `-diff` and `-diff-records` do: names added, names missing, and names whose records changed. Pass the record types both scans looked up. When a CNAME is involved only its target counts, so a re-pointed alias is a change and the rotating addresses behind a CDN are not. It sends no DNS queries:
+
+```go
+changes := subenum.Diff(lastWeek, today, []string{"A", "AAAA", "CNAME"})
+for _, c := range changes.Changed {
+    fmt.Println(c.Name, c.Previous, "->", c.Current)
+}
+```
+
+`Removed` lists previous names the new results lack, which is not proof they are gone: they may not have been candidates this time, or their lookup failed. The CLI reports a name removed only after a fresh NXDOMAIN on a complete run, so look them up again before acting on them.
+
+## ProbeZone: zone transfers
+
+`ProbeZone`{% include unreleased.html library="ProbeZone" %} does what the CLI's `-axfr` does before a scan, with the same code and limits. It looks up the domain's name servers through `ZoneOptions.Resolver` (default `8.8.8.8:53`), asks at most 8 of them, on at most 2 addresses each, for a full zone transfer (AXFR), and asks one how the zone proves a name does not exist:
+
+```go
+info, err := subenum.ProbeZone(ctx, "example.com", subenum.ZoneOptions{})
+if err != nil {
+    return err // a bad domain or option, or the name server lookup failed
+}
+fmt.Println(info.TransferAllowed) // name servers that allowed a transfer
+fmt.Println(info.Names)           // the names they gave, relative to the domain
+if info.Denial == "nsec" {
+    fmt.Println("plain NSEC: anyone can list the zone by walking it")
+}
+```
+
+Most name servers refuse transfers, which is the correct configuration and not an error. `Denial` is `nsec`, `nsec3`, `none` (no DNSSEC), or empty when no name server answered the probe. To scan the transferred names, pass `ZoneTransfer(opts)`{% include unreleased.html library="ZoneTransfer" %} in `Config.Sources`: its names are looked up like any other, so only names that still resolve are reported.
+
+These queries go to the domain's own name servers, not to `Resolver`, and they are **not paced by `Rate`**, just as the CLI's `-axfr` is not: at most 34 queries in all (the name server lookup, two address lookups and up to two transfers per name server, and one DNSSEC probe). `ZoneOptions.Timeout` (default `1s`) bounds each lookup; a transfer gets at least 10 seconds.
 
 ## Configuration
 
@@ -67,22 +116,28 @@ Read the channel until it closes, or cancel `ctx`. Breaking out of the loop with
 | `Words` | `DefaultWords()` | Labels to try, or dotted paths such as `api.eu`. |
 | `Resolver` | `8.8.8.8:53` | Trusted server: `ip:port`, `tls://host`, or `https://host/path`. |
 | `ResolverPool` | none | Extra plain-UDP resolvers. Every hit is re-checked against `Resolver`. |
+| `RatePerResolver`{% include unreleased.html library="RatePerResolver" %} | unlimited | Queries per second to each `ResolverPool` member. `Rate` still caps the total, so the stricter limit wins. |
 | `Concurrency` | `100` | Workers looking up names at once. |
 | `Timeout` | `1s` | Bound on one lookup of one record type. |
 | `Attempts` | `1` | Tries per name. Only failures are retried, never NXDOMAIN. |
 | `Rate` | unlimited | Queries per second on the wire, counting every type, retry and probe. |
-| `Types` | `A`, `AAAA` | Record types. `CNAME` populates `Result.Takeover`. |
+| `Types` | `A`, `AAAA` | Record types: `A`, `AAAA`, `CNAME`, `NS`{% include unreleased.html value="type=NS" %}, `MX`{% include unreleased.html value="type=MX" %} and `TXT`{% include unreleased.html value="type=TXT" %}. `CNAME` and `NS` populate `Result.Takeover`. |
 | `Recursive`, `Depth` | off, `1` | Enumerate again under each name found. |
 | `MaxQueries` | unlimited | Cap on candidate names tested. |
-| `MaxDuration` | unlimited | Time budget from the start of `Run`. Then no new names are tested and the rest are counted in `Stats.Skipped`, with `Stats.Expired` set. |
+| `MaxDuration`{% include unreleased.html library="MaxDuration" %} | unlimited | Time budget from the start of `Run`. Then no new names are tested and the rest are counted in `Stats.Skipped`, with `Stats.Expired` set. |
+| `AutoRate`{% include unreleased.html library="AutoRate" %} | false | When over a fifth of the last 200 lookups fail, halve the rate and keep going (a `NoticeRate` event says so), and raise it again once lookups succeed. It halves up to six times and not below 5 per second; only when it can slow down no further does the reliability guard apply. `Stats.RateBackoffs` and `Stats.FinalRate` report it. |
+| `TakeoverProviders`{% include unreleased.html library="TakeoverProviders" %} | built-in list | Extra takeover-prone services (`{Suffix: ".example-cdn.net", Name: "example-cdn"}`) for `provider:` hints, added to the built-in list; a `Name` of `-` removes a suffix. `TakeoverProvidersOnly` uses them alone. |
+| `RetryInconclusive`{% include unreleased.html library="RetryInconclusive" %} | false | Once every candidate is tried, look up each name that timed out, was refused or failed once more against `Resolver`. Names it resolves are reported but not expanded by `Recursive`. `Stats.Retried` and `Stats.Recovered` count the pass; `Stats.Inconclusive` lists the names still without an answer. |
+| `Sources`{% include unreleased.html library="Sources" %} | none | Passive sources whose names are added after `Words` and looked up like them: `CertificateTransparency()`, `WaybackMachine()`, `ZoneTransfer(opts)` (see [Zone transfers](#probezone-zone-transfers)), or your own `Source` (one `Names(ctx, domain)` method). A source that fails sends a `NoticeSource` event and the scan goes on. Ignored with `Simulate`. |
 | `Exclude` | none | Out-of-scope names and `*.parent` branches, never queried. |
 | `Force` | off | Scan a wildcard zone, dropping answers that match its fingerprint. |
 | `NoAbort` | off | Keep going when more than a fifth of lookups fail. `Run` still sends the warning as a `KindError` event; `Scan` returns no error for a scan that finished. |
 | `Simulate`, `HitRate`, `Seed` | off, `15`, random | Synthetic results with no DNS traffic, for tests and demos. |
+| `Verbose`, `Logf` | off, stderr | Log every lookup. Lines go to `Logf`, or to standard error when it is nil. |
 
 ## Accounting
 
-`Stats` puts each candidate name into exactly one outcome: `Found`, `NXDomain`, `Timeout`, `Refused`, `Other` or `WildcardFiltered`. Alongside are `QueriesSent`, `Skipped` (left untested by `MaxQueries`), `Excluded`, and the resolver-pool counters `PoolHits`, `Confirmed` and `Unconfirmed`. `Aborted` means the reliability guard stopped the scan, so the negatives mean nothing.
+`Stats` puts each candidate name into exactly one outcome: `Found`, `NXDomain`, `Timeout`, `Refused`, `Other` or `WildcardFiltered`. Alongside are `QueriesSent`, `Skipped` (left untested by `MaxQueries` or `MaxDuration`, with `Expired` set for the latter), `Excluded`, the result counters `Takeover` and `Internal`, and the resolver-pool counters `PoolHits`, `Confirmed` and `Unconfirmed`. `Aborted` means the reliability guard stopped the scan, so the negatives mean nothing. `Wildcard` and `WildcardFingerprint` describe a wildcard zone. `RetryInconclusive` fills `Retried`, `Recovered` and `Inconclusive` (the names still without an answer), and `AutoRate` fills `RateBackoffs` and `FinalRate`. `Total()` sums the outcomes. `Verdict(interrupted)`{% include unreleased.html library="Verdict" %} applies the CLI run-quality report's rules: `VerdictComplete`, `VerdictDegraded` or `VerdictUnreliable`, with the reason in plain words (naming `Config` fields such as `MaxQueries`).
 
 ## Testing your integration
 

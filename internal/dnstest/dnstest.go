@@ -39,9 +39,11 @@ func Start(t testing.TB, h Handler) *Server {
 }
 
 // StartWith runs a server with options, stopped on cleanup. With IPv6 set and
-// no IPv6 loopback available, the test is skipped.
+// no IPv6 loopback available, the test is skipped. Per-name counting
+// (QueriesFor) is always on.
 func StartWith(t testing.TB, opts Options, h Handler) *Server {
 	t.Helper()
+	opts.CountNames = true
 	s, err := dnsserver.Listen(opts, h)
 	if errors.Is(err, dnsserver.ErrNoIPv6) {
 		t.Skip(err)

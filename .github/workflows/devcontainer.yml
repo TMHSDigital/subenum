@@ -2,7 +2,8 @@ name: Devcontainer
 
 # Builds the devcontainer that "Open in Codespaces" and the Labs page rely on,
 # and runs the tests, lint and a simulated scan inside it (#101). Weekly too,
-# because the base image tag moves under it.
+# so a broken setup step shows up without a change here. The base images are
+# pinned in .devcontainer/**/Dockerfile, where Dependabot bumps them (#244).
 on:
   push:
     branches: [ "main" ]

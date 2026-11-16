@@ -30,6 +30,40 @@ func NewRateLimiter(perSecond int) *RateLimiter {
 	return &RateLimiter{interval: interval}
 }
 
+// NewAdjustableRateLimiter is NewRateLimiter whose result is never nil, so
+// SetRate can slow it down later (#220). perSecond <= 0 starts unlimited.
+func NewAdjustableRateLimiter(perSecond int) *RateLimiter {
+	if l := NewRateLimiter(perSecond); l != nil {
+		return l
+	}
+	return &RateLimiter{}
+}
+
+// SetRate changes the rate for slots reserved from now on; perSecond <= 0 is
+// unlimited. Slots already handed out keep their time.
+func (l *RateLimiter) SetRate(perSecond int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if perSecond <= 0 {
+		l.interval = 0
+		return
+	}
+	l.interval = max(time.Second/time.Duration(perSecond), time.Nanosecond)
+}
+
+// Rate returns the current rate in events per second, 0 when unlimited.
+func (l *RateLimiter) Rate() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.interval <= 0 {
+		return 0
+	}
+	return int(time.Second / l.interval)
+}
+
 // Wait blocks until the caller's reserved slot arrives or ctx is done.
 func (l *RateLimiter) Wait(ctx context.Context) error {
 	if l == nil {

@@ -45,7 +45,19 @@ type Query struct {
 type Reply struct {
 	A     []string // IPv4 answers for A queries
 	AAAA  []string // IPv6 answers for AAAA queries
-	CNAME string   // alias answered for every qtype; A/AAAA above are then owned by the target
+	CNAME string   // alias answered for every qtype; the records here are then owned by the target
+	NS    []string // name servers for NS queries
+	MX    []string // "<preference> <host>" (or just "<host>", preference 10) for MX queries
+	TXT   []string // texts for TXT queries, one record each
+
+	// Transfer answers an AXFR query for the queried zone: its SOA, an A
+	// record (192.0.2.1) for each of these names, and the SOA again (#85).
+	// Nil answers AXFR like any unknown type; set RCode to refuse it.
+	Transfer []string
+
+	// Denial adds a DNSSEC denial-of-existence record to a negative answer's
+	// authority section, after the SOA: "nsec" or "nsec3" (#234).
+	Denial string
 
 	RCode    dnsmessage.RCode // e.g. RCodeNameError (NXDOMAIN), RCodeServerFailure, RCodeRefused
 	Drop     bool             // send nothing; the client times out
@@ -72,6 +84,10 @@ type Options struct {
 	Serial bool
 	// IPv6 listens on [::1] instead of 127.0.0.1.
 	IPv6 bool
+	// CountNames keeps a count per name and type for QueriesFor. Tests set
+	// it (internal/dnstest does); a lab scan leaves it off, since the map
+	// would grow with every candidate (#321).
+	CountNames bool
 }
 
 // Server is a running DNS server.
@@ -87,7 +103,7 @@ type Server struct {
 
 	total  atomic.Int64
 	mu     sync.Mutex
-	counts map[countKey]int64
+	counts map[countKey]int64 // nil unless Options.CountNames
 
 	closers []io.Closer
 	// wg covers every goroutine the server starts: listeners, stream
@@ -129,7 +145,10 @@ func Listen(opts Options, h Handler) (*Server, error) {
 		}
 		return nil, err
 	}
-	s := &Server{Addr: ln.Addr().String(), counts: map[countKey]int64{}, closers: []io.Closer{ln, pc}, conns: map[net.Conn]struct{}{}}
+	s := &Server{Addr: ln.Addr().String(), closers: []io.Closer{ln, pc}, conns: map[net.Conn]struct{}{}}
+	if opts.CountNames {
+		s.counts = map[countKey]int64{}
+	}
 
 	s.wg.Add(2)
 	go func() {
@@ -235,7 +254,11 @@ func (s *Server) Queries() int64 { return s.total.Load() }
 
 // QueriesFor returns how many queries for name and qtype the server has
 // received. name is matched case-insensitively, with or without a trailing dot.
+// It panics unless the server was started with Options.CountNames.
 func (s *Server) QueriesFor(name string, qtype dnsmessage.Type) int64 {
+	if s.counts == nil {
+		panic("dnsserver: QueriesFor needs Options.CountNames")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.counts[countKey{normalize(name), qtype}]
@@ -410,9 +433,11 @@ func (s *Server) handle(msg []byte, tcp bool, h Handler) []byte {
 	}
 	q := Query{Name: normalize(question.Name.String()), Type: question.Type, TCP: tcp}
 	s.total.Add(1)
-	s.mu.Lock()
-	s.counts[countKey{q.Name, q.Type}]++
-	s.mu.Unlock()
+	if s.counts != nil {
+		s.mu.Lock()
+		s.counts[countKey{q.Name, q.Type}]++
+		s.mu.Unlock()
+	}
 
 	r := h(q)
 	if r.Delay > 0 {
@@ -454,65 +479,225 @@ func build(qh dnsmessage.Header, question dnsmessage.Question, q Query, r Reply)
 
 	answered := 0
 	if r.RCode == dnsmessage.RCodeSuccess && !hdr.Truncated {
-		rh := func(name dnsmessage.Name, t dnsmessage.Type) dnsmessage.ResourceHeader {
-			return dnsmessage.ResourceHeader{Name: name, Type: t, Class: dnsmessage.ClassINET, TTL: 60}
+		n, err := addAnswers(&b, question.Name, q.Type, r)
+		if err != nil {
+			return nil, err
 		}
-		owner := question.Name
-		if r.CNAME != "" {
-			target, err := dnsmessage.NewName(fqdn(r.CNAME))
-			if err != nil {
-				return nil, err
-			}
-			if err := b.CNAMEResource(rh(owner, dnsmessage.TypeCNAME), dnsmessage.CNAMEResource{CNAME: target}); err != nil {
-				return nil, err
-			}
-			answered++
-			owner = target
-		}
-		switch q.Type {
-		case dnsmessage.TypeA:
-			for _, a := range r.A {
-				ip, err := netip.ParseAddr(a)
-				if err != nil || !ip.Is4() {
-					continue
-				}
-				if err := b.AResource(rh(owner, dnsmessage.TypeA), dnsmessage.AResource{A: ip.As4()}); err != nil {
-					return nil, err
-				}
-				answered++
-			}
-		case dnsmessage.TypeAAAA:
-			for _, a := range r.AAAA {
-				ip, err := netip.ParseAddr(a)
-				if err != nil || !ip.Is6() || ip.Is4In6() {
-					continue
-				}
-				if err := b.AAAAResource(rh(owner, dnsmessage.TypeAAAA), dnsmessage.AAAAResource{AAAA: ip.As16()}); err != nil {
-					return nil, err
-				}
-				answered++
-			}
-		}
+		answered = n
 	}
 
 	// Negative answers (NXDOMAIN, and NOERROR without records: NODATA) carry
 	// the zone's SOA, as real authoritative servers send.
 	if answered == 0 && !hdr.Truncated && (r.RCode == dnsmessage.RCodeSuccess || r.RCode == dnsmessage.RCodeNameError) {
-		if err := b.StartAuthorities(); err != nil {
+		if err := addSOA(&b, q.Name); err != nil {
 			return nil, err
 		}
-		zone, err := dnsmessage.NewName(fqdn(zoneOf(q.Name)))
-		if err != nil {
-			return nil, err
-		}
-		mname, _ := dnsmessage.NewName("ns." + fqdn(zoneOf(q.Name)))
-		rname, _ := dnsmessage.NewName("hostmaster." + fqdn(zoneOf(q.Name)))
-		soa := dnsmessage.SOAResource{NS: mname, MBox: rname, Serial: 1, Refresh: 3600, Retry: 600, Expire: 86400, MinTTL: 60}
-		if err := b.SOAResource(dnsmessage.ResourceHeader{Name: zone, Type: dnsmessage.TypeSOA, Class: dnsmessage.ClassINET, TTL: 60}, soa); err != nil {
+		if err := addDenial(&b, q.Name, r.Denial); err != nil {
 			return nil, err
 		}
 	}
 	return b.Finish()
+}
+
+// addDenial adds an NSEC or NSEC3 record for name's zone to the authority
+// section addSOA started. Only the record type matters to clients here, so
+// the data is minimal but well formed: NSEC names the root as next and
+// covers A; NSEC3 is SHA-1, no salt, a zero hash, and covers A.
+func addDenial(b *dnsmessage.Builder, name, denial string) error {
+	bitmapA := []byte{0, 1, 0x40} // window 0, one byte, type A
+	var t dnsmessage.Type
+	var data []byte
+	switch denial {
+	case "":
+		return nil
+	case "nsec":
+		t, data = 47, append([]byte{0}, bitmapA...)
+	case "nsec3":
+		t = 50
+		data = append([]byte{1, 0, 0, 0, 0, 20}, make([]byte, 20)...)
+		data = append(data, bitmapA...)
+	default:
+		return fmt.Errorf("dnsserver: unknown Denial %q", denial)
+	}
+	owner, err := dnsmessage.NewName(fqdn(zoneOf(name)))
+	if err != nil {
+		return err
+	}
+	return b.UnknownResource(dnsmessage.ResourceHeader{Name: owner, Type: t, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.UnknownResource{Type: t, Data: data})
+}
+
+// answerBuilder adds r's records of one query type, owned by owner, and
+// returns how many it added. Values that are not valid for the type are
+// skipped.
+type answerBuilder func(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error)
+
+// answerBuilders holds one builder per query type the server answers; a new
+// record type is one entry here. Other types get only the CNAME, if any.
+var answerBuilders = map[dnsmessage.Type]answerBuilder{
+	dnsmessage.TypeA:    addA,
+	dnsmessage.TypeAAAA: addAAAA,
+	dnsmessage.TypeNS:   addNS,
+	dnsmessage.TypeMX:   addMX,
+	dnsmessage.TypeTXT:  addTXT,
+	dnsmessage.TypeAXFR: addTransfer,
+}
+
+// addTransfer answers a zone transfer in one message: the zone's SOA, an A
+// record per name in r.Transfer, and the SOA again. Nil Transfer adds nothing.
+func addTransfer(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	if r.Transfer == nil {
+		return 0, nil
+	}
+	soa := func() error {
+		mname, _ := dnsmessage.NewName("ns." + owner.String())
+		rname, _ := dnsmessage.NewName("hostmaster." + owner.String())
+		return b.SOAResource(rrHeader(owner, dnsmessage.TypeSOA),
+			dnsmessage.SOAResource{NS: mname, MBox: rname, Serial: 1, Refresh: 3600, Retry: 600, Expire: 86400, MinTTL: 60})
+	}
+	if err := soa(); err != nil {
+		return 0, err
+	}
+	n := 1
+	for _, name := range r.Transfer {
+		host, err := dnsmessage.NewName(fqdn(name))
+		if err != nil {
+			continue
+		}
+		if err := b.AResource(rrHeader(host, dnsmessage.TypeA), dnsmessage.AResource{A: [4]byte{192, 0, 2, 1}}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n + 1, soa()
+}
+
+// rrHeader is the header every answer record carries.
+func rrHeader(name dnsmessage.Name, t dnsmessage.Type) dnsmessage.ResourceHeader {
+	return dnsmessage.ResourceHeader{Name: name, Type: t, Class: dnsmessage.ClassINET, TTL: 60}
+}
+
+// addAnswers adds r's CNAME, if any, then the records of type qtype, owned by
+// the CNAME target when there is one. It returns how many records it added.
+func addAnswers(b *dnsmessage.Builder, owner dnsmessage.Name, qtype dnsmessage.Type, r Reply) (int, error) {
+	answered := 0
+	if r.CNAME != "" {
+		target, err := dnsmessage.NewName(fqdn(r.CNAME))
+		if err != nil {
+			return 0, err
+		}
+		if err := b.CNAMEResource(rrHeader(owner, dnsmessage.TypeCNAME), dnsmessage.CNAMEResource{CNAME: target}); err != nil {
+			return 0, err
+		}
+		answered++
+		owner = target
+	}
+	add, ok := answerBuilders[qtype]
+	if !ok {
+		return answered, nil
+	}
+	n, err := add(b, owner, r)
+	return answered + n, err
+}
+
+// addAddrs adds one record per value that parses as an address keep accepts.
+func addAddrs(values []string, keep func(netip.Addr) bool, add func(netip.Addr) error) (int, error) {
+	n := 0
+	for _, v := range values {
+		ip, err := netip.ParseAddr(v)
+		if err != nil || !keep(ip) {
+			continue
+		}
+		if err := add(ip); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+func addA(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	return addAddrs(r.A, netip.Addr.Is4, func(ip netip.Addr) error {
+		return b.AResource(rrHeader(owner, dnsmessage.TypeA), dnsmessage.AResource{A: ip.As4()})
+	})
+}
+
+func addAAAA(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	isV6 := func(ip netip.Addr) bool { return ip.Is6() && !ip.Is4In6() }
+	return addAddrs(r.AAAA, isV6, func(ip netip.Addr) error {
+		return b.AAAAResource(rrHeader(owner, dnsmessage.TypeAAAA), dnsmessage.AAAAResource{AAAA: ip.As16()})
+	})
+}
+
+// addNS adds one NS record per host that is a valid name.
+func addNS(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, h := range r.NS {
+		host, err := dnsmessage.NewName(fqdn(h))
+		if err != nil {
+			continue
+		}
+		if err := b.NSResource(rrHeader(owner, dnsmessage.TypeNS), dnsmessage.NSResource{NS: host}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// addMX adds one MX record per "<preference> <host>" or "<host>" value.
+func addMX(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, v := range r.MX {
+		pref, hostStr := uint16(10), v
+		if p, h, ok := strings.Cut(v, " "); ok {
+			pv, err := strconv.ParseUint(p, 10, 16)
+			if err != nil {
+				continue
+			}
+			pref, hostStr = uint16(pv), strings.TrimSpace(h)
+		}
+		host, err := dnsmessage.NewName(fqdn(hostStr))
+		if err != nil {
+			continue
+		}
+		if err := b.MXResource(rrHeader(owner, dnsmessage.TypeMX), dnsmessage.MXResource{Pref: pref, MX: host}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// addTXT adds one TXT record per text, split into 255-byte strings.
+func addTXT(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, v := range r.TXT {
+		var parts []string
+		for len(v) > 255 {
+			parts, v = append(parts, v[:255]), v[255:]
+		}
+		parts = append(parts, v)
+		if err := b.TXTResource(rrHeader(owner, dnsmessage.TypeTXT), dnsmessage.TXTResource{TXT: parts}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// addSOA adds the authority section holding the SOA of name's zone.
+func addSOA(b *dnsmessage.Builder, name string) error {
+	if err := b.StartAuthorities(); err != nil {
+		return err
+	}
+	zone, err := dnsmessage.NewName(fqdn(zoneOf(name)))
+	if err != nil {
+		return err
+	}
+	mname, _ := dnsmessage.NewName("ns." + fqdn(zoneOf(name)))
+	rname, _ := dnsmessage.NewName("hostmaster." + fqdn(zoneOf(name)))
+	soa := dnsmessage.SOAResource{NS: mname, MBox: rname, Serial: 1, Refresh: 3600, Retry: 600, Expire: 86400, MinTTL: 60}
+	return b.SOAResource(dnsmessage.ResourceHeader{Name: zone, Type: dnsmessage.TypeSOA, Class: dnsmessage.ClassINET, TTL: 60}, soa)
 }
 
 func fqdn(name string) string {

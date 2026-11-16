@@ -8,12 +8,17 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
+
+// found is a plain engine result, as the TUI writes it.
+func found(name string, records []dns.Record) output.Result {
+	return output.Result{Result: scan.Result{Subdomain: name, Records: records}}
+}
 
 // TestListenForEventsHandlesEveryKind covers #165: every engine event kind,
 // and one the TUI does not know, becomes a message, and an unknown kind
@@ -43,8 +48,8 @@ func TestListenForEventsHandlesEveryKind(t *testing.T) {
 
 // TestFinalizeOutputGatesStructuredOutput locks in the TUI's replication of the
 // CLI contract: structured output is finalized only on the success path
-// (doneMsg -> finalizeOutput(true)). The early-error path
-// (stoppedMsg -> finalizeOutput(false)) must not emit an empty JSON array, the
+// (EventDone -> finalizeOutput(true)). The early-error path
+// (stopped EventDone -> finalizeOutput(false)) must not emit an empty JSON array, the
 // bug fixed once for the CLI in main.run, and must leave an existing results
 // file untouched (#52).
 func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
@@ -64,7 +69,7 @@ func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
 	// Success path: finalize(true) emits the buffered JSON array.
 	path := filepath.Join(dir, "ok.json")
 	m := mkModel(t, path)
-	m.out.Result("a.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+	m.out.Emit(found("a.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}}))
 	if err := m.finalizeOutput(true); err != nil {
 		t.Fatalf("finalizeOutput: %v", err)
 	}
@@ -85,7 +90,7 @@ func TestFinalizeOutputGatesStructuredOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	m2 := mkModel(t, path2)
-	m2.out.Result("b.example.com", nil)
+	m2.out.Emit(found("b.example.com", nil))
 	if err := m2.finalizeOutput(false); err != nil {
 		t.Fatalf("finalizeOutput: %v", err)
 	}
@@ -118,7 +123,7 @@ func TestFinalizeOutputNoFile(t *testing.T) {
 func TestCtrlCAfterDoneQuits(t *testing.T) {
 	m := Model{state: stateScan, scanView: newScanViewModel(80, 24, false)}
 	m.scanView.done = true
-	next, cmd := m.updateScan(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, cmd := m.updateScan(keyCtrlC)
 	if cmd == nil {
 		t.Fatal("expected a quit command")
 	}
@@ -127,6 +132,29 @@ func TestCtrlCAfterDoneQuits(t *testing.T) {
 	}
 	if next.(Model).scanView.aborted {
 		t.Error("finished scan was relabelled as aborted")
+	}
+}
+
+// TestFilterTypingDoesNotQuit covers #221: while the result filter is being
+// typed, q is a letter, not quit; after enter, q quits a finished scan again.
+func TestFilterTypingDoesNotQuit(t *testing.T) {
+	var m tea.Model = Model{state: stateScan, scanView: newScanViewModel(80, 24, false)}
+	sv := m.(Model).scanView
+	sv.done = true
+	m = Model{state: stateScan, scanView: sv}
+	for _, k := range []string{"/", "q"} {
+		var cmd tea.Cmd
+		m, cmd = m.(Model).updateScan(typeText(k))
+		if cmd != nil {
+			t.Fatalf("key %q returned a command while typing the filter", k)
+		}
+	}
+	if f := m.(Model).scanView.filter; f != "q" {
+		t.Fatalf("filter = %q, want q", f)
+	}
+	m, _ = m.(Model).updateScan(keyEnter)
+	if _, cmd := m.(Model).updateScan(typeText("q")); cmd == nil {
+		t.Error("q after enter did not quit the finished scan")
 	}
 }
 
@@ -139,7 +167,7 @@ func TestFinalizeOutputReportsCloseError(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &Model{out: output.NewFile(f.Writer, false, output.FormatText), outFile: f}
-	m.out.Result("a.example.com", nil)
+	m.out.Emit(found("a.example.com", nil))
 	// Put a non-empty directory where the results file goes, so the final
 	// rename into place fails.
 	if err := os.MkdirAll(filepath.Join(path, "blocker"), 0o755); err != nil {
@@ -160,7 +188,7 @@ func TestOutputFileFailureSetsExitCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := Model{out: output.NewFile(f.Writer, false, output.FormatText), outFile: f}
-	m.out.Result("a.example.com", nil)
+	m.out.Emit(found("a.example.com", nil))
 	// Put a non-empty directory where the results file goes, so the final
 	// rename into place fails.
 	if err := os.MkdirAll(filepath.Join(path, "blocker"), 0o755); err != nil {
@@ -183,8 +211,8 @@ func TestOutputFileFailureSetsExitCode(t *testing.T) {
 // Bubble Tea owns and freeze the UI.
 func TestValidateRejectsStdinWordlist(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[1].SetValue("-")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldWordlist].SetValue("-")
 	if _, errStr := m.validate(); !strings.Contains(errStr, "standard input") {
 		t.Fatalf("validate() error = %q, want a standard-input rejection", errStr)
 	}
@@ -199,12 +227,12 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := Model{state: stateForm, form: newFormModel(savedConfig{})}
-	m.form.inputs[0].SetValue("example.com")
-	m.form.inputs[1].SetValue(wl)
-	m.form.inputs[10].SetValue("") // no output file
-	m.form.toggles[0] = true       // simulate: the started scan sends no DNS traffic
+	m.form.inputs[fieldDomain].SetValue("example.com")
+	m.form.inputs[fieldWordlist].SetValue(wl)
+	m.form.inputs[fieldOutput].SetValue("") // no output file
+	m.form.toggles[fieldSimulate] = true    // simulate: the started scan sends no DNS traffic
 
-	next, cmd := m.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next, cmd := m.updateForm(keyCtrlR)
 	nm := next.(Model)
 	if nm.form.err != "" {
 		t.Fatalf("form error: %s", nm.form.err)
@@ -216,7 +244,7 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 		t.Error("form does not show the loading state")
 	}
 	// A second ctrl+r while loading is ignored.
-	if _, again := nm.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR}); again != nil {
+	if _, again := nm.updateForm(keyCtrlR); again != nil {
 		t.Error("ctrl+r during load started a second load")
 	}
 
@@ -232,6 +260,55 @@ func TestRunLoadsWordlistAsync(t *testing.T) {
 	}
 }
 
+// TestEmptyWordlistUsesBundledList covers #288: an installed binary has no
+// examples/sample_wordlist.txt beside it, so an empty Wordlist field must scan
+// with the bundled list, the way a missing -w does for the CLI.
+func TestEmptyWordlistUsesBundledList(t *testing.T) {
+	redirectConfig(t) // beginScan saves the form values
+	m := Model{state: stateForm, form: newFormModel(savedConfig{})}
+	m.form.inputs[fieldDomain].SetValue("example.com")
+	m.form.inputs[fieldWordlist].SetValue("")
+	m.form.inputs[fieldOutput].SetValue("") // no output file
+	m.form.toggles[fieldSimulate] = true    // simulate: the started scan sends no DNS traffic
+
+	next, cmd := m.updateForm(keyCtrlR)
+	nm := next.(Model)
+	if nm.form.err != "" {
+		t.Fatalf("form error: %s", nm.form.err)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+r with an empty wordlist field did not start a load")
+	}
+	loaded, ok := cmd().(wordlistLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("load result = %+v, want the bundled list", loaded)
+	}
+	if len(loaded.entries) < 1000 {
+		t.Fatalf("loaded %d entries, want the bundled top-5000 list", len(loaded.entries))
+	}
+	started, _ := nm.updateForm(loaded)
+	sm := started.(Model)
+	defer sm.cancel()
+	if sm.state != stateScan {
+		t.Fatalf("state=%v after load, want the scan screen", sm.state)
+	}
+	if !strings.Contains(sm.scanView.View(), "bundled top-5000 list") {
+		t.Error("scan view does not say which wordlist ran")
+	}
+}
+
+// TestPoolErrorStaysOnForm covers #195: a resolver pool file that cannot be
+// used is reported on the form instead of starting the scan.
+func TestPoolErrorStaysOnForm(t *testing.T) {
+	m := Model{state: stateForm, form: newFormModel(savedConfig{})}
+	m.form.loading = true
+	next, _ := m.updateForm(wordlistLoadedMsg{entries: []string{"www"}, poolErr: errors.New("cannot read resolver pool: missing")})
+	nm := next.(Model)
+	if nm.state != stateForm || nm.form.loading || !strings.Contains(nm.form.err, "cannot read resolver pool") {
+		t.Fatalf("state=%v loading=%v err=%q, want the pool error on the form", nm.state, nm.form.loading, nm.form.err)
+	}
+}
+
 // TestScanFailureStatusAndExitCode covers #55: a scan that ends with an error
 // shows "Failed", not "Aborted", and the TUI exits non-zero.
 // TestScanStatusShowsETA covers #191: the status bar shows the same time
@@ -244,7 +321,7 @@ func TestScanStatusShowsETA(t *testing.T) {
 		if i == 1 && strings.Contains(sv.View(), "ETA") {
 			t.Errorf("ETA shown during warm-up:\n%s", sv.View())
 		}
-		sv, _ = sv.Update(progressMsg{processed: i * 10, total: 1000})
+		sv, _ = sv.Update(eventMsg{scan.Event{Kind: scan.EventProgress, Processed: i * 10, Total: 1000}})
 		now = now.Add(time.Second)
 	}
 	if !strings.Contains(sv.View(), "ETA 1m34s") {
@@ -261,7 +338,7 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 	}
 
 	// Preflight failure: error, then the channel closes without EventDone.
-	sv := update(newScanViewModel(120, 40, false), errorMsg{text: "resolver failed preflight"}, stoppedMsg{})
+	sv := update(newScanViewModel(120, 40, false), eventMsg{scan.Event{Kind: scan.EventError, Fatal: true, Message: "resolver failed preflight"}}, eventMsg{scan.Event{Kind: scan.EventDone, Stopped: true, Failed: true}})
 	if !sv.failed() || !strings.Contains(sv.View(), "Failed: resolver failed preflight") || strings.Contains(sv.View(), "Aborted") {
 		t.Errorf("preflight failure not shown as Failed:\n%s", sv.View())
 	}
@@ -269,25 +346,28 @@ func TestScanFailureStatusAndExitCode(t *testing.T) {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 
-	// Reliability warning under -no-abort with a finished scan is not a failure.
+	// Reliability warning under -no-abort with a finished scan is not a
+	// failure: the engine sends it without Fatal, and EventDone without Failed.
 	nv := newScanViewModel(120, 40, false)
-	nv.noAbort = true
-	nv = update(nv, errorMsg{text: "warning: 30% failed"}, doneMsg{processed: 5, total: 5})
+	nv = update(nv, eventMsg{scan.Event{Kind: scan.EventError, Message: "warning: 30% failed"}}, eventMsg{scan.Event{Kind: scan.EventDone, Processed: 5, Total: 5}})
 	if nv.failed() || exitCode(Model{scanView: nv}) != 0 {
 		t.Error("-no-abort warning counted as a failure")
+	}
+	if v := nv.View(); !strings.Contains(v, "⚠ warning: 30% failed") || strings.Contains(v, "✗") || nv.errText != "" {
+		t.Errorf("-no-abort warning shown as an error (errText %q):\n%s", nv.errText, v)
 	}
 
 	// A user abort stays "Aborted" and exits 0.
 	av := newScanViewModel(120, 40, false)
 	av.aborted = true
-	av = update(av, doneMsg{processed: 1, total: 5})
+	av = update(av, eventMsg{scan.Event{Kind: scan.EventDone, Processed: 1, Total: 5}})
 	if av.failed() || !strings.Contains(av.View(), "Aborted") || exitCode(Model{scanView: av}) != 0 {
 		t.Errorf("user abort mis-rendered:\n%s", av.View())
 	}
 
 	// A completed scan whose results file failed to write exits 1, as the
 	// CLI does (#155).
-	om := Model{scanView: update(newScanViewModel(120, 40, false), doneMsg{processed: 5, total: 5})}
+	om := Model{scanView: update(newScanViewModel(120, 40, false), eventMsg{scan.Event{Kind: scan.EventDone, Processed: 5, Total: 5}})}
 	om.reportOutputErr(errors.New("disk full"))
 	if code := exitCode(om); code != 1 {
 		t.Errorf("output file error: exit code = %d, want 1", code)

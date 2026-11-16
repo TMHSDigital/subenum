@@ -1,7 +1,9 @@
 package dns
 
 import (
+	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,6 +19,21 @@ func TestParseResolverList(t *testing.T) {
 	}
 	if _, err := ParseResolverList([]string{"resolver.example.com"}); err == nil {
 		t.Fatal("hostname accepted; resolvers must be IP addresses")
+	}
+}
+
+func TestParseResolverListRejectsBadPorts(t *testing.T) {
+	for _, line := range []string{"9.9.9.9:abc", "9.9.9.9:99999", "9.9.9.9:0", "9.9.9.9:-1"} {
+		_, err := ParseResolverList([]string{"1.1.1.1", line})
+		if err == nil {
+			t.Fatalf("%q accepted; want a port error", line)
+		}
+		if !strings.Contains(err.Error(), line) {
+			t.Fatalf("%q: error does not name the offending line: %v", line, err)
+		}
+		if !strings.Contains(err.Error(), "1-65535") {
+			t.Fatalf("%q: error does not state the port range: %v", line, err)
+		}
 	}
 }
 
@@ -59,6 +76,160 @@ func TestPoolRotatesAndBenches(t *testing.T) {
 	}
 	if !back {
 		t.Fatal("resolver never returned after its bench")
+	}
+}
+
+// TestQueriesFor checks that the pool books the queries a lookup really
+// sends: default types are two, and CNAME is one, its own query (#236, #249).
+func TestQueriesFor(t *testing.T) {
+	for _, tc := range []struct {
+		types []string
+		want  int
+	}{
+		{nil, 2},
+		{[]string{"A"}, 1},
+		{[]string{"A", "AAAA"}, 2},
+		{[]string{"A", "AAAA", "CNAME"}, 3},
+		{[]string{"NS", "MX", "TXT"}, 3},
+	} {
+		if got := QueriesFor(tc.types); got != tc.want {
+			t.Errorf("QueriesFor(%v) = %d, want %d", tc.types, got, tc.want)
+		}
+	}
+}
+
+// TestResolveTypesAtOnce covers #250: a name's record types are looked up
+// at the same time, so two slow types cost one delay, not two, and the
+// records still come back in the order of types.
+func TestResolveTypesAtOnce(t *testing.T) {
+	const delay = 300 * time.Millisecond
+	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10", AAAA: "2001:db8::10", DelayA: delay, DelayAAAA: delay}})
+	l := Lookup{Resolver: srv.Resolver(2 * time.Second), Timeout: 2 * time.Second, Types: []string{"A", "AAAA"}}
+	recs, elapsed, err := l.ResolveTypes(context.Background(), "www.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 || recs[0].Type != "A" || recs[1].Type != "AAAA" {
+		t.Errorf("records = %v, want A then AAAA", recs)
+	}
+	if elapsed >= 2*delay-50*time.Millisecond {
+		t.Errorf("A and AAAA took %v; looked up one after another they take %v, at once about %v", elapsed, 2*delay, delay)
+	}
+}
+
+// TestTypesArePriced: every type -type accepts has a query cost, and no
+// cost is listed for a type it rejects (#264).
+func TestTypesArePriced(t *testing.T) {
+	if len(queriesPerType) != len(Types()) {
+		t.Errorf("queriesPerType prices %d types, Types lists %d", len(queriesPerType), len(Types()))
+	}
+	for _, typ := range Types() {
+		if queriesPerType[typ] < 1 {
+			t.Errorf("type %s has no query cost", typ)
+		}
+		if _, err := ParseTypes(typ); err != nil {
+			t.Errorf("ParseTypes(%s): %v", typ, err)
+		}
+	}
+}
+
+// TestPoolReservesWireQueries resolves through a capped member on a fake
+// clock and checks the slots Resolve books (#236): one per wire query the
+// lookup sends, not one per record type, so default types book two and a
+// CNAME lookup one (#249).
+func TestPoolReservesWireQueries(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10", AAAA: "2001:db8::10"}})
+	for _, tc := range []struct {
+		types []string
+		want  int // slots booked by one lookup
+	}{
+		{nil, 2},
+		{[]string{"A", "AAAA", "CNAME"}, 3},
+	} {
+		p := NewPool([]string{srv.addr}, 2*time.Second)
+		p.SetRatePerResolver(10) // 100ms per query
+		now := time.Unix(0, 0)
+		p.now = func() time.Time { return now }
+		p.sleep = func(context.Context, time.Duration) error { return nil }
+		m := p.members[0]
+		m.trusted = true // no canary or second opinion: only the lookup books
+		ans := p.Resolve(context.Background(), Lookup{Timeout: 2 * time.Second, Types: tc.types}, "www.example.com")
+		if ans.Outcome != OutcomeFound {
+			t.Fatalf("types %v: outcome %v, want found", tc.types, ans.Outcome)
+		}
+		if want := now.Add(time.Duration(tc.want) * 100 * time.Millisecond); !m.free.Equal(want) {
+			t.Errorf("types %v: member free at %v, want %v (%d slots)", tc.types, m.free.Sub(now), want.Sub(now), tc.want)
+		}
+	}
+}
+
+// TestPoolRatePerResolver drives the per-resolver cap (#196) on a fake clock:
+// lookups go to members with room first, wait for the one that frees up
+// soonest when every cap is spent, and count each spent cap as throttled.
+func TestPoolRatePerResolver(t *testing.T) {
+	p := NewPool([]string{"192.0.2.1:53", "192.0.2.2:53"}, time.Second)
+	p.SetRatePerResolver(2) // one query per 500ms per member
+	now := time.Unix(0, 0)
+	p.now = func() time.Time { return now }
+	var waits []time.Duration
+	p.sleep = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+	a, b := p.members[0], p.members[1]
+	ms := 500 * time.Millisecond
+
+	lookup := func(want *PoolResolver, wantWait time.Duration) {
+		t.Helper()
+		m := p.pick(nil)
+		if m != want {
+			t.Fatalf("pick = %s, want %s", m.Addr, want.Addr)
+		}
+		waits = nil
+		if err := p.reserve(context.Background(), m, 1); err != nil {
+			t.Fatal(err)
+		}
+		if len(waits) != 1 || waits[0] != wantWait {
+			t.Fatalf("%s waited %v, want %v", m.Addr, waits, wantWait)
+		}
+	}
+	lookup(a, 0)
+	lookup(b, 0)
+	// Both caps are spent: wait for a, whose slot frees first, then b.
+	lookup(a, ms)
+	lookup(b, ms)
+	lookup(a, 2*ms)
+	if st := p.Stats(); st[0].Throttled != 3 || st[1].Throttled != 3 {
+		t.Fatalf("throttled = %d, %d, want 3, 3", st[0].Throttled, st[1].Throttled)
+	}
+
+	// Once the clock passes b's slots it has room again and is preferred
+	// over a, which is still booked ahead.
+	now = now.Add(2 * ms)
+	lookup(b, 0)
+	if st := p.Stats(); st[0].Throttled != 4 || st[1].Throttled != 3 {
+		t.Fatalf("throttled = %d, %d, want 4, 3", st[0].Throttled, st[1].Throttled)
+	}
+
+	// A lookup of several record types books one slot per query.
+	now = now.Add(time.Minute)
+	if err := p.reserve(context.Background(), a, 3); err != nil {
+		t.Fatal(err)
+	}
+	if !a.free.Equal(now.Add(3 * ms)) {
+		t.Fatalf("after a 3-query lookup a is free at %v, want %v", a.free, now.Add(3*ms))
+	}
+
+	// A second opinion waits for a capped member rather than going without.
+	if got := p.pickHealthy(b); got != a {
+		t.Fatalf("pickHealthy(b) with a capped = %v, want a", got)
+	}
+
+	// Uncapped, nothing waits or is throttled.
+	p.SetRatePerResolver(0)
+	waits = nil
+	if p.pick(nil) == nil || p.reserve(context.Background(), a, 1) != nil || len(waits) != 0 {
+		t.Fatalf("uncapped pool waited: %v", waits)
 	}
 }
 

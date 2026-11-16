@@ -4,10 +4,12 @@ layout: base
 {%- comment -%} Flatten the nav into one reading order for the previous/next links. {%- endcomment -%}
 {%- assign urls = "" | split: "" -%}
 {%- assign titles = "" | split: "" -%}
+{%- assign doc_section = nil -%}
 {%- for group in site.data.nav -%}
   {%- for item in group.pages -%}
     {%- assign urls = urls | push: item.url -%}
     {%- assign titles = titles | push: item.title -%}
+    {%- if item.url == page.url -%}{%- assign doc_section = group.section -%}{%- endif -%}
   {%- endfor -%}
 {%- endfor -%}
 {%- assign prev_url = nil -%}{%- assign next_url = nil -%}
@@ -24,7 +26,10 @@ layout: base
   </aside>
 
   <main id="content" class="doc">
-    <article class="prose" data-doc-body>
+    <article class="prose{% if page.numbered == false %} is-unnumbered{% endif %}" data-doc-body>
+      {%- if doc_section %}
+      <p class="doc-section">{{ doc_section }}</p>
+      {%- endif %}
       {{ content }}
     </article>
 

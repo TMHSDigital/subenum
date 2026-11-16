@@ -16,7 +16,10 @@ import (
 //
 // Lookups use the trusted resolver (never Pool) or the simulation, and honour
 // Concurrency, Rate, Attempts, Timeout and Types. Names in Exclude are not
-// looked up and are absent from the result. Wildcard answers are not
+// looked up and are absent from the result. MaxQueries caps how many names
+// are looked up and Deadline stops new lookups (#276); names left over are
+// absent from the result too, so the caller can count them unchecked.
+// Wildcard answers are not
 // filtered: a name under a wildcard still resolves, so it is never reported
 // removed. Cancelled lookups report OutcomeCanceled.
 func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Outcome, int64) {
@@ -24,36 +27,26 @@ func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Out
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
 	}
 	defer dns.CloseIdleConnections(cfg.Resolver)
+	cfg.Attempts = max(cfg.Attempts, 1)
+	// Live lookups carry the limiter on ctx and take a slot per DNS query;
+	// simulated and hooked lookups take one slot per name, as in Run.
 	limiter := dns.NewRateLimiter(cfg.Rate)
-	live := !cfg.Simulate && cfg.resolveHook == nil
-	if live {
+	var nameLimiter *dns.RateLimiter
+	if !cfg.live() {
+		nameLimiter = limiter
+	} else {
 		ctx = dns.WithLimiter(ctx, limiter)
 	}
 	var sent atomic.Int64
 	ctx = dns.WithQueryCounter(ctx, &sent)
-	attempts := max(cfg.Attempts, 1)
 	sc := newScope(cfg.Exclude)
 
 	lookup := func(name string) dns.Outcome {
-		switch {
-		case cfg.resolveHook != nil:
-			if limiter.Wait(ctx) != nil {
-				return dns.OutcomeCanceled
-			}
-			_, outcome := cfg.resolveHook(ctx, name)
-			return outcome
-		case cfg.Simulate:
-			if limiter.Wait(ctx) != nil {
-				return dns.OutcomeCanceled
-			}
-			if _, ok := dns.SimulateResolve(name, cfg.HitRate, cfg.Seed, nil, cfg.Types); ok {
-				return dns.OutcomeFound
-			}
-			return dns.OutcomeNXDomain
-		default:
-			_, outcome := dns.ResolveDomainWithRetry(ctx, cfg.Resolver, name, cfg.Timeout, nil, attempts, cfg.Types)
-			return outcome
+		if nameLimiter.Wait(ctx) != nil {
+			return dns.OutcomeCanceled
 		}
+		_, outcome := cfg.resolve(ctx, name, nil)
+		return outcome
 	}
 
 	out := make(map[string]dns.Outcome, len(names))
@@ -63,10 +56,7 @@ func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Out
 	for range max(min(cfg.Concurrency, len(names)), 1) {
 		wg.Go(func() {
 			for name := range work {
-				outcome := lookup(name)
-				if outcome != dns.OutcomeFound && ctx.Err() != nil {
-					outcome = dns.OutcomeCanceled
-				}
+				outcome := settle(ctx, lookup(name))
 				mu.Lock()
 				out[name] = outcome
 				mu.Unlock()
@@ -74,10 +64,15 @@ func Verify(ctx context.Context, cfg Config, names []string) (map[string]dns.Out
 		})
 	}
 	var undispatched []string
+	dispatched := 0
 	for i, name := range names {
 		if sc.excluded(name) {
 			continue
 		}
+		if (cfg.MaxQueries > 0 && dispatched >= cfg.MaxQueries) || cfg.pastDeadline() {
+			break // out of budget: the rest stay unchecked
+		}
+		dispatched++
 		select {
 		case work <- name:
 			continue

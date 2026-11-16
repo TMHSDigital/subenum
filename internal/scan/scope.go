@@ -50,6 +50,11 @@ func newScope(patterns []string) *scope {
 	return s
 }
 
+// empty reports whether no pattern excludes anything.
+func (s *scope) empty() bool {
+	return s == nil || (len(s.exact) == 0 && len(s.suffixes) == 0)
+}
+
 // excluded reports whether name is out of scope.
 func (s *scope) excluded(name string) bool {
 	if s == nil {
@@ -84,8 +89,9 @@ func parentOf(name string) string {
 	return ""
 }
 
-// IsExcluded reports whether name is out of scope under the -exclude
-// patterns, using the same rules as a scan.
-func IsExcluded(patterns []string, name string) bool {
-	return newScope(patterns).excluded(name)
+// Excluder returns a test of whether a name is out of scope under the
+// -exclude patterns, using the same rules as a scan. The patterns are parsed
+// once, so a caller checking many names builds one Excluder (#349).
+func Excluder(patterns []string) func(name string) bool {
+	return newScope(patterns).excluded
 }

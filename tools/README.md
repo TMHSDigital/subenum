@@ -29,7 +29,7 @@ go build -buildvcs=false -o wordlist-gen wordlist-gen.go
 ./wordlist-gen -domain company-name.com -o company-wordlist.txt
 
 # Add custom combinations
-./wordlist-gen -domain company-name.com -combine "dev,test,staging" -o company-wordlist.txt
+./wordlist-gen -domain company-name.com -combine "dev,test,staging" -f -o company-wordlist.txt
 ```
 
 ### Parameters

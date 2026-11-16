@@ -36,7 +36,10 @@ func CreateFile(path string) (*File, error) {
 	keep := os.FileMode(0)
 	if fi, err := os.Stat(path); err == nil {
 		if !fi.Mode().IsRegular() {
-			f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+			// No O_TRUNC: truncating a device or pipe is meaningless, and
+			// Windows rejects it on the NUL device with ERROR_INVALID_FUNCTION
+			// (#208), which broke -o NUL.
+			f, err := os.OpenFile(path, os.O_WRONLY, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -52,6 +55,20 @@ func CreateFile(path string) (*File, error) {
 		_ = f.Chmod(keep) // best effort; Windows only honors the read-only bit
 	}
 	return &File{Writer: bufio.NewWriter(f), path: path, f: f, tmp: true}, nil
+}
+
+// WriteFile writes data to path the way CreateFile does: atomically, so a
+// failed write leaves an existing file unchanged (#331).
+func WriteFile(path string, data []byte) error {
+	f, err := CreateFile(path)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(werr == nil); werr == nil {
+		werr = cerr
+	}
+	return werr
 }
 
 // createTemp is os.CreateTemp with mode 0666, so the umask applies the way

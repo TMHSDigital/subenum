@@ -187,6 +187,12 @@ Find only subdomains that are CNAMEs (useful for spotting potential takeovers):
 ./subenum -w wordlist.txt -type CNAME -format json example.com
 ```
 
+`NS`, `MX` and `TXT` work the same way. An `MX` value reads `<preference> <host>`. With `NS`, a delegated subzone whose name server does not exist is marked `dangling-ns`, a takeover that CNAME-only scans miss:
+
+```bash
+./subenum -w wordlist.txt -type A,CNAME,NS -show-records example.com
+```
+
 The record type is captured per result, so JSON and CSV output carry it in the `records` field / `type` column.
 
 ## Rate Limiting
@@ -214,6 +220,15 @@ Pass `-no-abort` to keep the warning but finish the wordlist:
 ./subenum -w wordlist.txt -no-abort example.com
 ```
 
+Or pass `-auto-rate` to slow down instead: when more than 20% of the last 200
+lookups failed, the query rate is halved (with a `rate` notice) and raised
+again once lookups succeed. The guard aborts only after six back-offs, or at 5
+queries per second:
+
+```bash
+./subenum -w wordlist.txt -rate 200 -auto-rate example.com
+```
+
 ## Query Cap and Recursion Ceiling
 
 `-max-queries` stops admitting new work once the cap is reached (0 = unlimited).
@@ -226,11 +241,15 @@ A ceiling above 1e7 refuses to start unless `-max-queries` or `-force` is set.
 
 ## Wildcard Fingerprint Filter
 
-Wildcard detection keeps the union of both probe answers as a fingerprint.
-Without `-force` the scan still exits. With `-force`, later results whose
-records are a subset of that fingerprint are dropped and counted as
-`wildcard-filtered`. Recursive mode probes each newly resolved parent and
-skips expanding a wildcard branch.
+Wildcard detection probes random names under the domain: five at first, and
+when their answers differ (a wildcard served from a rotating CDN or
+load-balancer pool) it keeps probing, up to 128 probes, until the set of
+answers stops growing. Those answers are the fingerprint. Without `-force` the
+scan still exits. With `-force`, later results whose records all appear in the
+fingerprint are dropped and counted as `wildcard-filtered`; a result that
+shares only some records with it triggers two more probes before it is
+judged. Recursive mode probes each newly resolved parent and skips expanding a
+wildcard branch.
 
 ```bash
 ./subenum -w wordlist.txt -force example.com
@@ -252,25 +271,37 @@ Emits a single JSON array of objects, each with the subdomain and its resolved r
 [
   {
     "subdomain": "www.example.com",
-    "records": [{ "type": "A", "value": "93.184.216.34" }]
+    "records": [{ "type": "A", "value": "93.184.216.34" }],
+    "sources": ["wordlist"]
   }
 ]
 ```
 
-JSON is buffered and written once at completion (it is a single document, so it does not stream like text and CSV).
+`sources` names what proposed the name: `wordlist`, `ct`, `wayback` and `axfr`, every one that had it, or `permute` alone for a `-permute` hit.
+
+JSON is streamed: each element is written as it is found, and the array is closed when the scan ends, so a run interrupted with Ctrl+C still leaves a valid document.
 
 ### CSV
 
-Streams a header followed by one `subdomain,type,value` row per record:
+Streams a header followed by one row per record. The first three columns are always `subdomain,type,value`; more are appended when they apply, in this order:
+
+| Column | When |
+|--------|------|
+| `simulated` | `-simulate` (every row is `true`) |
+| `takeover_candidate` | `-type` includes `CNAME` or `NS` (see takeover hints in the README) |
+| `change` | `-diff` (`added`, `removed` or, with `-diff-records`, `changed`) |
+| `sources` | always, last: what proposed the name, joined with `;` (empty for a `removed` row) |
 
 ```bash
 ./subenum -w wordlist.txt -format csv -o results.csv example.com
 ```
 
 ```csv
-subdomain,type,value
-www.example.com,A,93.184.216.34
+subdomain,type,value,sources
+www.example.com,A,93.184.216.34,wordlist
 ```
+
+With `-type A,CNAME` the header is `subdomain,type,value,takeover_candidate,sources`. Read columns by header name rather than position.
 
 ## Continuous Integration / Automated Testing
 

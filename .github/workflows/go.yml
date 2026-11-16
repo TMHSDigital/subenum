@@ -7,6 +7,14 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# GoReleaser builds, signs and uploads releases, so it is pinned like every
+# other tool here rather than floating on "~> v2" (#324). Dependabot does not
+# read action inputs: to bump it, change this one line after checking the
+# GoReleaser release notes; the release-snapshot job runs the new version on
+# that push, before any tag uses it.
+env:
+  GORELEASER_VERSION: v2.20.2
+
 jobs:
   # Two legs: "minimum" proves the go.mod floor (1.26.0) still builds and
   # passes; "stable" is the toolchain releases are built with, and is where
@@ -25,11 +33,17 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Read Go language minimum
+      if: matrix.go == 'minimum'
+      id: go-minimum
+      shell: bash
+      run: echo "version=$(sed -n 's/^go //p' go.mod)" >> "$GITHUB_OUTPUT"
+
     - name: Set up Go (go.mod minimum)
       if: matrix.go == 'minimum'
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
       with:
-        go-version-file: 'go.mod'
+        go-version: ${{ steps.go-minimum.outputs.version }}
         cache: false
 
     - name: Set up Go (latest stable)
@@ -53,6 +67,11 @@ jobs:
     - name: Verify dependencies
       run: go mod verify
 
+    # verify checks hashes, not tidiness: this fails on a go.mod or go.sum
+    # that `make tidy` would change.
+    - name: Check go.mod and go.sum are tidy
+      run: go mod tidy -diff
+
     - name: Check go directive
       shell: bash
       run: |
@@ -67,7 +86,27 @@ jobs:
       run: go build -v -buildvcs=false -ldflags "-X main.Version=$(git describe --tags --dirty)" ./...
 
     - name: Test
-      run: go test -v -race -shuffle=on ./...
+      run: go test -v -race -shuffle=on -coverpkg=./... -coverprofile=coverage.out ./...
+
+    # Coverage is printed and kept per run, and must stay above a floor (#170).
+    # -coverpkg counts code a package is exercised through from another (the
+    # CLI tests drive internal/report, for one), so the floor can sit near the
+    # real total, about 92% (#261).
+    - name: Coverage
+      if: matrix.go == 'stable'
+      shell: bash
+      run: |
+        total=$(go tool cover -func=coverage.out | awk '/^total:/ { sub("%", "", $3); print $3 }')
+        echo "Total coverage: ${total}%" | tee -a "$GITHUB_STEP_SUMMARY"
+        awk -v t="$total" 'BEGIN { exit !(t >= 85) }' || { echo "coverage ${total}% is below the 85% floor"; exit 1; }
+
+    - name: Upload coverage
+      if: matrix.go == 'stable'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: coverage
+        path: coverage.out
+        retention-days: 14
 
     # Every generated completion script must parse in the shell it targets
     # (#117); pwsh is preinstalled on the runner.
@@ -96,6 +135,29 @@ jobs:
     - name: Run govulncheck
       if: matrix.go == 'stable'
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # The unit tests on macOS and Windows, whose binaries ship too: file
+  # replacement, signals and paths differ there (#170). The race detector
+  # runs on Linux, in build.
+  test-os:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, windows-latest ]
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      with:
+        go-version: stable
+        check-latest: true
+        cache: false
+
+    - name: Test
+      run: go test -shuffle=on ./...
 
   # Runs the composite action (action.yml, #126) from this checkout against
   # a lab zone on every runner OS: a scan, then a diff against its results.
@@ -130,9 +192,16 @@ jobs:
         set -euo pipefail
         test "${{ steps.scan.outputs.verdict }}" = complete
         test "${{ steps.scan.outputs.found }}" -ge 5
+        test "${{ steps.scan.outputs.takeovers }}" -ge 1
+        test "${{ steps.scan.outputs.internal }}" = 0
+        test -z "${{ steps.scan.outputs.changes }}"
         grep -q 'dangling-cname' takeovers.sarif
         cp "${{ steps.scan.outputs.results }}" previous.jsonl
         echo "gone.lab.example" >> previous.jsonl
+        # Thousands of removed names make the job summary's list far longer
+        # than a pipe buffer, which the action must cut to 50 without
+        # failing its step (#345).
+        for i in $(seq 1 3000); do echo "gone$i.lab.example"; done >> previous.jsonl
 
     - name: Diff against it
       id: diff
@@ -147,7 +216,46 @@ jobs:
       shell: bash
       run: |
         test "${{ steps.diff.outputs.added }}" = 0
-        test "${{ steps.diff.outputs.removed }}" = 1
+        test "${{ steps.diff.outputs.removed }}" = 3001
+        grep -q '"change":"removed"' "${{ steps.diff.outputs.changes }}"
+        grep -q 'gone.lab.example' "${{ steps.diff.outputs.changes }}"
+
+  # The action's default install path, as users get it: download the latest
+  # release, check it against checksums.txt and its attestation, unpack it
+  # (#325). The action job above builds from source and never reaches that
+  # branch. Pushes to main only, since it needs a published release and the
+  # network. A fresh job with no Go setup and no earlier build, so the scan
+  # can only run the binary the release install put on PATH. The permissions
+  # match the monitoring guide's example workflow. The scan uses -simulate
+  # rather than a lab zone file from this checkout, whose format can be
+  # newer than the release.
+  action-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+    - name: Scan with the latest release
+      id: scan
+      uses: ./
+      with:
+        version: latest
+        domain: lab.example
+        args: -simulate
+
+    - name: Check the scan
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "${{ steps.scan.outputs.verdict }}" = complete
+        test "${{ steps.scan.outputs.found }}" -ge 1
+        test -s "${{ steps.scan.outputs.results }}"
 
   # Builds the Dockerfile for both published platforms without pushing, so a
   # broken image is caught on the PR rather than during a release.
@@ -198,7 +306,7 @@ jobs:
     - name: GoReleaser snapshot
       uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
       with:
-        version: "~> v2"
+        version: ${{ env.GORELEASER_VERSION }}
         args: release --snapshot --clean --skip=sign
 
     - name: Assert static Linux binaries
@@ -229,9 +337,10 @@ jobs:
   # release notes from the tag's CHANGELOG.md section. GoReleaser creates the
   # release as a draft; it is published only after provenance is attested, so
   # the public never sees a partial release (cleanup-failed-release removes a
-  # failed draft).
+  # failed draft). It waits for every test job, the macOS and Windows tests
+  # and the action included, since their binaries and the action ship too.
   release:
-    needs: [ build, docker ]
+    needs: [ build, test-os, action, docker ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -244,9 +353,12 @@ jobs:
       actions: write
 
     steps:
+    # GoReleaser and gh take the token from the environment, so the checkout
+    # keeps no credentials in .git/config (#324).
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         fetch-depth: 0
+        persist-credentials: false
 
     # Release binaries use the latest stable Go so they ship a patched
     # standard library; go.mod's version is only the minimum (#38). No build
@@ -283,7 +395,7 @@ jobs:
     - name: GoReleaser
       uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
       with:
-        version: "~> v2"
+        version: ${{ env.GORELEASER_VERSION }}
         args: release --clean --release-notes=${{ runner.temp }}/notes.md
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -425,13 +537,15 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
-        rel=$(gh api "repos/${REPO}/releases" --jq "([.[] | select(.tag_name==\"${TAG}\")][0]) // empty")
+        # Every page: past 30 releases the draft is not on the first one.
+        rel=$(gh api --paginate "repos/${REPO}/releases?per_page=100" \
+          --jq ".[] | select(.tag_name==\"${TAG}\") | [.id, .draft] | @tsv" | awk 'NR==1')
         if [ -z "${rel}" ]; then
           echo "No release found for ${TAG}; nothing to clean."
           exit 0
         fi
-        id=$(printf '%s' "${rel}" | jq -r '.id')
-        draft=$(printf '%s' "${rel}" | jq -r '.draft')
+        id=$(printf '%s' "${rel}" | cut -f1)
+        draft=$(printf '%s' "${rel}" | cut -f2)
         if [ "${draft}" != "true" ]; then
           echo "Release ${id} for ${TAG} is published (draft=${draft}); leaving it intact."
           exit 0

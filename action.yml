@@ -34,7 +34,7 @@ inputs:
     required: false
     default: ""
   sarif:
-    description: Write takeover candidates to this SARIF file, for github/codeql-action/upload-sarif. Needs CNAME in -type.
+    description: Write takeover candidates to this SARIF file, for github/codeql-action/upload-sarif. Needs CNAME or NS in -type.
     required: false
     default: ""
   max-duration:
@@ -74,6 +74,18 @@ outputs:
   changed:
     description: Names whose records changed since the previous results (add -diff-records to args).
     value: ${{ steps.scan.outputs.changed }}
+  changes:
+    description: >-
+      Path of the changes (JSONL): one line per added, removed or changed name
+      with a "change" field, then the run summary. Empty when there were no
+      previous results to diff against.
+    value: ${{ steps.scan.outputs.changes }}
+  takeovers:
+    description: Takeover candidates among the names found (needs CNAME or NS in -type).
+    value: ${{ steps.scan.outputs.takeovers }}
+  internal:
+    description: Names found that answer with an address that is not public.
+    value: ${{ steps.scan.outputs.internal }}
   results:
     description: Path of the full results (JSONL).
     value: ${{ steps.scan.outputs.results }}
@@ -118,6 +130,9 @@ runs:
             --pattern "$archive" --pattern checksums.txt
           (cd "$dl" && if command -v sha256sum > /dev/null; then sha256sum --check --ignore-missing checksums.txt; \
             else shasum -a 256 --check --ignore-missing checksums.txt; fi)
+          # Checksums and archive can be replaced together. Provenance binds
+          # this exact archive to the repository's trusted release workflow.
+          gh attestation verify "$dl/$archive" --repo TMHSDigital/subenum
           if [ "$ext" = zip ]; then unzip -o -q "$dl/$archive" -d "$dl/x"; else mkdir -p "$dl/x" && tar -xzf "$dl/$archive" -C "$dl/x"; fi
           find "$dl/x" -maxdepth 2 -name 'subenum*' -type f \( -name subenum -o -name subenum.exe \) -exec cp {} "$bin/" \;
         fi
@@ -182,9 +197,14 @@ runs:
         added=$(jq '.diff.added // 0' "$out/run.json")
         removed=$(jq '.diff.removed // 0' "$out/run.json")
         changed=$(jq '.diff.changed // 0' "$out/run.json")
+        takeovers=$(jq '[.targets[].takeover_candidates // 0] | add // 0' "$out/run.json")
+        internal=$(jq '[.targets[].internal_addresses // 0] | add // 0' "$out/run.json")
         {
           echo "verdict=$verdict"; echo "found=$found"; echo "added=$added"; echo "removed=$removed"; echo "changed=$changed"
+          echo "takeovers=$takeovers"; echo "internal=$internal"
           echo "results=$out/results.jsonl"; echo "stats=$out/run.json"
+          # Without -diff the scan prints every result, not changes.
+          if [ -n "$prev" ]; then echo "changes=$out/changes.jsonl"; fi
         } >> "$GITHUB_OUTPUT"
 
         {
@@ -192,15 +212,22 @@ runs:
           echo
           echo "$reason"
           echo
-          echo "| Target | Verdict | Found | Queries |"
-          echo "|---|---|---|---|"
-          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \(.found // 0) | \(.queries_sent // 0) |"' "$out/run.json"
+          echo "| Target | Verdict | Found | Queries | Takeover candidates | Internal addresses |"
+          echo "|---|---|---|---|---|---|"
+          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \(.found // 0) | \(.queries_sent // 0) | \(.takeover_candidates // 0) | \(.internal_addresses // 0) |"' "$out/run.json"
+          if [ "$takeovers" != 0 ]; then
+            echo
+            echo "**Takeover candidates:** $takeovers"
+            # jq stops at 50 itself: `| head -50` would close the pipe under
+            # pipefail and fail the step on a long list.
+            jq -rn 'limit(50; inputs | select(.takeover_candidate) | "- `\(.subdomain)`: \(.takeover_candidate)")' "$out/results.jsonl"
+          fi
           if [ -n "$prev" ]; then
             echo
             echo "**Changes since the previous results:** $added added, $removed removed, $changed changed."
-            jq -r 'select(.change == "added") | "- `+ \(.subdomain)`"' "$out/changes.jsonl" | head -50
-            jq -r 'select(.change == "removed") | "- `- \(.subdomain)`"' "$out/changes.jsonl" | head -50
-            jq -r 'select(.change == "changed") | "- `~ \(.subdomain)`: \([.previous_records[]? | "\(.type) \(.value)"] | join(", ")) -> \([.records[] | "\(.type) \(.value)"] | join(", "))"' "$out/changes.jsonl" | head -50
+            jq -rn 'limit(50; inputs | select(.change == "added") | "- `+ \(.subdomain)`")' "$out/changes.jsonl"
+            jq -rn 'limit(50; inputs | select(.change == "removed") | "- `- \(.subdomain)`")' "$out/changes.jsonl"
+            jq -rn 'limit(50; inputs | select(.change == "changed") | "- `~ \(.subdomain)`: \([.previous_records[]? | "\(.type) \(.value)"] | join(", ")) -> \([.records[] | "\(.type) \(.value)"] | join(", "))")' "$out/changes.jsonl"
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 

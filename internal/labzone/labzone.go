@@ -16,6 +16,9 @@
 //	shop     CNAME    www                    # relative target
 //	blog     CNAME    ghost.example.net.     # absolute target (trailing dot)
 //	*.dev    A        192.0.2.99
+//	mail     MX       10 mx1                 # preference and host (relative or absolute)
+//	@        TXT      "v=spf1 -all"          # the rest of the line, quotes optional
+//	sub      NS       ns1.gone.example.net.  # a delegated subzone
 //	slow     TIMEOUT                         # never answered
 //	broken   SERVFAIL                        # also REFUSED, NXDOMAIN
 //
@@ -52,14 +55,56 @@ type Zone struct {
 type entry struct {
 	a, aaaa []string
 	cname   string
+	ns, mx  []string // hosts as written (relative or absolute); MX keeps "<pref> <host>"
+	txt     []string
 	fail    *dnsserver.Reply // TIMEOUT, SERVFAIL, REFUSED or NXDOMAIN
 }
 
-var failures = map[string]dnsserver.Reply{
-	"TIMEOUT":  dnsserver.Dropped,
-	"SERVFAIL": dnsserver.ServFail,
-	"REFUSED":  dnsserver.Refused,
-	"NXDOMAIN": dnsserver.NXDomain,
+// hasRecords reports whether e holds any record other than a CNAME.
+func (e *entry) hasRecords() bool {
+	return len(e.a)+len(e.aaaa)+len(e.ns)+len(e.mx)+len(e.txt) > 0
+}
+
+// failure is a type that makes a name fail instead of holding records; a
+// new failure is one entry in failures.
+type failure struct {
+	name  string // upper case
+	reply dnsserver.Reply
+}
+
+var failures = []failure{
+	{"TIMEOUT", dnsserver.Dropped},
+	{"SERVFAIL", dnsserver.ServFail},
+	{"REFUSED", dnsserver.Refused},
+	{"NXDOMAIN", dnsserver.NXDomain},
+}
+
+// named is an entry of one of the parser tables: directives, failures and
+// recordTypes.
+type named interface{ key() string }
+
+func (f failure) key() string    { return f.name }
+func (d directive) key() string  { return d.name }
+func (r recordType) key() string { return r.name }
+
+// lookup returns the entry of table called name.
+func lookup[T named](table []T, name string) (T, bool) {
+	for _, t := range table {
+		if t.key() == name {
+			return t, true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
+// known lists the names in table, in order, for an "unknown ..." error.
+func known[T named](table []T) string {
+	names := make([]string, len(table))
+	for i, t := range table {
+		names[i] = t.key()
+	}
+	return strings.Join(names, ", ")
 }
 
 // Load parses the scenario file at path.
@@ -99,39 +144,172 @@ func Parse(r io.Reader) (*Zone, error) {
 	return z, nil
 }
 
-func (z *Zone) parseLine(fields []string) error {
-	switch strings.ToUpper(fields[0]) {
-	case "$DELAY":
-		if len(fields) != 2 {
-			return fmt.Errorf("want $DELAY <duration>, e.g. $DELAY 20ms")
-		}
-		d, err := time.ParseDuration(fields[1])
+// directive is a $NAME line taking one argument; a new directive is one
+// entry in directives.
+type directive struct {
+	name  string                          // upper case, with the $
+	usage string                          // shown when the argument is missing
+	set   func(z *Zone, arg string) error // parses arg into z
+}
+
+var directives = []directive{
+	{"$DELAY", "$DELAY <duration>, e.g. $DELAY 20ms", func(z *Zone, arg string) error {
+		d, err := time.ParseDuration(arg)
 		if err != nil || d < 0 || d > 10*time.Second {
-			return fmt.Errorf("bad $DELAY %q: want a duration up to 10s, e.g. 20ms", fields[1])
+			return fmt.Errorf("bad $DELAY %q: want a duration up to 10s, e.g. 20ms", arg)
 		}
 		z.Delay = d
 		return nil
-	case "$REFUSE-ABOVE":
-		if len(fields) != 2 {
-			return fmt.Errorf("want $REFUSE-ABOVE <queries per second>")
-		}
-		v, err := strconv.Atoi(fields[1])
+	}},
+	{"$REFUSE-ABOVE", "$REFUSE-ABOVE <queries per second>", func(z *Zone, arg string) error {
+		v, err := strconv.Atoi(arg)
 		if err != nil || v < 1 {
-			return fmt.Errorf("bad $REFUSE-ABOVE %q: want a positive number of queries per second", fields[1])
+			return fmt.Errorf("bad $REFUSE-ABOVE %q: want a positive number of queries per second", arg)
 		}
 		z.RefuseAbove = v
 		return nil
+	}},
+}
+
+// recordType is a record a name can hold, with a value; a new type is one
+// entry in recordTypes. owner is the name as written, for error messages.
+// With rest set, the value is the rest of the line (MX's "10 mail", a TXT
+// text with spaces); otherwise it is one field.
+type recordType struct {
+	name string // upper case
+	add  func(e *entry, owner, value string) error
+	rest bool
+}
+
+var recordTypes = []recordType{
+	{name: "A", add: addrRecord("A", netip.Addr.Is4, func(e *entry) *[]string { return &e.a })},
+	{name: "AAAA", add: addrRecord("AAAA", func(ip netip.Addr) bool { return !ip.Is4() }, func(e *entry) *[]string { return &e.aaaa })},
+	{name: "CNAME", add: func(e *entry, owner, value string) error {
+		if e.cname != "" || e.hasRecords() {
+			return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
+		}
+		target, err := cnameTarget(value)
+		if err != nil {
+			return err
+		}
+		e.cname = target
+		return nil
+	}},
+	// A delegation (#194): the name servers of a subzone.
+	{name: "NS", add: func(e *entry, owner, value string) error {
+		return addHost(e, owner, "NS", value, "", &e.ns)
+	}},
+	{name: "MX", rest: true, add: func(e *entry, owner, value string) error {
+		pref, host, ok := strings.Cut(value, " ")
+		if !ok {
+			return fmt.Errorf("want <name> MX <preference> <host>")
+		}
+		if _, err := strconv.ParseUint(pref, 10, 16); err != nil {
+			return fmt.Errorf("bad MX preference %q", pref)
+		}
+		return addHost(e, owner, "MX", strings.TrimSpace(host), pref+" ", &e.mx)
+	}},
+	{name: "TXT", rest: true, add: func(e *entry, owner, value string) error {
+		if e.cname != "" {
+			return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
+		}
+		if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+			value = value[1 : len(value)-1]
+		}
+		e.txt = append(e.txt, value)
+		return nil
+	}},
+}
+
+// addHost appends a record whose value is a host name, relative to the
+// scanned domain or absolute with a trailing dot, to list; prefix (MX's
+// preference) is kept in front of it.
+func addHost(e *entry, owner, typ, value, prefix string, list *[]string) error {
+	if e.cname != "" {
+		return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
 	}
+	host, err := cnameTarget(value)
+	if err != nil || host == "@" {
+		return fmt.Errorf("bad %s host %q", typ, value)
+	}
+	*list = append(*list, prefix+host)
+	return nil
+}
+
+// addrRecord returns the parser for an address record of type typ whose
+// addresses satisfy ok and are kept in the list list returns.
+func addrRecord(typ string, ok func(netip.Addr) bool, list func(*entry) *[]string) func(e *entry, owner, value string) error {
+	return func(e *entry, owner, value string) error {
+		ip, err := netip.ParseAddr(value)
+		if err != nil || !ok(ip) {
+			return fmt.Errorf("bad %s address %q", typ, value)
+		}
+		if e.cname != "" {
+			return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
+		}
+		l := list(e)
+		*l = append(*l, ip.String())
+		return nil
+	}
+}
+
+func (z *Zone) parseLine(fields []string) error {
 	if strings.HasPrefix(fields[0], "$") {
-		return fmt.Errorf("unknown directive %s (known: $DELAY, $REFUSE-ABOVE)", fields[0])
+		return z.parseDirective(fields)
 	}
+	return z.parseRecord(fields)
+}
+
+func (z *Zone) parseDirective(fields []string) error {
+	d, ok := lookup(directives, strings.ToUpper(fields[0]))
+	if !ok {
+		return fmt.Errorf("unknown directive %s (known: %s)", fields[0], known(directives))
+	}
+	if len(fields) != 2 {
+		return fmt.Errorf("want %s", d.usage)
+	}
+	return d.set(z, fields[1])
+}
+
+func (z *Zone) parseRecord(fields []string) error {
 	if len(fields) < 2 {
 		return fmt.Errorf("want <name> <type> [value]")
 	}
-
-	name, wild, err := parseName(fields[0])
+	e, err := z.entryFor(fields[0])
 	if err != nil {
 		return err
+	}
+
+	typ := strings.ToUpper(fields[1])
+	if f, ok := lookup(failures, typ); ok {
+		if len(fields) != 2 {
+			return fmt.Errorf("%s takes no value", typ)
+		}
+		if e.fail != nil || e.cname != "" || e.hasRecords() {
+			return fmt.Errorf("%s: a failure cannot be combined with other records for the same name", fields[0])
+		}
+		e.fail = &f.reply
+		return nil
+	}
+	rt, ok := lookup(recordTypes, typ)
+	if !ok {
+		return fmt.Errorf("unknown type %s (known: %s, %s)", fields[1], known(recordTypes), known(failures))
+	}
+	if len(fields) < 3 || (len(fields) > 3 && !rt.rest) {
+		return fmt.Errorf("want <name> %s <value>", typ)
+	}
+	if e.fail != nil {
+		return fmt.Errorf("%s: already defined as a failure", fields[0])
+	}
+	return rt.add(e, fields[0], strings.Join(fields[2:], " "))
+}
+
+// entryFor returns the entry for the name as written in the file, creating
+// it, and marks the name and its ancestors as existing.
+func (z *Zone) entryFor(raw string) (*entry, error) {
+	name, wild, err := parseName(raw)
+	if err != nil {
+		return nil, err
 	}
 	table := z.entries
 	if wild {
@@ -149,52 +327,7 @@ func (z *Zone) parseLine(fields []string) error {
 			break
 		}
 	}
-
-	typ := strings.ToUpper(fields[1])
-	if fail, ok := failures[typ]; ok {
-		if len(fields) != 2 {
-			return fmt.Errorf("%s takes no value", typ)
-		}
-		if e.fail != nil || e.cname != "" || len(e.a)+len(e.aaaa) > 0 {
-			return fmt.Errorf("%s: a failure cannot be combined with other records for the same name", fields[0])
-		}
-		e.fail = &fail
-		return nil
-	}
-	if len(fields) != 3 {
-		return fmt.Errorf("want <name> %s <value>", typ)
-	}
-	if e.fail != nil {
-		return fmt.Errorf("%s: already defined as a failure", fields[0])
-	}
-	value := fields[2]
-	switch typ {
-	case "A", "AAAA":
-		ip, err := netip.ParseAddr(value)
-		if err != nil || (typ == "A") != ip.Is4() {
-			return fmt.Errorf("bad %s address %q", typ, value)
-		}
-		if e.cname != "" {
-			return fmt.Errorf("%s: a CNAME cannot be combined with other records", fields[0])
-		}
-		if typ == "A" {
-			e.a = append(e.a, ip.String())
-		} else {
-			e.aaaa = append(e.aaaa, ip.String())
-		}
-	case "CNAME":
-		if e.cname != "" || len(e.a)+len(e.aaaa) > 0 {
-			return fmt.Errorf("%s: a CNAME cannot be combined with other records", fields[0])
-		}
-		target, err := cnameTarget(value)
-		if err != nil {
-			return err
-		}
-		e.cname = target
-	default:
-		return fmt.Errorf("unknown type %s (known: A, AAAA, CNAME, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)", fields[1])
-	}
-	return nil
+	return e, nil
 }
 
 // cnameTarget validates a CNAME value: "@" (the scanned domain itself), a
@@ -270,16 +403,17 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 		return *e.fail
 	}
 	if e.cname == "" {
-		return dnsserver.Reply{A: e.a, AAAA: e.aaaa}
+		r := dnsserver.Reply{A: e.a, AAAA: e.aaaa, TXT: e.txt}
+		for _, h := range e.ns {
+			r.NS = append(r.NS, absolute(h, origin))
+		}
+		for _, v := range e.mx {
+			pref, h, _ := strings.Cut(v, " ")
+			r.MX = append(r.MX, pref+" "+absolute(h, origin))
+		}
+		return r
 	}
-	target := e.cname
-	switch {
-	case target == "@":
-		target = origin
-	case !strings.HasSuffix(target, "."):
-		target += "." + origin
-	}
-	target = strings.TrimSuffix(target, ".")
+	target := absolute(e.cname, origin)
 	r := dnsserver.Reply{CNAME: target}
 	// Follow an in-zone target one step, as an authoritative server includes
 	// the target's addresses when it holds them.
@@ -289,6 +423,19 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 		}
 	}
 	return r
+}
+
+// absolute resolves a target as written in the file (a CNAME target, an NS
+// or MX host) against origin: "@" is origin, a name ending in a dot is
+// absolute, any other is relative to origin. The result has no trailing dot.
+func absolute(target, origin string) string {
+	switch {
+	case target == "@":
+		target = origin
+	case !strings.HasSuffix(target, "."):
+		target += "." + origin
+	}
+	return strings.TrimSuffix(target, ".")
 }
 
 // relative returns name relative to origin, if name is origin or under it.

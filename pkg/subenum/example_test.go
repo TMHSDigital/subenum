@@ -150,3 +150,46 @@ func ExampleConfig_recursive() {
 	// dev.example.com
 	// out of scope, never queried: 2
 }
+
+// Permutations suggests the names most likely to sit next to ones a scan
+// already found. Its output is relative to the apex, so it can feed the Words
+// of a second scan. Pass nil words for the CLI's built-in list.
+func ExamplePermutations() {
+	for _, name := range subenum.Permutations([]string{"api"}, []string{"dev"}) {
+		fmt.Println(name)
+	}
+
+	// Output:
+	// api-dev
+	// api1
+	// api2
+	// api3
+	// dev-api
+	// dev.api
+}
+
+// Diff compares two scans of the same domain, here last week's results with
+// today's. Pass the record types both scans looked up.
+func ExampleDiff() {
+	lastWeek := []subenum.Result{
+		{Name: "www.example.com", Records: []subenum.Record{{Type: "A", Value: "192.0.2.1"}}},
+		{Name: "blog.example.com", Records: []subenum.Record{{Type: "CNAME", Value: "blog.host.example"}}},
+		{Name: "old.example.com", Records: []subenum.Record{{Type: "A", Value: "192.0.2.2"}}},
+	}
+	today := []subenum.Result{
+		{Name: "www.example.com", Records: []subenum.Record{{Type: "A", Value: "192.0.2.1"}}},
+		{Name: "blog.example.com", Records: []subenum.Record{{Type: "CNAME", Value: "unclaimed.example"}}},
+		{Name: "api.example.com", Records: []subenum.Record{{Type: "A", Value: "192.0.2.3"}}},
+	}
+	changes := subenum.Diff(lastWeek, today, []string{"A", "AAAA", "CNAME"})
+	fmt.Println("added:", changes.Added)
+	fmt.Println("missing, to re-check:", changes.Removed)
+	for _, c := range changes.Changed {
+		fmt.Println("changed:", c.Name, c.Previous, "->", c.Current)
+	}
+
+	// Output:
+	// added: [api.example.com]
+	// missing, to re-check: [old.example.com]
+	// changed: blog.example.com [{CNAME blog.host.example}] -> [{CNAME unclaimed.example}]
+}

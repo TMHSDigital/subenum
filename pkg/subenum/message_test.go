@@ -3,6 +3,7 @@ package subenum
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/validate"
@@ -14,6 +15,69 @@ import (
 func TestDefaultsMatchTheCLI(t *testing.T) {
 	if DefaultResolver != validate.DefaultDNSServer {
 		t.Errorf("DefaultResolver = %q, but the CLI defaults to %q", DefaultResolver, validate.DefaultDNSServer)
+	}
+	// The numeric defaults are literals for the same reason; the CLI flags
+	// and the TUI form take theirs from scan (#262).
+	if DefaultConcurrency != scan.DefaultConcurrency {
+		t.Errorf("DefaultConcurrency = %d, scan.DefaultConcurrency = %d", DefaultConcurrency, scan.DefaultConcurrency)
+	}
+	if DefaultTimeout != scan.DefaultTimeoutMs*time.Millisecond {
+		t.Errorf("DefaultTimeout = %s, scan.DefaultTimeoutMs = %d", DefaultTimeout, scan.DefaultTimeoutMs)
+	}
+	if DefaultHitRate != scan.DefaultHitRate {
+		t.Errorf("DefaultHitRate = %d, scan.DefaultHitRate = %d", DefaultHitRate, scan.DefaultHitRate)
+	}
+}
+
+// TestOptionsSetsEveryField is pkg/subenum's drift guard of #262: with every
+// Config field set, options fills in every scan.Options field except the ones
+// listed in pkgUnmapped, each with the reason.
+func TestOptionsSetsEveryField(t *testing.T) {
+	pkgUnmapped := map[string]string{
+		"Simulate":      "mapped, but zero here: ResolverPool needs a live scan",
+		"ResumeFrom":    "the library does not resume interrupted scans",
+		"ResumeParents": "the library does not resume interrupted scans",
+		"RetryPrior":    "the library does not resume interrupted scans",
+		"Resolver":      "scan.Run builds the resolver from DNSServer",
+	}
+	c := Config{
+		Domain: "example.com", Words: []string{"www"}, Concurrency: 7, Timeout: 700 * time.Millisecond,
+		Resolver: "192.0.2.53:53", HitRate: 40, Seed: 9, Attempts: 2, Force: true, Types: []string{"A"},
+		Recursive: true, Depth: 3, Rate: 50, AutoRate: true, MaxQueries: 10, MaxDuration: time.Minute,
+		Exclude: []string{"vpn.example.com"}, NoAbort: true, Verbose: true, Logf: func(string, ...any) {},
+		RetryInconclusive: true, RatePerResolver: 5, ResolverPool: []string{"192.0.2.1"},
+		TakeoverProviders: []TakeoverProvider{{Suffix: ".example-cdn.net", Name: "example-cdn"}},
+	}
+	opts, err := c.options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, field := range opts.Fields() {
+		_, listed := pkgUnmapped[name]
+		switch zero := field.IsZero(); {
+		case zero && !listed:
+			t.Errorf("scan.Options.%s is never set from Config; map it or list it in pkgUnmapped with a reason", name)
+		case !zero && listed:
+			t.Errorf("scan.Options.%s is set from Config but listed in pkgUnmapped", name)
+		}
+	}
+}
+
+// TestRangeErrorsNameConfigFields pins the messages for the two checks that
+// moved into scan.Options.Validate (#262): they still name the Config field.
+func TestRangeErrorsNameConfigFields(t *testing.T) {
+	for _, c := range []struct {
+		cfg  Config
+		want string
+	}{
+		{Config{Domain: "example.com", Words: []string{"www"}, RatePerResolver: -1},
+			"subenum: rate per resolver (RatePerResolver) must be 0 (unlimited) or a positive integer, got -1"},
+		{Config{Domain: "example.com", Words: []string{"www"}, MaxDuration: -time.Second},
+			"subenum: max duration (MaxDuration) must be 0 (unlimited) or positive, got -1s"},
+	} {
+		if _, err := c.cfg.options(); err == nil || err.Error() != c.want {
+			t.Errorf("error = %v, want %q", err, c.want)
+		}
 	}
 }
 
@@ -47,11 +111,7 @@ func TestFieldNames(t *testing.T) {
 func TestConfigFieldsCoverEverySetting(t *testing.T) {
 	cfg := reflect.TypeOf(Config{})
 	for _, st := range scan.Settings {
-		field, ok := configFields[st]
-		if !ok {
-			t.Errorf("setting %q has no Config field", st)
-			continue
-		}
+		field := scan.FieldName(st)
 		if _, ok := cfg.FieldByName(field); !ok {
 			t.Errorf("setting %q maps to %q, which is not a Config field", st, field)
 		}

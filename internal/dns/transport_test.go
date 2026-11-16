@@ -3,12 +3,15 @@ package dns
 import (
 	"context"
 	"crypto/x509"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
+	"weak"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -23,6 +26,8 @@ func startAllTransports(t *testing.T) (*dnstest.Server, map[string]string) {
 		switch q.Name {
 		case "www.example.com":
 			return dnstest.Reply{A: []string{"192.0.2.1"}, AAAA: []string{"2001:db8::1"}}
+		case "alias.example.com":
+			return dnstest.Reply{CNAME: "edge.example.net"}
 		case "refused.example.com":
 			return dnstest.Refused
 		case "dropped.example.com":
@@ -69,7 +74,7 @@ func TestTransportsAgree(t *testing.T) {
 			ctx := WithLimiter(context.Background(), lim)
 
 			before := srv.Queries()
-			recs, _, err := ResolveTypes(ctx, r, "www.example.com", 2*time.Second, types)
+			recs, _, err := Lookup{Resolver: r, Timeout: 2 * time.Second, Types: types}.ResolveTypes(ctx, "www.example.com")
 			if err != nil {
 				t.Fatalf("www: %v", err)
 			}
@@ -91,14 +96,22 @@ func TestTransportsAgree(t *testing.T) {
 				}
 			}
 
-			if _, o := ResolveDomainWithRetry(context.Background(), r, "missing.example.com", 2*time.Second, nil, 2, []string{"A"}); o != OutcomeNXDomain {
-				t.Errorf("missing name: outcome %v, want NXDOMAIN", o)
+			// CNAME is its own raw query (#249), so check it over each
+			// transport too.
+			cname := Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 1, Types: []string{"CNAME"}}
+			if recs, o := cname.Resolve(context.Background(), "alias.example.com"); o != OutcomeFound || len(recs) != 1 || recs[0].Value != "edge.example.net" {
+				t.Errorf("CNAME alias: records %v, outcome %v; want edge.example.net", recs, o)
 			}
-			if _, _, err := ResolveTypes(context.Background(), r, "refused.example.com", 2*time.Second, []string{"A"}); Classify(err) != OutcomeRefused {
-				t.Errorf("REFUSED: Classify(%v) = %v, want refused", err, Classify(err))
+			for _, typ := range []string{"A", "CNAME"} {
+				if _, o := (Lookup{Resolver: r, Timeout: 2 * time.Second, Attempts: 2, Types: []string{typ}}).Resolve(context.Background(), "missing.example.com"); o != OutcomeNXDomain {
+					t.Errorf("%s missing name: outcome %v, want NXDOMAIN", typ, o)
+				}
+				if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{typ}}).ResolveTypes(context.Background(), "refused.example.com"); Classify(err) != OutcomeRefused {
+					t.Errorf("%s REFUSED: Classify(%v) = %v, want refused", typ, err, Classify(err))
+				}
 			}
 			short := NewResolver(300*time.Millisecond, server)
-			if _, o := ResolveDomainWithRetry(context.Background(), short, "dropped.example.com", 300*time.Millisecond, nil, 1, []string{"A"}); o != OutcomeTimeout {
+			if _, o := (Lookup{Resolver: short, Timeout: 300 * time.Millisecond, Attempts: 1, Types: []string{"A"}}).Resolve(context.Background(), "dropped.example.com"); o != OutcomeTimeout {
 				t.Errorf("dropped query: outcome %v, want timeout", o)
 			}
 		})
@@ -112,7 +125,7 @@ func TestDoTReusesConnections(t *testing.T) {
 	r := NewResolver(2*time.Second, servers[TransportTLS])
 	before := srv.Connections()
 	for i := 0; i < 20; i++ {
-		if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+		if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,21 +137,88 @@ func TestDoTReusesConnections(t *testing.T) {
 	}
 }
 
+// TestDialRefusesDoneContext covers #295: once the dial context is done the
+// Dial hook returns its error instead of a pooled connection, and counts no
+// query.
+func TestDialRefusesDoneContext(t *testing.T) {
+	_, servers := startAllTransports(t)
+	for _, transport := range []string{TransportUDP, TransportTLS} {
+		t.Run(transport, func(t *testing.T) {
+			r := NewResolver(2*time.Second, servers[transport])
+			defer CloseIdleConnections(r)
+			// One lookup leaves a connection in the pool.
+			if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
+				t.Fatal(err)
+			}
+			var sent atomic.Int64
+			ctx, cancel := context.WithCancel(WithQueryCounter(context.Background(), &sent))
+			cancel()
+			c, err := r.Dial(ctx, "udp", "")
+			if c != nil {
+				_ = c.Close()
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("Dial under a canceled context: conn %v, error %v; want context.Canceled", c, err)
+			}
+			if n := sent.Load(); n != 0 {
+				t.Errorf("counted %d queries for a refused dial, want 0", n)
+			}
+		})
+	}
+}
+
+// TestTimedOutLookupSendsNoLateQueries covers #295 end to end: after an A
+// lookup times out, Go's resolver goroutine must not send the name again on
+// a pooled socket, so the server sees exactly the queries that were counted.
+// Go would retry after the system resolver timeout (5s by default), so the
+// test has to wait that long.
+func TestTimedOutLookupSendsNoLateQueries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the system resolver timeout")
+	}
+	t.Parallel()
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Name == "slow.example.com" {
+			return dnstest.Dropped
+		}
+		return dnstest.NXDomain
+	})
+	r := NewResolver(300*time.Millisecond, srv.Addr)
+	defer CloseIdleConnections(r)
+	var sent atomic.Int64
+	ctx := WithQueryCounter(context.Background(), &sent)
+	if _, o := (Lookup{Resolver: r, Timeout: 300 * time.Millisecond, Attempts: 1, Types: []string{"A"}}).Resolve(ctx, "slow.example.com"); o != OutcomeTimeout {
+		t.Fatalf("dropped query: outcome %v, want timeout", o)
+	}
+	time.Sleep(6500 * time.Millisecond)
+	got := srv.QueriesFor("slow.example.com", dnsmessage.TypeA)
+	if got != 1 {
+		t.Errorf("server received %d queries for the timed-out name, want 1", got)
+	}
+	if n := sent.Load(); n != got {
+		t.Errorf("counted %d queries, server received %d", n, got)
+	}
+}
+
 // TestDoTDiscardsClosedConnections covers #113: a server that closes each
 // connection after one answer costs one dial per query, not two, because a
 // pooled connection the server closed is detected before it is reused.
 func TestDoTDiscardsClosedConnections(t *testing.T) {
 	srv, servers := startAllTransports(t)
 	srv.CloseStreamsAfter(1)
-	r := NewResolver(2*time.Second, servers[TransportTLS])
+	// Each lookup pays a TLS handshake, which a loaded machine can stretch
+	// past a couple of seconds; the server answers at once, so a long timeout
+	// costs nothing (#289).
+	const timeout = 10 * time.Second
+	r := NewResolver(timeout, servers[TransportTLS])
 	var sent atomic.Int64
 	ctx := WithQueryCounter(context.Background(), &sent)
 	before := srv.Connections()
 	for i := 0; i < 10; i++ {
-		if _, _, err := ResolveTypes(ctx, r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+		if _, _, err := (Lookup{Resolver: r, Timeout: timeout, Types: []string{"A"}}).ResolveTypes(ctx, "www.example.com"); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(5 * time.Millisecond) // let the server's close arrive
+		waitPooledClosed(t, r, timeout)
 	}
 	if opened := srv.Connections() - before; opened != 10 {
 		t.Errorf("10 lookups opened %d connections, want 10", opened)
@@ -148,17 +228,52 @@ func TestDoTDiscardsClosedConnections(t *testing.T) {
 	}
 }
 
+// waitPooledClosed waits until each DoT connection r keeps for reuse has
+// read the server's close, then puts it back in the pool. The next lookup's
+// alive probe then finds it closed, instead of racing the close with its
+// one-millisecond read, which a loaded machine can lose (#289).
+func waitPooledClosed(t *testing.T, r *net.Resolver, timeout time.Duration) {
+	t.Helper()
+	v, ok := pooledDialers.Load(weak.Make(r))
+	if !ok {
+		t.Fatal("the resolver has no pooled dialer")
+	}
+	d := v.(*dotDialer)
+	var seen []idleConn
+drain:
+	for {
+		select {
+		case ic := <-d.idle:
+			if err := ic.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+				t.Fatal(err)
+			}
+			var b [1]byte
+			n, err := ic.conn.Read(b[:])
+			var ne net.Error
+			if n > 0 || err == nil || (errors.As(err, &ne) && ne.Timeout()) {
+				t.Fatalf("pooled connection: read %d byte(s), %v; want the server's close", n, err)
+			}
+			seen = append(seen, ic)
+		default:
+			break drain
+		}
+	}
+	for _, ic := range seen {
+		d.idle <- ic
+	}
+}
+
 // TestCloseIdleConnections: a scan's DoT connections are closed when it
 // ends, and the resolver still works afterwards.
 func TestCloseIdleConnections(t *testing.T) {
 	srv, servers := startAllTransports(t)
 	r := NewResolver(2*time.Second, servers[TransportTLS])
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
 		t.Fatal(err)
 	}
 	CloseIdleConnections(r)
 	before := srv.Connections()
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err != nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err != nil {
 		t.Fatal(err)
 	}
 	if srv.Connections() == before {
@@ -179,7 +294,7 @@ func TestDoHRefusesRedirects(t *testing.T) {
 	trustOnly(t, redirect)
 
 	r := NewResolver(2*time.Second, redirect.URL+"/dns-query")
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err == nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err == nil {
 		t.Fatal("lookup through a redirecting server succeeded")
 	}
 	if plainHits.Load() != 0 {
@@ -194,7 +309,7 @@ func TestDoHThrottlingIsRefused(t *testing.T) {
 		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
 		trustOnly(t, srv)
 		r := NewResolver(2*time.Second, srv.URL+"/dns-query")
-		_, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"})
+		_, _, err := Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}.ResolveTypes(context.Background(), "www.example.com")
 		srv.Close()
 		if outcome := Classify(err); outcome != OutcomeRefused {
 			t.Errorf("HTTP %d: outcome %v, want refused", status, outcome)
@@ -208,7 +323,7 @@ func TestDoTRejectsUntrustedCertificate(t *testing.T) {
 	_, servers := startAllTransports(t)
 	testRootCAs = x509.NewCertPool() // trusts nothing; startAllTransports restores it
 	r := NewResolver(2*time.Second, servers[TransportTLS])
-	if _, _, err := ResolveTypes(context.Background(), r, "www.example.com", 2*time.Second, []string{"A"}); err == nil {
+	if _, _, err := (Lookup{Resolver: r, Timeout: 2 * time.Second, Types: []string{"A"}}).ResolveTypes(context.Background(), "www.example.com"); err == nil {
 		t.Fatal("lookup over an untrusted DoT certificate succeeded")
 	}
 }

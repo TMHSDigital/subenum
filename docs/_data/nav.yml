@@ -22,6 +22,8 @@
       url: /docker.html
     - title: Go library
       url: /library.html
+    - title: AI agents (MCP)
+      url: /mcp.html
 
 - section: Internals
   pages:

@@ -1,6 +1,6 @@
 {
   "name": "subenum labs",
-  "image": "mcr.microsoft.com/devcontainers/go:1.26-bookworm@sha256:f848c0d10256ec05e45b0d84a7f3eb1cf33ec1f6c6b4a596ae66aa081018b6ff",
+  "build": { "dockerfile": "Dockerfile" },
   "postCreateCommand": "go mod download && go build -o subenum . && echo 'Lab 1: ./subenum -w examples/labs/words.txt -simulate-zone examples/labs/lab1-first-scan.zone lab.example'",
   "customizations": {
     "vscode": {

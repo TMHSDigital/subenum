@@ -12,8 +12,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
 // Format selects how resolved results are rendered on stdout and in the output
@@ -23,7 +25,7 @@ type Format int
 const (
 	// FormatText is the default human-friendly streaming output.
 	FormatText Format = iota
-	// FormatJSON buffers results and emits a single JSON array at completion.
+	// FormatJSON streams results as array elements; Finish closes the array.
 	FormatJSON
 	// FormatCSV streams "subdomain,type,value" rows with a header.
 	FormatCSV
@@ -31,6 +33,10 @@ const (
 	// Unlike FormatJSON it needs no Finish to be complete, so it pipes live.
 	FormatJSONL
 )
+
+// Formats names the output formats -format accepts, for completion and
+// messages (#264). "ndjson" is an accepted alias of jsonl, left out here.
+func Formats() []string { return []string{"text", "json", "jsonl", "csv"} }
 
 // ParseFormat converts a flag string into a Format.
 func ParseFormat(s string) (Format, error) {
@@ -48,23 +54,24 @@ func ParseFormat(s string) (Format, error) {
 	}
 }
 
-// Result is one resolved subdomain and its records, used for structured output.
-// Simulated is set on every result of a -simulate run, so invented names can
-// never pass for real recon output once saved or piped (#53).
+// Result is one resolved subdomain as written: the engine's scan.Result
+// (subdomain, records, simulated, takeover hint) plus what the CLI adds to it.
+// The embedded fields come first, so the JSON field order is unchanged (#162).
 type Result struct {
-	Subdomain string       `json:"subdomain"`
-	Records   []dns.Record `json:"records"`
-	Simulated bool         `json:"simulated,omitempty"`
-	// Takeover is a DNS-only subdomain-takeover hint ("dangling",
-	// "provider:<name>" or "dangling:<name>"); verify it by hand (#71).
-	Takeover string `json:"takeover_candidate,omitempty"`
+	scan.Result
 	// Change is "added" or "removed" in -diff mode (#84), or "changed" with
 	// -diff-records when a name's records differ from the baseline (#189).
+	// `subenum diff` says "missing" instead of "removed": it looks nothing up
+	// (#310).
 	Change string `json:"change,omitempty"`
 	// PreviousRecords are the baseline's records of a "changed" name.
 	PreviousRecords []dns.Record `json:"previous_records,omitempty"`
 	// Permutation marks a name found by the -permute pass (#72).
 	Permutation bool `json:"permutation,omitempty"`
+	// Sources names what proposed the name (#273): "wordlist", a passive
+	// source ("ct", "wayback") and "axfr", every one that had it, in that
+	// order; or "permute" alone for a -permute hit.
+	Sources []string `json:"sources,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
@@ -79,19 +86,24 @@ type Writer struct {
 	outWriter *bufio.Writer
 	simulate  bool
 	format    Format
-	stdout    bool // mirror results to os.Stdout (false for the TUI)
-	plain     bool // text stdout prints bare names, no "Found:" banner
-	records   bool // text output appends record types and values
+	stdout    bool      // mirror results to stdout (false for the TUI)
+	out       io.Writer // stdout destination; nil means os.Stdout
+	plain     bool      // text stdout prints bare names, no "Found:" banner
+	records   bool      // text output appends record types and values
 
 	stderr      io.Writer // diagnostics destination; nil means os.Stderr
 	progressLen int       // width of the progress line currently on screen
 	lineMode    bool      // progress as whole lines, never carriage-return overwrites (#78)
 	quiet       bool      // -silent: Info and Progress print nothing (#128)
 	eta         ETA       // time left, appended to the progress line (#191)
+	logJSON     bool      // -log-format json: diagnostics as JSON lines (#198)
+	target      string    // the domain being scanned, for JSON diagnostics
+	now         func() time.Time
 
 	seed           uint64 // simulation seed, named in the text file header
 	takeoverColumn bool   // CSV carries a takeover_candidate column
 	diff           bool   // -diff output: +/- prefixes and a CSV change column
+	sourcesColumn  bool   // CSV carries a sources column (#273)
 	headerDone     bool   // text file header written
 
 	jsonOpen  bool          // FormatJSON: the array's "[" and first element are written (#181)
@@ -116,6 +128,15 @@ func NewFile(outWriter *bufio.Writer, simulate bool, format Format) *Writer {
 	return &Writer{outWriter: outWriter, simulate: simulate, format: format, stdout: false}
 }
 
+// SetStdout sends results meant for stdout to out instead of os.Stdout, so
+// the CLI can run against injected streams (#158). Call it before the first
+// result.
+func (w *Writer) SetStdout(out io.Writer) { w.out = out }
+
+// SetStderr sends diagnostics, progress and notices to errOut instead of
+// os.Stderr.
+func (w *Writer) SetStderr(errOut io.Writer) { w.stderr = errOut }
+
 // SetPlain makes text-mode stdout print bare subdomain names, one per line,
 // without the "Found:" banner, so output pipes straight into other tools. The
 // CLI enables it when stdout is not a terminal.
@@ -138,7 +159,7 @@ func (w *Writer) SetDiff(on bool) { w.diff = on }
 
 func diffPrefix(change string) string {
 	switch change {
-	case "removed":
+	case "removed", "missing":
 		return "- "
 	case "changed":
 		return "~ "
@@ -147,8 +168,13 @@ func diffPrefix(change string) string {
 }
 
 // SetTakeoverColumn adds a takeover_candidate column to CSV output. The CLI
-// sets it when CNAME records are requested, the only case that yields hints.
+// sets it when CNAME or NS records are requested, the only cases that yield
+// hints (see dns.HintsTakeover).
 func (w *Writer) SetTakeoverColumn(on bool) { w.takeoverColumn = on }
+
+// SetSourcesColumn adds a sources column to CSV output, after every other
+// column: each result's Sources joined with ";" (#273).
+func (w *Writer) SetSourcesColumn(on bool) { w.sourcesColumn = on }
 
 // SetSeed records the simulation seed for the simulated-results file header.
 func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
@@ -157,19 +183,9 @@ func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
 // result's records as TYPE=value pairs.
 func (w *Writer) SetShowRecords(show bool) { w.records = show }
 
-// Result records a resolved domain. In text mode it prints immediately; in JSON
-// mode it is streamed as an array element that Finish closes; in CSV and
-// JSONL mode it is streamed.
-func (w *Writer) Result(domain string, records []dns.Record) {
-	w.ResultWithHint(domain, records, "")
-}
-
-// ResultWithHint is Result with a subdomain-takeover hint attached.
-func (w *Writer) ResultWithHint(domain string, records []dns.Record, takeover string) {
-	w.Emit(Result{Subdomain: domain, Records: records, Takeover: takeover})
-}
-
-// Emit writes one result in the configured format. Simulated is set from the
+// Emit writes one result in the configured format. In text mode it prints
+// immediately; in JSON mode it is streamed as an array element that Finish
+// closes; in CSV and JSONL mode it is streamed. Simulated is set from the
 // writer; Change marks a -diff result.
 func (w *Writer) Emit(res Result) {
 	w.mu.Lock()
@@ -204,6 +220,9 @@ func (w *Writer) writeText(res Result) {
 		if res.Takeover != "" {
 			line += " TAKEOVER?=" + res.Takeover
 		}
+		if res.Internal != "" {
+			line += " INTERNAL=" + res.Internal
+		}
 		if len(res.PreviousRecords) > 0 {
 			line += " (was" + formatRecords(res.PreviousRecords) + ")"
 		}
@@ -211,11 +230,11 @@ func (w *Writer) writeText(res Result) {
 	if w.stdout {
 		switch {
 		case w.plain:
-			fmt.Println(line)
+			_, _ = fmt.Fprintln(w.stdOut(), line)
 		case w.simulate:
-			fmt.Printf("Found (SIMULATED): %s\n", line)
+			_, _ = fmt.Fprintf(w.stdOut(), "Found (SIMULATED): %s\n", line)
 		default:
-			fmt.Printf("Found: %s\n", line)
+			_, _ = fmt.Fprintf(w.stdOut(), "Found: %s\n", line)
 		}
 	}
 	if w.outWriter != nil {
@@ -262,13 +281,13 @@ func (w *Writer) writeJSONElement(res Result) {
 		w.jsonBuf.WriteString("[\n  ")
 	}
 	if err := w.jsonEnc.Encode(res); err != nil {
-		_, _ = fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
+		w.diagLocked(LevelError, KindMessage, "Error: encoding JSON output: "+err.Error(), nil)
 		return
 	}
 	w.jsonOpen = true
 	data := bytes.TrimSuffix(w.jsonBuf.Bytes(), []byte("\n")) // Encode ends each value with a newline
 	if w.stdout {
-		_, _ = os.Stdout.Write(data)
+		_, _ = w.stdOut().Write(data)
 	}
 	if w.outWriter != nil {
 		_, _ = w.outWriter.Write(data)
@@ -290,11 +309,11 @@ func (w *Writer) writeJSONL(res Result) {
 	}
 	data, err := json.Marshal(res)
 	if err != nil {
-		_, _ = fmt.Fprintf(w.errOut(), "Error: encoding JSON output: %v\n", err)
+		w.diagLocked(LevelError, KindMessage, "Error: encoding JSON output: "+err.Error(), nil)
 		return
 	}
 	if w.stdout {
-		fmt.Printf("%s\n", data)
+		_, _ = fmt.Fprintf(w.stdOut(), "%s\n", data)
 	}
 	if w.outWriter != nil {
 		_, _ = fmt.Fprintf(w.outWriter, "%s\n", data)
@@ -316,8 +335,11 @@ func (w *Writer) ensureCSV() {
 	if w.diff {
 		header = append(header, "change")
 	}
+	if w.sourcesColumn {
+		header = append(header, "sources")
+	}
 	if w.stdout {
-		w.csvStdout = csv.NewWriter(os.Stdout)
+		w.csvStdout = csv.NewWriter(w.stdOut())
 		_ = w.csvStdout.Write(header)
 	}
 	if w.outWriter != nil {
@@ -343,12 +365,21 @@ func (w *Writer) writeCSVRows(res Result) {
 		if w.diff {
 			row = append(row, res.Change)
 		}
+		if w.sourcesColumn {
+			row = append(row, strings.Join(res.Sources, ";"))
+		}
 		if w.csvStdout != nil {
 			_ = w.csvStdout.Write(row)
 		}
 		if w.csvFile != nil {
 			_ = w.csvFile.Write(row)
 		}
+	}
+	// Stdout gets each result as it is found, as the other formats do, so a
+	// pipe sees live rows and a force quit loses none (#319). The -o file
+	// stays buffered behind its own bufio.Writer.
+	if w.csvStdout != nil {
+		w.csvStdout.Flush()
 	}
 }
 
@@ -369,7 +400,7 @@ func (w *Writer) Finish() error {
 		}
 		w.jsonOpen = false
 		if w.stdout {
-			fmt.Print(end)
+			_, _ = io.WriteString(w.stdOut(), end)
 		}
 		if w.outWriter != nil {
 			if _, err := w.outWriter.WriteString(end); err != nil {
@@ -395,7 +426,15 @@ func (w *Writer) Finish() error {
 	return nil
 }
 
-// errOut is where diagnostics go; tests may swap it.
+// stdOut is where results meant for stdout go.
+func (w *Writer) stdOut() io.Writer {
+	if w.out != nil {
+		return w.out
+	}
+	return os.Stdout
+}
+
+// errOut is where diagnostics go.
 func (w *Writer) errOut() io.Writer {
 	if w.stderr != nil {
 		return w.stderr
@@ -412,8 +451,13 @@ func (w *Writer) Progress(pct float64, processed, total, found int64) {
 		return
 	}
 	line := fmt.Sprintf("Progress: %.1f%% (%d/%d) | Found: %d ", pct, processed, total, found)
-	if left, ok := w.eta.Update(processed, total); ok {
+	left, etaOK := w.eta.Update(processed, total)
+	if etaOK {
 		line += "| ETA " + FormatETA(left) + " "
+	}
+	if w.logJSON {
+		w.progressJSONLocked(line, pct, processed, total, found, left, etaOK)
+		return
 	}
 	if w.lineMode {
 		_, _ = fmt.Fprintln(w.errOut(), strings.TrimSpace(line))
@@ -451,22 +495,20 @@ func (w *Writer) Info(format string, a ...any) {
 	if w.quiet {
 		return
 	}
-	w.Notice(format, a...)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.diagLocked(LevelInfo, KindMessage, fmt.Sprintf(format, a...), nil)
 }
 
 // Notice writes a line to stderr like Info, even under SetQuiet: for what a
 // user must not miss, such as results being simulated.
 func (w *Writer) Notice(format string, a ...any) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.clearProgressLocked()
-	_, _ = fmt.Fprintf(w.errOut(), format+"\n", a...)
+	w.NoticeOf(KindMessage, format, a...)
 }
 
 // Error writes an error line to stderr, serialized like Info.
 func (w *Writer) Error(format string, a ...any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.clearProgressLocked()
-	_, _ = fmt.Fprintf(w.errOut(), "Error: "+format+"\n", a...)
+	w.diagLocked(LevelError, KindMessage, "Error: "+fmt.Sprintf(format, a...), nil)
 }

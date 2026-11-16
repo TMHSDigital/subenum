@@ -16,7 +16,7 @@
 
 ## Checklist
 <!-- Please mark the relevant option with an 'x' -->
-- [ ] I have read the [CONTRIBUTING](../docs/CONTRIBUTING.md) document
+- [ ] I have read the [CONTRIBUTING](https://github.com/TMHSDigital/subenum/blob/main/docs/CONTRIBUTING.md) document
 - [ ] My code follows the code style of this project
 - [ ] I have added/updated appropriate comments to the code
 - [ ] I have added tests that prove my fix is effective or that my feature works

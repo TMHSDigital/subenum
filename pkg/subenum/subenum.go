@@ -26,7 +26,9 @@ import (
 	"time"
 
 	"github.com/TMHSDigital/subenum/data"
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/permute"
 	"github.com/TMHSDigital/subenum/internal/scan"
 	"github.com/TMHSDigital/subenum/internal/validate"
 	"github.com/TMHSDigital/subenum/internal/wordlist"
@@ -68,6 +70,11 @@ type Config struct {
 	// and wildcard probes always use Resolver.
 	ResolverPool []string
 
+	// RatePerResolver caps the DNS queries per second sent to each
+	// ResolverPool member; Rate still caps the total, so the stricter limit
+	// wins. 0 is unlimited. Ignored without a ResolverPool.
+	RatePerResolver int
+
 	// Concurrency is the number of workers looking up names at once.
 	Concurrency int
 
@@ -84,8 +91,9 @@ type Config struct {
 	// unlimited. Pace scans of resolvers you do not own.
 	Rate int
 
-	// Types are the record types to look up: "A", "AAAA" and "CNAME". Nil
-	// looks up A and AAAA. CNAME is what populates Result.Takeover.
+	// Types are the record types to look up: "A", "AAAA", "CNAME", "NS",
+	// "MX" and "TXT". Nil looks up A and AAAA. CNAME and NS are what
+	// populate Result.Takeover.
 	Types []string
 
 	// Recursive enumerates Words again under every name that is found,
@@ -105,6 +113,40 @@ type Config struct {
 	// and the names left are counted in Stats.Skipped with Stats.Expired
 	// set. 0 is unlimited.
 	MaxDuration time.Duration
+
+	// AutoRate keeps a scan going when its resolver starts failing: when
+	// more than a fifth of the last 200 lookups failed, the query rate is
+	// halved (from the rate reached so far when Rate is 0), up to six times
+	// and down to 5 per second, and raised again once lookups succeed. A
+	// KindNotice event with NoticeRate reports each change. Only when it
+	// can slow down no further does the reliability guard apply.
+	AutoRate bool
+
+	// RetryInconclusive looks up once more, after every candidate has been
+	// tried, each name whose lookup timed out, was refused or failed. The
+	// retry goes to Resolver. A name that then resolves is reported like any
+	// other, but not expanded by Recursive. Stats.Retried and
+	// Stats.Recovered count the pass; Stats.Inconclusive lists the names
+	// still without an answer, with or without it.
+	RetryInconclusive bool
+
+	// Sources propose extra candidates before the scan, such as
+	// CertificateTransparency(), WaybackMachine() and ZoneTransfer(): their
+	// names are added after Words and looked up like any other, so a stale
+	// name is never reported. Each is asked once; one that fails sends a KindNotice event
+	// with NoticeSource and the scan goes on without it. Ignored when
+	// Simulate is set.
+	Sources []Source
+
+	// TakeoverProviders adds takeover-prone services to the built-in list
+	// that Result.Takeover's "provider:<name>" hints come from. An entry for
+	// a suffix already listed replaces it, and a Name of "-" removes the
+	// suffix. The longest matching suffix wins.
+	TakeoverProviders []TakeoverProvider
+
+	// TakeoverProvidersOnly uses TakeoverProviders alone, without the
+	// built-in list.
+	TakeoverProvidersOnly bool
 
 	// Exclude lists names that are out of scope and are never queried.
 	// "mail.example.com" excludes one name; "*.corp.example.com" excludes
@@ -144,10 +186,18 @@ type Config struct {
 	Logf func(format string, args ...any)
 }
 
+// TakeoverProvider is a takeover-prone service for Config.TakeoverProviders:
+// CNAME targets under Suffix (".example-cdn.net", the leading dot optional)
+// belong to Name ("example-cdn": lowercase letters, digits and hyphens).
+type TakeoverProvider struct {
+	Suffix string
+	Name   string
+}
+
 // Record is one DNS record behind a result.
 type Record struct {
-	Type  string // "A", "AAAA" or "CNAME"
-	Value string // an address, or the target of a CNAME
+	Type  string // "A", "AAAA", "CNAME", "NS", "MX" or "TXT"
+	Value string // an address, a CNAME target, a name server, "<preference> <host>" (MX) or a text (TXT)
 }
 
 // Result is a subdomain that resolved.
@@ -162,9 +212,26 @@ type Result struct {
 	// Takeover is a hint that a CNAME points somewhere unclaimed:
 	// "dangling" (the target does not resolve), "provider:<name>" (the
 	// target belongs to a known hosting provider) or "dangling:<name>"
-	// (both). It is derived only from DNS, so it is a lead to verify by
-	// hand, not a finding. Empty unless Types includes "CNAME".
+	// (both); or "dangling-ns" when the name is delegated to a name server
+	// that does not resolve. It is derived only from DNS, so it is a lead
+	// to verify by hand, not a finding. Empty unless Types includes "CNAME"
+	// or "NS".
 	Takeover string
+
+	// Internal names the most notable non-public scope among the
+	// addresses: "loopback", "unspecified", "link-local", "private"
+	// (RFC 1918 or fc00::/7) or "cgnat" (100.64.0.0/10). A public name
+	// that answers with one leaks internal addressing. Empty when every
+	// address is public, and always empty in a simulated scan.
+	Internal string
+
+	// Sources names what proposed the name (#273): "wordlist" for Words
+	// (and, with Recursive, an entry below a found name), and each of
+	// Config.Sources that returned it. A source is named by its Name()
+	// string method when it has one ("ct" and "wayback" for the built-in
+	// ones), else as "Sources[i]", its index in Config.Sources. Several
+	// sources are listed in the order of Config.Sources, after "wordlist".
+	Sources []string
 }
 
 // Stats accounts for every candidate name a finished scan looked up.
@@ -181,6 +248,7 @@ type Stats struct {
 	Skipped     int64 // candidates left untested because MaxQueries or MaxDuration was reached
 	Excluded    int64 // candidates left untested because Exclude covered them
 	Takeover    int64 // results carrying a Takeover hint
+	Internal    int64 // results with an Internal address scope
 
 	PoolHits    int64 // names a ResolverPool member reported
 	Confirmed   int64 // of those, the ones Resolver confirmed
@@ -201,6 +269,23 @@ type Stats struct {
 	// WildcardFingerprint is the answer the wildcard gives, learned from
 	// random probes. Empty when there is no wildcard.
 	WildcardFingerprint []Record
+
+	// Retried counts the names Config.RetryInconclusive looked up again,
+	// and Recovered the ones that then got an answer; the outcome counters
+	// above already count those under their new outcome.
+	Retried   int64
+	Recovered int64
+
+	// Inconclusive lists, sorted, the names whose lookup still timed out,
+	// was refused or failed when the scan ended: their existence is
+	// unknown. Feed them to another scan to try again.
+	Inconclusive []string
+
+	// RateBackoffs counts how often AutoRate halved the rate, and
+	// FinalRate is the rate in queries per second when the scan ended
+	// (0 = unlimited). Both are 0 without AutoRate.
+	RateBackoffs int64
+	FinalRate    int64
 }
 
 // Total returns the number of candidate names that were looked up and
@@ -228,6 +313,7 @@ const (
 	// set, or the reliability guard gave up. Few or no results follow.
 	// The exception is the reliability guard under Config.NoAbort: its
 	// warning arrives as a KindError, and the scan then runs to the end.
+	// Event.Fatal tells the two apart.
 	KindError
 	// KindDone is always the last event, and reports Event.Stats. It
 	// arrives whether the scan completed, never started, was stopped by
@@ -271,6 +357,11 @@ const (
 	NoticeCeiling
 	// NoticeSkip means one recursive branch was not expanded.
 	NoticeSkip
+	// NoticeRate means AutoRate changed the query rate.
+	NoticeRate
+	// NoticeSource means a Config.Sources lookup failed; the scan went on
+	// without that source's names.
+	NoticeSource
 )
 
 // String names a notice category.
@@ -284,6 +375,10 @@ func (n Notice) String() string {
 		return "ceiling"
 	case NoticeSkip:
 		return "skip"
+	case NoticeRate:
+		return "rate"
+	case NoticeSource:
+		return "source"
 	}
 	return "none"
 }
@@ -317,6 +412,15 @@ type Event struct {
 	// zone without Force, a failed resolver check) or because ctx was
 	// cancelled during those checks. Stats then covers only the checks.
 	Stopped bool
+
+	// Fatal is set on a KindError that ends the scan. The one KindError
+	// without it is the reliability guard's warning under Config.NoAbort.
+	Fatal bool
+
+	// Failed is set on KindDone when the scan failed: a fatal KindError
+	// was sent, or the reliability guard stopped the scan. A scan cancelled
+	// through the context has not failed.
+	Failed bool
 }
 
 // DefaultWords returns the bundled wordlist: the most common subdomain labels,
@@ -337,6 +441,22 @@ var defaultWords = sync.OnceValue(func() []string {
 	words, _, _ := wordlist.Build(lines, "")
 	return words
 })
+
+// Permutations returns second-pass candidates for names a scan already found,
+// the same ones the CLI's -permute tries: api suggests api-dev, dev-api,
+// dev.api, api2 and so on. Each seed is a name relative to the apex, such as
+// "api" for api.example.com or "api.us" for api.us.example.com; its leftmost
+// label is permuted and the rest kept. words are combined with each seed
+// label; nil selects the CLI's built-in list of environment, version and role
+// names. Candidates that are not valid DNS names are left out. The result is
+// relative to the apex, like Config.Words, sorted and duplicate-free, so it
+// can be passed as the Words of a follow-up scan. It sends no DNS queries.
+func Permutations(seeds, words []string) []string {
+	if words == nil {
+		words = permute.Words
+	}
+	return permute.Generate(seeds, words, nil)
+}
 
 // doneGrace is how long Run's forwarder waits to hand over the final event
 // after ctx is cancelled, when the caller may have stopped reading.
@@ -365,16 +485,27 @@ func Run(ctx context.Context, cfg Config) (<-chan Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	in := make(chan scan.Event, 64)
-	go scan.Run(ctx, internal.Config(), in)
-
+	if scan.InconclusiveListOff(ctx) {
+		internal.ListInconclusive = false // subenum mcp never reads it (#349)
+	}
 	out := make(chan Event, 64)
 	go func() {
 		defer close(out)
+		var cands *candidates.Set // nil: every result is the wordlist's
+		if len(cfg.Sources) > 0 && !cfg.Simulate {
+			cands = withSourceNames(ctx, out, cfg.Sources, internal.Domain, internal.Entries)
+			internal.Entries = cands.Entries()
+		}
+		in := make(chan scan.Event, 64)
+		go scan.Run(ctx, internal.Config, in)
 		// scan.Run always ends with exactly one EventDone (#99), so the
 		// channel ends with exactly one KindDone too.
 		for ev := range in {
-			forward(ctx, out, translate(ev))
+			e := translate(ev)
+			if e.Kind == KindResult {
+				e.Result.Sources = cands.SourcesOf(e.Result.Name)
+			}
+			forward(ctx, out, e)
 		}
 	}()
 	return out, nil
@@ -423,25 +554,19 @@ func Scan(ctx context.Context, cfg Config) ([]Result, Stats, error) {
 	var results []Result
 	var stats Stats
 	var failure string
-	completed := false
 	for ev := range events {
 		switch ev.Kind {
 		case KindResult:
 			results = append(results, ev.Result)
 		case KindError:
-			if failure == "" {
+			// The reliability guard's warning under NoAbort is not fatal:
+			// the scan runs to completion and is a success.
+			if ev.Fatal && failure == "" {
 				failure = ev.Message
 			}
 		case KindDone:
 			stats = ev.Stats
-			completed = !ev.Stopped
 		}
-	}
-	// Under NoAbort the reliability guard only warns: it is the one error
-	// after which the scan still runs to completion, so a completed scan
-	// that was not aborted is a success.
-	if cfg.NoAbort && completed && !stats.Aborted {
-		failure = ""
 	}
 	switch {
 	case ctx.Err() != nil:
@@ -474,8 +599,6 @@ func (c Config) options() (scan.Options, error) {
 		return scan.Options{}, fmt.Errorf("subenum: Rate must be 0 (unlimited) or positive, got %d", c.Rate)
 	case c.MaxQueries < 0:
 		return scan.Options{}, fmt.Errorf("subenum: MaxQueries must be 0 (unlimited) or positive, got %d", c.MaxQueries)
-	case c.MaxDuration < 0:
-		return scan.Options{}, fmt.Errorf("subenum: MaxDuration must be 0 (unlimited) or positive, got %s", c.MaxDuration)
 	case c.Depth < 0:
 		return scan.Options{}, fmt.Errorf("subenum: Depth must not be negative, got %d", c.Depth)
 	case c.Simulate && c.HitRate != 0 && (c.HitRate < 1 || c.HitRate > 100):
@@ -509,42 +632,65 @@ func (c Config) options() (scan.Options, error) {
 	}
 
 	opts := scan.Options{
-		Domain:      domain,
-		Entries:     entries,
-		Concurrency: orDefault(c.Concurrency, DefaultConcurrency),
-		TimeoutMs:   ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout)),
-		DNSServer:   resolver,
-		Simulate:    c.Simulate,
-		HitRate:     orDefault(c.HitRate, DefaultHitRate),
-		Seed:        seed,
-		Attempts:    orDefault(c.Attempts, DefaultAttempts),
-		Force:       c.Force,
-		Types:       types,
-		Recursive:   c.Recursive,
-		Depth:       orDefault(c.Depth, 1),
-		Rate:        c.Rate,
-		MaxQueries:  c.MaxQueries,
-		Exclude:     c.Exclude,
-		NoAbort:     c.NoAbort,
-		Verbose:     c.Verbose,
-		Logf:        dns.Logf(c.Logf),
+		Config: scan.Config{
+			Domain:      domain,
+			Entries:     entries,
+			Concurrency: orDefault(c.Concurrency, DefaultConcurrency),
+			// Whole milliseconds, rounded up, as the CLI's -timeout takes.
+			Timeout:    time.Duration(ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout))) * time.Millisecond,
+			DNSServer:  resolver,
+			Simulate:   c.Simulate,
+			HitRate:    orDefault(c.HitRate, DefaultHitRate),
+			Seed:       seed,
+			Attempts:   orDefault(c.Attempts, DefaultAttempts),
+			Force:      c.Force,
+			Types:      types,
+			Recursive:  c.Recursive,
+			Depth:      orDefault(c.Depth, 1),
+			Rate:       c.Rate,
+			AutoRate:   c.AutoRate,
+			MaxQueries: c.MaxQueries,
+			Exclude:    c.Exclude,
+			NoAbort:    c.NoAbort,
+			Verbose:    c.Verbose,
+			Logf:       dns.Logf(c.Logf),
+
+			RetryInconclusive: c.RetryInconclusive,
+			ListInconclusive:  true, // Stats.Inconclusive is part of the API
+		},
+		MaxDuration:     c.MaxDuration,
+		RatePerResolver: c.RatePerResolver,
 	}
 	if c.MaxDuration > 0 {
 		opts.Deadline = time.Now().Add(c.MaxDuration)
+	}
+	if len(c.TakeoverProviders) > 0 || c.TakeoverProvidersOnly {
+		lines := make([]string, 0, len(c.TakeoverProviders))
+		for _, p := range c.TakeoverProviders {
+			if strings.ContainsAny(p.Suffix+p.Name, " \t\r\n") || p.Suffix == "" || p.Name == "" {
+				return scan.Options{}, fmt.Errorf("subenum: TakeoverProviders: invalid entry %+v", p)
+			}
+			lines = append(lines, p.Suffix+" "+p.Name)
+		}
+		providers, err := dns.ParseTakeoverProviders(lines, c.TakeoverProvidersOnly)
+		if err != nil {
+			return scan.Options{}, fmt.Errorf("subenum: TakeoverProviders: %w", err)
+		}
+		opts.TakeoverProviders = providers
 	}
 
 	if len(c.ResolverPool) > 0 {
 		if c.Simulate {
 			return scan.Options{}, errors.New("subenum: ResolverPool cannot be used with Simulate, which sends no DNS queries")
 		}
-		addrs, err := dns.ParseResolverList(c.ResolverPool)
+		pool, err := dns.NewPoolFromLines(c.ResolverPool, opts.Timeout, c.RatePerResolver)
+		if errors.Is(err, dns.ErrNoResolvers) {
+			return scan.Options{}, errors.New("subenum: ResolverPool lists no resolvers")
+		}
 		if err != nil {
 			return scan.Options{}, fmt.Errorf("subenum: ResolverPool: %w", err)
 		}
-		if len(addrs) == 0 {
-			return scan.Options{}, errors.New("subenum: ResolverPool lists no resolvers")
-		}
-		opts.Pool = dns.NewPool(addrs, time.Duration(opts.TimeoutMs)*time.Millisecond)
+		opts.Pool = pool
 	}
 
 	if err := opts.Validate(); err != nil {
@@ -592,27 +738,12 @@ func orDefaultDuration(v, def time.Duration) time.Duration {
 	return v
 }
 
-// configFields names each engine setting as the Config field that sets it.
-// Engine messages refer to settings by token (#100), and a library caller
-// has no flags: "Use {force} to scan anyway" reads "Use Force to scan anyway".
-var configFields = map[scan.Setting]string{
-	scan.SettingConcurrency: "Concurrency",
-	scan.SettingTimeout:     "Timeout",
-	scan.SettingAttempts:    "Attempts",
-	scan.SettingHitRate:     "HitRate",
-	scan.SettingDepth:       "Depth",
-	scan.SettingRate:        "Rate",
-	scan.SettingMaxQueries:  "MaxQueries",
-	scan.SettingMaxDuration: "MaxDuration",
-	scan.SettingExclude:     "Exclude",
-	scan.SettingRecursive:   "Recursive",
-	scan.SettingForce:       "Force",
-}
-
 // fieldNames renders the setting tokens in an engine message as Config
-// fields.
+// fields (scan.FieldName). Engine messages refer to settings by token (#100),
+// and a library caller has no flags: "Use {force} to scan anyway" reads
+// "Use Force to scan anyway".
 func fieldNames(msg string) string {
-	return scan.Render(msg, func(st scan.Setting) string { return configFields[st] })
+	return scan.Render(msg, scan.FieldName)
 }
 
 // translate converts an internal event to the public one.
@@ -626,7 +757,7 @@ func translate(ev scan.Event) Event {
 	switch ev.Kind {
 	case scan.EventResult:
 		out.Kind = KindResult
-		out.Result = Result{Name: ev.Domain, Records: records(ev.Records), Takeover: ev.Takeover}
+		out.Result = Result{Name: ev.Result.Subdomain, Records: records(ev.Result.Records), Takeover: ev.Result.Takeover, Internal: ev.Result.Internal}
 	case scan.EventProgress:
 		out.Kind = KindProgress
 	case scan.EventNotice:
@@ -634,10 +765,12 @@ func translate(ev scan.Event) Event {
 		out.Notice = notice(ev.Notice)
 	case scan.EventError:
 		out.Kind = KindError
+		out.Fatal = ev.Fatal
 	case scan.EventDone:
 		out.Kind = KindDone
 		out.Stats = stats(ev.Stats)
 		out.Stopped = ev.Stopped
+		out.Failed = ev.Failed
 	}
 	return out
 }
@@ -663,8 +796,65 @@ func notice(n scan.NoticeKind) Notice {
 		return NoticeCeiling
 	case scan.NoticeSkip:
 		return NoticeSkip
+	case scan.NoticeRate:
+		return NoticeRate
 	}
 	return NoticeNone
+}
+
+// Verdicts a finished scan can get from Stats.Verdict, the same ones the
+// CLI's run-quality report gives.
+const (
+	VerdictComplete   = scan.VerdictComplete   // a name missing from the results most likely does not exist
+	VerdictDegraded   = scan.VerdictDegraded   // some names were not tested or got no answer
+	VerdictUnreliable = scan.VerdictUnreliable // too many lookups failed: a missing name means nothing
+)
+
+// Verdict says how far the results of a finished scan can be trusted, by
+// the rules of the CLI's run-quality report: VerdictComplete,
+// VerdictDegraded or VerdictUnreliable, with the reason in plain words.
+// interrupted reports that the scan was cancelled before it ended. The
+// reason names Config fields, such as MaxQueries.
+func (s Stats) Verdict(interrupted bool) (verdict, reason string) {
+	v, r := engineStats(s).Verdict(interrupted)
+	return v, scan.Render(r, scan.FieldName)
+}
+
+// engineStats is the inverse of stats, for the engine's verdict rules.
+func engineStats(s Stats) scan.Stats {
+	var fp []dns.Record
+	if len(s.WildcardFingerprint) > 0 {
+		fp = dnsRecords(s.WildcardFingerprint)
+	}
+	return scan.Stats{
+		Found:            s.Found,
+		NXDomain:         s.NXDomain,
+		Timeout:          s.Timeout,
+		Refused:          s.Refused,
+		Other:            s.Other,
+		WildcardFiltered: s.WildcardFiltered,
+
+		QueriesSent: s.QueriesSent,
+		Skipped:     s.Skipped,
+		Excluded:    s.Excluded,
+		Takeover:    s.Takeover,
+		Internal:    s.Internal,
+
+		PoolHits:    s.PoolHits,
+		Confirmed:   s.Confirmed,
+		Unconfirmed: s.Unconfirmed,
+
+		Aborted:     s.Aborted,
+		Expired:     s.Expired,
+		Wildcard:    s.Wildcard,
+		Fingerprint: fp,
+
+		Retried:      s.Retried,
+		Recovered:    s.Recovered,
+		Inconclusive: s.Inconclusive,
+		RateBackoffs: s.RateBackoffs,
+		FinalRate:    s.FinalRate,
+	}
 }
 
 func stats(s scan.Stats) Stats {
@@ -680,6 +870,7 @@ func stats(s scan.Stats) Stats {
 		Skipped:     s.Skipped,
 		Excluded:    s.Excluded,
 		Takeover:    s.Takeover,
+		Internal:    s.Internal,
 
 		PoolHits:    s.PoolHits,
 		Confirmed:   s.Confirmed,
@@ -689,5 +880,11 @@ func stats(s scan.Stats) Stats {
 		Expired:             s.Expired,
 		Wildcard:            s.Wildcard,
 		WildcardFingerprint: records(s.Fingerprint),
+
+		Retried:      s.Retried,
+		Recovered:    s.Recovered,
+		Inconclusive: s.Inconclusive,
+		RateBackoffs: s.RateBackoffs,
+		FinalRate:    s.FinalRate,
 	}
 }

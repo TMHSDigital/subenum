@@ -31,7 +31,7 @@ To work with `subenum`, you'll need:
     To build the project, run:
 
     ```bash
-    # Standard build (version fallback is the `Version` var in main.go)
+    # Standard build (reports dev without an injected or module version)
     go build -buildvcs=false
 
     # Inject the git tag into the binary
@@ -59,33 +59,42 @@ To work with `subenum`, you'll need:
 
 ```
 subenum/
+├── .devcontainer/              # Dev container, plus a labs container (labs/devcontainer.json)
 ├── .github/
 │   ├── workflows/
-│   │   ├── go.yml              # CI: build, test, lint, release
+│   │   ├── go.yml              # CI: build, test, lint, govulncheck, release
 │   │   ├── codeql.yml          # Weekly CodeQL security analysis
+│   │   ├── devcontainer.yml    # Builds the dev container and runs checks in it
 │   │   └── pages.yml           # GitHub Pages deployment
+│   ├── SECURITY.md             # Vulnerability disclosure policy
 │   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.md       # Structured bug report form
-│   │   └── feature_request.md  # Feature proposal template
+│   │   ├── bug_report.yml      # Structured bug report form
+│   │   ├── feature_request.yml # Feature proposal form
+│   │   └── config.yml          # Issue chooser settings
+│   ├── scripts/                # check-links.py, release-notes.sh
 │   ├── CODE_OF_CONDUCT.md      # Contributor Covenant v2.1
 │   ├── CONTRIBUTING.md         # Points to docs/CONTRIBUTING.md
+│   ├── FUNDING.yml
 │   ├── dependabot.yml          # Automated dependency updates
 │   └── PULL_REQUEST_TEMPLATE.md
 ├── data/
-│   └── wordlist.txt            # Default wordlist for Docker/Make
-├── docs/
-│   ├── ARCHITECTURE.md         # Internals: worker pool, context, output
+│   ├── subdomains-5k.txt       # Bundled default wordlist, embedded by data.go
+│   ├── data.go
+│   └── wordlist.txt            # Sample wordlist for the Docker examples (mounted at /data)
+├── docs/                       # Source of the website (GitHub Pages)
+│   ├── ARCHITECTURE.md         # Internals: engine, resolver, wildcard detection, subsystems
 │   ├── CODE_OF_CONDUCT.md      # Community guidelines (Jekyll page)
 │   ├── CONTRIBUTING.md         # PR workflow, testing, ethical guidelines
 │   ├── DEVELOPER_GUIDE.md      # This file
 │   ├── DOCUMENTATION_STRUCTURE.md
 │   ├── ROADMAP.md              # Planned work
 │   ├── docker.md               # Container setup and volume mounting
-│   ├── start.md, cli.md, library.md, labs.md, monitoring.md  # User guides
+│   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md, mcp.md  # User guides
 │   ├── _config.yml             # Jekyll config for GitHub Pages
 │   ├── _data/nav.yml           # Site navigation: sidebar, footer, search, reading order
 │   ├── _includes/, _layouts/, assets/  # Jekyll site templates, CSS, JS, images
 │   ├── search.json             # Search index, generated at build time
+│   ├── 404.html
 │   └── index.html              # GitHub Pages landing page
 ├── examples/
 │   ├── sample_wordlist.txt     # 50-entry starter wordlist
@@ -94,31 +103,56 @@ subenum/
 │   ├── demo.sh                 # Quick demo script
 │   └── labs/                   # -simulate-zone scenarios and wordlist for docs/labs.md
 ├── internal/
+│   ├── cli/                    # The command: flags, session, config, diff, resume, permute, labs, MCP, and its tests
+│   ├── axfr/                   # Zone transfer attempts shared by -axfr and subenum.ProbeZone
+│   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
+│   ├── ct/
+│   │   ├── ct.go               # Certificate Transparency (crt.sh) client for -ct
+│   │   └── ct_test.go
+│   ├── diff/                   # Result comparison shared by -diff and subenum.Diff
+│   ├── dns/
+│   │   ├── resolver.go         # NewResolver, Lookup (ResolveTypes, Resolve, CheckWildcard,
+│   │   │                       # FingerprintWildcard), Classify, ParseTypes
+│   │   ├── transport.go        # UDP (TCP fallback), DNS over TLS, DNS over HTTPS dialers
+│   │   ├── axfr.go             # Transfer: AXFR zone transfer over TCP (-axfr)
+│   │   ├── nsec.go             # ProbeDenial: is the zone NSEC-walkable (-axfr)
+│   │   ├── pool.go             # Pool: the -r resolver pool (benching, canaries, second opinions)
+│   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
+│   │   ├── takeover.go         # TakeoverProvider, TakeoverHint (dangling CNAMEs and NS delegations)
+│   │   ├── scope.go            # AddressScope, InternalScope: non-public address scopes
+│   │   ├── simulate.go         # Simulation.Resolve (seeded synthetic DNS)
+│   │   ├── testdns_test.go     # Table-driven wrapper over internal/dnstest
+│   │   └── *_test.go           # Resolver, transport, pool, rate, takeover, simulation tests
 │   ├── dnsserver/              # Scriptable loopback DNS server (UDP, TCP, DoT, DoH)
 │   ├── dnstest/                # dnsserver for tests: stops on cleanup, fails the test on error
 │   ├── labzone/                # -simulate-zone scenario parser and answer logic
-│   ├── dns/
-│   │   ├── resolver.go         # NewResolver, ResolveTypes, ResolveDomainWithRetry, Classify,
-│   │   │                       # CheckWildcard, FingerprintWildcard, ParseTypes
-│   │   ├── resolver_test.go    # DNS resolution, classification and wildcard detection tests
-│   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
-│   │   ├── ratelimit_test.go   # Rate limiter tests
-│   │   ├── testdns_test.go     # Table-driven wrapper over internal/dnstest
-│   │   ├── simulate.go         # SimulateResolve (seeded synthetic DNS)
-│   │   └── simulate_test.go    # Simulation logic tests
+│   ├── mcp/                    # MCP server over stdio (JSON-RPC, tools only) for subenum mcp
 │   ├── output/
 │   │   ├── writer.go           # Thread-safe output (results→stdout, rest→stderr)
 │   │   ├── file.go             # File: atomically replaced -o results file
-│   │   └── writer_test.go      # Output writer tests
+│   │   ├── summary.go          # Run-quality summary: JSONL summary line, -stats file
+│   │   ├── sarif.go            # -sarif: takeover candidates as SARIF 2.1.0
+│   │   ├── eta.go              # Progress ETA estimate
+│   │   ├── log.go              # -log-format: text or JSON diagnostics on stderr
+│   │   └── *_test.go           # Writer, file, ETA tests
+│   ├── passive/                # -sources: Source interface, registry, Wayback Machine source
+│   ├── permute/                # -permute candidate generation
+│   ├── report/                 # Run-quality report built from finished scans
 │   ├── scan/
-│   │   ├── options.go          # Options: settings shared by CLI and TUI (Validate, Config)
-│   │   ├── options_test.go     # Options validation tests
+│   │   ├── options.go          # Options: Config plus the settings only checked (Validate, Fields)
 │   │   ├── runner.go           # Scan engine: Config, Event/NoticeKind, Stats, Run
-│   │   └── runner_test.go      # Dispatcher lifecycle, recursion, rate, wildcard, cancellation tests
+│   │   ├── dispatcher.go       # Lazy candidate generation in chunks, budgets, resume watermark
+│   │   ├── autorate.go         # -auto-rate back-off controller
+│   │   ├── scope.go            # -exclude patterns (ValidateExcludes, IsExcluded)
+│   │   ├── settings.go         # Setting tokens in engine messages, rendered per front end
+│   │   ├── verdict.go          # Run-quality verdicts: complete, degraded, unreliable
+│   │   ├── verify.go           # Verify: re-check names on the trusted resolver (-diff)
+│   │   └── *_test.go           # Dispatcher, recursion, rate, wildcard, pool, resume, cancellation tests
 │   ├── tui/
 │   │   ├── model.go            # Root Bubble Tea model (form → scan state machine)
 │   │   ├── form.go             # Config form screen (textinput fields + toggles)
 │   │   ├── scan_view.go        # Live results screen (viewport + progress bar)
+│   │   ├── passes.go           # Sources and Permute: source lookups before the scan, the permutation pass after it
 │   │   ├── logo.go             # Styled wordmark
 │   │   ├── config.go           # Session persistence: load/save <user config dir>/subenum/last.json
 │   │   └── *_test.go           # Model, form, scan view and config tests
@@ -127,28 +161,28 @@ subenum/
 │   │   ├── punycode.go         # IDN → punycode (A-label) conversion
 │   │   └── *_test.go           # Validator and punycode tests
 │   └── wordlist/
-│       ├── reader.go           # ReadLines, Normalize, Build, LoadWordlist
-│       └── reader_test.go      # Wordlist reading, normalization and dedup tests
+│       ├── reader.go           # ReadLines, ReadLinesFrom, Normalize, Build, Prepare/For, LoadWordlist
+│       └── *_test.go           # Wordlist reading, normalization and dedup tests
 ├── pkg/
 │   └── subenum/                # Public Go library API: Config, Scan, Run, Event, Stats
 ├── tools/
 │   ├── wordlist-gen.go         # Custom wordlist generator utility
 │   ├── wordlist-gen_test.go    # Generator tests
+│   ├── licenses/               # THIRD_PARTY_LICENSES generator, run at release time
 │   └── README.md               # Wordlist generator docs
 ├── .gitattributes              # Line-ending normalization rules
 ├── .gitignore
 ├── .golangci.yml               # Linter configuration (golangci-lint v2)
-├── main.go                     # CLI entry point: flag parsing, -dL loop, exit codes
-├── main_test.go                # CLI-level tests: validation, flag logic
-├── main_e2e_test.go            # End-to-end run() tests: -dL, stdin, formats, exit codes
-├── main_signal_unix_test.go    # SIGTERM exit code test (Unix only)
+├── .goreleaser.yaml            # Release archives, completions, man page
+├── main.go                     # Entry point: calls internal/cli (keeps go install at the module root)
+├── action.yml                  # GitHub Action
+├── CITATION.cff                # Citation metadata
 ├── go.mod / go.sum             # Go module (Bubble Tea TUI is linked into every binary)
 ├── Dockerfile                  # Multi-stage distroless static nonroot build
 ├── docker-compose.yml          # Compose orchestration
 ├── Makefile                    # Build, test, lint, simulate, Docker targets
 ├── CHANGELOG.md                # Versioned release history
 ├── README.md                   # Project overview
-├── SECURITY.md                 # Vulnerability disclosure policy
 └── LICENSE                     # GNU General Public License v3.0
 ```
 
@@ -160,16 +194,13 @@ To run all tests:
 go test -v -race ./...
 ```
 
-On Windows, use Go 1.26.3 or later for race runs. Go 1.26.0 reports false
-data races there (between `context.WithTimeout` and the net package's DNS
-lookup goroutine) and can crash with `Exception 0xc0000005` in `scan.Run`;
-neither is a bug in subenum, and Linux, where CI runs `-race`, is not
-affected. `go.mod` keeps `go 1.26.0` as the minimum, so pick the toolchain
-per command:
-
-```bash
-GOTOOLCHAIN=go1.26.3 go test -race ./...
-```
+On Windows, Go 1.26.0 reports false data races (between
+`context.WithTimeout` and the net package's DNS lookup goroutine) and can
+crash with `Exception 0xc0000005` in `scan.Run`; neither is a bug in
+subenum, and Linux, where CI runs `-race`, is not affected. You need no
+workaround: `go.mod` names `toolchain go1.26.11`, so a local Go older than
+that switches to the patched toolchain by itself. The problem only comes
+back if you force Go 1.26.0 with `GOTOOLCHAIN=local`.
 
 Default `go test ./...` is hermetic (in-process DNS responder, no outbound
 network). The optional live resolver smoke test is gated on an env var:
@@ -218,7 +249,7 @@ func TestGuideResolveOutcomes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, got := ResolveDomainWithRetry(context.Background(), r, tc.domain, timeout, nil, 1, []string{"A"})
+			_, got := Lookup{Resolver: r, Timeout: timeout, Attempts: 1, Types: []string{"A"}}.Resolve(context.Background(), tc.domain)
 			if got != tc.want {
 				t.Errorf("%s: outcome = %v, want %v", tc.domain, got, tc.want)
 			}
@@ -227,7 +258,7 @@ func TestGuideResolveOutcomes(t *testing.T) {
 }
 ```
 
-Scan-engine tests in `internal/scan` can avoid DNS entirely by setting the unexported `resolveHook` field of `scan.Config`, or by running with `Simulate` set; see `runner_test.go`.
+Scan-engine tests in `internal/scan` can avoid DNS entirely by setting the unexported `resolveHook` field of `scan.Config`, or by running with `Simulate` set; see `runner_test.go`. The hook replaces candidate lookups only: wildcard probes still go to `Resolver`, so a hooked test also sets `Simulate` or points the resolver at a local server (`Config.live` reports whether a scan sends real lookups).
 
 ## Debugging Tips
 
@@ -287,9 +318,12 @@ Please follow these style guidelines when contributing:
 There is no CLI-only build: `main` imports `internal/tui`, so Bubble Tea links
 into every binary. Direct third-party deps:
 
-- [`github.com/charmbracelet/bubbletea`](https://github.com/charmbracelet/bubbletea) - Elm-architecture terminal UI framework
-- [`github.com/charmbracelet/bubbles`](https://github.com/charmbracelet/bubbles) - reusable TUI components (textinput, viewport, progress bar)
-- [`github.com/charmbracelet/lipgloss`](https://github.com/charmbracelet/lipgloss) - terminal styling
+- [`charm.land/bubbletea/v2`](https://github.com/charmbracelet/bubbletea) - Elm-architecture terminal UI framework
+- [`charm.land/bubbles/v2`](https://github.com/charmbracelet/bubbles) - reusable TUI components (textinput, viewport, progress bar)
+- [`charm.land/lipgloss/v2`](https://github.com/charmbracelet/lipgloss) - terminal styling
+
+Keep these on versions whose `go` directive is at most the module's `go
+1.26.0`: lipgloss v2.1.0 needs Go 1.26.7, so lipgloss stays on v2.0.x for now.
 
 If you need to add a further dependency:
 
@@ -308,6 +342,7 @@ The site at [tmhsdigital.github.io/subenum](https://tmhsdigital.github.io/subenu
 - `docs/_data/nav.yml` is the single list of pages and sections. Add a new page there or it won't appear in the sidebar, the footer or search.
 - `docs/search.json` is generated at build time from the pages in `nav.yml`; `docs/assets/js/site.js` runs search, tabs, copy buttons and the hero animation.
 - The palette lives at the top of `docs/assets/css/site.css`. The outcome colours (resolved, nxdomain, timeout, refused) mean the same thing everywhere, so reuse the tokens rather than adding colours.
+- The site deploys from `main`, so it can document a feature before a release has it. List such a subcommand, flag, Action input or output, or library identifier in `docs/_data/unreleased.yml`, run `make docs-flags`, and put `{% raw %}{% include unreleased.html flag="name" %}{% endraw %}` (or `command=` / `action=` / `library=`) after it in prose; the site then tags it "unreleased". A new value of a flag that is already released goes in the `values:` list as `flag=VALUE` (`type=NS`) and is tagged with `value="type=NS"`; `make docs-flags` names such values in a tagged note on the flag's row. In the release commit, empty those lists, run `make docs-flags` again, and remove the README's "Unreleased" notes (the README is not rendered by the site, so it says so in plain text).
 
 To preview locally, build with the same image the workflow uses and serve the output:
 
@@ -326,9 +361,9 @@ The token is needed because the header shows the latest release tag. `docs/_prev
 
 The following capabilities are implemented and available today:
 
-*   **Terminal UI** (`-tui`): a Bubble Tea form-based config screen and live-scrolling results view, no arguments required to launch. Last-used values persist to `~/.config/subenum/last.json` across sessions.
+*   **Terminal UI** (`-tui`): a Bubble Tea form-based config screen and live-scrolling results view, no arguments required to launch. Last-used values persist across sessions in `last.json` in the user config directory (`~/.config/subenum/` on Linux, `~/Library/Application Support/subenum/` on macOS, `%AppData%\subenum\` on Windows).
 *   **Output Formats** (`-format text|json|jsonl|csv`): on stdout and in the atomically replaced output file (`-o`); `jsonl` streams one object per line.
-*   **Record Types** (`-type A,AAAA,CNAME`): per-type lookups filtered to the requested types.
+*   **Record Types** (`-type A,AAAA,CNAME,NS,MX,TXT`): per-type lookups filtered to the requested types.
 *   **Recursive Enumeration** (`-recursive` with `-depth`): enumerate subdomains of discovered subdomains, with loop and duplicate protection and per-branch wildcard checks.
 *   **Rate Limiting** (`-rate`): cap DNS queries per second on the wire across the worker pool, counting every record type, retry and wildcard probe.
 *   **Multiple Targets** (`-dL`): scan a list of apex domains, each as an independent scan, with exit code 3 when only some targets fail.
@@ -337,6 +372,6 @@ The following capabilities are implemented and available today:
 
 See `docs/ROADMAP.md` for the next-pass list. Areas still open:
 
-*   **Additional record types**: extend `dns.ResolveTypes` beyond A/AAAA/CNAME (for example MX, TXT, NS).
+*   **Additional record types**: `Lookup.ResolveTypes` covers A, AAAA, CNAME, NS, MX and TXT; a new type is a case in `lookupType`, an entry in `typeOrder` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 

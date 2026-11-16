@@ -11,7 +11,34 @@ import (
 	"testing"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/scan"
 )
+
+// found is a plain engine result, as the CLI writes it.
+func found(name string, records []dns.Record) Result {
+	return Result{Result: scan.Result{Subdomain: name, Records: records}}
+}
+
+// TestResultJSONFieldOrder pins the JSON and JSONL field names and order now
+// that the engine's scan.Result is embedded (#162).
+func TestResultJSONFieldOrder(t *testing.T) {
+	recs := []dns.Record{{Type: "CNAME", Value: "x.example.net"}}
+	res := Result{
+		Result:          scan.Result{Subdomain: "a.example.com", Records: recs, Simulated: true, Takeover: "dangling"},
+		Change:          "changed",
+		PreviousRecords: recs,
+		Permutation:     true,
+	}
+	got, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"subdomain":"a.example.com","records":[{"type":"CNAME","value":"x.example.net"}],"simulated":true,` +
+		`"takeover_candidate":"dangling","change":"changed","previous_records":[{"type":"CNAME","value":"x.example.net"}],"permutation":true}`
+	if string(got) != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
 
 // captureStdout redirects os.Stdout for the duration of fn and returns what was
 // written. Used to assert on the streaming text output the Writer prints there.
@@ -38,7 +65,7 @@ func captureStdout(t *testing.T, fn func()) string {
 func TestWriterSimulateTextPrefix(t *testing.T) {
 	w := New(nil, true, FormatText)
 	out := captureStdout(t, func() {
-		w.Result("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+		w.Emit(found("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}}))
 	})
 	if !strings.Contains(out, "Found (SIMULATED): www.example.com") {
 		t.Errorf("expected simulated prefix on stdout, got %q", out)
@@ -46,7 +73,7 @@ func TestWriterSimulateTextPrefix(t *testing.T) {
 
 	wLive := New(nil, false, FormatText)
 	outLive := captureStdout(t, func() {
-		wLive.Result("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+		wLive.Emit(found("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}}))
 	})
 	if strings.Contains(outLive, "SIMULATED") {
 		t.Errorf("live mode must not tag results as simulated, got %q", outLive)
@@ -64,7 +91,7 @@ func TestNewFileWriterSkipsStdout(t *testing.T) {
 	w := NewFile(bw, false, FormatText)
 
 	out := captureStdout(t, func() {
-		w.Result("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+		w.Emit(found("www.example.com", []dns.Record{{Type: "A", Value: "1.2.3.4"}}))
 		if err := w.Finish(); err != nil {
 			t.Fatalf("Finish: %v", err)
 		}
@@ -88,6 +115,25 @@ func TestNewFileWriterSkipsStdout(t *testing.T) {
 	}
 }
 
+// TestWriterCSVStdoutStreams covers #319: a CSV row reaches stdout when its
+// result is emitted, before Finish, as text, JSON and JSONL rows do.
+func TestWriterCSVStdoutStreams(t *testing.T) {
+	var out bytes.Buffer
+	w := New(nil, false, FormatCSV)
+	w.SetStdout(&out)
+	w.Emit(found("www.example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+	if got, want := out.String(), "subdomain,type,value\nwww.example.com,A,192.0.2.1\n"; got != want {
+		t.Fatalf("stdout before Finish = %q, want %q", got, want)
+	}
+	w.Emit(found("api.example.com", []dns.Record{{Type: "A", Value: "192.0.2.2"}}))
+	if !strings.HasSuffix(out.String(), "api.example.com,A,192.0.2.2\n") {
+		t.Fatalf("second row not written before Finish: %q", out.String())
+	}
+	if err := w.Finish(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWriterCSVEmptyRecords(t *testing.T) {
 	tmp, err := os.CreateTemp("", "output-csv-empty-*.csv")
 	if err != nil {
@@ -98,9 +144,9 @@ func TestWriterCSVEmptyRecords(t *testing.T) {
 	bw := bufio.NewWriter(tmp)
 	w := New(bw, false, FormatCSV)
 	// A resolved domain with no records still gets one row with empty fields.
-	// Finish must run inside the capture because csv.Writer buffers until flush.
+	// Finish runs inside the capture so the header and rows are all flushed.
 	out := captureStdout(t, func() {
-		w.Result("www.example.com", nil)
+		w.Emit(found("www.example.com", nil))
 		if err := w.Finish(); err != nil {
 			t.Fatalf("Finish: %v", err)
 		}
@@ -157,7 +203,7 @@ func TestWriterResultText(t *testing.T) {
 
 	domains := []string{"www.example.com", "api.example.com", "mail.example.com"}
 	for _, d := range domains {
-		w.Result(d, []dns.Record{{Type: "A", Value: "1.2.3.4"}})
+		w.Emit(found(d, []dns.Record{{Type: "A", Value: "1.2.3.4"}}))
 	}
 	if err := w.Finish(); err != nil {
 		t.Fatalf("Finish: %v", err)
@@ -189,8 +235,8 @@ func TestWriterResultJSONFile(t *testing.T) {
 
 	bw := bufio.NewWriter(tmp)
 	w := New(bw, false, FormatJSON)
-	w.Result("www.example.com", []dns.Record{{Type: "A", Value: "93.184.216.34"}})
-	w.Result("ipv6.example.com", []dns.Record{{Type: "AAAA", Value: "2606:2800:220:1::1"}})
+	w.Emit(found("www.example.com", []dns.Record{{Type: "A", Value: "93.184.216.34"}}))
+	w.Emit(found("ipv6.example.com", []dns.Record{{Type: "AAAA", Value: "2606:2800:220:1::1"}}))
 	if err := w.Finish(); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
@@ -222,9 +268,9 @@ func TestWriterResultJSONFile(t *testing.T) {
 // array is byte for byte what encoding every result at once produced.
 func TestWriterJSONStreamsSameBytes(t *testing.T) {
 	results := []Result{
-		{Subdomain: "www.example.com", Records: []dns.Record{{Type: "A", Value: "192.0.2.1"}, {Type: "AAAA", Value: "2001:db8::1"}}},
-		{Subdomain: "blog.example.com", Records: []dns.Record{{Type: "CNAME", Value: "ghost.example.net"}}, Takeover: "dangling"},
-		{Subdomain: "old.example.com", Change: "removed"},
+		{Result: scan.Result{Subdomain: "www.example.com", Records: []dns.Record{{Type: "A", Value: "192.0.2.1"}, {Type: "AAAA", Value: "2001:db8::1"}}}},
+		{Result: scan.Result{Subdomain: "blog.example.com", Records: []dns.Record{{Type: "CNAME", Value: "ghost.example.net"}}, Takeover: "dangling"}},
+		{Result: scan.Result{Subdomain: "old.example.com"}, Change: "removed"},
 	}
 	for _, n := range []int{0, 1, len(results)} {
 		var buf bytes.Buffer
@@ -320,10 +366,10 @@ func TestWriterResultCSVFile(t *testing.T) {
 
 	bw := bufio.NewWriter(tmp)
 	w := New(bw, false, FormatCSV)
-	w.Result("www.example.com", []dns.Record{
+	w.Emit(found("www.example.com", []dns.Record{
 		{Type: "A", Value: "1.1.1.1"},
 		{Type: "AAAA", Value: "2606::1"},
-	})
+	}))
 	if err := w.Finish(); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
@@ -357,7 +403,7 @@ func TestWriterPlainAndRecords(t *testing.T) {
 
 	w := New(nil, true, FormatText)
 	w.SetPlain(true)
-	out := captureStdout(t, func() { w.Result("www.example.com", recs) })
+	out := captureStdout(t, func() { w.Emit(found("www.example.com", recs)) })
 	if out != "www.example.com\n" {
 		t.Errorf("plain stdout = %q, want bare name", out)
 	}
@@ -367,7 +413,7 @@ func TestWriterPlainAndRecords(t *testing.T) {
 	w = New(bw, false, FormatText)
 	w.SetPlain(true)
 	w.SetShowRecords(true)
-	out = captureStdout(t, func() { w.Result("www.example.com", recs) })
+	out = captureStdout(t, func() { w.Emit(found("www.example.com", recs)) })
 	if err := w.Finish(); err != nil {
 		t.Fatal(err)
 	}
@@ -385,8 +431,8 @@ func TestWriterJSONLStreams(t *testing.T) {
 	bw := bufio.NewWriter(&buf)
 	w := New(bw, false, FormatJSONL)
 	out := captureStdout(t, func() {
-		w.Result("a.example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}})
-		w.Result("b.example.com", nil)
+		w.Emit(found("a.example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+		w.Emit(found("b.example.com", nil))
 	})
 	// Streamed before Finish: each line is a complete JSON object.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -462,7 +508,7 @@ func TestResultClearsProgressOnTerminal(t *testing.T) {
 	w := New(nil, false, FormatText)
 	w.stderr = &buf
 	w.Progress(10, 1, 10, 0)
-	_ = captureStdout(t, func() { w.Result("www.example.com", nil) })
+	_ = captureStdout(t, func() { w.Emit(found("www.example.com", nil)) })
 	if w.progressLen != 0 || !strings.HasSuffix(buf.b.String(), "\r") {
 		t.Errorf("progress line not cleared before result: %q", buf.b.String())
 	}
@@ -474,7 +520,7 @@ func TestResultClearsProgressOnTerminal(t *testing.T) {
 	p.stderr = &buf2
 	p.SetPlain(true)
 	p.Progress(10, 1, 10, 0)
-	_ = captureStdout(t, func() { p.Result("www.example.com", nil) })
+	_ = captureStdout(t, func() { p.Emit(found("www.example.com", nil)) })
 	if p.progressLen != 0 {
 		t.Error("plain mode must clear the progress line before a result")
 	}
@@ -512,7 +558,7 @@ func TestSimulatedOutputIsMarked(t *testing.T) {
 		w.SetPlain(true)
 		w.SetSeed(42)
 		stdout = captureStdout(t, func() {
-			w.Result("www.example.com", recs)
+			w.Emit(found("www.example.com", recs))
 			if err := w.Finish(); err != nil {
 				t.Fatalf("Finish: %v", err)
 			}
@@ -572,7 +618,7 @@ func TestFinishReportsFileWriteErrors(t *testing.T) {
 		buf := bufio.NewWriterSize(&failWriter{limit: 8}, 16)
 		w := NewFile(buf, false, format)
 		for i := 0; i < 20; i++ {
-			w.Result("host"+strings.Repeat("x", i)+".example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}})
+			w.Emit(found("host"+strings.Repeat("x", i)+".example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}}))
 		}
 		if err := w.Finish(); err == nil {
 			t.Errorf("format %d: Finish returned nil after the file writer failed", format)
@@ -589,7 +635,7 @@ func TestTakeoverHintOutput(t *testing.T) {
 		w.SetPlain(true)
 		setup(w)
 		return captureStdout(t, func() {
-			w.ResultWithHint("old.example.com", recs, "dangling")
+			w.Emit(Result{Result: scan.Result{Subdomain: "old.example.com", Records: recs, Takeover: "dangling"}})
 			_ = w.Finish()
 		})
 	}
@@ -604,5 +650,33 @@ func TestTakeoverHintOutput(t *testing.T) {
 	}
 	if out := run(FormatText, func(*Writer) {}); out != "old.example.com\n" {
 		t.Errorf("text without -show-records = %q, want the bare name", out)
+	}
+}
+
+// TestSetStdoutCapturesEveryFormat covers #158: with SetStdout, every format
+// (and the jsonl summary) writes to the injected writer, never os.Stdout, so
+// the CLI can run against in-memory streams.
+func TestSetStdoutCapturesEveryFormat(t *testing.T) {
+	for _, format := range []Format{FormatText, FormatJSON, FormatJSONL, FormatCSV} {
+		var out, errOut bytes.Buffer
+		w := New(nil, false, format)
+		w.SetStdout(&out)
+		w.SetStderr(&errOut)
+		leaked := captureStdout(t, func() {
+			w.Emit(found("www.example.com", []dns.Record{{Type: "A", Value: "192.0.2.1"}}))
+			w.Summary(Summary{})
+			if err := w.Finish(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if leaked != "" {
+			t.Errorf("format %v: %q went to os.Stdout", format, leaked)
+		}
+		if !strings.Contains(out.String(), "www.example.com") {
+			t.Errorf("format %v: injected stdout = %q, want the result", format, out.String())
+		}
+		if format == FormatJSONL && !strings.Contains(out.String(), "verdict") {
+			t.Errorf("jsonl summary missing from injected stdout: %q", out.String())
+		}
 	}
 }

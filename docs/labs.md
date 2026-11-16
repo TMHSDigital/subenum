@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Labs
+numbered: false
 ---
 
 # Labs: DNS enumeration without touching real infrastructure
@@ -181,9 +182,17 @@ www      AAAA     2001:db8::10
 shop     CNAME    www                   # relative target
 blog     CNAME    ghost.example.net.    # absolute target (trailing dot)
 *.dev    A        192.0.2.99            # wildcard under dev
+mail     MX       10 mx1                # preference and host (relative or absolute)
+@        TXT      "v=spf1 -all"         # the rest of the line; quotes optional
+sub      NS       ns1.gone.example.     # a delegated subzone (scan with -type NS)
 slow     TIMEOUT                        # never answered
 broken   SERVFAIL                       # also: REFUSED, NXDOMAIN
 ```
+
+Start a scenario in `examples/labs` with a comment saying what it teaches
+(`# Lab 6: <title>. <what to look for>`): `subenum mcp` shows that comment,
+without the lab number and any indented command line, to agents choosing a
+scenario.
 
 Names the file does not define are NXDOMAIN. The scenario is the whole world
 during a lab, so names outside the scanned domain (such as an external CNAME
@@ -192,9 +201,9 @@ documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
 `2001:db8::/32`) and reserved names such as `lab.example`, so nothing in a
 lab points at a real host.
 
-Scenarios work with every other flag, such as `-dL` (each listed domain gets
+Scenarios work with the other flags, such as `-dL` (each listed domain gets
 the same zone), `-permute`, `-diff`, `-format json` and `-stats`, which
 records the scenario file under `zone`. `-simulate-zone` cannot be combined
-with `-simulate`, `-dns-server` or `-r`, whether they come from the command
-line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
+with `-simulate`, `-dns-server`, `-r`, `-ct`, `-sources` or `-axfr`, whether they
+come from the command line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
 rather than send a query off the machine.

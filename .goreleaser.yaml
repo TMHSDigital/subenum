@@ -11,6 +11,9 @@ before:
     - go mod verify
     # Shell completions and the man page, generated from the flags (#88).
     - go run . generate-assets build/assets
+    # Licence notices of the Go standard library and every linked module,
+    # read from the module cache (#326).
+    - go run ./tools/licenses -o build/THIRD_PARTY_LICENSES
 
 builds:
   - id: subenum
@@ -44,6 +47,8 @@ archives:
         formats: [zip]
     files:
       - LICENSE
+      - src: build/THIRD_PARTY_LICENSES
+        strip_parent: true
       - README.md
       - CHANGELOG.md
       - src: build/assets/completions/*

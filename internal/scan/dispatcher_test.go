@@ -17,6 +17,28 @@ func testDispatcher(cfg Config, maxDepth int) *dispatcher {
 	return newDispatcher(cfg, maxDepth)
 }
 
+// TestNextChunkSize covers #184: chunks are at most maxChunk jobs, and a
+// short wordlist goes out one job at a time so every worker gets some.
+func TestNextChunkSize(t *testing.T) {
+	big := testDispatcher(Config{Entries: makeEntries(10000)}, 1)
+	if got := len(big.nextChunk(50)); got != maxChunk {
+		t.Errorf("10000 entries, 50 workers: chunk of %d, want %d", got, maxChunk)
+	}
+	small := testDispatcher(Config{Entries: makeEntries(20)}, 1)
+	for i := 0; i < 20; i++ {
+		if got := len(small.nextChunk(100)); got != 1 {
+			t.Fatalf("20 entries, 100 workers: chunk %d has %d jobs, want 1", i, got)
+		}
+	}
+	if got := small.nextChunk(100); got != nil {
+		t.Errorf("exhausted dispatcher returned %v", got)
+	}
+	mid := testDispatcher(Config{Entries: makeEntries(30)}, 1)
+	if got := len(mid.nextChunk(10)); got != 3 {
+		t.Errorf("30 entries, 10 workers: chunk of %d, want 3", got)
+	}
+}
+
 // drain takes every job next will give, without completing any.
 func drain(d *dispatcher) []string {
 	var names []string
@@ -29,23 +51,152 @@ func drain(d *dispatcher) []string {
 	}
 }
 
-func TestDispatcherDedupesAndSettlesDuplicates(t *testing.T) {
-	d := testDispatcher(Config{Entries: []string{"www", "mail", "www", "api"}}, 1)
-	got := drain(d)
-	if want := []string{"www.example.com", "mail.example.com", "api.example.com"}; !slices.Equal(got, want) {
-		t.Fatalf("jobs %v, want %v", got, want)
+// TestCapLeavesExcludedOutOfSkipped covers #238: a budget that runs out with
+// only excluded candidates left counts them as excluded, not skipped, so the
+// scan is still complete; in-scope candidates past it are still skipped.
+func TestCapLeavesExcludedOutOfSkipped(t *testing.T) {
+	entries := makeEntries(100)
+	var excl []string
+	for _, e := range entries[90:] {
+		excl = append(excl, e+".example.com")
 	}
-	// The duplicate (index 2) settled when it was skipped; the others settle
-	// as they complete, in any order.
-	for _, root := range []int{3, 0} {
+	cfg := Config{Domain: "example.com", Entries: entries, MaxQueries: 90, Exclude: excl}
+	d := testDispatcher(cfg, 1)
+	if got := len(drain(d)); got != 90 {
+		t.Fatalf("admitted %d, want 90", got)
+	}
+	if d.skipped != 0 || d.excluded != 10 {
+		t.Errorf("skipped %d excluded %d, want 0 and 10", d.skipped, d.excluded)
+	}
+
+	cfg.MaxQueries = 80 // now 10 in-scope names are past the cap too
+	d = testDispatcher(cfg, 1)
+	drain(d)
+	if d.skipped != 10 || d.excluded != 10 {
+		t.Errorf("cap 80: skipped %d excluded %d, want 10 and 10", d.skipped, d.excluded)
+	}
+}
+
+// Only a recursive scan with a multi-label entry can reach one name through
+// two parents, so only it keeps a set of generated candidates (#248, #301);
+// a flat scan, and a recursive one over single labels, rely on their entries
+// being unique already.
+func TestDispatcherVisitedSetOnlyForMultiLabelEntries(t *testing.T) {
+	if flat := testDispatcher(Config{Entries: []string{"www", "a.b"}}, 1); flat.visited != nil || flat.expanded != nil {
+		t.Error("a non-recursive scan allocated a visited or expanded set")
+	}
+	single := testDispatcher(Config{Entries: []string{"a", "b"}, Recursive: true}, 3)
+	drain(single)
+	single.expand(job{domain: "a.example.com", depth: 1})
+	if got := drain(single); len(got) != 2 {
+		t.Fatalf("children %v, want 2", got)
+	}
+	if single.visited != nil {
+		t.Error("a recursive scan over single-label entries kept a per-candidate set")
+	}
+
+	// "a.b" under the root and "a" under b.example.com are one name.
+	d := testDispatcher(Config{Entries: []string{"a.b", "a", "b"}, Recursive: true}, 3)
+	if d.visited == nil {
+		t.Fatal("a recursive scan with a multi-label entry kept no per-candidate set")
+	}
+	drain(d)
+	d.expand(job{domain: "b.example.com", depth: 1})
+	got := drain(d)
+	if want := []string{"a.b.b.example.com", "b.b.example.com"}; !slices.Equal(got, want) {
+		t.Errorf("children %v, want %v", got, want)
+	}
+}
+
+// Jobs settle as they complete, in any order, and the watermark is the first
+// entry not yet done.
+func TestDispatcherSettlesOutOfOrder(t *testing.T) {
+	d := testDispatcher(Config{Entries: []string{"www", "mail", "api"}, Recursive: true}, 1)
+	drain(d)
+	for _, root := range []int{2, 0} {
 		d.complete(completion{root: root, finished: true})
 	}
 	if d.watermark != 1 {
 		t.Errorf("watermark %d, want 1 (entry 1 not yet done)", d.watermark)
 	}
 	d.complete(completion{root: 1, finished: true})
-	if d.watermark != 4 {
-		t.Errorf("watermark %d, want 4", d.watermark)
+	if d.watermark != 3 {
+		t.Errorf("watermark %d, want 3", d.watermark)
+	}
+}
+
+// TestCapCountsRecursiveRemainderWithoutBuildingIt covers #301: a budget
+// reached in a recursive scan splits what is left into skipped and excluded
+// with the same counts as generating every candidate would give.
+func TestCapCountsRecursiveRemainderWithoutBuildingIt(t *testing.T) {
+	entries := makeEntries(10)
+	cfg := Config{
+		Domain: "example.com", Entries: entries, Recursive: true, MaxQueries: 12,
+		Exclude: []string{
+			entries[1] + ".example.com",                     // tested before the cap: excluded as generated
+			entries[9] + ".example.com",                     // past the cap
+			entries[0] + "." + entries[0] + ".example.com",  // generated before the cap
+			entries[7] + "." + entries[0] + ".example.com",  // past the cap
+			"absent." + entries[0] + ".example.com",         // not a candidate
+			entries[3] + ".other.example.com",               // parent never expanded
+			"*." + entries[2] + ".example.com",              // whole subtree of a found parent
+			"*.deep." + entries[4] + ".example.com",         // excludes nothing queued
+			entries[5] + "." + entries[4] + ".example.com.", // past the cap, written with a trailing dot
+		},
+	}
+	// The same scan with no budget, generating every candidate, gives the
+	// counts the capped one must reach without building them.
+	find := func(d *dispatcher) {
+		for _, i := range []int{0, 2, 4} {
+			d.expand(job{domain: entries[i] + ".example.com", depth: 1})
+		}
+	}
+	full := cfg
+	full.MaxQueries = 0
+	all := testDispatcher(full, 2)
+	find(all)
+	candidates := len(drain(all))
+
+	d := testDispatcher(cfg, 2)
+	// Take 4 root jobs, then queue the found parents behind the root.
+	for i := 0; i < 4; i++ {
+		if _, ok := d.next(); !ok {
+			t.Fatal("no job")
+		}
+	}
+	find(d)
+	admitted := 4 + len(drain(d))
+	if admitted != 12 || !d.capped {
+		t.Fatalf("admitted %d capped %v, want 12 and true", admitted, d.capped)
+	}
+	if d.excluded != all.excluded || d.skipped != candidates-admitted {
+		t.Errorf("capped: excluded %d skipped %d, want %d and %d", d.excluded, d.skipped, all.excluded, candidates-admitted)
+	}
+	if d.remaining != 0 || len(d.frontier) != 0 {
+		t.Errorf("remaining %d frontier %d after the cap, want 0 and 0", d.remaining, len(d.frontier))
+	}
+}
+
+// A resumed parent that the resumed scan finds again is expanded once, and
+// counted once when a budget stops admission (#301).
+func TestDispatcherExpandsAResumedParentOnce(t *testing.T) {
+	cfg := Config{
+		Entries: []string{"a", "b"}, Recursive: true,
+		ResumeParents: []string{"dev.example.com", "DEV.example.com."},
+	}
+	d := testDispatcher(cfg, 3)
+	d.expand(job{domain: "dev.example.com", depth: 1})
+	want := []string{"a.example.com", "b.example.com", "a.dev.example.com", "b.dev.example.com"}
+	if got := drain(d); !slices.Equal(got, want) {
+		t.Errorf("jobs %v, want %v", got, want)
+	}
+
+	cfg.MaxQueries = 1
+	d = testDispatcher(cfg, 3)
+	drain(d)
+	d.expand(job{domain: "dev.example.com", depth: 1})
+	if d.skipped != 3 {
+		t.Errorf("skipped %d, want 3 (one root entry and dev's two children, once)", d.skipped)
 	}
 }
 
@@ -144,7 +295,7 @@ func TestDispatcherDeadline(t *testing.T) {
 	if _, ok := d.next(); !ok {
 		t.Fatal("no job")
 	}
-	d.expire(true)
+	d.expire(1)
 	if !d.expired || d.skipped != 4 || d.admitted != 0 || d.total() != 0 {
 		t.Errorf("expired %v skipped %d admitted %d total %d, want true 4 0 0", d.expired, d.skipped, d.admitted, d.total())
 	}
@@ -156,5 +307,52 @@ func TestDispatcherDeadline(t *testing.T) {
 	d.complete(completion{root: 0, skipped: true})
 	if !d.expired || d.skipped != 3 || d.pending != 0 || d.watermark != 0 {
 		t.Errorf("expired %v skipped %d pending %d watermark %d, want true 3 0 0", d.expired, d.skipped, d.pending, d.watermark)
+	}
+}
+
+// TestDispatcherCapThenDeadline covers #317: when -max-queries stops
+// admission and the deadline then fires with a chunk still held, the held
+// jobs are skipped, so tested plus skipped is every candidate, and the scan
+// is marked expired because the time budget skipped admitted work.
+func TestDispatcherCapThenDeadline(t *testing.T) {
+	d := testDispatcher(Config{Entries: makeEntries(10), MaxQueries: 4}, 1)
+	held := drain(d) // the cap admits 4 and skips the other 6
+	if len(held) != 4 || !d.capped || d.skipped != 6 {
+		t.Fatalf("admitted %d capped %v skipped %d, want 4 true 6", len(held), d.capped, d.skipped)
+	}
+	d.expire(len(held))
+	if d.admitted != 0 || d.skipped != 10 || !d.expired || d.total() != 0 {
+		t.Errorf("admitted %d skipped %d expired %v total %d, want 0 10 true 0", d.admitted, d.skipped, d.expired, d.total())
+	}
+
+	// A deadline with nothing held after the cap changes nothing.
+	d = testDispatcher(Config{Entries: makeEntries(10), MaxQueries: 4}, 1)
+	drain(d)
+	d.expire(0)
+	if d.expired || d.skipped != 6 {
+		t.Errorf("empty expire after the cap: expired %v skipped %d, want false 6", d.expired, d.skipped)
+	}
+
+	// A worker skips a job after the cap: the time budget skipped it.
+	d = testDispatcher(Config{Entries: makeEntries(10), MaxQueries: 4}, 1)
+	drain(d)
+	d.pending = 1
+	d.complete(completion{root: 0, skipped: true})
+	if !d.expired || d.skipped != 7 || d.admitted != 3 {
+		t.Errorf("skipped job after the cap: expired %v skipped %d admitted %d, want true 7 3", d.expired, d.skipped, d.admitted)
+	}
+}
+
+// A parent found after a budget stop whose whole subtree is excluded has its
+// children counted as excluded, not skipped, as countUnbuilt does, so they
+// cannot make a complete scan look incomplete (#238).
+func TestCappedExpandOfExcludedSubtree(t *testing.T) {
+	d := testDispatcher(Config{Entries: makeEntries(5), MaxQueries: 2, Recursive: true,
+		Exclude: []string{"*.p0.example.com"}}, 3)
+	drain(d)
+	skipped := d.skipped
+	d.expand(job{domain: "p0.example.com", depth: 1})
+	if d.excluded != 5 || d.skipped != skipped {
+		t.Errorf("excluded %d skipped %d, want the 5 children excluded and skipped unchanged at %d", d.excluded, d.skipped, skipped)
 	}
 }

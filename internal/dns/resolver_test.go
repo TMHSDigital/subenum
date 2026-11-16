@@ -6,9 +6,17 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+// resolveDomain reports whether one lookup of domain (DefaultTypes, no
+// retry) returns records.
+func resolveDomain(ctx context.Context, r *net.Resolver, domain string, timeout time.Duration) bool {
+	records, _, _ := Lookup{Resolver: r, Timeout: timeout}.ResolveTypes(ctx, domain)
+	return len(records) > 0
+}
 
 func TestResolveDomain(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{
@@ -31,7 +39,7 @@ func TestResolveDomain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveDomain(context.Background(), r, tt.domain, timeout, nil)
+			got := resolveDomain(context.Background(), r, tt.domain, timeout)
 			if got != tt.expected {
 				t.Errorf("ResolveDomain(%q) = %v, want %v", tt.domain, got, tt.expected)
 			}
@@ -43,7 +51,7 @@ func TestResolveDomainTimeout(t *testing.T) {
 	addr := startBlackHole(t)
 	veryShortTimeout := time.Millisecond
 	r := NewResolver(veryShortTimeout, addr)
-	if ResolveDomain(context.Background(), r, "example.com.", veryShortTimeout, nil) {
+	if resolveDomain(context.Background(), r, "example.com.", veryShortTimeout) {
 		t.Errorf("expected timeout against a black-holed resolver")
 	}
 }
@@ -55,7 +63,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 	timeout := time.Second
 	r := srv.Resolver(timeout)
 
-	records, result := ResolveDomainWithRetry(context.Background(), r, "example.com.", timeout, nil, 3, []string{"A"})
+	records, result := Lookup{Resolver: r, Timeout: timeout, Attempts: 3, Types: []string{"A"}}.Resolve(context.Background(), "example.com.")
 	if result != OutcomeFound {
 		t.Errorf("expected example.com to resolve, got %v", result)
 	}
@@ -63,7 +71,7 @@ func TestResolveDomainWithRetry(t *testing.T) {
 		t.Errorf("expected records, got none")
 	}
 
-	_, result = ResolveDomainWithRetry(context.Background(), r, "missing.example.com.", timeout, nil, 2, []string{"A"})
+	_, result = Lookup{Resolver: r, Timeout: timeout, Attempts: 2, Types: []string{"A"}}.Resolve(context.Background(), "missing.example.com.")
 	if result == OutcomeFound {
 		t.Errorf("expected missing name to fail")
 	}
@@ -75,15 +83,13 @@ func TestResolveDomainWithRetryContextCancellation(t *testing.T) {
 	cancel()
 
 	timeout := time.Second
-	start := time.Now()
-	_, result := ResolveDomainWithRetry(ctx, srv.Resolver(timeout), "example.com.", timeout, nil, 5, []string{"A"})
-	elapsed := time.Since(start)
+	_, result := Lookup{Resolver: srv.Resolver(timeout), Timeout: timeout, Attempts: 5, Types: []string{"A"}}.Resolve(ctx, "example.com.")
 
 	if result == OutcomeFound {
 		t.Errorf("expected cancelled context to prevent resolution")
 	}
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("expected near-instant return on cancelled context, took %s", elapsed)
+	if srv.Queries() != 0 {
+		t.Errorf("expected no query to reach the server on cancelled context, got %d", srv.Queries())
 	}
 }
 
@@ -92,7 +98,7 @@ func TestCheckWildcard(t *testing.T) {
 		"www.example.com": {A: "192.0.2.1"},
 	})
 	timeout := time.Second
-	isWildcard, _, err := CheckWildcard(context.Background(), srv.Resolver(timeout), "example.com", timeout, nil, 1)
+	isWildcard, _, err := Lookup{Resolver: srv.Resolver(timeout), Timeout: timeout, Attempts: 1}.CheckWildcard(context.Background(), "example.com")
 	if err != nil {
 		t.Fatalf("CheckWildcard returned error: %v", err)
 	}
@@ -114,7 +120,7 @@ func TestCheckWildcardInconclusive(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := startTestDNS(t, map[string]testReply{"*": tc.reply})
 			timeout := 100 * time.Millisecond
-			is, fp, err := CheckWildcard(context.Background(), srv.Resolver(timeout), "example.com", timeout, []string{"A"}, 2)
+			is, fp, err := Lookup{Resolver: srv.Resolver(timeout), Timeout: timeout, Attempts: 2, Types: []string{"A"}}.CheckWildcard(context.Background(), "example.com")
 			if !errors.Is(err, ErrWildcardInconclusive) {
 				t.Fatalf("err = %v, want ErrWildcardInconclusive", err)
 			}
@@ -136,7 +142,7 @@ func TestCheckWildcardCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := CheckWildcard(ctx, srv.Resolver(time.Second), "example.com", time.Second, nil, 1)
+	_, _, err := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 1}.CheckWildcard(ctx, "example.com")
 	if err == nil {
 		t.Errorf("expected error from cancelled context")
 	}
@@ -205,7 +211,7 @@ func TestClassify(t *testing.T) {
 // failure, and it must not be retried.
 func TestResolveDomainWithRetryCNAMENoData(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"www.example.com": {A: "192.0.2.10"}})
-	records, outcome := ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, nil, 3, []string{"CNAME"})
+	records, outcome := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 3, Types: []string{"CNAME"}}.Resolve(context.Background(), "www.example.com")
 	if len(records) != 0 {
 		t.Fatalf("records = %v, want none", records)
 	}
@@ -216,9 +222,46 @@ func TestResolveDomainWithRetryCNAMENoData(t *testing.T) {
 
 	// A second identical call with attempts=1 must issue the same number of
 	// queries, proving the attempts=3 call above did not retry.
-	_, _ = ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, nil, 1, []string{"CNAME"})
+	_, _ = Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 1, Types: []string{"CNAME"}}.Resolve(context.Background(), "www.example.com")
 	if got := srv.Queries() - first; got != first {
 		t.Fatalf("attempts=3 issued %d queries, attempts=1 issued %d; NODATA must not be retried", first, got)
+	}
+}
+
+func TestResolveVerboseNoData(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{
+		"www.example.com":   {A: "192.0.2.10"},
+		"alias.example.com": {CNAME: "www.example.com"},
+	})
+	for _, tc := range []struct {
+		domain  string
+		prefix  string
+		outcome Outcome
+	}{
+		{"www.example.com", "No records: www.example.com (CNAME) in ", OutcomeNXDomain},
+		{"alias.example.com", "Resolved: alias.example.com (CNAME: www.example.com) in ", OutcomeFound},
+		{"missing.example.com", "Failed to resolve: missing.example.com (Error: ", OutcomeNXDomain},
+	} {
+		t.Run(tc.domain, func(t *testing.T) {
+			var lines []string
+			lookup := Lookup{
+				Resolver: srv.Resolver(time.Second), Timeout: time.Second,
+				Attempts: 1, Types: []string{"CNAME"},
+				Logf: func(format string, args ...any) {
+					lines = append(lines, fmt.Sprintf(format, args...))
+				},
+			}
+			_, outcome := lookup.Resolve(context.Background(), tc.domain)
+			if outcome != tc.outcome {
+				t.Errorf("outcome = %v, want %v", outcome, tc.outcome)
+			}
+			if len(lines) != 1 || !strings.HasPrefix(lines[0], tc.prefix) {
+				t.Fatalf("verbose lines = %q, want one beginning %q", lines, tc.prefix)
+			}
+			if strings.Contains(lines[0], "Error: <nil>") {
+				t.Errorf("successful NODATA lookup logged a nil error: %q", lines[0])
+			}
+		})
 	}
 }
 
@@ -230,7 +273,7 @@ func TestCheckWildcardCNAMEFingerprint(t *testing.T) {
 		"*":                {CNAME: "edge.example.net"},
 		"edge.example.net": {A: "192.0.2.50"},
 	})
-	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, []string{"CNAME"}, 1)
+	is, fp, err := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 1, Types: []string{"CNAME"}}.CheckWildcard(context.Background(), "example.com")
 	if err != nil {
 		t.Fatalf("CheckWildcard: %v", err)
 	}
@@ -244,7 +287,7 @@ func TestCheckWildcardCNAMEFingerprint(t *testing.T) {
 
 	// A real hit under the same wildcard returns the same CNAME, so it is a
 	// subset of the fingerprint and would be filtered.
-	recs, _, _ := ResolveTypes(context.Background(), srv.Resolver(time.Second), "www.example.com", time.Second, []string{"CNAME"})
+	recs, _, _ := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Types: []string{"CNAME"}}.ResolveTypes(context.Background(), "www.example.com")
 	if len(recs) != 1 || recs[0] != want {
 		t.Fatalf("www CNAME records = %v, want [%v]", recs, want)
 	}
@@ -253,7 +296,7 @@ func TestCheckWildcardCNAMEFingerprint(t *testing.T) {
 func TestResolveDomainWithRetryCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, outcome := ResolveDomainWithRetry(ctx, NewResolver(time.Second, startBlackHole(t)), "x.example.com", time.Second, nil, 3, nil)
+	_, outcome := Lookup{Resolver: NewResolver(time.Second, startBlackHole(t)), Timeout: time.Second, Attempts: 3}.Resolve(ctx, "x.example.com")
 	if outcome != OutcomeCanceled {
 		t.Fatalf("outcome = %v, want Canceled", outcome)
 	}
@@ -261,7 +304,7 @@ func TestResolveDomainWithRetryCanceled(t *testing.T) {
 
 func TestResolveDomainWithRetryNXDomainNoRetry(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{})
-	_, outcome := ResolveDomainWithRetry(context.Background(), srv.Resolver(time.Second), "nope.example.com.", time.Second, nil, 3, []string{"A"})
+	_, outcome := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 3, Types: []string{"A"}}.Resolve(context.Background(), "nope.example.com.")
 	if outcome != OutcomeNXDomain {
 		t.Fatalf("outcome = %v, want NXDomain", outcome)
 	}
@@ -274,7 +317,7 @@ func TestCheckWildcardFingerprint(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{
 		"*": {A: "192.0.2.99"},
 	})
-	is, fp, err := CheckWildcard(context.Background(), srv.Resolver(time.Second), "example.com", time.Second, nil, 1)
+	is, fp, err := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Attempts: 1}.CheckWildcard(context.Background(), "example.com")
 	if err != nil {
 		t.Fatalf("CheckWildcard: %v", err)
 	}
@@ -296,7 +339,7 @@ func TestResolveTypesTCPFallbackOnTruncation(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{
 		"big.example.com": {A: "192.0.2.1", Truncated: true},
 	})
-	recs, _, err := ResolveTypes(context.Background(), srv.Resolver(2*time.Second), "big.example.com.", 2*time.Second, []string{"A"})
+	recs, _, err := Lookup{Resolver: srv.Resolver(2 * time.Second), Timeout: 2 * time.Second, Types: []string{"A"}}.ResolveTypes(context.Background(), "big.example.com.")
 	if err != nil {
 		t.Fatalf("ResolveTypes: %v", err)
 	}
@@ -314,14 +357,14 @@ func TestLiveResolverSmoke(t *testing.T) {
 	}
 	timeout := 3 * time.Second
 	r := NewResolver(timeout, "8.8.8.8:53")
-	if !ResolveDomain(context.Background(), r, "example.com.", timeout, nil) {
+	if !resolveDomain(context.Background(), r, "example.com.", timeout) {
 		t.Fatal("expected example.com to resolve via 8.8.8.8")
 	}
 }
 
 func TestResolveTypesAAAA(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"v6.example.com": {A: "192.0.2.1", AAAA: "2001:db8::1"}})
-	recs, _, err := ResolveTypes(context.Background(), srv.Resolver(time.Second), "v6.example.com", time.Second, DefaultTypes)
+	recs, _, err := Lookup{Resolver: srv.Resolver(time.Second), Timeout: time.Second, Types: DefaultTypes}.ResolveTypes(context.Background(), "v6.example.com")
 	if err != nil {
 		t.Fatalf("ResolveTypes: %v", err)
 	}
@@ -338,7 +381,7 @@ func TestResolveTypesServFailOutranksNXDomain(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"flaky.example.com": {ServFailA: true}})
 	r := srv.Resolver(time.Second)
 
-	_, outcome := ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, nil, 1, DefaultTypes)
+	_, outcome := Lookup{Resolver: r, Timeout: time.Second, Attempts: 1, Types: DefaultTypes}.Resolve(context.Background(), "flaky.example.com")
 	if outcome == OutcomeNXDomain {
 		t.Fatal("SERVFAIL on A was masked by NXDOMAIN on AAAA")
 	}
@@ -347,7 +390,7 @@ func TestResolveTypesServFailOutranksNXDomain(t *testing.T) {
 	}
 	single := srv.Queries()
 
-	_, _ = ResolveDomainWithRetry(context.Background(), r, "flaky.example.com", time.Second, nil, 3, DefaultTypes)
+	_, _ = Lookup{Resolver: r, Timeout: time.Second, Attempts: 3, Types: DefaultTypes}.Resolve(context.Background(), "flaky.example.com")
 	if retried := srv.Queries() - single; retried <= single {
 		t.Fatalf("attempts=3 sent %d queries vs %d for attempts=1; the failure was not retried", retried, single)
 	}
@@ -359,7 +402,7 @@ func TestResolveTypesServFailOutranksNXDomain(t *testing.T) {
 func TestResolveTypesSlowADoesNotStarveAAAA(t *testing.T) {
 	srv := startTestDNS(t, map[string]testReply{"slow.example.com": {A: "192.0.2.1", AAAA: "2001:db8::2", DelayA: 600 * time.Millisecond}})
 	timeout := 300 * time.Millisecond
-	recs, _, err := ResolveTypes(context.Background(), srv.Resolver(timeout), "slow.example.com", timeout, DefaultTypes)
+	recs, _, err := Lookup{Resolver: srv.Resolver(timeout), Timeout: timeout, Types: DefaultTypes}.ResolveTypes(context.Background(), "slow.example.com")
 	if len(recs) != 1 || recs[0] != (Record{Type: "AAAA", Value: "2001:db8::2"}) {
 		t.Fatalf("records = %v (err %v), want only the AAAA record", recs, err)
 	}

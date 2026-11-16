@@ -3,6 +3,7 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
@@ -70,12 +71,41 @@ type TargetSummary struct {
 	// (-max-queries) or "duration" (-max-duration, #190). Empty when none did.
 	StoppedBy string `json:"stopped_by,omitempty"`
 	Takeover  int64  `json:"takeover_candidates,omitempty"` // results with a takeover hint
+	// Internal counts results with a loopback, private, link-local,
+	// unspecified or CGNAT address (#218).
+	Internal int64 `json:"internal_addresses,omitempty"`
+	// Retried counts the inconclusive names -retry-inconclusive looked up
+	// again, and Recovered the ones that then got an answer (#217); the
+	// outcomes already count those under their new outcome.
+	Retried   int64 `json:"retried,omitempty"`
+	Recovered int64 `json:"recovered,omitempty"`
+	// RateBackoffs counts how often -auto-rate halved the rate, and
+	// FinalRate is the rate it ended at in queries per second (#220).
+	RateBackoffs int64 `json:"rate_backoffs,omitempty"`
+	FinalRate    int64 `json:"final_rate,omitempty"`
 	// Permutation is the -permute pass, when one ran (#72).
 	Permutation *PermutationSummary `json:"permutation,omitempty"`
 	// CTNames counts the Certificate Transparency names -ct added as
 	// candidates and seeds; CTError says why the lookup failed (#130).
-	CTNames     int          `json:"ct_names,omitempty"`
-	CTError     string       `json:"ct_error,omitempty"`
+	CTNames int    `json:"ct_names,omitempty"`
+	CTError string `json:"ct_error,omitempty"`
+	// Sources has one entry per passive source asked (-ct, -sources): the
+	// names it added as candidates and seeds, or why its lookup failed
+	// (#193). ct_names and ct_error repeat the ct entry.
+	Sources []SourceSummary `json:"sources,omitempty"`
+	// AXFRAllowed lists the name servers that allowed an -axfr zone
+	// transfer (a misconfiguration), AXFRNames counts the names it added as
+	// candidates and seeds, and AXFRError says why no transfer could be
+	// tried (#85). A refusal is the correct configuration, not an error.
+	AXFRAllowed []string `json:"axfr_allowed,omitempty"`
+	AXFRNames   int      `json:"axfr_names,omitempty"`
+	AXFRError   string   `json:"axfr_error,omitempty"`
+	// AXFRFound counts the results a zone transfer had proposed (#273).
+	AXFRFound int `json:"axfr_found,omitempty"`
+	// ZoneDenial is how the zone proves a name does not exist, from -axfr's
+	// DNSSEC probe: "nsec" (walkable: every name can be listed), "nsec3" or
+	// "none" (unsigned) (#234).
+	ZoneDenial  string       `json:"zone_denial,omitempty"`
 	PoolHits    int64        `json:"pool_hits,omitempty"`   // -r: names a pool resolver said exist
 	Confirmed   int64        `json:"confirmed,omitempty"`   // pool hits the trusted resolver confirmed
 	Unconfirmed int64        `json:"unconfirmed,omitempty"` // pool hits the trusted resolver denied
@@ -85,12 +115,27 @@ type TargetSummary struct {
 	Reason      string       `json:"reason"`
 }
 
-// PermutationSummary counts a target's -permute pass.
+// SourceSummary is one passive source's contribution to a target (#193).
+type SourceSummary struct {
+	Name  string `json:"name"`            // -sources name: ct, wayback
+	Names int    `json:"names"`           // names it added as candidates and seeds
+	Found int    `json:"found"`           // results it had proposed, whoever else did too (#273)
+	Error string `json:"error,omitempty"` // why the lookup failed; the scan went on without it
+	// Truncated reports that the source stopped at one of its limits: its
+	// names were used, but some hosts may be missing (#272).
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// PermutationSummary counts a target's -permute pass. Processed and
+// QueriesSent are the pass's own; the target's queries_sent includes them, and
+// its verdict is the worse of the two passes' (#298).
 type PermutationSummary struct {
-	Seeds      int    `json:"seeds"`
-	Candidates int    `json:"candidates"`
-	Found      int    `json:"found"`
-	Verdict    string `json:"verdict,omitempty"`
+	Seeds       int    `json:"seeds"`
+	Candidates  int    `json:"candidates"`
+	Found       int    `json:"found"`
+	Processed   int64  `json:"processed,omitempty"`
+	QueriesSent int64  `json:"queries_sent,omitempty"`
+	Verdict     string `json:"verdict,omitempty"`
 }
 
 // Outcomes counts how each lookup ended. SERVFAIL and other errors Go's
@@ -120,27 +165,29 @@ func (w *Writer) Summary(s Summary) {
 	}
 	if w.stdout {
 		w.clearProgressLocked()
-		fmt.Printf("%s\n", data)
+		_, _ = fmt.Fprintf(w.stdOut(), "%s\n", data)
 	}
 	if w.outWriter != nil {
 		_, _ = fmt.Fprintf(w.outWriter, "%s\n", data)
 	}
 }
 
+// WriteNamesFile writes names to path, one per line, atomically
+// (-inconclusive, #217).
+func WriteNamesFile(path string, names []string) error {
+	var b strings.Builder
+	for _, n := range names {
+		b.WriteString(n)
+		b.WriteByte('\n')
+	}
+	return WriteFile(path, []byte(b.String()))
+}
+
 // WriteSummaryFile writes s as indented JSON to path, atomically.
 func WriteSummaryFile(path string, s Summary) error {
-	f, err := CreateFile(path)
-	if err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
-		_ = f.Close(false)
 		return err
 	}
-	_, werr := f.Write(append(data, '\n'))
-	if cerr := f.Close(werr == nil); werr == nil {
-		werr = cerr
-	}
-	return werr
+	return WriteFile(path, append(data, '\n'))
 }

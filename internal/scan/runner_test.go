@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -367,6 +370,113 @@ func TestRunStatsSumToProcessed(t *testing.T) {
 	}
 }
 
+// retryHook answers by name and by how often the name was asked: "ok" names
+// resolve, "gone" names do not exist, and "flaky-*" names time out first and
+// then answer as their suffix says ("flaky-ok", "flaky-gone", "flaky-down"
+// never answers). It counts every call.
+func retryHook(calls *sync.Map) func(context.Context, string) ([]dns.Record, dns.Outcome) {
+	return func(_ context.Context, name string) ([]dns.Record, dns.Outcome) {
+		n, _ := calls.LoadOrStore(name, new(atomic.Int64))
+		call := n.(*atomic.Int64).Add(1)
+		label, _, _ := strings.Cut(name, ".")
+		label = strings.TrimRight(label, "0123456789")
+		if rest, ok := strings.CutPrefix(label, "flaky-"); ok {
+			if call == 1 || rest == "down" {
+				return nil, dns.OutcomeTimeout
+			}
+			label = rest
+		}
+		if label == "ok" {
+			return []dns.Record{{Type: "A", Value: "192.0.2.1"}}, dns.OutcomeFound
+		}
+		return nil, dns.OutcomeNXDomain
+	}
+}
+
+// TestRunRetryInconclusive covers #217: with RetryInconclusive, names whose
+// lookup timed out are looked up once more after the main pass; an answer
+// moves them out of the timeout count, a found name is reported, and the
+// names still unanswered are listed in Stats.Inconclusive. Without it the
+// names are listed but not retried.
+func TestRunRetryInconclusive(t *testing.T) {
+	entries := []string{"ok1", "gone1", "flaky-ok1", "flaky-ok2", "flaky-gone1", "flaky-down1", "flaky-down2"}
+	run := func(retry bool) (*Event, []string, *sync.Map) {
+		calls := &sync.Map{}
+		cfg := Config{
+			Domain: "example.com", Entries: entries, Concurrency: 3, Timeout: time.Second,
+			Simulate: true, Attempts: 1, RetryInconclusive: retry, ListInconclusive: true, resolveHook: retryHook(calls),
+		}
+		events := make(chan Event, 64)
+		go Run(context.Background(), cfg, events)
+		var done *Event
+		var found []string
+		for ev := range events {
+			switch ev.Kind {
+			case EventResult:
+				found = append(found, ev.Result.Subdomain)
+			case EventError:
+				t.Errorf("unexpected error: %s", ev.Message)
+			case EventDone:
+				e := ev
+				done = &e
+			}
+		}
+		if done == nil {
+			t.Fatal("no EventDone received")
+		}
+		sort.Strings(found)
+		return done, found, calls
+	}
+
+	done, found, calls := run(true)
+	st := done.Stats
+	if want := []string{"flaky-ok1.example.com", "flaky-ok2.example.com", "ok1.example.com"}; !slices.Equal(found, want) {
+		t.Errorf("results = %v, want %v", found, want)
+	}
+	if st.Found != 3 || st.NXDomain != 2 || st.Timeout != 2 || st.Retried != 5 || st.Recovered != 3 {
+		t.Errorf("stats = found %d nxdomain %d timeout %d retried %d recovered %d, want 3 2 2 5 3",
+			st.Found, st.NXDomain, st.Timeout, st.Retried, st.Recovered)
+	}
+	if done.Found != 3 || st.Sum() != done.Processed || done.Processed != int64(len(entries)) {
+		t.Errorf("found %d, sum %d, processed %d: counts must still add up to the names tested", done.Found, st.Sum(), done.Processed)
+	}
+	if want := []string{"flaky-down1.example.com", "flaky-down2.example.com"}; !slices.Equal(st.Inconclusive, want) {
+		t.Errorf("Inconclusive = %v, want %v", st.Inconclusive, want)
+	}
+	if n, _ := calls.Load("ok1.example.com"); n.(*atomic.Int64).Load() != 1 {
+		t.Error("a name that answered the first time was looked up again")
+	}
+
+	done, found, _ = run(false)
+	st = done.Stats
+	if len(found) != 1 || st.Timeout != 5 || st.Retried != 0 || st.Recovered != 0 || len(st.Inconclusive) != 5 {
+		t.Errorf("without RetryInconclusive: results %v, timeout %d, retried %d, recovered %d, inconclusive %v",
+			found, st.Timeout, st.Retried, st.Recovered, st.Inconclusive)
+	}
+}
+
+// TestRunRetryInconclusiveSkippedAfterAbort: the retry pass does not run once
+// the reliability guard has aborted the scan; the resolver is failing.
+func TestRunRetryInconclusiveSkippedAfterAbort(t *testing.T) {
+	cfg := Config{
+		Domain: "example.com", Entries: makeEntries(reliabilityMinJobs + 50), Concurrency: 4,
+		Timeout: time.Second, Simulate: true, Attempts: 1, RetryInconclusive: true, ListInconclusive: true,
+		resolveHook: hookOutcome(dns.OutcomeTimeout),
+	}
+	events := make(chan Event, 64)
+	go Run(context.Background(), cfg, events)
+	done, errs, _ := collect(events)
+	if len(errs) == 0 || done == nil || !done.Stats.Aborted {
+		t.Fatalf("expected a reliability abort, got errs %d done %+v", len(errs), done)
+	}
+	if done.Stats.Retried != 0 {
+		t.Errorf("Retried = %d after an abort, want 0", done.Stats.Retried)
+	}
+	if int64(len(done.Stats.Inconclusive)) != done.Stats.Timeout {
+		t.Errorf("Inconclusive lists %d names, want the %d timeouts", len(done.Stats.Inconclusive), done.Stats.Timeout)
+	}
+}
+
 // TestRunReliabilityGuardAborts injects a high timeout rate and asserts the
 // guard emits EventError, names the failure rate, and cancels the scan.
 func TestRunReliabilityGuardAborts(t *testing.T) {
@@ -515,8 +625,15 @@ func TestRunDeadlineStopsAdmission(t *testing.T) {
 			if done.Total != c.wantProcessed {
 				t.Errorf("total %d, want %d: skipped names are not part of it", done.Total, c.wantProcessed)
 			}
+			// What a resume repeats is every lookup at or past RootDone (#341).
+			if r := done.Stats.Repeat; done.Stats.RootDone+r.Processed != done.Processed || r.Processed != r.NXDomain {
+				t.Errorf("RootDone %d, repeat %+v: want RootDone plus the repeated lookups to be the %d processed", done.Stats.RootDone, r, done.Processed)
+			}
 			if !strings.Contains(notice, "time budget reached ({max_duration})") {
 				t.Errorf("notice %q, want the time budget named", notice)
+			}
+			if untested := strings.Contains(notice, "before any name was tested"); untested != (c.wantProcessed == 0) {
+				t.Errorf("notice %q: says no name was tested %v, want %v (#340)", notice, untested, c.wantProcessed == 0)
 			}
 			if v, reason := done.Stats.Verdict(false); v != VerdictDegraded || !strings.Contains(reason, "{max_duration}") {
 				t.Errorf("verdict %s (%s), want degraded naming the time budget", v, reason)
@@ -740,7 +857,7 @@ func TestRunRotatingPoolWildcardFiltered(t *testing.T) {
 	for ev := range events {
 		switch ev.Kind {
 		case EventResult:
-			found[ev.Domain] = true
+			found[ev.Result.Subdomain] = true
 		case EventDone:
 			e := ev
 			done = &e
@@ -1285,6 +1402,67 @@ func TestRunAlwaysEndsWithOneDone(t *testing.T) {
 			}
 			if sawError != c.wantError {
 				t.Errorf("EventError seen %v, want %v", sawError, c.wantError)
+			}
+		})
+	}
+}
+
+// TestRunStatesFatalAndFailed covers #308: the engine says on each EventError
+// whether it was fatal and on EventDone whether the scan failed, so the front
+// ends do not work it out from the errors they saw and their own NoAbort.
+func TestRunStatesFatalAndFailed(t *testing.T) {
+	failing := func(noAbort bool) Config {
+		return Config{
+			Domain: "example.com", Entries: makeEntries(reliabilityMinJobs + 50), Concurrency: 4,
+			Timeout: time.Second, Simulate: true, Attempts: 1, NoAbort: noAbort,
+			resolveHook: hookOutcome(dns.OutcomeTimeout),
+		}
+	}
+	clean := Config{Domain: "example.com", Entries: makeEntries(5), Concurrency: 2, Timeout: time.Second, Simulate: true, HitRate: 50}
+	outOfScope := clean
+	outOfScope.Exclude = []string{"example.com"}
+
+	cases := map[string]struct {
+		cfg       Config
+		cancelled bool // ctx is cancelled before the scan starts
+		wantErrs  bool
+		wantFatal bool // of every EventError
+		stopped   bool
+		aborted   bool
+		failed    bool
+	}{
+		"completed clean":                    {cfg: clean},
+		"stopped before candidates by error": {cfg: outOfScope, wantErrs: true, wantFatal: true, stopped: true, failed: true},
+		"reliability abort":                  {cfg: failing(false), wantErrs: true, wantFatal: true, aborted: true, failed: true},
+		"reliability warning under NoAbort":  {cfg: failing(true), wantErrs: true},
+		"cancelled":                          {cfg: clean, cancelled: true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if c.cancelled {
+				cancel()
+			}
+			events := make(chan Event, 64)
+			go Run(ctx, c.cfg, events)
+			done, errs, _ := collect(events)
+			if done == nil {
+				t.Fatal("no EventDone")
+			}
+			if (len(errs) > 0) != c.wantErrs {
+				t.Fatalf("EventErrors %+v, want any: %v", errs, c.wantErrs)
+			}
+			for _, e := range errs {
+				if e.Fatal != c.wantFatal {
+					t.Errorf("EventError %q: Fatal = %v, want %v", e.Message, e.Fatal, c.wantFatal)
+				}
+			}
+			if done.Stopped != c.stopped || done.Stats.Aborted != c.aborted {
+				t.Errorf("EventDone: Stopped %v, Aborted %v; want %v, %v", done.Stopped, done.Stats.Aborted, c.stopped, c.aborted)
+			}
+			if done.Failed != c.failed {
+				t.Errorf("EventDone: Failed = %v, want %v", done.Failed, c.failed)
 			}
 		})
 	}

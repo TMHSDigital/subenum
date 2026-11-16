@@ -7,7 +7,7 @@ title: Contributing
 
 We welcome contributions! Please read this guide to understand how you can contribute.
 
-See the [Code of Conduct](CODE_OF_CONDUCT.html).
+See the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development Environment Setup
 
@@ -22,11 +22,18 @@ The `go` directive in `go.mod` must stay exactly `go 1.26.0`. CI fails the build
 if it drifts. Current `golang.org/x/sys` and `golang.org/x/text` declare
 `go 1.26.0`, so it is also the floor. New dependencies must keep it and pass
 `govulncheck`, which CI runs. On PowerShell, quote `-go=1.26.0`; unquoted it is
-parsed as `-go=1`. After changing dependencies run `make tidy`.
+parsed as `-go=1`. After changing dependencies run `make tidy` (plain `go mod tidy`), then confirm the `go` directive is still `go 1.26.0`.
+
+The `toolchain` line is separate: it names the patched Go release that builds
+from source use (#243). With the default `GOTOOLCHAIN=auto`, an older local Go
+downloads that release, so `go install` and source builds of the action never
+ship the original 1.26.0 standard library, which has since had security fixes.
+Raise it to the newest 1.26.x when a Go patch release comes out; it never
+changes the `go 1.26.0` language floor.
 
 ### Codespaces / Dev Containers
 
-The quickest start needs no local setup. [Open the repository in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum), or use "Reopen in Container" in VS Code. The container in `.devcontainer/` comes with Go 1.26 and the CI version of golangci-lint, and builds the binary. `make test` and `./subenum -simulate example.com` then work with no network access to any target.
+The quickest start needs no local setup. [Open the repository in GitHub Codespaces](https://codespaces.new/TMHSDigital/subenum), or use "Reopen in Container" in VS Code. The container in `.devcontainer/` comes with the current Go release (1.27; the module supports 1.26 and later) and the CI version of golangci-lint, and builds the binary. `make test` and `./subenum -simulate example.com` then work with no network access to any target.
 
 New here? Look for issues labeled [`good first issue`](https://github.com/TMHSDigital/subenum/labels/good%20first%20issue), and ask questions in [Discussions](https://github.com/TMHSDigital/subenum/discussions).
 
@@ -53,13 +60,13 @@ The project includes a Makefile to simplify development tasks:
 # Build the binary
 make build
 
-# Run tests
+# Run tests (go test -v ./..., without the race detector; see Testing Requirements)
 make test
 
 # Run linter
 make lint
 
-# Tidy modules (keeps the go 1.26.0 pin)
+# Tidy modules: runs go mod tidy; then confirm the go directive is still go 1.26.0
 make tidy
 
 # Clean up build artifacts
@@ -77,8 +84,11 @@ You can use Docker for development to ensure a consistent environment:
 # Build the Docker image
 make docker-build
 
-# Run the tool in a Docker container
-make docker-run
+# Simulated scan in a container (no DNS traffic)
+make docker-simulate
+
+# Live scan in a container: name a domain you own or may test
+make docker-run DOMAIN=yourdomain.com
 ```
 
 ## Pull Request Process
@@ -90,11 +100,12 @@ make docker-run
 
 2. **Make your changes** and ensure they follow the project's coding standards
 
-3. **Test your changes**:
+3. **Test your changes** with the race detector, as CI does (see [Testing Requirements](#testing-requirements)), and lint them:
    ```bash
-   make test
+   go test -race ./...
    make lint
    ```
+   The race detector needs cgo and a C toolchain. If you have none, run `make test` locally; CI still runs the suite with `-race`.
 
 4. **Commit your changes** with a clear message describing the change
 
@@ -156,16 +167,13 @@ All pull requests must pass the full test suite, including the race detector:
 go test -v -race ./...
 ```
 
-On Windows, use Go 1.26.3 or later for race runs. Go 1.26.0 reports false
-data races there (between `context.WithTimeout` and the net package's DNS
-lookup goroutine) and can crash with `Exception 0xc0000005` in `scan.Run`;
-neither is a bug in subenum, and Linux, where CI runs `-race`, is not
-affected. `go.mod` keeps `go 1.26.0` as the minimum, so pick the toolchain
-per command:
-
-```bash
-GOTOOLCHAIN=go1.26.3 go test -race ./...
-```
+On Windows, Go 1.26.0 reports false data races (between
+`context.WithTimeout` and the net package's DNS lookup goroutine) and can
+crash with `Exception 0xc0000005` in `scan.Run`; neither is a bug in
+subenum, and Linux, where CI runs `-race`, is not affected. You need no
+workaround: `go.mod` names `toolchain go1.26.11`, so a local Go older than
+that switches to the patched toolchain by itself. The problem only comes
+back if you force Go 1.26.0 with `GOTOOLCHAIN=local`.
 
 New features should include tests. New flags must be covered by at least one test case.
 Do not hit public resolvers. Use `-simulate` or the in-process DNS server in
@@ -174,3 +182,15 @@ NODATA, delay, drop, truncation) and counts every query per name and type.
 `internal/dns` tests can also use the table-driven `startTestDNS` wrapper in
 `internal/dns/testdns_test.go`. The optional live smoke test is gated on
 `SUBENUM_NETWORK_TESTS=1`.
+
+Parsers of untrusted input have fuzz targets (`grep -rn "^func Fuzz" .`): the
+Wayback answer, lab scenarios, domain and wordlist normalisation, MCP request
+lines, and zone-transfer and DNSSEC denial messages. `go test` runs their seed
+inputs; to fuzz one, name it and its package:
+
+```bash
+go test -run '^$' -fuzz '^FuzzHostNames$' -fuzztime 1m ./internal/passive/
+```
+
+A failing input is saved under the package's `testdata/fuzz/`; commit it with
+the fix so it stays a regression test.

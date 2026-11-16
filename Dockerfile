@@ -2,7 +2,7 @@
 # minimum); Dependabot keeps both digests fresh. It runs on the build host's
 # platform and cross-compiles for the target, so multi-arch images (#40) need
 # no QEMU emulation.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS builder
 
 # Set by BuildKit for each platform being built.
 ARG TARGETOS
@@ -18,21 +18,31 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
-# Every top-level .go file: main is split across several (main.go,
-# main_summary.go, ...); _test.go files are ignored by go build.
-COPY *.go ./
+# main.go only calls internal/cli, where the command lives; _test.go files
+# are ignored by go build.
+COPY main.go ./
 COPY internal/ ./internal/
-# The default wordlist is embedded in the binary (#63).
+# subenum mcp runs scans through the public library (#131).
+COPY pkg/ ./pkg/
+# The default wordlist is embedded in the binary (#63), and so are the lab
+# scenarios that subenum mcp's lab_scan serves (#131).
 COPY data/subdomains-5k.txt data/data.go ./data/
+COPY examples/labs/*.zone examples/labs/words.txt examples/labs/labs.go ./examples/labs/
 
 # Build the binary with optimizations
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o subenum -ldflags="-w -s -X main.Version=${VERSION}" .
 
-FROM gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
+# Licence notices of the Go standard library and every linked module (#326).
+COPY tools/licenses/main.go ./tools/licenses/
+RUN go run ./tools/licenses -o THIRD_PARTY_LICENSES
+
+FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
 
 WORKDIR /home/nonroot
 
 COPY --from=builder /app/subenum /usr/local/bin/subenum
+COPY LICENSE /usr/share/doc/subenum/
+COPY --from=builder /app/THIRD_PARTY_LICENSES /usr/share/doc/subenum/
 COPY examples/ ./examples/
 
 VOLUME ["/data"]

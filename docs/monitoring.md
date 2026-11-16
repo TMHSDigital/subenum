@@ -25,7 +25,9 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
   (removed); JSON and JSONL results carry `"change": "added"` or
   `"change": "removed"`; CSV gains a `change` column.
 - The `-o` file still receives the **full** current results, so it can be the
-  next run's `-diff` input.
+  next run's `-diff` input. With several `-o` files, each one does, in its own
+  format. If a stopped run saves state for `-resume`, an `-o` file that is also
+  the `-diff` file is left unchanged; the others get the partial results.
 - The exit code is `4` when anything was added or removed, `0` when nothing
   changed. A failed scan still exits `1`, `2` or `3`.
 - Names are only reported as removed when the run's
@@ -39,6 +41,9 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
   `-recursive` or `-permute`) still resolves, and a name whose lookup fails
   cannot be checked; neither is reported as removed, and stderr says how many
   there were.
+- These checks spend what is left of the run's budgets: `-max-queries` per
+  target, less the names the scan tested, and the `-max-duration` deadline.
+  Names the budget does not reach are counted `unverified`, not removed.
 - With `-stats` (or `-format jsonl`), the run-quality report gains a `diff`
   object with the `added` and `removed` counts, plus `still_resolving` and
   `unverified` when there were any.
@@ -47,7 +52,7 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
 
 A name can stay in place while what it points at moves. A CNAME re-pointed
 at an unclaimed service is a takeover waiting to happen, and plain `-diff`
-reports it as unchanged. Add `-diff-records` to also compare the records of
+reports it as unchanged. Add `-diff-records`{% include unreleased.html flag="diff-records" %} to also compare the records of
 every name found again:
 
 ```bash
@@ -68,7 +73,7 @@ subenum -w wordlist.txt -format jsonl -type A,AAAA,CNAME -diff previous.jsonl -d
 ## The subenum GitHub Action
 
 The repository is also a GitHub Action. It installs a release (checked against
-its `checksums.txt`), diffs against the previous complete run's results kept as
+its `checksums.txt` and its build provenance attestation), diffs against the previous complete run's results kept as
 an artifact, writes a summary table to the job, and fails the job when the
 verdict is not good enough:
 
@@ -113,12 +118,34 @@ jobs:
 | `previous` | | A previous results file to diff against (add `-diff-records` to `args` to also catch record changes) |
 | `baseline-artifact` | | Artifact name for the baseline: downloaded before, replaced after a complete run |
 | `sarif` | | Write takeover candidates as SARIF |
-| `max-duration` | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report |
+| `max-duration`{% include unreleased.html action="max-duration" %} | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report. The CLI also saves a resume state then (`subenum-resume.json`, or the `-state` path), and `subenum -resume <file>` tests the names the budget left; the action does not carry that file to the next run |
 | `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never` |
 | `version` | `latest` | Release to install, or `source` to build the action's checkout |
+| `token` | `github.token` | Token for downloading the release and the baseline artifact |
 
-Outputs: `verdict`, `found`, `added`, `removed`, `changed` (with `-diff-records`), and the paths `results` (JSONL)
-and `stats` (the run-quality report). The step below builds the same thing by
+Outputs: `verdict`, `found`, `added`, `removed`, `changed`{% include unreleased.html action="changed" %} (with `-diff-records`),
+`takeovers`{% include unreleased.html action="takeovers" %} (takeover candidates among the names found; needs `CNAME` or `NS` in `-type`),
+`internal`{% include unreleased.html action="internal" %} (names answering with an address that is not public), and the paths `results` (JSONL),
+`stats` (the run-quality report) and `changes`{% include unreleased.html action="changes" %} (JSONL, one line per added, removed or
+changed name with a `change` field; empty when there were no previous results to
+diff against). The job summary lists the takeover candidates under the table.
+
+To open an issue with the new names, add a step after the action (the job
+then also needs `issues: write`):
+
+{% raw %}
+```yaml
+      - if: steps.subenum.outputs.added != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGES: ${{ steps.subenum.outputs.changes }}
+        run: |
+          jq -r 'select(.change == "added") | "- \(.subdomain)"' "$CHANGES" > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "New subdomains ($(date -u +%F))" --body-file body.md
+```
+{% endraw %}
+
+The step below builds the same thing by
 hand, if you prefer to see every command.
 
 ## Example: a scheduled GitHub Actions workflow
@@ -132,6 +159,7 @@ It runs with `issues: write`, so it pins everything it runs: subenum is a
 release archive checked against the release's `checksums.txt` (`-diff` first
 shipped in v0.9.0), and each action is pinned to a commit.
 
+{% raw %}
 ```yaml
 name: Subdomain monitor
 
@@ -220,6 +248,7 @@ jobs:
             run.json
           retention-days: 90
 ```
+{% endraw %}
 
 A failed, degraded or unreliable scan uploads nothing, so the next run still
 compares against the last complete baseline. To keep a baseline longer than 90 days,
@@ -230,8 +259,12 @@ commit `previous.jsonl` to a branch or store it in object storage instead.
 Add `-type A,AAAA,CNAME -sarif takeovers.sarif` to the scan and upload the file
 after it, and every dangling or takeover-prone CNAME becomes an alert in the
 repository's Security tab, where it can be triaged and dismissed. Alerts are
-fingerprinted per name, so a candidate seen every week stays one alert. The
-job needs `security-events: write`:
+fingerprinted per name, so a candidate seen every week stays one alert. With
+`NS`{% include unreleased.html value="type=NS" %} in the list as well
+(`-type A,AAAA,CNAME,NS`), so does every delegation to a name server that does
+not exist (`dangling-ns`); a release that does not have `NS` yet rejects it, so
+add it only once the pinned `SUBENUM_VERSION` does. The job needs
+`security-events: write`:
 
 ```yaml
       - name: Upload takeover candidates

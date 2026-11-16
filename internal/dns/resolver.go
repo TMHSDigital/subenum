@@ -12,22 +12,37 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // Record is a single resolved DNS record. Type is "A", "AAAA", "CNAME", etc.
-// Value is the IP address (for A/AAAA) or target name (for CNAME).
+// Value is the IP address (A/AAAA), the target name (CNAME), the name server
+// (NS), "<preference> <host>" (MX) or the text (TXT).
 type Record struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
 }
 
+// RecordKey identifies a record by type and value, for de-duplication and
+// fingerprint matching.
+func RecordKey(r Record) string { return r.Type + "\x00" + r.Value }
+
 // DefaultTypes is the record-type set used when none is specified; it preserves
 // the historical LookupHost behavior (A and AAAA).
 var DefaultTypes = []string{"A", "AAAA"}
 
-var supportedTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true}
+// typeOrder is every record type -type accepts, in the order help and
+// completion list them. It is the one list (#264): Types serves it to the
+// CLI's completion and the MCP schema, and queriesPerType must price each.
+var typeOrder = []string{"A", "AAAA", "CNAME", "NS", "MX", "TXT"}
+
+// Types returns the record types -type accepts, in a fixed order.
+func Types() []string { return slices.Clone(typeOrder) }
+
+// SupportedTypes names the record types -type accepts, for messages.
+var SupportedTypes = strings.Join(typeOrder, ", ")
 
 // Outcome is a coarse classification of one resolver attempt so callers can
 // tell a definitive negative (NXDOMAIN) apart from an infrastructure failure.
@@ -103,8 +118,8 @@ func ParseTypes(s string) ([]string, error) {
 		if t == "" {
 			continue
 		}
-		if !supportedTypes[t] {
-			return nil, fmt.Errorf("unsupported record type %q (want A, AAAA, or CNAME)", part)
+		if !slices.Contains(typeOrder, t) {
+			return nil, fmt.Errorf("unsupported record type %q (want %s)", part, SupportedTypes)
 		}
 		if !seen[t] {
 			seen[t] = true
@@ -126,10 +141,25 @@ func ParseTypes(s string) ([]string, error) {
 // ResolveTypes, a dial beyond the slots reserved up front takes another rate
 // slot, which keeps -rate exact however many queries Go decides to send (#50).
 func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
-	dl := newDialer(timeout, dnsServer) // UDP/TCP, DoT or DoH (#86)
+	return newResolver(timeout, dnsServer, nil)
+}
+
+// newResolver is NewResolver with its idle UDP sockets counted against
+// budget, which a pool shares across its members (#252); nil is a budget of
+// the resolver's own.
+func newResolver(timeout time.Duration, dnsServer string, budget *idleBudget) *net.Resolver {
+	dl := newDialer(timeout, dnsServer, budget) // UDP/TCP, DoT or DoH (#86)
 	r := &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
+			// Go runs A and AAAA lookups in a goroutine of its own, which
+			// keeps retrying after the caller's timeout under a context that
+			// is canceled and has lost the caller's values. A pooled
+			// connection would let such a retry onto the wire unpaced and
+			// uncounted, so a dial under a finished context is refused (#295).
+			if err := dialCtx.Err(); err != nil {
+				return nil, err
+			}
 			if c, ok := dialCtx.Value(queryCounterKey{}).(*atomic.Int64); ok {
 				c.Add(1)
 			}
@@ -260,48 +290,105 @@ func fqdn(domain string) string {
 }
 
 // queriesPerType is how many DNS queries one lookup of each type puts on the
-// wire when the first answer is definitive. Go's LookupCNAME sends A, AAAA
-// and CNAME queries. These slots are reserved before the lookup's timeout
-// starts; anything Go sends beyond them (its own retries) is charged as it is
-// dialed (see NewResolver).
-var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 3}
+// wire when the first answer is definitive. CNAME is one query of its own
+// (lookupCNAME), not Go's LookupCNAME, which also sends A and AAAA (#249).
+// These slots are reserved before the lookup's timeout starts; anything sent
+// beyond them (Go's retries, a TCP retry after truncation) is charged as it
+// is dialed (see NewResolver).
+var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 1, "NS": 1, "MX": 1, "TXT": 1}
 
-// ResolveTypes performs per-type DNS lookups for the requested record types and
-// returns the matching records, the time spent in lookups, and the most severe lookup
-// error (if any). An empty types slice falls back to DefaultTypes. The caller
-// should reuse a single *net.Resolver across lookups (see scan.Run).
+// QueriesFor is how many queries one lookup of types puts on the wire, by
+// queriesPerType; empty types means DefaultTypes, as in ResolveTypes. The
+// pool's per-resolver cap reserves this many slots, so it matches what the
+// global -rate limiter charges (#236).
+func QueriesFor(types []string) int {
+	if len(types) == 0 {
+		types = DefaultTypes
+	}
+	n := 0
+	for _, t := range types {
+		n += int(queriesPerType[t])
+	}
+	return n
+}
+
+// Lookup is how one name is looked up: the resolver, the per-type timeout,
+// how many attempts a retried lookup makes, the record types, and the verbose
+// logger. Naming the fields keeps a swapped attempts/types argument from
+// compiling (#163). The zero value of each field has a meaning: Attempts < 1
+// is one attempt, empty Types is DefaultTypes, and a nil Logf discards lines.
+type Lookup struct {
+	Resolver *net.Resolver
+	Timeout  time.Duration
+	Attempts int
+	Types    []string
+	Logf     Logf
+}
+
+// ResolveTypes performs one per-type DNS lookup of domain for each of
+// l.Types and returns the matching records, the time spent in lookups, and
+// the most severe lookup error (if any). It neither retries nor logs. The
+// caller should reuse a single *net.Resolver across lookups (see scan.Run).
 //
 // Each type gets its own timeout, so a slow A answer cannot starve AAAA or
 // CNAME. If ctx carries a RateLimiter (see WithLimiter), each type first waits
 // for one slot per query it will send; the timeout starts only after that.
-func ResolveTypes(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string) ([]Record, time.Duration, error) {
+//
+// The types are looked up at the same time (#250), so a name costs its
+// slowest type's round trip rather than the sum of them all; the records
+// and the error are combined in the order of types, as before. The
+// duration is the wall time of the whole call.
+func (l Lookup) ResolveTypes(ctx context.Context, domain string) ([]Record, time.Duration, error) {
+	types := l.Types
 	if len(types) == 0 {
 		types = DefaultTypes
 	}
-	lim := limiterFrom(ctx)
-	name := fqdn(domain)
-	var elapsed time.Duration
+	start := time.Now()
+	type answer struct {
+		recs []Record
+		err  error
+	}
+	answers := make([]answer, len(types))
+	if len(types) == 1 {
+		answers[0].recs, answers[0].err = l.lookupOne(ctx, domain, types[0])
+	} else {
+		var wg sync.WaitGroup
+		for i, t := range types {
+			wg.Go(func() {
+				answers[i].recs, answers[i].err = l.lookupOne(ctx, domain, t)
+			})
+		}
+		wg.Wait()
+	}
 	var records []Record
 	var worstErr error
-	for _, t := range types {
-		for i := int32(0); i < queriesPerType[t]; i++ {
-			if err := lim.Wait(ctx); err != nil {
-				return records, elapsed, err
-			}
-		}
-		b := &wireBudget{prepaid: queriesPerType[t]}
-		lookupCtx, cancel := context.WithTimeout(context.WithValue(ctx, budgetKey{}, b), timeout)
-		start := time.Now()
-		recs, err := lookupType(lookupCtx, resolver, name, domain, t)
-		elapsed += time.Since(start)
-		cancel()
-		if err != nil {
-			worstErr = worse(worstErr, b.fixErr(err))
+	for _, a := range answers {
+		if a.err != nil {
+			worstErr = worse(worstErr, a.err)
 			continue
 		}
-		records = append(records, recs...)
+		records = append(records, a.recs...)
 	}
-	return records, elapsed, worstErr
+	return records, time.Since(start), worstErr
+}
+
+// lookupOne is one type's lookup for ResolveTypes: its rate-limiter slots,
+// then the lookup under its own timeout and wire budget.
+func (l Lookup) lookupOne(ctx context.Context, domain, t string) ([]Record, error) {
+	lim := limiterFrom(ctx)
+	for range queriesPerType[t] {
+		if err := lim.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	b := &wireBudget{prepaid: queriesPerType[t]}
+	lookupCtx, cancel := context.WithTimeout(context.WithValue(ctx, budgetKey{}, b), l.Timeout)
+	defer cancel()
+	recs, err := lookupType(lookupCtx, l.Resolver, fqdn(domain), domain, t)
+	if err != nil {
+		return nil, b.fixErr(err)
+	}
+	return recs, nil
 }
 
 // worse keeps the more severe of two lookup errors. Any infrastructure failure
@@ -336,14 +423,45 @@ func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t str
 		}
 		return recs, nil
 	case "CNAME":
-		cname, err := resolver.LookupCNAME(ctx, name)
+		cname, err := lookupCNAME(ctx, resolver, name)
 		if err != nil {
 			return nil, err
 		}
-		// LookupCNAME returns the domain itself when there is no CNAME chain.
+		// lookupCNAME returns the domain itself when there is no CNAME chain.
 		if cname != "" && !strings.EqualFold(strings.TrimSuffix(cname, "."), strings.TrimSuffix(domain, ".")) {
 			return []Record{{Type: "CNAME", Value: strings.TrimSuffix(cname, ".")}}, nil
 		}
+	case "NS":
+		// NS records exist only where a zone is delegated (#194).
+		nss, err := resolver.LookupNS(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(nss))
+		for _, ns := range nss {
+			recs = append(recs, Record{Type: "NS", Value: strings.ToLower(strings.TrimSuffix(ns.Host, "."))})
+		}
+		return recs, nil
+	case "MX":
+		mxs, err := resolver.LookupMX(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(mxs))
+		for _, mx := range mxs {
+			recs = append(recs, Record{Type: "MX", Value: fmt.Sprintf("%d %s", mx.Pref, strings.ToLower(strings.TrimSuffix(mx.Host, ".")))})
+		}
+		return recs, nil
+	case "TXT":
+		txts, err := resolver.LookupTXT(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(txts))
+		for _, txt := range txts {
+			recs = append(recs, Record{Type: "TXT", Value: txt})
+		}
+		return recs, nil
 	}
 	return nil, nil
 }
@@ -359,35 +477,39 @@ func StderrLogf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
-// ResolveDomain performs a single DNS lookup for the given domain using the
-// specified resolver and timeout. It returns true if the domain resolves (A/AAAA).
-func ResolveDomain(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, logf Logf) bool {
-	records, _, _ := ResolveWithLog(ctx, resolver, domain, timeout, logf, DefaultTypes)
-	return len(records) > 0
-}
-
-// ResolveWithLog wraps ResolveTypes with the verbose per-lookup logging used by
-// the CLI, returning the resolved records for the requested types.
-func ResolveWithLog(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, logf Logf, types []string) ([]Record, time.Duration, error) {
-	records, elapsed, err := ResolveTypes(ctx, resolver, domain, timeout, types)
-	if logf != nil && len(records) > 0 {
-		logf("Resolved: %s (%s: %s) in %s", domain, records[0].Type, records[0].Value, elapsed)
-	} else if logf != nil {
-		logf("Failed to resolve: %s (Error: %v) in %s", domain, err, elapsed)
+// resolveWithLog wraps ResolveTypes with the verbose per-lookup logging used
+// by the CLI, returning the resolved records for the requested types.
+func (l Lookup) resolveWithLog(ctx context.Context, domain string) ([]Record, time.Duration, error) {
+	records, elapsed, err := l.ResolveTypes(ctx, domain)
+	if l.Logf != nil {
+		switch {
+		case len(records) > 0:
+			l.Logf("Resolved: %s (%s: %s) in %s", domain, records[0].Type, records[0].Value, elapsed)
+		case err == nil:
+			types := l.Types
+			if len(types) == 0 {
+				types = DefaultTypes
+			}
+			l.Logf("No records: %s (%s) in %s", domain, strings.Join(types, ","), elapsed)
+		default:
+			l.Logf("Failed to resolve: %s (Error: %v) in %s", domain, err, elapsed)
+		}
 	}
 	return records, elapsed, err
 }
 
-// ResolveDomainWithRetry calls ResolveWithLog up to maxAttempts times, respecting
-// ctx cancellation between attempts with a linear backoff delay. It returns the
-// resolved records and a classified outcome for the last attempt.
-func ResolveDomainWithRetry(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, logf Logf, maxAttempts int, types []string) ([]Record, Outcome) {
+// Resolve looks domain up to l.Attempts times (at least once), logging each
+// try through l.Logf and respecting ctx cancellation between attempts with a
+// linear backoff delay. It returns the resolved records and a classified
+// outcome for the last attempt.
+func (l Lookup) Resolve(ctx context.Context, domain string) ([]Record, Outcome) {
+	maxAttempts := max(l.Attempts, 1)
 	last := OutcomeOther
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return nil, OutcomeCanceled
 		}
-		records, _, err := ResolveWithLog(ctx, resolver, domain, timeout, logf, types)
+		records, _, err := l.resolveWithLog(ctx, domain)
 		if len(records) > 0 {
 			return records, OutcomeFound
 		}
@@ -431,15 +553,16 @@ var ErrWildcardInconclusive = errors.New("wildcard check inconclusive")
 // CheckWildcard probes the domain with two random subdomains, looking up the
 // same record types the scan will request (empty means DefaultTypes), so a
 // CNAME wildcard is fingerprinted when -type includes CNAME. Each probe is
-// tried up to attempts times. If either probe resolves the domain is treated
-// as wildcard (conservative). The returned record slice is the union of both
-// probe answers and is the fingerprint used to filter later results.
+// tried up to l.Attempts times; probes are not logged (l.Logf is unused). If
+// either probe resolves the domain is treated as wildcard (conservative). The
+// returned record slice is the union of both probe answers and is the
+// fingerprint used to filter later results.
 //
 // The check is conclusive only when every probe ended found or NXDOMAIN/NODATA.
 // Otherwise the error wraps ErrWildcardInconclusive. Returns (isWildcard,
 // fingerprint, error).
-func CheckWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string, attempts int) (bool, []Record, error) {
-	return checkWildcard(ctx, resolver, domain, timeout, types, attempts, 2, false)
+func (l Lookup) CheckWildcard(ctx context.Context, domain string) (bool, []Record, error) {
+	return l.checkWildcard(ctx, domain, 2, false)
 }
 
 // Fingerprint probes sizing for FingerprintWildcard (#48).
@@ -454,22 +577,22 @@ const (
 // load-balancer pool) it keeps probing until the fingerprint has not grown
 // for max(8, 4 x its size) consecutive probes, so the whole pool is learned
 // rather than the two addresses two probes happened to see (#48).
-func FingerprintWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string, attempts int) (bool, []Record, error) {
-	return checkWildcard(ctx, resolver, domain, timeout, types, attempts, fingerprintProbes, true)
+func (l Lookup) FingerprintWildcard(ctx context.Context, domain string) (bool, []Record, error) {
+	return l.checkWildcard(ctx, domain, fingerprintProbes, true)
 }
 
-func checkWildcard(ctx context.Context, resolver *net.Resolver, domain string, timeout time.Duration, types []string, attempts, probes int, saturate bool) (bool, []Record, error) {
-	if len(types) == 0 {
-		types = DefaultTypes
+func (l Lookup) checkWildcard(ctx context.Context, domain string, probes int, saturate bool) (bool, []Record, error) {
+	if len(l.Types) == 0 {
+		l.Types = DefaultTypes
 	}
-	if attempts < 1 {
-		attempts = 1
-	}
+	l.Attempts = max(l.Attempts, 1)
+	l.Logf = nil
+	attempts := l.Attempts
 	var fp []Record
 	seen := map[string]struct{}{}
 	add := func(recs []Record) (grew bool) {
 		for _, r := range recs {
-			k := r.Type + "\x00" + r.Value
+			k := RecordKey(r)
 			if _, ok := seen[k]; !ok {
 				seen[k] = struct{}{}
 				fp = append(fp, r)
@@ -479,7 +602,7 @@ func checkWildcard(ctx context.Context, resolver *net.Resolver, domain string, t
 		return grew
 	}
 	probe := func() error {
-		recs, o := ResolveDomainWithRetry(ctx, resolver, RandomLabel()+"."+domain, timeout, nil, attempts, types)
+		recs, o := l.Resolve(ctx, RandomLabel()+"."+domain)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

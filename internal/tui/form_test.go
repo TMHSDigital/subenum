@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -11,23 +14,22 @@ import (
 
 func TestNewFormModelDefaults(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	if len(m.inputs) != 14 {
-		t.Fatalf("expected 14 text inputs, got %d", len(m.inputs))
-	}
 	if m.focus != fieldDomain {
 		t.Errorf("expected initial focus on domain, got %d", m.focus)
 	}
-	if got := m.inputs[1].Value(); got != "examples/sample_wordlist.txt" {
+	// No repo-relative default: an empty field means the bundled list, so a
+	// binary run outside a checkout works on the first try (#288).
+	if got := m.inputs[fieldWordlist].Value(); got != "" {
 		t.Errorf("default wordlist = %q", got)
 	}
-	if got := m.inputs[4].Value(); got != "100" {
+	if got := m.inputs[fieldConcurrency].Value(); got != "100" {
 		t.Errorf("default concurrency = %q", got)
 	}
 }
 
 func TestValidateMissingDomain(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("")
+	m.inputs[fieldDomain].SetValue("")
 	if _, errStr := m.validate(); errStr == "" {
 		t.Error("expected validation error for missing domain")
 	}
@@ -35,8 +37,8 @@ func TestValidateMissingDomain(t *testing.T) {
 
 func TestValidateNonPositiveConcurrency(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[4].SetValue("0")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldConcurrency].SetValue("0")
 	_, errStr := m.validate()
 	if !strings.Contains(errStr, "concurrency") {
 		t.Errorf("expected concurrency error, got %q", errStr)
@@ -47,26 +49,26 @@ func TestValidateNonPositiveConcurrency(t *testing.T) {
 // and rejected when Simulate is ON.
 func TestValidateHitRateOnlyWhenSimulate(t *testing.T) {
 	live := newFormModel(savedConfig{})
-	live.inputs[0].SetValue("example.com")
-	live.inputs[2].SetValue("") // blank hit rate
-	live.toggles[0] = false
+	live.inputs[fieldDomain].SetValue("example.com")
+	live.inputs[fieldHitRate].SetValue("") // blank hit rate
+	live.toggles[fieldSimulate] = false
 	vals, errStr := live.validate()
 	if errStr != "" {
 		t.Errorf("live mode should ignore hit rate, got error %q", errStr)
 	}
-	if vals.hitRate < 1 || vals.hitRate > 100 {
-		t.Errorf("live mode should set a sane default hit rate, got %d", vals.hitRate)
+	if vals.HitRate < 1 || vals.HitRate > 100 {
+		t.Errorf("live mode should set a sane default hit rate, got %d", vals.HitRate)
 	}
 
 	sim := newFormModel(savedConfig{})
-	sim.inputs[0].SetValue("example.com")
-	sim.inputs[2].SetValue("") // blank hit rate
-	sim.toggles[0] = true
+	sim.inputs[fieldDomain].SetValue("example.com")
+	sim.inputs[fieldHitRate].SetValue("") // blank hit rate
+	sim.toggles[fieldSimulate] = true
 	if _, errStr := sim.validate(); errStr == "" {
 		t.Error("simulate mode should reject blank hit rate")
 	}
 
-	sim.inputs[2].SetValue("500") // out of range
+	sim.inputs[fieldHitRate].SetValue("500") // out of range
 	if _, errStr := sim.validate(); errStr == "" {
 		t.Error("simulate mode should reject out-of-range hit rate")
 	}
@@ -76,8 +78,8 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 	m := newFormModel(savedConfig{})
 
 	// Both gates off: HitRate is skipped after Simulate, Depth after Recursive.
-	m.toggles[0] = false
-	m.toggles[2] = false
+	m.toggles[fieldSimulate] = false
+	m.toggles[fieldRecursive] = false
 
 	m.focus = fieldSimulate
 	m.moveFocus(+1)
@@ -87,19 +89,19 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 
 	m.focus = fieldRecursive
 	m.moveFocus(+1)
-	if m.focus != fieldRate {
-		t.Errorf("recursive OFF: expected Rate after Recursive (Depth skipped), got %d", m.focus)
+	if m.focus != fieldPermute {
+		t.Errorf("recursive OFF: expected Permute after Recursive (Depth skipped), got %d", m.focus)
 	}
 
 	// Gates on: the previously skipped fields are now reachable.
-	m.toggles[0] = true
+	m.toggles[fieldSimulate] = true
 	m.focus = fieldSimulate
 	m.moveFocus(+1)
 	if m.focus != fieldHitRate {
 		t.Errorf("simulate ON: expected HitRate after Simulate, got %d", m.focus)
 	}
 
-	m.toggles[2] = true
+	m.toggles[fieldRecursive] = true
 	m.focus = fieldRecursive
 	m.moveFocus(+1)
 	if m.focus != fieldDepth {
@@ -109,30 +111,30 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 
 func TestValidateRejectsBadRecordType(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[7].SetValue("A,MX")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldTypes].SetValue("A,SRV")
 	if _, errStr := m.validate(); errStr == "" {
-		t.Error("expected validation error for unsupported record type MX")
+		t.Error("expected validation error for unsupported record type SRV")
 	}
 }
 
 func TestValidateDepthGatedOnRecursive(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[8].SetValue("not-a-number")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldDepth].SetValue("not-a-number")
 
 	// Recursive OFF: bad depth is ignored, defaults to 1.
-	m.toggles[2] = false
+	m.toggles[fieldRecursive] = false
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Errorf("recursive OFF should ignore depth, got %q", errStr)
 	}
-	if vals.depth != 1 {
-		t.Errorf("expected default depth 1 when recursive off, got %d", vals.depth)
+	if vals.Depth != 1 {
+		t.Errorf("expected default depth 1 when recursive off, got %d", vals.Depth)
 	}
 
 	// Recursive ON: bad depth is rejected.
-	m.toggles[2] = true
+	m.toggles[fieldRecursive] = true
 	if _, errStr := m.validate(); errStr == "" {
 		t.Error("recursive ON should reject non-numeric depth")
 	}
@@ -143,18 +145,18 @@ func TestValidateDepthGatedOnRecursive(t *testing.T) {
 // disables the wildcard abort).
 func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[12].SetValue("2500")
-	m.toggles[3] = true
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldMaxQueries].SetValue("2500")
+	m.toggles[fieldNoAbort] = true
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	if vals.maxQueries != 2500 || !vals.noAbort || vals.force {
-		t.Errorf("got maxQueries=%d noAbort=%v force=%v", vals.maxQueries, vals.noAbort, vals.force)
+	if vals.MaxQueries != 2500 || !vals.NoAbort || vals.Force {
+		t.Errorf("got maxQueries=%d noAbort=%v force=%v", vals.MaxQueries, vals.NoAbort, vals.Force)
 	}
 
-	m.inputs[12].SetValue("-1")
+	m.inputs[fieldMaxQueries].SetValue("-1")
 	if _, errStr := m.validate(); !strings.Contains(errStr, "max queries") {
 		t.Errorf("negative max queries: got %q", errStr)
 	}
@@ -162,7 +164,7 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 	// The new toggle is reachable and flips with space.
 	m.focus = fieldForce
 	m.moveFocus(+1)
-	if m.focus != fieldNoAbort || !m.isToggle() || m.toggleArrayIndex() != 3 {
+	if m.focus != fieldNoAbort || !m.isToggle() {
 		t.Errorf("focus after Force = %d, want No Abort toggle", m.focus)
 	}
 }
@@ -172,31 +174,37 @@ func TestValidateMaxQueriesAndNoAbort(t *testing.T) {
 func TestValidateNormalizesDomain(t *testing.T) {
 	for _, in := range []string{"https://Example.COM/", "Example.COM.", "example.com"} {
 		m := newFormModel(savedConfig{})
-		m.inputs[0].SetValue(in)
+		m.inputs[fieldDomain].SetValue(in)
 		vals, errStr := m.validate()
 		if errStr != "" {
 			t.Fatalf("%q: unexpected error %q", in, errStr)
 		}
-		if vals.domain != "example.com" {
-			t.Errorf("%q: domain = %q, want example.com", in, vals.domain)
+		if vals.Domain != "example.com" {
+			t.Errorf("%q: domain = %q, want example.com", in, vals.Domain)
 		}
 	}
 }
 
 // TestFormBuildsSharedConfig covers #80: the TUI builds its scan.Config with
-// the shared scan.Options builder. main_test.go asserts the CLI produces this
+// the shared scan.Options builder. internal/cli/cli_test.go asserts the CLI produces this
 // same Config from the equivalent flags.
 func TestFormBuildsSharedConfig(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	for i, v := range map[int]string{0: "example.com", 1: "wl.txt", 2: "30", 3: "1.1.1.1:53", 4: "50", 5: "800", 6: "2", 7: "A,CNAME", 8: "2", 9: "100", 10: "", 12: "500"} {
-		m.inputs[i].SetValue(v)
+	for f, v := range map[int]string{
+		fieldDomain: "example.com", fieldWordlist: "wl.txt", fieldHitRate: "30", fieldDNSServer: "1.1.1.1:53",
+		fieldConcurrency: "50", fieldTimeout: "800", fieldAttempts: "2", fieldTypes: "A,CNAME", fieldDepth: "2",
+		fieldRate: "100", fieldOutput: "", fieldMaxQueries: "500",
+	} {
+		m.inputs[f].SetValue(v)
 	}
-	m.toggles = [4]bool{true, true, true, true}
+	for _, f := range []int{fieldSimulate, fieldForce, fieldRecursive, fieldNoAbort} {
+		m.toggles[f] = true
+	}
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	got := vals.options([]string{"www", "mail"}, 7).Config()
+	got := vals.options([]string{"www", "mail"}, 7).Config
 	want := scan.Config{
 		Domain: "example.com", Entries: []string{"www", "mail"}, Concurrency: 50,
 		Timeout: 800 * time.Millisecond, DNSServer: "1.1.1.1:53", Simulate: true, HitRate: 30,
@@ -208,20 +216,57 @@ func TestFormBuildsSharedConfig(t *testing.T) {
 	}
 }
 
-// TestValidateExclude covers #87 in the TUI: the Exclude field reaches the
-// scan config, and an invalid pattern is rejected on the form.
-func TestValidateExclude(t *testing.T) {
+// TestAutoRateDurationRetryFields covers #274: Auto Rate, Max Duration and
+// Retry Inconclusive reach the scan options, a bad or negative duration is
+// rejected on the form, and the values are saved for the next session.
+func TestAutoRateDurationRetryFields(t *testing.T) {
 	m := newFormModel(savedConfig{})
-	m.inputs[0].SetValue("example.com")
-	m.inputs[13].SetValue(" vpn.example.com , *.corp.example.com ")
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.toggles[fieldAutoRate] = true
+	m.toggles[fieldRetryIncon] = true
+	m.inputs[fieldMaxDuration].SetValue(" 1h30m ")
 	vals, errStr := m.validate()
 	if errStr != "" {
 		t.Fatalf("validate: %s", errStr)
 	}
-	if got := vals.options(nil, 0).Config().Exclude; !reflect.DeepEqual(got, []string{"vpn.example.com", "*.corp.example.com"}) {
+	opts := vals.options(nil, 0)
+	if !opts.AutoRate || !opts.RetryInconclusive || opts.MaxDuration != 90*time.Minute {
+		t.Errorf("options: AutoRate %v, RetryInconclusive %v, MaxDuration %s", opts.AutoRate, opts.RetryInconclusive, opts.MaxDuration)
+	}
+	again := newFormModel(vals.saved)
+	if !again.toggles[fieldAutoRate] || !again.toggles[fieldRetryIncon] || again.inputs[fieldMaxDuration].Value() != "1h30m0s" {
+		t.Errorf("reloaded form: auto rate %v, retry %v, max duration %q", again.toggles[fieldAutoRate], again.toggles[fieldRetryIncon], again.inputs[fieldMaxDuration].Value())
+	}
+
+	for value, want := range map[string]string{
+		"soon": `Max Duration must be a duration such as 20m or 1h30m, got "soon"`,
+		"-5m":  "max duration (Max Duration) must be 0 (unlimited) or positive, got -5m0s",
+	} {
+		m.inputs[fieldMaxDuration].SetValue(value)
+		if _, errStr := m.validate(); errStr != want {
+			t.Errorf("max duration %q: got %q, want %q", value, errStr, want)
+		}
+	}
+	m.inputs[fieldMaxDuration].SetValue("")
+	if vals, errStr := m.validate(); errStr != "" || vals.MaxDuration != 0 {
+		t.Errorf("blank max duration: %q, %s; want no error and no budget", errStr, vals.MaxDuration)
+	}
+}
+
+// TestValidateExclude covers #87 in the TUI: the Exclude field reaches the
+// scan config, and an invalid pattern is rejected on the form.
+func TestValidateExclude(t *testing.T) {
+	m := newFormModel(savedConfig{})
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldExclude].SetValue(" vpn.example.com , *.corp.example.com ")
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	if got := vals.options(nil, 0).Exclude; !reflect.DeepEqual(got, []string{"vpn.example.com", "*.corp.example.com"}) {
 		t.Errorf("Exclude = %q", got)
 	}
-	m.inputs[13].SetValue("not a domain")
+	m.inputs[fieldExclude].SetValue("not a domain")
 	// The engine's setting token is rendered as the form field (#100).
 	if _, errStr := m.validate(); !strings.Contains(errStr, "invalid Exclude pattern") {
 		t.Errorf("invalid pattern: got %q", errStr)
@@ -234,6 +279,231 @@ func TestSettingLabelsCoverEverySetting(t *testing.T) {
 	for _, s := range scan.Settings {
 		if settingLabel(s) == "" {
 			t.Errorf("setting %q has no form label", s)
+		}
+	}
+}
+
+// TestFormFieldSpec covers #161 and #160: every formFields entry is complete,
+// a gate always names a toggle, and a field with an engine setting takes its
+// label and flag from scan's table rather than its own.
+func TestFormFieldSpec(t *testing.T) {
+	for f, spec := range formFields {
+		if spec.name() == "" {
+			t.Errorf("field %d has no label", f)
+		}
+		if spec.setting != "" && (spec.label != "" || spec.flag != "") {
+			t.Errorf("field %q names its setting's label or flag itself", spec.name())
+		}
+		if spec.saved == nil {
+			t.Errorf("field %q has no saved config slot", spec.name())
+			continue
+		}
+		var c savedConfig
+		switch spec.saved(&c).(type) {
+		case *string, *int:
+			if spec.kind != textField || spec.placeholder == "" {
+				t.Errorf("text field %q is not a text field or lacks a placeholder", spec.name())
+			}
+		case *bool:
+			if spec.kind != toggleField || spec.gate != 0 {
+				t.Errorf("toggle %q is not a toggle or is gated", spec.name())
+			}
+		default:
+			t.Errorf("field %q is saved in an unsupported type", spec.name())
+		}
+		if spec.gate != 0 && formFields[spec.gate].kind != toggleField {
+			t.Errorf("field %q is gated on %q, which is not a toggle", spec.name(), formFields[spec.gate].name())
+		}
+	}
+}
+
+// TestFormViewRows pins the default form's rows (ANSI stripped), so the
+// table-driven View keeps the order, labels, defaults and gate hints (#161).
+func TestFormViewRows(t *testing.T) {
+	ansi := regexp.MustCompile("\x1b\\[[0-9;?]*[a-zA-Z]")
+	var rows []string
+	for _, line := range strings.Split(ansi.ReplaceAllString(newFormModel(savedConfig{}).View(), ""), "\n") {
+		if line = strings.TrimRight(line, " "); strings.Contains(line, ":") {
+			rows = append(rows, line)
+		}
+	}
+	want := []string{
+		"▸ Domain*:            > e.g. example.com",
+		"  Wordlist:           > empty = bundled top-5000 list",
+		"  Sources:            > optional, ct,wayback",
+		"  Simulate:           OFF",
+		"  Hit Rate (%):         (enable Simulate)",
+		"  DNS Server:         > 8.8.8.8:53",
+		"  Resolver Pool:      > optional, file of resolver addresses",
+		"  Rate/Resolver:      > 0",
+		"  Concurrency:        > 100",
+		"  Timeout (ms):       > 1000",
+		"  Attempts:           > 1",
+		"  Record Types:       > A,AAAA",
+		"  Recursive:          OFF",
+		"  Depth:                (enable Recursive)",
+		"  Permute:            OFF",
+		"  Rate (qps):         > 0",
+		"  Auto Rate:          OFF",
+		"  Max Names:          > 0",
+		"  Max Duration:       > optional, e.g. 20m",
+		"  Exclude:            > optional, e.g. vpn.example.com,*.corp.example.com",
+		"  Output File:        > optional, e.g. results.txt",
+		"  Format:             > text",
+		"  Force:              OFF",
+		"  No Abort:           OFF",
+		"  Retry Inconclusive: OFF",
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("form rows:\n got %q\nwant %q", rows, want)
+	}
+}
+
+// TestLaunchOptionsPrefillTheForm covers #195: the domain argument and flags
+// given with -tui fill the form over its remembered values.
+func TestLaunchOptionsPrefillTheForm(t *testing.T) {
+	opts := Options{Domain: "example.org", Settings: map[string]string{
+		"w": "big.txt", "r": "resolvers.txt", "rate-per-resolver": "5", "t": "20", "simulate": "true",
+	}}
+	m := newFormModel(opts.prefill(savedConfig{Domain: "old.example.com", Wordlist: "old.txt", Concurrency: 100}))
+	for f, want := range map[int]string{
+		fieldDomain: "example.org", fieldWordlist: "big.txt", fieldResolvers: "resolvers.txt",
+		fieldRatePerResolver: "5", fieldConcurrency: "20",
+	} {
+		if got := m.inputs[f].Value(); got != want {
+			t.Errorf("%s = %q, want %q", formFields[f].name(), got, want)
+		}
+	}
+	if !m.toggles[fieldSimulate] {
+		t.Error("Simulate not switched on by -simulate")
+	}
+	// Without a domain argument the remembered domain stays.
+	if got := newFormModel(Options{}.prefill(savedConfig{Domain: "old.example.com"})).inputs[fieldDomain].Value(); got != "old.example.com" {
+		t.Errorf("no domain argument: Domain = %q", got)
+	}
+}
+
+// TestResolverPoolField covers #195: the Resolver Pool and Rate/Resolver
+// fields reach the scan, and bad values are reported on the form.
+func TestResolverPoolField(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "resolvers.txt")
+	if err := os.WriteFile(good, []byte("# pool\n1.1.1.1\n9.9.9.9:53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(dir, "bad.txt")
+	if err := os.WriteFile(bad, []byte("not an address\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(empty, []byte("# nothing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newFormModel(savedConfig{})
+	m.inputs[fieldDomain].SetValue("example.com")
+	m.inputs[fieldResolvers].SetValue(good)
+	m.inputs[fieldRatePerResolver].SetValue("3")
+	vals, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	if vals.resolvers != good || vals.RatePerResolver != 3 {
+		t.Fatalf("resolvers=%q ratePerResolver=%d", vals.resolvers, vals.RatePerResolver)
+	}
+	pool, err := loadPool(vals)
+	if err != nil || pool == nil || len(pool.Stats()) != 2 {
+		t.Fatalf("loadPool = %v, %v; want a two-resolver pool", pool, err)
+	}
+
+	// Simulation sends no DNS queries, so no pool is built, as with -r.
+	sim := vals
+	sim.Simulate = true
+	if pool, err := loadPool(sim); pool != nil || err != nil {
+		t.Errorf("simulate: loadPool = %v, %v; want no pool", pool, err)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(dir, "missing.txt"): "cannot read resolver pool",
+		bad:                               "resolver pool",
+		empty:                             "lists no resolvers",
+	} {
+		v := vals
+		v.resolvers = path
+		if _, err := loadPool(v); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: loadPool error = %v, want %q", filepath.Base(path), err, want)
+		}
+	}
+
+	m.inputs[fieldRatePerResolver].SetValue("-1")
+	// The range check is scan.Options.Validate's, rendered as the form label (#262).
+	if _, errStr := m.validate(); errStr != "rate per resolver (Rate/Resolver) must be 0 (unlimited) or a positive integer, got -1" {
+		t.Errorf("negative Rate/Resolver: got %q", errStr)
+	}
+	m.inputs[fieldRatePerResolver].SetValue("0")
+	m.inputs[fieldResolvers].SetValue("-")
+	if _, errStr := m.validate(); !strings.Contains(errStr, "standard input") {
+		t.Errorf("stdin resolver pool: got %q", errStr)
+	}
+}
+
+// TestWithSettingsSeedsEveryFlaggedField covers #160: a SUBENUM_* or config
+// file value for each field's flag reaches that field and no other.
+func TestWithSettingsSeedsEveryFlaggedField(t *testing.T) {
+	blank := newFormModel(savedConfig{})
+	for f, spec := range formFields {
+		flag := spec.flagName()
+		if flag == "" {
+			continue
+		}
+		v := "7"
+		if spec.kind == toggleField {
+			v = "true"
+		}
+		m := newFormModel(withSettings(savedConfig{}, map[string]string{flag: v}))
+		for g := range formFields {
+			changed := m.inputs[g].Value() != blank.inputs[g].Value() || m.toggles[g] != blank.toggles[g]
+			if want := g == f; changed != want {
+				t.Errorf("-%s=%s: field %q changed = %v, want %v", flag, v, formFields[g].name(), changed, want)
+			}
+		}
+	}
+}
+
+// TestOptionsSetsEveryField is the TUI's drift guard of #262: with every form
+// row set, validate and options fill in every scan.Options field except the
+// ones listed in tuiUnmapped, each with the reason. A field added to
+// scan.Options fails here until the form maps it or the list says why it does
+// not.
+func TestOptionsSetsEveryField(t *testing.T) {
+	tuiUnmapped := map[string]string{
+		"Pool":              "beginScan sets it from the pool loadPool built",
+		"Deadline":          "beginScan sets it from MaxDuration when the scan starts",
+		"TakeoverProviders": "the form has no takeover provider file; the built-in list applies",
+		"ListInconclusive":  "the scan screen shows the counts, not the names (#300)",
+		"ResumeFrom":        "the TUI does not resume interrupted scans",
+		"ResumeParents":     "the TUI does not resume interrupted scans",
+		"RetryPrior":        "the TUI does not resume interrupted scans",
+		"Verbose":           "the scan screen shows events itself; there is no debug log",
+		"Logf":              "the scan screen shows events itself; there is no debug log",
+		"Resolver":          "scan.Run builds the resolver from DNSServer",
+	}
+	m := filledForm(t)
+	v, errStr := m.validate()
+	if errStr != "" {
+		t.Fatalf("validate: %s", errStr)
+	}
+	for name, field := range v.options([]string{"www"}, 9).Fields() {
+		_, listed := tuiUnmapped[name]
+		switch zero := field.IsZero(); {
+		case zero && !listed:
+			t.Errorf("scan.Options.%s is never set by the form; map it or list it in tuiUnmapped with a reason", name)
+		case !zero && listed:
+			t.Errorf("scan.Options.%s is set by the form but listed in tuiUnmapped", name)
+		}
+	}
+	for name := range tuiUnmapped {
+		if _, ok := reflect.TypeFor[scan.Options]().FieldByName(name); !ok {
+			t.Errorf("tuiUnmapped lists %s, which scan.Options does not have", name)
 		}
 	}
 }

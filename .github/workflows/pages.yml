@@ -1,7 +1,9 @@
 name: GitHub Pages
 
-# Only site changes redeploy, so a code-only push does not publish docs for
-# behaviour that is not released yet (#125).
+# Pushes that touch the site redeploy it, and a release rebuilds it so the
+# header shows the new tag. Docs for a feature that is on main but not
+# released yet go live with that push; docs/_data/unreleased.yml tags them
+# "unreleased" until the release (#213).
 #
 # The `release` trigger below only fires for a release published outside the
 # release workflow. GoReleaser publishes with GITHUB_TOKEN, and GitHub does not
@@ -21,8 +23,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages"
@@ -50,6 +50,10 @@ jobs:
           path: ./_site
 
   deploy:
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

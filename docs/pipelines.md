@@ -49,18 +49,23 @@ httpx -silent -l names.txt
 ```
 
 With `-format jsonl`, the same report is the last line of the output, so one
-file holds both:
+file holds both. `-o` can be given more than once, and a format prefix
+(`jsonl:results.jsonl`){% include unreleased.html value="o=format:path" %}
+gives a file its own format, so one run saves bare names for the next tool and
+JSONL with the report (and a future `-diff` baseline):
 
 ```bash
-subenum -silent -format jsonl -o results.jsonl example.com > /dev/null
+subenum -silent -o names.txt -o jsonl:results.jsonl example.com > /dev/null
 tail -n 1 results.jsonl | jq -e '.verdict == "complete"' > /dev/null || exit 1
-jq -r 'select(.type != "summary") | .subdomain' results.jsonl | httpx -silent
+httpx -silent -l names.txt
 ```
 
 ## Takeover candidates first
 
 With CNAME lookups, subenum marks names whose alias target does not resolve or
-points at a takeover-prone service. Send those to a closer look before the
+points at a takeover-prone service; with NS lookups
+(`-type NS`{% include unreleased.html value="type=NS" %}), names delegated to a name
+server that does not exist (`dangling-ns`). Send those to a closer look before the
 rest:
 
 ```bash
@@ -77,6 +82,30 @@ its own preflight, wildcard check and verdict in the report:
 subenum -silent -dL scope.txt -exclude-file out-of-scope.txt -stats run.json \
   | httpx -silent
 ```
+
+## Machine-readable diagnostics
+
+`-log-format json`{% include unreleased.html flag="log-format" %} turns stderr into JSON Lines, so CI can act on a warning
+without matching `Note:` or `Warning:` text. Each line has `time`, `level`
+(`error`, `warn`, `notice`, `info`, `debug`), `kind`, `target` (the domain
+being scanned, when there is one) and `message`; engine notices also list the
+settings they name as codes in `settings`. Results on stdout are unchanged:
+
+```bash
+subenum -log-format json -stats run.json example.com 2> log.jsonl > names.txt
+jq -r 'select(.level == "warn" or .level == "error") | "\(.kind): \(.message)"' log.jsonl
+```
+
+```json
+{"time":"2026-11-09T12:00:00.000Z","level":"warn","kind":"cap","target":"example.com","message":"query cap reached (-max-queries 3); skipped 3 additional jobs","settings":["max_queries"]}
+```
+
+Progress is an event (`"kind":"progress"` with a `progress` object of
+`percent`, `processed`, `total`, `found` and `eta_seconds`) and, as on a piped
+stderr, appears only when `-progress` is given explicitly. Errors in the
+command line itself are JSON lines too, once `-log-format json` has been read
+(from the command line before the error, `SUBENUM_LOG_FORMAT` or the config
+file); `-h` help stays text.
 
 ## Tips
 

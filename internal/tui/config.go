@@ -4,29 +4,51 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
+	"time"
 )
 
 type savedConfig struct {
-	Domain      string `json:"domain"`
-	Wordlist    string `json:"wordlist"`
-	DNSServer   string `json:"dns_server"`
-	Concurrency int    `json:"concurrency"`
-	TimeoutMs   int    `json:"timeout_ms"`
-	Attempts    int    `json:"attempts"`
-	HitRate     int    `json:"hit_rate"`
-	Types       string `json:"types"`
-	Depth       int    `json:"depth"`
-	Rate        int    `json:"rate"`
-	MaxQueries  int    `json:"max_queries"`
-	Exclude     string `json:"exclude,omitempty"`
-	Output      string `json:"output"`
-	Format      string `json:"format"`
-	Simulate    bool   `json:"simulate"`
-	Force       bool   `json:"force"`
-	Recursive   bool   `json:"recursive"`
-	NoAbort     bool   `json:"no_abort"`
+	Domain    string `json:"domain"`
+	Wordlist  string `json:"wordlist"`
+	DNSServer string `json:"dns_server"`
+	// Resolvers is the resolver pool file (-r) and RatePerResolver its
+	// per-member cap (-rate-per-resolver) (#195).
+	Resolvers       string `json:"resolvers,omitempty"`
+	RatePerResolver int    `json:"rate_per_resolver,omitempty"`
+	Concurrency     int    `json:"concurrency"`
+	TimeoutMs       int    `json:"timeout_ms"`
+	Attempts        int    `json:"attempts"`
+	HitRate         int    `json:"hit_rate"`
+	Types           string `json:"types"`
+	Depth           int    `json:"depth"`
+	Rate            int    `json:"rate"`
+	MaxQueries      int    `json:"max_queries"`
+	Exclude         string `json:"exclude,omitempty"`
+	Output          string `json:"output"`
+	Format          string `json:"format"`
+	Simulate        bool   `json:"simulate"`
+	Force           bool   `json:"force"`
+	Recursive       bool   `json:"recursive"`
+	NoAbort         bool   `json:"no_abort"`
+	// AutoRate, MaxDuration and RetryInconclusive are -auto-rate,
+	// -max-duration (as Go prints a duration, e.g. "20m0s") and
+	// -retry-inconclusive (#274).
+	AutoRate          bool   `json:"auto_rate,omitempty"`
+	MaxDuration       string `json:"max_duration,omitempty"`
+	RetryInconclusive bool   `json:"retry_inconclusive,omitempty"`
+	// Sources is -sources as a comma-separated list, and Permute is -permute
+	// (#274).
+	Sources string `json:"sources,omitempty"`
+	Permute bool   `json:"permute,omitempty"`
+}
+
+// durationText is how a max duration is saved: "" for none, so the form
+// shows its placeholder again, else the duration as Go prints it.
+func durationText(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
 }
 
 func configPath() (string, error) {
@@ -53,7 +75,8 @@ func loadSavedConfig() (savedConfig, bool) {
 	return sc, true
 }
 
-func saveConfig(fv formValues) error {
+// saveConfig writes sc, the form as validate remembered it, to last.json.
+func saveConfig(sc savedConfig) error {
 	p, err := configPath()
 	if err != nil {
 		return err
@@ -61,32 +84,15 @@ func saveConfig(fv formValues) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	sc := savedConfig{
-		Domain:      fv.domain,
-		Wordlist:    fv.wordlist,
-		DNSServer:   fv.dnsServer,
-		Concurrency: fv.concurrency,
-		TimeoutMs:   fv.timeoutMs,
-		Attempts:    fv.attempts,
-		HitRate:     fv.hitRate,
-		Types:       strings.Join(fv.recordTypes, ","),
-		Depth:       fv.depth,
-		Rate:        fv.rate,
-		MaxQueries:  fv.maxQueries,
-		Exclude:     strings.Join(fv.exclude, ","),
-		Output:      fv.outputFile,
-		Format:      fv.formatName,
-		Simulate:    fv.simulate,
-		Force:       fv.force,
-		Recursive:   fv.recursive,
-		NoAbort:     fv.noAbort,
-	}
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {
 		return err
 	}
 	// Write a temp file and rename it into place, so a second instance
-	// reading at the same moment never sees half-written JSON (#80).
+	// reading at the same moment never sees half-written JSON (#80). Not
+	// output.WriteFile on purpose: os.CreateTemp makes the file 0600 whatever
+	// the umask, since the saved form can name the user's files and resolvers
+	// (#331).
 	tmp, err := os.CreateTemp(filepath.Dir(p), ".last-*.json")
 	if err != nil {
 		return err
@@ -106,47 +112,26 @@ func saveConfig(fv formValues) error {
 }
 
 // withSettings overlays flag values from SUBENUM_* variables or the config
-// file (keyed by flag name) on the remembered form values (#118).
+// file (keyed by flag name) on the remembered form values (#118), using each
+// form field's flag (#160).
 func withSettings(sc savedConfig, settings map[string]string) savedConfig {
-	for name, v := range settings {
-		n, _ := strconv.Atoi(v)
-		b, _ := strconv.ParseBool(v)
-		switch name {
-		case "w":
-			sc.Wordlist = v
-		case "dns-server":
-			sc.DNSServer = v
-		case "t":
-			sc.Concurrency = n
-		case "timeout":
-			sc.TimeoutMs = n
-		case "attempts":
-			sc.Attempts = n
-		case "hit-rate":
-			sc.HitRate = n
-		case "type":
-			sc.Types = v
-		case "depth":
-			sc.Depth = n
-		case "rate":
-			sc.Rate = n
-		case "max-queries":
-			sc.MaxQueries = n
-		case "exclude":
-			sc.Exclude = v
-		case "o":
-			sc.Output = v
-		case "format":
-			sc.Format = v
-		case "simulate":
-			sc.Simulate = b
-		case "force":
-			sc.Force = b
-		case "recursive":
-			sc.Recursive = b
-		case "no-abort":
-			sc.NoAbort = b
+	for _, spec := range formFields {
+		if v, ok := settings[spec.flagName()]; ok && spec.flagName() != "" {
+			spec.set(&sc, v)
 		}
 	}
 	return sc
+}
+
+// Flags lists the flags whose SUBENUM_* or config file value seeds the form,
+// so the CLI can check that every flag is either wired here or deliberately
+// left out of the TUI.
+func Flags() []string {
+	var out []string
+	for _, spec := range formFields {
+		if f := spec.flagName(); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
