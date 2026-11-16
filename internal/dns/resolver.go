@@ -81,6 +81,10 @@ func (o Outcome) String() string {
 	return "error"
 }
 
+// refusedText is the DNSError.Err that marks a response carrying RCODE
+// REFUSED. Socket errors such as "connection refused" must not match.
+const refusedText = "server refused the query (REFUSED)"
+
 // Classify maps a resolver error onto a coarse outcome so callers can tell a
 // definitive negative (NXDOMAIN) apart from an infrastructure failure.
 func Classify(err error) Outcome {
@@ -98,7 +102,7 @@ func Classify(err error) Outcome {
 		case de.IsTimeout:
 			return OutcomeTimeout
 		}
-		if strings.Contains(strings.ToLower(de.Err), "refused") {
+		if de.Err == refusedText {
 			return OutcomeRefused
 		}
 	}
@@ -222,7 +226,7 @@ func (b *wireBudget) fixErr(err error) error {
 		cp.Server = s
 	}
 	if b.refused.Load() && Classify(err) == OutcomeOther {
-		cp.Err = "server refused the query (REFUSED)"
+		cp.Err = refusedText
 	}
 	return &cp
 }
