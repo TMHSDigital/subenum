@@ -155,6 +155,7 @@ type Prepared struct {
 	counts  []uint32 // occurrences of each entry in the raw lines (#248: 4 bytes, not 8)
 	invalid int      // lines that are not valid DNS labels
 	maxLen  int      // longest entry
+	dotted  int      // entries with more than one label, the only ones that can end in a target (#351)
 }
 
 // Prepare normalizes raw wordlist lines; see Build.
@@ -256,6 +257,9 @@ func (pr *Preparer) Add(line string) {
 	p.entries = append(p.entries, entry)
 	p.counts = append(p.counts, 1)
 	p.maxLen = max(p.maxLen, len(entry))
+	if strings.Contains(entry, ".") {
+		p.dotted++
+	}
 	pr.index.add(p.entries, slot)
 }
 
@@ -269,18 +273,50 @@ func (pr *Preparer) Prepared() *Prepared {
 
 // For returns the entries for domain with the same counts Build gives: an
 // entry too long for domain is skipped at every occurrence, any other entry
-// is kept once and its repeats are duplicates. The returned slice may be
-// shared between calls; appending to it copies.
+// is kept once and its repeats are duplicates. An entry that already ends in
+// domain, such as a full name pasted from another tool, is used as the
+// prefix in front of it, so "www.example.com" under example.com is www, not
+// www.example.com.example.com (#351); it is a duplicate when that prefix is
+// also in the list. The returned slice may be shared between calls;
+// appending to it copies.
 func (p *Prepared) For(domain string) (entries []string, duplicates, skipped int) {
-	limit := maxNameLen - 1 - len(strings.TrimSuffix(domain, "."))
+	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
+	limit := maxNameLen - 1 - len(domain)
 	skipped = p.invalid
-	if p.maxLen <= limit {
+	suffix := p.targetSuffix(domain)
+	if p.maxLen <= limit && suffix == "" {
 		for _, c := range p.counts {
 			duplicates += int(c) - 1
 		}
 		return p.entries[:len(p.entries):len(p.entries)], duplicates, skipped
 	}
+	// A stripped entry whose prefix the list also holds on its own is a
+	// repeat of that entry, wherever the two appear.
+	var plain, emitted map[string]bool
+	if suffix != "" {
+		plain, emitted = map[string]bool{}, map[string]bool{}
+		for _, entry := range p.entries {
+			if prefix, ok := strings.CutSuffix(entry, suffix); ok {
+				plain[prefix] = false
+			}
+		}
+		for _, entry := range p.entries {
+			if _, ok := plain[entry]; ok {
+				plain[entry] = true
+			}
+		}
+	}
 	for i, entry := range p.entries {
+		if suffix != "" {
+			if prefix, ok := strings.CutSuffix(entry, suffix); ok {
+				if plain[prefix] || emitted[prefix] {
+					duplicates += int(p.counts[i])
+					continue
+				}
+				emitted[prefix] = true
+				entry = prefix
+			}
+		}
 		if len(entry) > limit {
 			skipped += int(p.counts[i])
 			continue
@@ -289,6 +325,37 @@ func (p *Prepared) For(domain string) (entries []string, duplicates, skipped int
 		entries = append(entries, entry)
 	}
 	return entries, duplicates, skipped
+}
+
+// targetSuffix returns "."+domain when some entry ends in it, and "" when
+// none does or domain is empty. domain is lower case without a final dot.
+func (p *Prepared) targetSuffix(domain string) string {
+	if domain == "" || p.dotted == 0 {
+		return ""
+	}
+	suffix := "." + domain
+	for _, entry := range p.entries {
+		if strings.HasSuffix(entry, suffix) {
+			return suffix
+		}
+	}
+	return ""
+}
+
+// Suffixed reports how many distinct entries end in domain, which For uses
+// as prefixes (#351), so a caller can say so once.
+func (p *Prepared) Suffixed(domain string) int {
+	suffix := p.targetSuffix(strings.ToLower(strings.TrimSuffix(domain, ".")))
+	if suffix == "" {
+		return 0
+	}
+	n := 0
+	for _, entry := range p.entries {
+		if strings.HasSuffix(entry, suffix) {
+			n++
+		}
+	}
+	return n
 }
 
 // NotIn returns the names that are not in entries, in their order and

@@ -172,6 +172,26 @@ func TestE2EStdinWordlistPlainOutput(t *testing.T) {
 	}
 }
 
+// TestE2EFullNamesInWordlist covers #351: full names pasted into -w are
+// scanned as their prefixes, not with the target appended twice, and one
+// note says so.
+func TestE2EFullNamesInWordlist(t *testing.T) {
+	t.Parallel()
+	wl := writeFile(t, "full.txt", "api.lab.example\nwww.lab.example\n")
+	code, stdout, stderr := runCLIStreams(t, "-simulate", "-seed", "1", "-hit-rate", "100", "-progress=false", "-w", wl, "lab.example")
+	if code != exitOK {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+	lines := strings.Fields(stdout)
+	sort.Strings(lines)
+	if strings.Join(lines, ",") != "api.lab.example,www.lab.example" {
+		t.Errorf("stdout = %q, want the names once under lab.example", stdout)
+	}
+	if !strings.Contains(stderr, "Note: 2 wordlist entries ended in lab.example; used them as prefixes") {
+		t.Errorf("missing prefix note:\n%s", stderr)
+	}
+}
+
 func TestE2ESeedReproducible(t *testing.T) {
 	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords+"vpn\ncdn\nadmin\nportal\n")

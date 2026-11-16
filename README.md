@@ -436,6 +436,8 @@ Results can only be as good as the wordlist. Without `-w`, subenum uses its bund
 
 List size sets the query volume: each entry costs one query per record type (two with the default `A,AAAA`), per attempt, per recursion level. A 1M-entry list at `-rate 500` is about 70 minutes of wire time per target, so pair big lists with `-rate` (and `-r` for a resolver pool), and use `-max-queries` as a budget. `tools/wordlist-gen` builds a small target-specific list from a domain's own terms.
 
+Entries are prefixes. An entry that already ends in the target, such as `www.example.com` pasted from another tool's output, is scanned as `www` under `example.com`, and the scan notes how many entries it shortened.
+
 <div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
 
 ## Finding more names

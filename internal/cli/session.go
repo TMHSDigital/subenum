@@ -653,6 +653,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		out.Info("=== [%d/%d] %s ===", i+1, len(s.targets), target)
 	}
 	entries, duplicates, skipped := s.words.For(target)
+	if n := s.words.Suffixed(target); n > 0 {
+		out.Info("Note: %d wordlist entries ended in %s; used them as prefixes", n, target)
+	}
 	if skipped > 0 {
 		out.Info("Skipped %d invalid wordlist entries (not valid DNS labels, or name longer than 253 characters)", skipped)
 	}

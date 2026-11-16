@@ -76,6 +76,30 @@ func TestPrepareMatchesReference(t *testing.T) {
 	}
 }
 
+// TestForStripsTargetSuffix covers #351: full names pasted into a wordlist
+// are used as prefixes under their own target, a prefix the list also holds
+// on its own is a duplicate wherever it appears, and other targets and
+// entries that only contain the target's text are left alone.
+func TestForStripsTargetSuffix(t *testing.T) {
+	lines := []string{"api.lab.example", "www", "WWW.Lab.Example.", "dev.api.lab.example", "api.lab.example", "lab.example.org", "xlab.example"}
+	p := Prepare(lines)
+	for _, domain := range []string{"lab.example", "LAB.example."} {
+		entries, dupes, skipped := p.For(domain)
+		want := []string{"api", "www", "dev.api", "lab.example.org", "xlab.example"}
+		if !reflect.DeepEqual(entries, want) || dupes != 2 || skipped != 0 {
+			t.Errorf("For(%q) = %v, %d dupes, %d skipped; want %v, 2, 0", domain, entries, dupes, skipped, want)
+		}
+		if n := p.Suffixed(domain); n != 3 {
+			t.Errorf("Suffixed(%q) = %d, want 3", domain, n)
+		}
+	}
+	for _, domain := range []string{"other.example", ""} {
+		if entries, _, _ := p.For(domain); len(entries) != 6 || p.Suffixed(domain) != 0 {
+			t.Errorf("For(%q) changed entries: %v", domain, entries)
+		}
+	}
+}
+
 // TestPrepareIndexAcrossGrowth covers #248: the entry index keeps finding
 // earlier entries while its table doubles many times, so repeats seen long
 // after their first occurrence (in another case) still count as duplicates,
