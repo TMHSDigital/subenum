@@ -163,6 +163,14 @@ runs:
         # A second use in the same job must not resume or diff the first's.
         rm -rf "$dir"
         mkdir -p "$dir"
+        # An earlier use in this job kept a copy of what it saved: the
+        # artifact list can lag an upload by seconds, so it may not show yet.
+        saved="$RUNNER_TEMP/subenum-saved/${NAME//[^A-Za-z0-9._-]/_}"
+        if [ -d "$saved" ]; then
+          cp -R "$saved/." "$dir/"
+          echo "Using the baseline an earlier step in this job saved."
+          exit 0
+        fi
         run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME&per_page=1" \
           --jq '.artifacts[0] | select(.expired == false) | .workflow_run.id // empty')
         if [ -n "$run" ]; then
@@ -303,6 +311,7 @@ runs:
         esac
 
     - name: Save the baseline
+      id: save
       # A stopped run whose verdict fails the step under fail-on still saves
       # its state.
       if: ${{ (success() && steps.scan.outputs.upload == 'true') || (!cancelled() && steps.scan.outputs.carry-state == 'true') }}
@@ -312,3 +321,15 @@ runs:
         path: ${{ runner.temp }}/subenum-carry/
         retention-days: 90
         overwrite: true
+
+    - name: Keep the baseline for later uses in this job
+      if: ${{ !cancelled() && steps.save.outcome == 'success' }}
+      shell: bash
+      env:
+        NAME: ${{ inputs.baseline-artifact }}
+      run: |
+        set -euo pipefail
+        saved="$RUNNER_TEMP/subenum-saved/${NAME//[^A-Za-z0-9._-]/_}"
+        rm -rf "$saved"
+        mkdir -p "$saved"
+        cp -R "$RUNNER_TEMP/subenum-carry/." "$saved/"

@@ -281,7 +281,9 @@ jobs:
 
     # A time-boxed scan carries its resume state in the baseline artifact,
     # and the next use continues it rather than starting over (#352). -rate
-    # 5 makes the 31-name wordlist outlast the first use's 2s budget.
+    # 5 makes the 31-name wordlist outlast the first use's 2s budget. The
+    # later uses read the copy the action kept in this job, not the artifact
+    # list, which can lag the upload by seconds.
     - name: Stop a scan at its time budget
       id: stopped
       uses: ./
