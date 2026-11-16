@@ -108,7 +108,9 @@ type Config struct {
 	// MaxQueries caps how many candidate names are tested. 0 is unlimited.
 	MaxQueries int
 
-	// MaxDuration is a time budget, counted from when Run starts. Once it
+	// MaxDuration is a time budget, counted from when Run starts but not
+	// including the preflight and wildcard probes sent before the first
+	// candidate lookup, so Run can take longer than MaxDuration. Once it
 	// runs out no new name is looked up, lookups already under way finish,
 	// and the names left are counted in Stats.Skipped with Stats.Expired
 	// set. 0 is unlimited.

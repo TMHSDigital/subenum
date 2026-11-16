@@ -479,6 +479,15 @@ func TestE2EHelpListsExitCodes(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Exit codes:") || !strings.Contains(out, "143") {
 		t.Errorf("-h: exit %d, output missing the exit-code table:\n%s", code, out)
 	}
+	// Every subcommand appears in the usage lines, not only in the exit
+	// codes (#379).
+	usage, _, _ := strings.Cut(out, "\n  -")
+	usage += "\n"
+	for _, sub := range subcommands {
+		if !strings.Contains(usage, "subenum "+sub+" ") && !strings.Contains(usage, "subenum "+sub+"\n") {
+			t.Errorf("-h usage does not show `subenum %s`:\n%s", sub, usage)
+		}
+	}
 }
 
 // TestE2ESummary covers #70: jsonl output ends with a schema-versioned

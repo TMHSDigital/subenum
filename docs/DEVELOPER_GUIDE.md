@@ -105,6 +105,7 @@ subenum/
 ├── internal/
 │   ├── cli/                    # The command: flags, session, config, diff, resume, permute, labs, MCP, and its tests
 │   ├── axfr/                   # Zone transfer attempts shared by -axfr and subenum.ProbeZone
+│   ├── candidates/             # A target's candidate set, source attribution and -permute seeds (CLI and TUI)
 │   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/
 │   │   ├── ct.go               # Certificate Transparency (crt.sh) client for -ct
@@ -138,6 +139,7 @@ subenum/
 │   ├── passive/                # -sources: Source interface, registry, Wayback Machine source
 │   ├── permute/                # -permute candidate generation
 │   ├── report/                 # Run-quality report built from finished scans
+│   ├── retryhttp/              # Retrying HTTP client for the passive sources
 │   ├── scan/
 │   │   ├── options.go          # Options: Config plus the settings only checked (Validate, Fields)
 │   │   ├── runner.go           # Scan engine: Config, Event/NoticeKind, Stats, Run

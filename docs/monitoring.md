@@ -135,11 +135,13 @@ changed name with a `change` field; empty when there were no previous results to
 diff against). The job summary lists the takeover candidates under the table.
 
 To open an issue with the new names, add a step after the action (the job
-then also needs `issues: write`):
+then also needs `issues: write`). It reads the `changes`{% include unreleased.html action="changes" %}
+output, which an action pinned to a release that predates it leaves empty;
+the `if:` then skips the step instead of failing it:
 
 {% raw %}
 ```yaml
-      - if: steps.subenum.outputs.added != '0'
+      - if: steps.subenum.outputs.added != '0' && steps.subenum.outputs.changes != ''
         env:
           GH_TOKEN: ${{ github.token }}
           CHANGES: ${{ steps.subenum.outputs.changes }}

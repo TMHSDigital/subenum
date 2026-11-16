@@ -155,7 +155,7 @@ go build -buildvcs=false -o subenum
 <details>
 <summary><strong>Pre-built binaries</strong></summary>
 
-Download the archive for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page: `subenum_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). Each archive holds the static binary, `LICENSE`, `THIRD_PARTY_LICENSES` (the licence notices of the Go standard library and the modules linked into the binary), `README.md`, `CHANGELOG.md`, shell completions (`completions/`) and the man page (`man/`).
+Download the archive for your platform from the [Releases](https://github.com/TMHSDigital/subenum/releases) page: `subenum_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). Each archive holds the static binary, `LICENSE`, `THIRD_PARTY_LICENSES` (the licence notices of the Go standard library and the modules linked into the binary; from the next release on, v0.10.0 archives do not have it), `README.md`, `CHANGELOG.md`, shell completions (`completions/`) and the man page (`man/`).
 
 Platforms: Linux (amd64, arm64, 386) &middot; macOS (amd64, arm64) &middot; Windows (amd64, arm64) &middot; FreeBSD (amd64, arm64)
 
@@ -444,6 +444,8 @@ Entries are prefixes. An entry that already ends in the target, such as `www.exa
 
 A wordlist only finds names someone thought to put in it. These passes add candidates from elsewhere; every one of them is still resolved like any other name, so a stale source costs a query, never a false result.
 
+> **Unreleased:** `-sources`, the per-result `sources` field and `-axfr` are on `main` but not in v0.10.0, the latest release, which rejects them; `-ct` and `-permute` are released. Until the next release, build from main: `go install github.com/TMHSDigital/subenum@main`.
+
 ### Certificate Transparency: names no wordlist has
 
 Certificates name the hosts they cover, so Certificate Transparency logs show real names, including forgotten ones like `legacy-billing`, that no generic wordlist contains. `-ct` asks [crt.sh](https://crt.sh/) once per target (HTTPS, no API key) and adds the names under the target as candidates after the wordlist, and as seeds for `-permute`. They are only candidates: each is resolved like any other name, so expired certificates cost a query, never a false result.
@@ -644,7 +646,7 @@ A name that answered for one `-type` while another type's lookup still timed out
 subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl example.com
 ```
 
-To compare two results files you already have, without scanning, use `subenum diff previous.jsonl current.jsonl`: `+` for names only in the second file, `-` for names only in the first (missing, not proven gone, since nothing is looked up), and with `-records` `~` for names whose records differ. `-type` limits the record comparison and `-format` picks the output format; the exit code is `4` when the files differ.
+To compare two results files you already have, without scanning, use `subenum diff previous.jsonl current.jsonl` (on `main` only until the next release; v0.10.0 does not have it): `+` for names only in the second file, `-` for names only in the first (missing, not proven gone, since nothing is looked up), and with `-records` `~` for names whose records differ. `-type` limits the record comparison and `-format` picks the output format; the exit code is `4` when the files differ.
 
 <div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
 
