@@ -98,12 +98,22 @@ func Classify(err error) Outcome {
 		case de.IsTimeout:
 			return OutcomeTimeout
 		}
-		if strings.Contains(strings.ToLower(de.Err), "refused") {
+		// Go's resolver reports RCODE REFUSED as "server misbehaving" and
+		// copies a transport error's text, so the only REFUSED wording that
+		// reaches here is this package's own: fixErr's for the RCODE and the
+		// DoH 429/503 one. A bare "refused" would also match a socket's
+		// "connection refused" from a closed port or a resolver that is down,
+		// which is not the rate-limit signal (#377).
+		if strings.Contains(de.Err, refusedPhrase) {
 			return OutcomeRefused
 		}
 	}
 	return OutcomeOther
 }
+
+// refusedPhrase is the wording every error this package raises for a refused
+// query carries, and the only text Classify counts as REFUSED.
+const refusedPhrase = "refused the query"
 
 // ParseTypes parses a comma-separated record-type list (for example
 // "A,AAAA,CNAME") into a normalized, de-duplicated, uppercase slice.
@@ -222,7 +232,7 @@ func (b *wireBudget) fixErr(err error) error {
 		cp.Server = s
 	}
 	if b.refused.Load() && Classify(err) == OutcomeOther {
-		cp.Err = "server refused the query (REFUSED)"
+		cp.Err = "server " + refusedPhrase + " (REFUSED)"
 	}
 	return &cp
 }

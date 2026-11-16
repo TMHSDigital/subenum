@@ -171,14 +171,34 @@ func TestClassify(t *testing.T) {
 			want: OutcomeTimeout,
 		},
 		{
-			name: "refused",
-			err:  &net.DNSError{Err: "server refused", Name: "blocked.example.com"},
+			// fixErr's wording for a response carrying RCODE REFUSED.
+			name: "refused rcode",
+			err:  &net.DNSError{Err: "server refused the query (REFUSED)", Name: "blocked.example.com"},
 			want: OutcomeRefused,
 		},
 		{
-			name: "refused mixed case",
-			err:  &net.DNSError{Err: "REFUSED"},
+			// The DoH 429/503 wording, as Go's resolver copies it (#114).
+			name: "doh shedding load",
+			err:  &net.DNSError{Err: "DNS-over-HTTPS server refused the query (HTTP 429 Too Many Requests)"},
 			want: OutcomeRefused,
+		},
+		{
+			// A closed UDP port (ICMP port unreachable on Linux) is a socket
+			// error, not the REFUSED rate-limit signal (#377).
+			name: "udp connection refused",
+			err:  &net.DNSError{Err: "read udp 127.0.0.1:50000->127.0.0.1:5999: recvfrom: connection refused", Server: "127.0.0.1:5999"},
+			want: OutcomeOther,
+		},
+		{
+			// TCP fallback or DoT to a closed port (#377).
+			name: "tcp connection refused",
+			err:  &net.DNSError{Err: "dial tcp 127.0.0.1:5999: connect: connection refused"},
+			want: OutcomeOther,
+		},
+		{
+			name: "windows connection refused",
+			err:  &net.DNSError{Err: "dial tcp 127.0.0.1:5999: connectex: No connection could be made because the target machine actively refused it."},
+			want: OutcomeOther,
 		},
 		{
 			name: "other dns error",

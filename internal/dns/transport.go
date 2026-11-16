@@ -440,8 +440,8 @@ func (c *dohConn) exchange(msg []byte) ([]byte, error) {
 	case http.StatusOK:
 	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
 		// The HTTP form of REFUSED: the server is shedding load. Worded so
-		// Classify counts it as refused, the rate-limit signal (#114).
-		return nil, fmt.Errorf("DNS-over-HTTPS server refused the query (HTTP %s)", resp.Status)
+		// Classify counts it as refused, the rate-limit signal (#114, #377).
+		return nil, fmt.Errorf("DNS-over-HTTPS server %s (HTTP %s)", refusedPhrase, resp.Status)
 	default:
 		return nil, fmt.Errorf("DNS-over-HTTPS server returned %s", resp.Status)
 	}
