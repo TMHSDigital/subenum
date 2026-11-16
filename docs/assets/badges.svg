@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="626" height="44" viewBox="0 0 626 44" role="img" aria-label="Linux, macOS, Windows, FreeBSD. One static binary. No API keys. GPL-3.0.">
+  <rect width="626" height="44" rx="14" fill="#0E1726"/>
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" dominant-baseline="central">
+    <circle cx="24" cy="22" r="4.5" fill="#F2B441"/>
+    <text x="38" y="22" textLength="224" lengthAdjust="spacingAndGlyphs" fill="#E8ECF2">Linux · macOS · Windows · FreeBSD</text>
+    <rect x="278" y="12" width="1.5" height="20" rx="0.75" fill="#6F7E97"/>
+    <text x="294" y="22" textLength="106" lengthAdjust="spacingAndGlyphs" fill="#94A3BA">one static binary</text>
+    <rect x="416" y="12" width="1.5" height="20" rx="0.75" fill="#6F7E97"/>
+    <rect x="432" y="17" width="10" height="10" rx="2" fill="#4CC9A0"/>
+    <text x="450" y="22" textLength="74" lengthAdjust="spacingAndGlyphs" fill="#94A3BA">no API keys</text>
+    <rect x="540" y="12" width="1.5" height="20" rx="0.75" fill="#6F7E97"/>
+    <text x="556" y="22" textLength="50" lengthAdjust="spacingAndGlyphs" fill="#94A3BA">GPL-3.0</text>
+  </g>
+</svg>

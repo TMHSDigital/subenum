@@ -17,5 +17,6 @@ kramdown:
 # Internal templates and local build output are not part of the site.
 exclude:
   - DOCUMENTATION_STRUCTURE.md
+  - superpowers
   - _preview
   - .jekyll-cache

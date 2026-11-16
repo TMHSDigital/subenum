@@ -4,11 +4,13 @@
 
 <br>
 
-[![Build](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main&style=for-the-badge&label=build)](https://github.com/TMHSDigital/subenum/actions)
-[![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum?style=for-the-badge)](https://github.com/TMHSDigital/subenum/releases)
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
-[![Go Report Card](https://goreportcard.com/badge/github.com/TMHSDigital/subenum?style=for-the-badge)](https://goreportcard.com/report/github.com/TMHSDigital/subenum)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](LICENSE)
+[![Build](https://img.shields.io/github/actions/workflow/status/TMHSDigital/subenum/go.yml?branch=main&style=for-the-badge&label=build&labelColor=0E1726&logo=githubactions&logoColor=E8ECF2)](https://github.com/TMHSDigital/subenum/actions)
+[![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum?style=for-the-badge&label=release&labelColor=0E1726&color=F2B441&logo=github&logoColor=E8ECF2)](https://github.com/TMHSDigital/subenum/releases)
+[![Go Reference](https://img.shields.io/badge/go-reference-4CC9A0?style=for-the-badge&labelColor=0E1726&logo=go&logoColor=E8ECF2)](https://pkg.go.dev/github.com/TMHSDigital/subenum/pkg/subenum)
+[![Container image](https://img.shields.io/badge/image-ghcr.io-F2B441?style=for-the-badge&labelColor=0E1726&logo=docker&logoColor=E8ECF2)](https://github.com/TMHSDigital/subenum/pkgs/container/subenum)
+[![Go 1.26+](https://img.shields.io/badge/go-1.26%2B-F2B441?style=for-the-badge&labelColor=0E1726&logo=go&logoColor=E8ECF2)](https://go.dev)
+
+<img src="docs/assets/badges.svg" alt="Linux, macOS, Windows, FreeBSD · one static binary · no API keys · GPL-3.0" width="626"/>
 
 ### Fast, concurrent subdomain enumeration that tells you how far to trust the result.
 
@@ -19,12 +21,26 @@ Built for pentesters, bug-bounty hunters, and operators doing authorized reconna
 
 **[Website](https://tmhsdigital.github.io/subenum/)** &nbsp;·&nbsp; [Quick Start](#quick-start) &nbsp;·&nbsp; [Install](#installation) &nbsp;·&nbsp; [Flags](#cli-flags) &nbsp;·&nbsp; [Labs](docs/labs.md) &nbsp;·&nbsp; [Go library](#go-library) &nbsp;·&nbsp; [MCP](#ai-agents-mcp) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md)
 
-<sub>Linux · macOS · Windows · FreeBSD &nbsp;—&nbsp; one static binary, no API keys</sub>
-
 </div>
 
 > [!IMPORTANT]
 > **Authorized use only.** Only scan domains you own or have explicit written permission to test. Unauthorized scanning may violate applicable laws. Users are solely responsible for compliance with all applicable laws and regulations.
+
+<details>
+<summary><strong>Contents</strong></summary>
+
+<br>
+
+- [Quick Start](#quick-start) · [Why subenum](#why-subenum) · [Features](#features) · [How it works](#how-it-works)
+- [Installation](#installation)
+- [Configuration](#configuration): [CLI flags](#cli-flags) · [Defaults, completions and the man page](#defaults-completions-and-the-man-page)
+- [Usage](#usage): [CLI](#cli) · [Resuming a scan](#resuming-an-interrupted-scan) · [DoT and DoH](#encrypted-dns-dot-and-doh) · [Choosing a wordlist](#choosing-a-wordlist)
+- [Finding more names](#finding-more-names): [Certificate Transparency](#certificate-transparency-names-no-wordlist-has) · [Zone transfers](#zone-transfers-the-whole-zone-in-one-query) · [Permutations](#permutations-a-second-pass)
+- [Reading the results](#reading-the-results): [Run-quality report](#run-quality-report) · [Takeover hints](#subdomain-takeover-hints) · [Internal addresses](#internal-addresses) · [Monitoring](#monitoring-for-new-subdomains)
+- [Other interfaces](#other-interfaces): [TUI](#interactive-tui) · [Go library](#go-library) · [AI agents (MCP)](#ai-agents-mcp)
+- [Development](#development)
+
+</details>
 
 ## Quick Start
 
@@ -107,6 +123,8 @@ flowchart LR
     PM --> Q
     SIG["SIGINT / SIGTERM"] -->|"drain, save -state"| Q
 ```
+
+<div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
 
 ## Installation
 
@@ -200,6 +218,8 @@ make help           # list all targets
 ```
 
 </details>
+
+<div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
 
 ## Configuration
 
@@ -305,6 +325,8 @@ subenum completion bash > /etc/bash_completion.d/subenum      # or zsh, fish, po
 subenum completion zsh > "${fpath[1]}/_subenum"
 subenum man > /usr/local/share/man/man1/subenum.1
 ```
+
+<div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
 
 ## Usage
 
@@ -414,6 +436,8 @@ Results can only be as good as the wordlist. Without `-w`, subenum uses its bund
 
 List size sets the query volume: each entry costs one query per record type (two with the default `A,AAAA`), per attempt, per recursion level. A 1M-entry list at `-rate 500` is about 70 minutes of wire time per target, so pair big lists with `-rate` (and `-r` for a resolver pool), and use `-max-queries` as a budget. `tools/wordlist-gen` builds a small target-specific list from a domain's own terms.
 
+<div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
+
 ## Finding more names
 
 A wordlist only finds names someone thought to put in it. These passes add candidates from elsewhere; every one of them is still resolved like any other name, so a stale source costs a query, never a false result.
@@ -484,6 +508,8 @@ subenum -permute -format jsonl -o results.jsonl example.com
 The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist, and any whose full name would pass 253 characters, are skipped. It is one level deep even under `-recursive`, so a permutation hit is reported but not expanded further. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates, hits, `processed` and `queries_sent` of the pass per target. The target's `queries_sent` includes the pass, and its `verdict` is the worse of the two passes'; when it is the permutation pass's, the `reason` starts with `permutation pass:`.
 
 </details>
+
+<div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
 
 ## Reading the results
 
@@ -614,6 +640,8 @@ subenum -w wordlist.txt -format jsonl -diff previous.jsonl -o current.jsonl exam
 
 To compare two results files you already have, without scanning, use `subenum diff previous.jsonl current.jsonl`: `+` for names only in the second file, `-` for names only in the first (missing, not proven gone, since nothing is looked up), and with `-records` `~` for names whose records differ. `-type` limits the record comparison and `-format` picks the output format; the exit code is `4` when the files differ.
 
+<div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
+
 ## Other interfaces
 
 ### Interactive TUI
@@ -689,11 +717,18 @@ claude mcp add subenum -- subenum mcp -allow example.com
 
 It offers `lab_scan` (the lab scenarios, on a local DNS server, always safe), `scan` (only for domains in `-allow` and their subdomains) `explain_stats` (reads a `-stats` report back in plain language) and `diff` (compares two result sets without a DNS query). The operator sets the resolver, rate and budgets; the model can ask for a smaller `max_queries`, never a larger one, and can never pick a resolver. Every scan returns a verdict that tells the agent whether a missing name can be trusted to be absent. See the [MCP page](https://tmhsdigital.github.io/subenum/mcp.html).
 
+<div align="right"><sub><a href="#readme">↑ back to top</a></sub></div>
+
 ## Development
 
 See [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for the pull request workflow and ethical guidelines, and [DEVELOPER_GUIDE.md](./docs/DEVELOPER_GUIDE.md) for build setup, testing, and project structure. Pull requests are welcome. The dev container gets you a ready toolchain in one click:
 
-[![Open in GitHub Codespaces](https://img.shields.io/badge/Open%20in-Codespaces-181717?style=for-the-badge&logo=github)](https://codespaces.new/TMHSDigital/subenum)
+[![Open in GitHub Codespaces](https://img.shields.io/badge/Open%20in-Codespaces-4CC9A0?style=for-the-badge&labelColor=0E1726&logo=github&logoColor=E8ECF2)](https://codespaces.new/TMHSDigital/subenum)
+
+<details>
+<summary><strong>Tech stack and project structure</strong></summary>
+
+<br>
 
 | Layer | Components |
 | :--- | :--- |
@@ -703,11 +738,6 @@ See [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for the pull request workflow and 
 | Infrastructure | Docker &middot; distroless static nonroot &middot; Make &middot; docker-compose |
 | CI/CD | GitHub Actions &middot; CodeQL &middot; Dependabot &middot; golangci-lint v2 |
 | Quality | `go test -race` &middot; gosec &middot; govet &middot; staticcheck |
-
-<details>
-<summary><strong>Project structure</strong></summary>
-
-<br>
 
 ```
 subenum/
@@ -719,6 +749,7 @@ subenum/
 │   │   ├── devcontainer.yml    # Builds the dev container and runs checks in it
 │   │   └── pages.yml           # GitHub Pages deployment
 │   ├── SECURITY.md             # Vulnerability disclosure policy
+│   ├── CONTRIBUTING.md, CODE_OF_CONDUCT.md, FUNDING.yml
 │   ├── ISSUE_TEMPLATE/         # bug_report.yml, feature_request.yml, config.yml
 │   ├── scripts/                # check-links.py, release-notes.sh
 │   ├── dependabot.yml
@@ -729,8 +760,10 @@ subenum/
 │   └── wordlist.txt            # Sample wordlist for the Docker examples (mounted at /data)
 ├── docs/                       # Source of the website (GitHub Pages)
 │   ├── assets/                 # Brand, CSS, JS, TUI screenshot, demo clip
-│   ├── _data/, _includes/, _layouts/
-│   ├── ARCHITECTURE.md, CONTRIBUTING.md, DEVELOPER_GUIDE.md, ROADMAP.md
+│   ├── _config.yml, _data/, _includes/, _layouts/, 404.html, search.json
+│   ├── ARCHITECTURE.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, DEVELOPER_GUIDE.md, ROADMAP.md
+│   ├── DOCUMENTATION_STRUCTURE.md  # Where each topic is documented (not published)
+│   ├── superpowers/            # Design notes and plans (not published)
 │   ├── start.md, cli.md, pipelines.md, library.md, labs.md, monitoring.md, docker.md, mcp.md
 │   └── index.html              # Landing page
 ├── examples/
@@ -739,6 +772,8 @@ subenum/
 │   ├── advanced_usage.md
 │   └── demo.sh
 ├── internal/
+│   ├── axfr/                   # -axfr: zone transfer attempts against each name server
+│   ├── candidates/             # Gathers a target's candidate names for the command line
 │   ├── cli/                    # The command and its subsystems (config, diff, resume, permute, CT, labs, MCP, ...)
 │   ├── cliargs/                # Flags anywhere on the command line (subenum and wordlist-gen)
 │   ├── ct/                     # Certificate Transparency (crt.sh) client for -ct
@@ -752,13 +787,14 @@ subenum/
 │   ├── passive/                # -sources: keyless passive name sources (Wayback Machine; crt.sh is in ct/)
 │   ├── permute/                # -permute candidate generation
 │   ├── report/                 # Run-quality report built from finished scans
+│   ├── retryhttp/              # HTTP client with retries for the passive sources
 │   ├── scan/                   # Scan engine: Config, Event types, Run()
 │   ├── tui/                    # Bubble Tea UI: form, scan view, session config
 │   ├── validate/               # Input validators shared by the CLI and the TUI
 │   └── wordlist/               # Wordlist reading, sanitizing and dedup
 ├── pkg/subenum/                # Public Go library API
 ├── tools/
-│   ├── wordlist-gen.go
+│   ├── wordlist-gen.go, wordlist-gen_test.go, README.md
 │   └── licenses/               # Release-time third-party licence notices
 ├── main.go                     # Entry point: calls internal/cli
 ├── action.yml                  # GitHub Action
