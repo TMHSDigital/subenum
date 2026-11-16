@@ -87,6 +87,9 @@ type scanViewModel struct {
 	records  bool
 	saving   bool
 	savePath string
+	// An existing destination needs a second Enter. Editing or closing the
+	// prompt clears this path so confirmation cannot apply to another save.
+	overwritePath string
 
 	// The permutation pass (#274). permute says one follows the main pass;
 	// main is the main pass's last event once it has finished, and perm the
@@ -279,6 +282,9 @@ func (m scanViewModel) filterHint() string {
 // it is open (#332).
 func (m scanViewModel) doneHint() string {
 	if m.saving {
+		if m.overwritePath != "" {
+			return m.hint("  file exists: enter overwrite  •  esc cancel  •  " + m.savePath + "█")
+		}
 		return m.hint("  save to: " + m.savePath + "█  (enter save  •  esc cancel)")
 	}
 	return m.hint("  r new scan  •  s save  •  q quit  •  " + m.filterHint())
@@ -287,6 +293,9 @@ func (m scanViewModel) doneHint() string {
 // handleSaveKey edits the save prompt's path. It reports whether the user
 // pressed enter to save; esc closes the prompt.
 func (m *scanViewModel) handleSaveKey(msg tea.KeyPressMsg) (save bool) {
+	if msg.Code != tea.KeyEnter {
+		m.overwritePath = ""
+	}
 	switch {
 	case msg.Code == tea.KeyEnter:
 		m.saving = false
