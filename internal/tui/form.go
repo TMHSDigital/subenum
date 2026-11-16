@@ -550,11 +550,14 @@ func (m *formModel) validate() (formValues, string) {
 
 	// The form only parses its text fields here; ranges and the resolver are
 	// checked by scan.Options.Validate, the same validator the CLI uses (#80).
-	num := func(f int, name string, blank int) int {
+	// Blank values use the same defaults as remembered().
+	num := func(f int, name string) int {
 		s := strings.TrimSpace(text(f))
-		if err != nil || s == "" {
-			keep(f, strconv.Itoa(blank))
-			return blank
+		if err != nil {
+			return 0
+		}
+		if s == "" {
+			s = formFields[f].def
 		}
 		n, perr := strconv.Atoi(s)
 		if perr != nil {
@@ -563,22 +566,22 @@ func (m *formModel) validate() (formValues, string) {
 		keep(f, strconv.Itoa(n))
 		return n
 	}
-	concurrency := num(fieldConcurrency, "Concurrency", 0)
-	timeout := num(fieldTimeout, "Timeout", 0)
-	attempts := num(fieldAttempts, "Attempts", 0)
+	concurrency := num(fieldConcurrency, "Concurrency")
+	timeout := num(fieldTimeout, "Timeout")
+	attempts := num(fieldAttempts, "Attempts")
 	// Hit rate only matters in simulation mode, and depth only when
 	// recursive is on; otherwise their fields must not block the scan.
 	hitRate := scan.DefaultHitRate
 	if m.shown(fieldHitRate) {
-		hitRate = num(fieldHitRate, "Hit rate", 0)
+		hitRate = num(fieldHitRate, "Hit rate")
 	}
 	depth := 1
 	if m.shown(fieldDepth) {
-		depth = num(fieldDepth, "Depth", 1)
+		depth = num(fieldDepth, "Depth")
 	}
-	rate := num(fieldRate, "Rate", 0)                    // blank means unlimited
-	maxQueries := num(fieldMaxQueries, "Max queries", 0) // blank means unlimited
-	ratePerResolver := num(fieldRatePerResolver, formFields[fieldRatePerResolver].name(), 0)
+	rate := num(fieldRate, "Rate")                    // blank means unlimited
+	maxQueries := num(fieldMaxQueries, "Max queries") // blank means unlimited
+	ratePerResolver := num(fieldRatePerResolver, formFields[fieldRatePerResolver].name())
 	var maxDuration time.Duration // blank means unlimited, as -max-duration 0
 	if s := strings.TrimSpace(text(fieldMaxDuration)); err == nil && s != "" {
 		var perr error
