@@ -32,6 +32,10 @@ L=examples/labs
 W="-w $L/words.txt"
 ```
 
+Labs run from the command line. Combining `-tui` with an active `-simulate-zone`
+setting (including `SUBENUM_SIMULATE_ZONE` or a config-file value) exits with
+usage error 2 before the interface opens. Remove `-tui` to run the lab.
+
 Each lab ends with questions. The answers are folded underneath; try first.
 
 ## Lab 1: a first scan

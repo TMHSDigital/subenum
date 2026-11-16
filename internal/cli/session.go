@@ -195,6 +195,11 @@ func (s *session) parse() (code int, done bool) {
 	// -tui counts only as a real flag, not as the value of another flag
 	// (-o -tui) or an argument after "--" (#58).
 	if f.tui {
+		// The form cannot represent lab zones; never discard a lab request.
+		if f.simZone != "" {
+			diag.Error("-tui cannot be combined with %s; run the lab without -tui", defaults.describe(fs, "simulate-zone"))
+			return exitUsage, true
+		}
 		return tui.Start(tuiOptions(f, fs, positionals, defaults, diag)), true
 	}
 
