@@ -720,10 +720,22 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			s.status[i] = report.StatusOK
 			return true
 		}
-		pass.resumeFrom, pass.resumeNames = saved.RootDone, s.targetResults.mainPassNames()
-		out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
+		if saved.MainDone {
+			out.Info("%s finished its main pass before the run stopped; %d results restored", target, len(saved.Results))
+		} else {
+			pass.resumeFrom, pass.resumeNames = saved.RootDone, s.targetResults.mainPassNames()
+			out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
+		}
 	}
-	res := s.mainPass(ctx, pass, mainSaved)
+	var res targetResult
+	if saved != nil && saved.MainDone {
+		// Scanning it again would re-expand every saved parent under
+		// -recursive, and a name it found anew would change the permutation
+		// candidates the saved position indexes (#358).
+		res = targetResult{done: true, final: mainSaved.event()}
+	} else {
+		res = s.mainPass(ctx, pass, mainSaved)
+	}
 	// -permute: a second pass over permutations of what was found (#72),
 	// skipped after an interrupt, a resolver abort or a spent time budget. Its seeds are the
 	// main pass's names only, so a resumed pass rebuilds the same

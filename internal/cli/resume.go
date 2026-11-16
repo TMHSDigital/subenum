@@ -44,8 +44,9 @@ type resumeState struct {
 
 type resumeTarget struct {
 	Domain    string          `json:"domain"`
-	Done      bool            `json:"done"`      // fully scanned before the interrupt
-	RootDone  int             `json:"root_done"` // wordlist entries settled, for the interrupted target
+	Done      bool            `json:"done"`                // fully scanned before the interrupt
+	RootDone  int             `json:"root_done"`           // wordlist entries settled, for the interrupted target
+	MainDone  bool            `json:"main_done,omitempty"` // only the -permute pass was left; not scanned again (#358)
 	Stats     scan.Stats      `json:"stats"`
 	Processed int64           `json:"processed"`
 	Total     int64           `json:"total"`
@@ -542,17 +543,20 @@ func saveResumeState(s *session) bool {
 		// completed before the interrupt, with nothing left by -max-duration.
 		t.Done = s.status[i] == report.StatusOK && res.done && !res.unfinished() &&
 			(res.permutation == nil || res.permutation.candidates == 0 || (res.permutation.pass.done && !res.permutation.pass.unfinished()))
+		// The -permute pass starts only once the main pass completed, so a
+		// target with one left resumes in it, without the main pass (#358).
+		t.MainDone = !t.Done && ((res.done && !res.unfinished() && res.permutation != nil) || (saved != nil && saved.MainDone))
 		switch {
 		case res.done:
 			final := res.final
-			if !t.Done {
+			if !t.Done && !t.MainDone {
 				// The resumed run scans the main pass again from RootDone,
 				// and re-expands every saved parent (#341).
 				final = withoutRepeat(final)
 			}
 			t.Stats, t.Processed, t.Total = final.Stats, final.Processed, final.Total
 			t.RootDone = int(final.Stats.RootDone)
-			if !t.Done {
+			if !t.Done && !t.MainDone {
 				t.Pending = savePending(final.Stats.Pending)
 			}
 		case saved != nil:

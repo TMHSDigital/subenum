@@ -1015,6 +1015,94 @@ func TestSaveResumeStateRecordsFinishedPermutePass(t *testing.T) {
 	}
 }
 
+// TestSaveResumeStateMarksFinishedMainPass covers #358: a target stopped in
+// its -permute pass is saved with its main pass finished, counted in full,
+// since the resumed run does not scan it again.
+func TestSaveResumeStateMarksFinishedMainPass(t *testing.T) {
+	main := scan.Event{Kind: scan.EventDone, Stats: scan.Stats{RootDone: 40, NXDomain: 30, Repeat: scan.Repeat{NXDomain: 10, Processed: 10}},
+		Processed: 40, Total: 40}
+	f := cliFlags{stateFile: filepath.Join(t.TempDir(), "state.json")}
+	saveResumeState(&session{
+		f: f, out: output.New(nil, false, output.FormatText),
+		targets:      []string{"a.example"},
+		status:       []report.Status{report.StatusInterrupted},
+		entryDigests: []string{"d1"},
+		results:      []targetResult{{done: true, final: main, permutation: &permutationResult{candidates: 12}}},
+		runs:         []resultLog{{}},
+	})
+	data, err := os.ReadFile(f.stateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st resumeState
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	got := st.Targets[0]
+	if got.Done || !got.MainDone {
+		t.Errorf("done %v, main_done %v; want only the main pass finished", got.Done, got.MainDone)
+	}
+	if got.Processed != 40 || got.Stats.NXDomain != 30 || got.RootDone != 40 {
+		t.Errorf("main pass saved as %d processed, %d NXDOMAIN, root_done %d; want it whole (40, 30, 40)", got.Processed, got.Stats.NXDomain, got.RootDone)
+	}
+}
+
+// TestE2EResumePermuteSkipsFinishedMainPass covers #358: resuming a
+// -recursive -permute scan stopped in its permutation pass does not scan the
+// finished main pass again, which would re-expand every saved parent, and
+// resumes in the same candidate list.
+func TestE2EResumePermuteSkipsFinishedMainPass(t *testing.T) {
+	t.Parallel()
+	words := "api\ndev\nwww\nmail\nshop\nblog\n"
+	wl := writeFile(t, "wl.txt", words)
+	args := []string{"-simulate", "-seed", "5", "-hit-rate", "50", "-progress=false", "-format", "jsonl",
+		"-permute", "-recursive", "-depth", "2", "-w", wl, "example.com"}
+	code, ref := runCLI(t, "", args...)
+	if code != 0 {
+		t.Fatalf("reference run: exit %d", code)
+	}
+	refResults, _ := jsonlRecords(t, ref)
+	// Leave one depth-2 name out of the saved main pass: re-expanding its
+	// saved parent would find it again.
+	var mainResults []output.Result
+	child := ""
+	for _, r := range refResults {
+		if r.Permutation {
+			continue
+		}
+		if child == "" && strings.Count(strings.TrimSuffix(r.Subdomain, ".example.com"), ".") == 1 {
+			child = r.Subdomain
+			continue
+		}
+		mainResults = append(mainResults, r)
+	}
+	if child == "" {
+		t.Fatal("reference run found no depth-2 name; adjust the seed")
+	}
+	entries, _, _ := wordlist.Build(strings.Split(words, "\n"), "example.com")
+	perms := candidatesFor("example.com", entries, mainPassNames(mainResults))
+	if len(perms) < 2 {
+		t.Fatalf("%d permutation candidates; adjust the seed", len(perms))
+	}
+	half := len(perms) / 2
+	stopped := resumeTarget{Domain: "example.com", MainDone: true, RootDone: len(entries), Processed: int64(len(entries)),
+		Results: mainResults, Permute: &resumePass{RootDone: half, Processed: int64(half)}}
+	path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{stopped}})
+	code, stdout, stderr := runCLIStreams(t, "-resume", path)
+	if code != 0 {
+		t.Fatalf("resume: exit %d\n%s", code, stderr)
+	}
+	if strings.Contains(stderr, "at wordlist entry") {
+		t.Errorf("the finished main pass was scanned again:\n%s", stderr)
+	}
+	if want := fmt.Sprintf("at candidate %d of %d", half, len(perms)); !strings.Contains(stderr, want) {
+		t.Errorf("permutation pass not resumed %q:\n%s", want, stderr)
+	}
+	if got, _ := jsonlRecords(t, stdout); resultNames(got)[child] {
+		t.Errorf("%s was looked up again by the main pass", child)
+	}
+}
+
 // TestE2EPermuteRecursive covers #111: -permute with -recursive runs the
 // permutation pass one level deep, so no name is built from a candidate
 // under another candidate and the pass is not refused.
