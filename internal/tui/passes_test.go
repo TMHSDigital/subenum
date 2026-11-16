@@ -309,6 +309,11 @@ func TestPermutationPassStates(t *testing.T) {
 	if m := update(start(nil), eventMsg{scan.Event{Kind: scan.EventError, Fatal: true, Message: "too many failures"}}, abortedDone); !m.scanView.done || !m.scanView.failed() {
 		t.Error("a main pass the reliability guard aborted was followed by a permutation pass")
 	}
+	expiredDone := mainDone
+	expiredDone.Stats.Expired, expiredDone.Stats.Skipped = true, 5
+	if m := update(start(nil), expiredDone); !m.scanView.done || m.scanView.main != nil || !m.final.Stats.Expired {
+		t.Error("a main pass stopped by its time budget was followed by a permutation pass")
+	}
 
 	// ctrl+c while the candidates are built: the pass does not start, and
 	// the scan ends as an interrupted one.
