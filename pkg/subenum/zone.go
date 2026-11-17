@@ -64,6 +64,9 @@ func probeZone(ctx context.Context, domain string, opts ZoneOptions, skip func(s
 		return ZoneInfo{}, fmt.Errorf("subenum: Timeout must not be negative, got %s", opts.Timeout)
 	}
 	resolver := orDefaultString(opts.Resolver, DefaultResolver)
+	if normalized, err := validate.NormalizeDNSServer(resolver); err == nil {
+		resolver = normalized
+	}
 	if err := validate.DNSServer(resolver); err != nil {
 		return ZoneInfo{}, fmt.Errorf("subenum: Resolver %s: %w", resolver, err)
 	}

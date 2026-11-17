@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
+	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
 const (
@@ -235,6 +236,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 		limiter = dns.NewAdjustableRateLimiter(cfg.Rate)
 	}
 	if cfg.Resolver == nil {
+		if normalized, err := validate.NormalizeDNSServer(cfg.DNSServer); err == nil {
+			cfg.DNSServer = normalized
+		}
 		cfg.Resolver = dns.NewResolver(cfg.Timeout, cfg.DNSServer)
 	}
 	// DoT and DoH connections kept for reuse are not held past the scan

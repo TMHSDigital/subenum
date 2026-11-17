@@ -222,7 +222,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", scan.DefaultConcurrency, "Number of concurrent workers")
 	fs.IntVar(&f.timeoutMs, "timeout", scan.DefaultTimeoutMs, "DNS lookup timeout in milliseconds")
-	fs.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server: ip:port (UDP, TCP fallback), tls://host[:853] (DNS over TLS) or https://host/path (DNS over HTTPS)")
+	fs.StringVar(&f.dnsServer, "dns-server", DefaultDNSServer, "DNS server: ip[:port] (UDP, TCP fallback), tls://host[:853] (DNS over TLS) or https://host/path (DNS over HTTPS)")
 	fs.BoolVar(&f.verbose, "v", false, "Enable verbose output")
 	fs.BoolVar(&f.showVersion, "version", false, "Show version information")
 	fs.BoolVar(&f.showProgress, "progress", true, "Show progress during scanning")
@@ -794,13 +794,17 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 	if p.flat {
 		recursive, depth = false, 1
 	}
+	dnsServer := f.dnsServer
+	if normalized, err := validate.NormalizeDNSServer(dnsServer); err == nil {
+		dnsServer = normalized
+	}
 	return scan.Options{
 		Config: scan.Config{
 			Domain:      p.domain,
 			Entries:     p.entries,
 			Concurrency: f.concurrency,
 			Timeout:     time.Duration(f.timeoutMs) * time.Millisecond,
-			DNSServer:   f.dnsServer,
+			DNSServer:   dnsServer,
 			Simulate:    f.testMode,
 			HitRate:     f.testHitRate,
 			Seed:        f.seed,
