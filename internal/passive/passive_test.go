@@ -194,6 +194,28 @@ func TestWaybackTransportError(t *testing.T) {
 	}
 }
 
+// TestWaybackStalledBody covers #409: a body that stalls past the timeout
+// keeps the names read before it, with a Truncated error.
+func TestWaybackStalledBody(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("http://a.example.com/\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	names, err := Wayback{BaseURL: srv.URL, Timeout: 200 * time.Millisecond}.Names(context.Background(), "example.com")
+	var tr *Truncated
+	if !errors.As(err, &tr) || tr.Source != "wayback" || !slices.Equal(names, []string{"a"}) {
+		t.Errorf("names %q, err %v; want [a] and a wayback Truncated error", names, err)
+	}
+}
+
 // FuzzHostNames: any answer parses without panicking, and every name it
 // gives is a valid entry under the domain (#259).
 func FuzzHostNames(f *testing.F) {

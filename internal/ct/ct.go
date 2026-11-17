@@ -87,6 +87,11 @@ func (c Client) Names(ctx context.Context, domain string) ([]string, error) {
 			// cut instead of losing them all (#251).
 			return sortedNames(set), fmt.Errorf("%w: the answer reached the %d MiB read limit", ErrTruncated, maxBody>>20)
 		}
+		if body.err != nil && len(set) > 0 {
+			// The body read failed midway (a timeout, a reset connection):
+			// keep the names parsed before the cut, as for the limit (#409).
+			return sortedNames(set), fmt.Errorf("%w: the answer was cut off: %v", ErrTruncated, body.err)
+		}
 		return nil, fmt.Errorf("certificate transparency lookup: reading %s's answer: %w", resp.Request.URL.Host, err)
 	}
 	return sortedNames(set), nil
@@ -124,6 +129,7 @@ type limitReader struct {
 	r   io.Reader
 	n   int64
 	hit bool
+	err error // a read error other than io.EOF, such as a timeout
 }
 
 func (l *limitReader) Read(p []byte) (int, error) {
@@ -136,6 +142,9 @@ func (l *limitReader) Read(p []byte) (int, error) {
 	}
 	n, err := l.r.Read(p)
 	l.n -= int64(n)
+	if err != nil && !errors.Is(err, io.EOF) {
+		l.err = err
+	}
 	return n, err
 }
 
