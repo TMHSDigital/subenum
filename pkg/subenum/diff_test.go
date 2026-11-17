@@ -48,6 +48,24 @@ func TestDiffTypes(t *testing.T) {
 	}
 }
 
+func TestDiffTypesCaseInsensitive(t *testing.T) {
+	prev := []subenum.Result{{Name: "a.example.com", Records: []subenum.Record{{Type: "A", Value: "192.0.2.1"}}}}
+	cur := []subenum.Result{{Name: "a.example.com", Records: []subenum.Record{{Type: "A", Value: "192.0.2.2"}}}}
+	for _, types := range [][]string{{"A"}, {"a"}, {" a "}} {
+		if got := subenum.Diff(prev, cur, types); len(got.Changed) != 1 {
+			t.Errorf("types %q: Changed = %+v, want a.example.com", types, got.Changed)
+		}
+	}
+}
+
+func TestDiffTXTCase(t *testing.T) {
+	prev := []subenum.Result{{Name: "t.example.com", Records: []subenum.Record{{Type: "TXT", Value: "token=AbC"}}}}
+	cur := []subenum.Result{{Name: "t.example.com", Records: []subenum.Record{{Type: "TXT", Value: "token=abc"}}}}
+	if got := subenum.Diff(prev, cur, []string{"TXT"}); len(got.Changed) != 1 {
+		t.Errorf("Changed = %+v, want t.example.com", got.Changed)
+	}
+}
+
 func TestDiffEmpty(t *testing.T) {
 	got := subenum.Diff(nil, nil, nil)
 	if got.Added != nil || got.Removed != nil || got.Changed != nil {
