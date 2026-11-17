@@ -171,7 +171,10 @@ runs:
           echo "Using the baseline an earlier step in this job saved."
           exit 0
         fi
-        run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME&per_page=1" \
+        # upload-artifact allows &, +, # and % in names. Encode the name so the
+        # query string cannot truncate or reinterpret it (#407).
+        encoded=$(jq -rn --arg n "$NAME" '$n|@uri')
+        run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$encoded&per_page=1" \
           --jq '.artifacts[0] | select(.expired == false) | .workflow_run.id // empty')
         if [ -n "$run" ]; then
           gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "$NAME" --dir "$dir"
@@ -240,7 +243,13 @@ runs:
         if [ "$resumed" = false ]; then
           subenum "${flags[@]}" "${extra[@]}" "${target[@]}" > "$out/changes.jsonl" || code=$?
         fi
-        if [ ! -s "$out/run.json" ]; then echo "::error::subenum exited $code without a report"; exit "$code"; fi
+        if [ ! -s "$out/run.json" ]; then
+          echo "::error::subenum exited $code without a report"
+          # -dry-run and -version exit 0 without writing a report; the step
+          # must still fail rather than pass on the previous use's outputs (#407).
+          [ "$code" -ne 0 ] || code=1
+          exit "$code"
+        fi
 
         verdict=$(jq -r .verdict "$out/run.json")
         reason=$(jq -r .reason "$out/run.json")
