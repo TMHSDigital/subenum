@@ -543,6 +543,9 @@ func (m *formModel) validate() (formValues, string) {
 	if dnsServer == "" {
 		dnsServer = validate.DefaultDNSServer
 	}
+	if normalized, err := validate.NormalizeDNSServer(dnsServer); err == nil {
+		dnsServer = normalized
+	}
 	resolvers := path(fieldResolvers)
 	if resolvers == wordlist.Stdin {
 		return formValues{}, "Resolver pool from standard input (-) is not supported in the TUI; enter a file path"

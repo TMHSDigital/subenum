@@ -12,13 +12,14 @@ func TestDNSServer(t *testing.T) {
 		"1.1.1.1:53",
 		"192.168.1.1:53",
 		"[2001:4860:4860::8888]:53",
+		"1.1.1.1",
+		"2606:4700:4700::1111",
 	}
 
 	invalidServers := []struct {
 		server string
 		reason string
 	}{
-		{"8.8.8.8", "missing port"},
 		{":53", "missing IP"},
 		{"localhost:53", "not a valid IP"},
 		{"256.1.1.1:53", "invalid IP octet"},

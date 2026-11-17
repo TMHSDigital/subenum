@@ -119,7 +119,7 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 	var allow, sources string
 	var timeoutMs int
 	fs.StringVar(&allow, "allow", "", "Comma-separated domains the scan tool may enumerate, each with its subdomains. Without it only lab_scan, explain_stats and diff are offered")
-	fs.StringVar(&cfg.dnsServer, "dns-server", DefaultDNSServer, "Resolver for live scans: ip:port, tls://host or https://host/path")
+	fs.StringVar(&cfg.dnsServer, "dns-server", DefaultDNSServer, "Resolver for live scans: ip[:port], tls://host or https://host/path")
 	fs.IntVar(&cfg.maxQueries, "max-queries", defaultMCPMaxQueries, "Most candidate names one tool call may test; a call can ask for fewer")
 	fs.IntVar(&cfg.rate, "rate", defaultMCPRate, "DNS queries per second for live scans")
 	fs.DurationVar(&cfg.maxDuration, "max-duration", defaultMCPMaxDuration, "Longest one tool call may scan")
@@ -165,6 +165,9 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 		return fail("-max-calls must be at least 1, got %d", cfg.maxCalls)
 	}
 	cfg.timeout = time.Duration(timeoutMs) * time.Millisecond
+	if normalized, err := validate.NormalizeDNSServer(cfg.dnsServer); err == nil {
+		cfg.dnsServer = normalized
+	}
 	if err := validate.DNSServer(cfg.dnsServer); err != nil {
 		return fail("-dns-server: %v", err)
 	}

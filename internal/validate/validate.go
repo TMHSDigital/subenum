@@ -38,13 +38,44 @@ var (
 	tldRegex   = regexp.MustCompile(`^([a-zA-Z]{2,}|xn--[a-zA-Z0-9-]{1,59})$`)
 )
 
+// NormalizeDNSServer returns server with a default port of 53 appended when it
+// is a bare IPv4 or IPv6 literal, so `-dns-server 1.1.1.1` works the way it
+// does for `-r` files and for dig/dnsx. Bracketed IPv6 literals are handled
+// without double-bracketing. Already-complete addresses, tls:// and https://
+// values, and anything else are returned unchanged.
+func NormalizeDNSServer(server string) (string, error) {
+	s := strings.TrimSpace(server)
+	if s == "" {
+		return s, fmt.Errorf("empty DNS server")
+	}
+	if strings.HasPrefix(s, "tls://") || strings.HasPrefix(s, "https://") || strings.Contains(s, "://") {
+		return s, nil
+	}
+	if _, _, err := net.SplitHostPort(s); err == nil {
+		return s, nil
+	}
+	host := s
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		host = s[1 : len(s)-1]
+	}
+	if net.ParseIP(host) != nil {
+		return net.JoinHostPort(host, "53"), nil
+	}
+	return s, fmt.Errorf("expected ip[:port], got %q", s)
+}
+
 // DNSServer checks that server is a valid ip:port address with an IP host and a
-// port in the range 1-65535.
+// port in the range 1-65535. A bare IPv4 or IPv6 literal is accepted and
+// treated as port 53.
 //
 // Encrypted transports are written as URLs (#86): tls://host[:port] for DNS
 // over TLS (port 853 by default) and https://host/path for DNS over HTTPS.
 // Their host may be a name, which is resolved with the system resolver.
 func DNSServer(server string) error {
+	normalized, err := NormalizeDNSServer(server)
+	if err == nil {
+		server = normalized
+	}
 	switch {
 	case strings.HasPrefix(server, "tls://"):
 		hostport, host, err := DoTAddress(server)
@@ -67,7 +98,7 @@ func DNSServer(server string) error {
 	}
 	host, portStr, err := net.SplitHostPort(server)
 	if err != nil {
-		return fmt.Errorf("invalid format, expected ip:port (e.g., %s), tls://host or https://host/path: %w", DefaultDNSServer, err)
+		return fmt.Errorf("invalid format, expected ip[:port] (e.g., %s), tls://host or https://host/path: %w", DefaultDNSServer, err)
 	}
 	if net.ParseIP(host) == nil {
 		return fmt.Errorf("invalid IP address: %s", host)

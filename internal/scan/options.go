@@ -88,7 +88,11 @@ func (o Options) Validate() error {
 		return fmt.Errorf("rate per resolver ({rate_per_resolver}) must be 0 (unlimited) or a positive integer, got %d", o.RatePerResolver)
 	}
 	if !o.Simulate {
-		if err := validate.DNSServer(o.DNSServer); err != nil {
+		server := o.DNSServer
+		if normalized, err := validate.NormalizeDNSServer(server); err == nil {
+			server = normalized
+		}
+		if err := validate.DNSServer(server); err != nil {
 			return fmt.Errorf("DNS server %s: %w", o.DNSServer, err)
 		}
 	}

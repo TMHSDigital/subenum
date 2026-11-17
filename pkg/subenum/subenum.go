@@ -634,6 +634,9 @@ func (c Config) options() (scan.Options, error) {
 	}
 
 	resolver := orDefaultString(c.Resolver, DefaultResolver)
+	if normalized, err := validate.NormalizeDNSServer(resolver); err == nil {
+		resolver = normalized
+	}
 	if !c.Simulate {
 		if err := validate.DNSServer(resolver); err != nil {
 			return scan.Options{}, fmt.Errorf("subenum: Resolver %s: %w", resolver, err)
