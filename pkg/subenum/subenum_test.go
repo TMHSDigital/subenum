@@ -504,12 +504,14 @@ func TestMaxDuration(t *testing.T) {
 // internal/libhook with the list turned off, which keeps none (#367).
 func TestInconclusiveListOff(t *testing.T) {
 	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
-		if strings.HasPrefix(q.Name, "bad") {
+		// "bad-", not "bad": the wildcard probe's random hex label can start
+		// with "bad", and refusing it fails the scan.
+		if strings.HasPrefix(q.Name, "bad-") {
 			return dnstest.Refused
 		}
 		return dnstest.NXDomain
 	})
-	cfg := subenum.Config{Domain: "lab.example", Words: []string{"bad1", "ok", "bad2"}, Resolver: srv.Addr,
+	cfg := subenum.Config{Domain: "lab.example", Words: []string{"bad-1", "ok", "bad-2"}, Resolver: srv.Addr,
 		Timeout: 10 * time.Second, Attempts: 1}
 	_, stats, err := subenum.Scan(context.Background(), cfg)
 	if err != nil || len(stats.Inconclusive) != 2 {
