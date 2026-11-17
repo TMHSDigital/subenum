@@ -36,6 +36,8 @@ action:
   - resumed
 # pkg/subenum identifiers
 library:
+  - Config.Validate
+  - ErrNoWords
   - AutoRate
   - Diff
   - Internal
