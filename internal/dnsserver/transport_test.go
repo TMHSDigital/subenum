@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -229,8 +230,10 @@ func TestDoHHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer srv.Close()
+	dropped := make(chan struct{})
 	ts := httptest.NewUnstartedServer(srv.DoHHandler(func(q Query) Reply {
 		if q.Name == "dropped.example.com" {
+			close(dropped)
 			return Dropped
 		}
 		if !q.TCP {
@@ -277,23 +280,85 @@ func TestDoHHandler(t *testing.T) {
 	}
 
 	t.Run("dropped", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL, bytes.NewReader(query(t, "dropped.example.com.")))
 		if err != nil {
 			t.Fatal(err)
 		}
 		req.Header.Set("Content-Type", "application/dns-message")
-		resp, err := client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			t.Fatalf("dropped DoH query answered with status %d; want the request held until the client gives up", resp.StatusCode)
+		type result struct {
+			resp *http.Response
+			err  error
+		}
+		done := make(chan result, 1)
+		go func() {
+			resp, err := client.Do(req)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			done <- result{resp, err}
+		}()
+		// Wait for the query to reach the handler before canceling it. A short
+		// client deadline could expire before delivery on a loaded runner.
+		select {
+		case <-dropped:
+		case <-ctx.Done():
+			t.Fatal("dropped query never reached the handler")
+		}
+		select {
+		case got := <-done:
+			t.Fatalf("dropped request completed before cancellation: response=%v, error=%v", got.resp, got.err)
+		case <-time.After(10 * time.Millisecond):
+		}
+		cancel()
+		select {
+		case got := <-done:
+			if got.resp != nil || !errors.Is(got.err, context.Canceled) {
+				t.Fatalf("dropped request: response=%v, error=%v; want only context.Canceled", got.resp, got.err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("dropped request did not stop after cancellation")
 		}
 	})
 
 	// Only the well-formed POSTs reached the handler.
 	if got := srv.Queries(); got != 2 {
 		t.Errorf("Queries() = %d, want 2 (answered + dropped POST)", got)
+	}
+}
+
+// A canceled server context can be observed before the client gives up. The
+// dropped request must still receive no HTTP response, not an implicit 200.
+func TestDoHHandlerCanceledServerContext(t *testing.T) {
+	var srv Server
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		srv.DoHHandler(func(Query) Reply {
+			cancel()
+			return Dropped
+		}).ServeHTTP(w, r.WithContext(ctx))
+	}))
+	ts.StartTLS()
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL, bytes.NewReader(query(t, "dropped.example.com.")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/dns-message")
+	resp, err := ts.Client().Do(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+		t.Fatalf("dropped request answered with status %d after server cancellation", resp.StatusCode)
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("request error = %v, want EOF without a response", err)
+	}
+	if got := srv.Queries(); got != 1 {
+		t.Errorf("Queries() = %d, want 1", got)
 	}
 }
 
