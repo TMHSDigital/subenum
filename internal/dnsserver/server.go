@@ -383,7 +383,9 @@ func (s *Server) DoHHandler(h Handler) http.Handler {
 		if resp == nil {
 			// A dropped query: hold the request until the client gives up.
 			<-r.Context().Done()
-			return
+			// Returning would let net/http send an implicit 200 if the server
+			// sees cancellation first. Abort without writing any response.
+			panic(http.ErrAbortHandler)
 		}
 		w.Header().Set("Content-Type", "application/dns-message")
 		_, _ = w.Write(resp)
