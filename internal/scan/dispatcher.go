@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -279,16 +280,19 @@ func (d *dispatcher) settle(i int) {
 // counted as they would have been, not as skipped, so a budget that ran out
 // only past them still leaves the verdict complete (#238). Without
 // exclusions a cap stays O(1), and with them no candidate is built (see
-// countUnbuilt). Multi-label entries need every remaining candidate walked:
-// countUnbuilt cannot place them under a pattern (#361), and a visited set
-// must drop the names generated twice (#301), so each walked name that could
-// repeat joins it and is counted once.
+// countUnbuilt). Multi-label entries with exclusions need every remaining
+// candidate walked: countUnbuilt cannot place them under a pattern (#361),
+// and a visited set must drop the names generated twice (#301), so each
+// walked name that could repeat joins it and is counted once. Without
+// exclusions only the entries that can begin a repeat are walked (#365).
 func (d *dispatcher) stopAdmitting() {
 	switch {
 	case d.visited == nil && d.cfg.scope.empty():
 		d.skipped += d.remaining
 	case !d.multiLabel:
 		d.countUnbuilt()
+	case d.cfg.scope.empty():
+		d.countUnbuiltRepeats()
 	default:
 		for _, e := range d.frontier[d.head:] {
 			for i := e.next; i < d.n; i++ {
@@ -348,6 +352,43 @@ func (d *dispatcher) countUnbuilt() {
 		}
 		d.excluded += out
 		d.skipped += left - out
+	}
+}
+
+// countUnbuiltRepeats counts the candidates not yet generated as skipped, for
+// a recursive scan with multi-label entries and no exclusions, dropping the
+// names its visited set says are repeats (#365). Only a name some multi-label
+// entry begins can repeat (see collidable), and such a name's entry is either
+// that multi-label entry, or a label prefix of it ("a" of "a.b") with the
+// rest of it starting the parent. So only the entries that are a multi-label
+// entry or a label prefix of one are walked, per queued expansion, and the
+// rest are counted without being built.
+func (d *dispatcher) countUnbuiltRepeats() {
+	prefixes := make(map[string]struct{})
+	for m := range d.multi {
+		prefixes[m] = struct{}{}
+		for i := 0; i < len(m); i++ {
+			if m[i] == '.' {
+				prefixes[m[:i]] = struct{}{}
+			}
+		}
+	}
+	var walk []int // indexes of those entries, ascending
+	for i, entry := range d.cfg.Entries {
+		if _, ok := prefixes[entry]; ok {
+			walk = append(walk, i)
+		}
+	}
+	for _, e := range d.frontier[d.head:] {
+		repeats := 0
+		first, _ := slices.BinarySearch(walk, e.next)
+		for _, i := range walk[first:] {
+			entry := d.cfg.Entries[i]
+			if !d.firstVisit(entry, entry+"."+e.parent, e.depth) {
+				repeats++
+			}
+		}
+		d.skipped += d.n - e.next - repeats
 	}
 }
 

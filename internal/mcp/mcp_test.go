@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -338,6 +339,52 @@ func TestDuplicateInFlightIDIsRefused(t *testing.T) {
 	send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}`)
 	if m := recv(); m["id"] != float64(1) || m["result"] == nil {
 		t.Errorf("the first request could not be cancelled: %v", m)
+	}
+}
+
+// TestPendingToolCallsAreBounded covers #365: while one tool call runs, at
+// most maxPendingCalls are held in all; the next is refused at once, and
+// ping and cancellation still work.
+func TestPendingToolCallsAreBounded(t *testing.T) {
+	started := make(chan struct{}, 2*maxPendingCalls)
+	block := Tool{
+		Name:        "block",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Call: func(ctx context.Context, _ json.RawMessage) Result {
+			started <- struct{}{}
+			<-ctx.Done()
+			return Result{Text: "stopped"}
+		},
+	}
+	send, recv, _ := serve(t, &Server{Tools: []Tool{block}})
+	call := func(id int) {
+		send(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"block","arguments":{"pad":%q}}}`, id, strings.Repeat("x", 1024)))
+	}
+	call(1)
+	<-started
+	for id := 2; id <= maxPendingCalls+1; id++ {
+		call(id)
+	}
+	m := recv()
+	if e, ok := m["error"].(map[string]any); !ok || m["id"] != float64(maxPendingCalls+1) || e["code"] != float64(codeInvalidRequest) {
+		t.Fatalf("call %d past the bound: %v, want an invalid-request error", maxPendingCalls+1, m)
+	}
+	send(`{"jsonrpc":"2.0","id":"p","method":"ping"}`)
+	if m := recv(); m["id"] != "p" {
+		t.Fatalf("ping with the queue full: %v", m)
+	}
+	for id := 1; id <= maxPendingCalls; id++ {
+		send(fmt.Sprintf(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":%d}}`, id))
+		if m := recv(); m["result"] == nil {
+			t.Fatalf("cancelled call: %v", m)
+		}
+	}
+	// The slots are free again.
+	call(100)
+	<-started
+	send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":100}}`)
+	if m := recv(); m["id"] != float64(100) {
+		t.Fatalf("call after the queue drained: %v", m)
 	}
 }
 

@@ -166,6 +166,71 @@ func BenchmarkDispatcherRecursiveDotted(b *testing.B) {
 	b.ReportMetric(float64(len(d.visited)), "visited")
 }
 
+// TestCapCountsRepeatsWithoutWalking covers #365: with no exclusions, a
+// budget in a recursive scan with multi-label entries walks only the entries
+// that can begin a repeat, and still counts every name the scan with no
+// budget would generate exactly once, whichever job the budget stops at.
+func TestCapCountsRepeatsWithoutWalking(t *testing.T) {
+	entries := []string{"a", "b", "c", "a.b", "x", "b.c", "x.a.b", "c.a", "y"}
+	parents := []string{"b.example.com", "c.example.com", "a.b.example.com", "b.c.example.com", "a.example.com"}
+	run := func(maxQueries int) (admitted int, d *dispatcher) {
+		d = testDispatcher(Config{Entries: entries, Recursive: true, MaxQueries: maxQueries}, 3)
+		if _, ok := d.next(); !ok {
+			t.Fatal("no job")
+		}
+		for _, p := range parents {
+			d.expand(job{domain: p, depth: strings.Count(p, ".") - 1})
+		}
+		return 1 + len(drain(d)), d
+	}
+	candidates, all := run(0)
+	if all.skipped != 0 || candidates >= len(entries)*(len(parents)+1) {
+		t.Fatalf("uncapped: %d candidates, skipped %d; want some repeats dropped and none skipped", candidates, all.skipped)
+	}
+	for limit := 1; limit < candidates; limit++ {
+		admitted, d := run(limit)
+		if admitted != limit || !d.capped {
+			t.Fatalf("cap %d: admitted %d capped %v", limit, admitted, d.capped)
+		}
+		if admitted+d.skipped != candidates {
+			t.Errorf("cap %d: admitted %d + skipped %d = %d, want %d", limit, admitted, d.skipped, admitted+d.skipped, candidates)
+		}
+	}
+
+	// The remainder is not built: 10,000 entries under 50 parents cost a few
+	// hundred allocations, not one per candidate.
+	big := append(makeEntries(10_000), "dev.api")
+	allocs := testing.AllocsPerRun(3, func() {
+		d := testDispatcher(Config{Entries: big, Recursive: true, MaxQueries: 1}, 2)
+		d.next()
+		for i := range 50 {
+			d.expand(job{domain: big[i] + ".example.com", depth: 1})
+		}
+		d.next()
+	})
+	if allocs > 5000 {
+		t.Errorf("a capped scan of 500,000 candidates made %.0f allocations, want under 5000", allocs)
+	}
+}
+
+// BenchmarkCapRecursiveDotted measures a budget reached in a recursive scan
+// whose 100,000 entries include one with a dot, with 200 found parents
+// queued (#365): 20 million candidates to count.
+func BenchmarkCapRecursiveDotted(b *testing.B) {
+	entries := append(makeEntries(100_000), "dev.api")
+	b.ReportAllocs()
+	for b.Loop() {
+		d := testDispatcher(Config{Entries: entries, Recursive: true, MaxQueries: 1}, 2)
+		d.next()
+		for i := range 200 {
+			d.expand(job{domain: entries[i] + ".example.com", depth: 1})
+		}
+		if _, ok := d.next(); ok || !d.capped {
+			b.Fatal("the budget did not stop admission")
+		}
+	}
+}
+
 // Jobs settle as they complete, in any order, and the watermark is the first
 // entry not yet done.
 func TestDispatcherSettlesOutOfOrder(t *testing.T) {

@@ -29,6 +29,12 @@ var supportedVersions = []string{ProtocolVersion, "2025-03-26", "2024-11-05"}
 // file as an argument, and diff two results files, so it is generous.
 const maxMessage = 16 << 20
 
+// maxPendingCalls bounds the tool calls one session holds, running or
+// waiting, so a client pipelining large calls cannot hold maxMessage bytes
+// for each of an unbounded queue (#365). Other requests are not counted, so
+// ping and notifications/cancelled still work when it is full.
+const maxPendingCalls = 8
+
 // JSON-RPC error codes.
 const (
 	codeParse          = -32700
@@ -114,6 +120,9 @@ type session struct {
 	// calls runs one tool call at a time, so a client cannot multiply the
 	// operator's query budget by calling in parallel.
 	calls chan struct{}
+	// pending bounds the tool calls running or waiting for calls, each of
+	// which holds its arguments, up to maxMessage, in memory (#365).
+	pending chan struct{}
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // in-flight requests by ID
@@ -129,7 +138,11 @@ type session struct {
 func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	ss := &session{srv: s, w: w, stop: cancel, calls: make(chan struct{}, 1), cancels: map[string]context.CancelFunc{}}
+	ss := &session{
+		srv: s, w: w, stop: cancel,
+		calls: make(chan struct{}, 1), pending: make(chan struct{}, maxPendingCalls),
+		cancels: map[string]context.CancelFunc{},
+	}
 	// When input ends, finish what was asked, for clients that send their
 	// requests and close stdin; ctx, or a client that stopped reading, stops
 	// it sooner.
@@ -241,11 +254,26 @@ func (ss *session) dispatch(ctx context.Context, line []byte) {
 		ss.reply(req.ID, nil, &rpcError{codeInvalidRequest, "a request with this id is still in progress"})
 		return
 	}
+	toolCall := req.Method == "tools/call"
+	if toolCall {
+		select {
+		case ss.pending <- struct{}{}:
+		default:
+			ss.mu.Unlock()
+			// Tool calls run one at a time; a client that queues more than
+			// this many is refused rather than held in memory (#365).
+			ss.reply(req.ID, nil, &rpcError{codeInvalidRequest, fmt.Sprintf("too many tool calls pending: at most %d may run or wait at once", maxPendingCalls)})
+			return
+		}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	ss.cancels[key] = cancel
 	ss.mu.Unlock()
 	ss.wg.Go(func() {
 		defer func() {
+			if toolCall {
+				<-ss.pending
+			}
 			ss.mu.Lock()
 			delete(ss.cancels, key)
 			ss.mu.Unlock()

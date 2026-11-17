@@ -22,7 +22,8 @@ safety. The model chooses only what to scan within those limits.
 | The most names one call may test (`-max-queries`) and its time budget (`-max-duration`) | For lab scans only: the scenario, a rate, and `force` |
 
 Tool calls run one at a time, so a model cannot multiply the budget by calling
-in parallel, and arguments the tools do not define (a resolver, say) are
+in parallel; at most 8 may be running or waiting at once, and the next is
+refused with an invalid-request error until one finishes. Arguments the tools do not define (a resolver, say) are
 refused rather than ignored. A client that sends a `progressToken` with a
 `scan` or `lab_scan` call gets a progress notification about once a second
 (`312/1000 tested, 4 found`), and can cancel the call at any time.

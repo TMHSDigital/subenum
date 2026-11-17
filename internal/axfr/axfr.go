@@ -6,9 +6,11 @@ package axfr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
@@ -106,8 +108,9 @@ func Try(ctx context.Context, target string, o Options) Result {
 		servers = servers[:MaxServers]
 	}
 
-	names := map[string]struct{}{}
-	transferTimeout := max(MinTimeout, o.Timeout)
+	// Resolve the servers, and probe the denial at the first address that
+	// answers, in order.
+	var attempts []*attempt
 	for _, ns := range servers {
 		host := strings.ToLower(strings.TrimSuffix(ns.Host, "."))
 		if o.Skip != nil && o.Skip(host) {
@@ -125,31 +128,40 @@ func Try(ctx context.Context, target string, o Options) Result {
 		if len(addrs) > AddrsPerServer {
 			addrs = addrs[:AddrsPerServer]
 		}
-		for _, addr := range addrs {
-			if ctx.Err() != nil {
-				return res
+		attempts = append(attempts, &attempt{host: host, addrs: addrs})
+	}
+	for _, a := range attempts {
+		for _, addr := range a.addrs {
+			if res.Denial != "" || ctx.Err() != nil {
+				break
 			}
-			if res.Denial == "" {
-				res.Queries++
-				res.Denial = probeDenial(ctx, o, host, addr, target)
-			}
-			res.Tried++
 			res.Queries++
-			got, err := dns.Transfer(ctx, net.JoinHostPort(addr, o.Port), target, transferTimeout)
-			if err != nil {
-				if errors.Is(err, dns.ErrTransferRefused) {
-					logf(o.Debug, "-axfr: %s (%s): %v", host, addr, err)
-				} else {
-					logf(o.Info, "-axfr: %s (%s): %v", host, addr, err)
-				}
-				continue
-			}
-			res.Allowed = append(res.Allowed, host)
-			for _, n := range got {
+			res.Denial = probeDenial(ctx, o, a.host, addr, target)
+		}
+	}
+
+	// Ask every server at once (#365): one that silently drops TCP/53 costs
+	// a whole transfer timeout, and asking them in turn added those up. Each
+	// server's addresses are still tried in order, and what each reports is
+	// printed in server order once all are done.
+	transferTimeout := max(MinTimeout, o.Timeout)
+	var wg sync.WaitGroup
+	for _, a := range attempts {
+		wg.Go(func() { a.transfer(ctx, o, target, transferTimeout) })
+	}
+	wg.Wait()
+	names := map[string]struct{}{}
+	for _, a := range attempts {
+		for _, l := range a.logs {
+			logf(l.f, "%s", l.msg)
+		}
+		res.Tried += a.tried
+		res.Queries += int64(a.tried)
+		if a.allowed {
+			res.Allowed = append(res.Allowed, a.host)
+			for _, n := range a.got {
 				names[strings.TrimSuffix(n, "."+target)] = struct{}{}
 			}
-			logf(o.Info, "Zone transfer: %s (%s) allowed AXFR of %s: %d names. Anyone can list this zone; restrict transfers to your secondaries.", host, addr, target, len(got))
-			break // one address of a server is enough
 		}
 	}
 	for n := range names {
@@ -157,4 +169,50 @@ func Try(ctx context.Context, target string, o Options) Result {
 	}
 	sort.Strings(res.Names)
 	return res
+}
+
+// attempt is one name server's zone transfer, run beside the others.
+type attempt struct {
+	host  string
+	addrs []string
+
+	tried   int // addresses asked
+	allowed bool
+	got     []string // the zone, when an address allowed the transfer
+	logs    []logLine
+}
+
+// logLine is a message held until every transfer is done, so they print in
+// server order.
+type logLine struct {
+	f   func(string, ...any)
+	msg string
+}
+
+func (a *attempt) logf(f func(string, ...any), format string, args ...any) {
+	if f != nil {
+		a.logs = append(a.logs, logLine{f, fmt.Sprintf(format, args...)})
+	}
+}
+
+// transfer asks a's addresses in turn until one allows the transfer.
+func (a *attempt) transfer(ctx context.Context, o Options, target string, timeout time.Duration) {
+	for _, addr := range a.addrs {
+		if ctx.Err() != nil {
+			return
+		}
+		a.tried++
+		got, err := dns.Transfer(ctx, net.JoinHostPort(addr, o.Port), target, timeout)
+		if err != nil {
+			if errors.Is(err, dns.ErrTransferRefused) {
+				a.logf(o.Debug, "-axfr: %s (%s): %v", a.host, addr, err)
+			} else {
+				a.logf(o.Info, "-axfr: %s (%s): %v", a.host, addr, err)
+			}
+			continue
+		}
+		a.allowed, a.got = true, got
+		a.logf(o.Info, "Zone transfer: %s (%s) allowed AXFR of %s: %d names. Anyone can list this zone; restrict transfers to your secondaries.", a.host, addr, target, len(got))
+		return // one address of a server is enough
+	}
 }
