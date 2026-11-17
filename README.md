@@ -13,8 +13,10 @@
 
 ### Fast, concurrent subdomain enumeration that tells you how far to trust the result.
 
-Point it at a domain; it brute-forces DNS across a worker pool, accounts for every query, and prints the subdomains that resolve.<br>
-Built for pentesters, bug-bounty hunters, and operators doing authorized reconnaissance of their own infrastructure.
+Point it at a domain. It brute-forces DNS across a worker pool and tells you which names resolve.<br>
+<sub>Built for pentesters, bug-bounty hunters, and operators doing authorized reconnaissance of their own infrastructure.</sub>
+
+<img src="docs/assets/highlights.svg" alt="Every query accounted for: each lookup classified, with a verdict CI can gate on (-stats). Wildcards fingerprinted, not reported: rotating CDN pools too, wildcard branches skipped (-force). A rate limit that holds on the wire: retries, record types and probes all count (-rate). Resolvers that cannot lie to you: every hit re-checked, resolvers hiding names benched (-r)." width="860"/>
 
 <img src="docs/assets/demo.svg" alt="subenum in a terminal: lab 1 lists six hosts with their records and flags blog.lab.example as a dangling CNAME takeover candidate; lab 2 detects a wildcard zone, and with -force keeps only the three real hosts" width="860"/>
 
