@@ -135,6 +135,8 @@ These queries go to the domain's own name servers, not to `Resolver`, and they a
 | `Simulate`, `HitRate`, `Seed` | off, `15`, random | Synthetic results with no DNS traffic, for tests and demos. |
 | `Verbose`, `Logf` | off, stderr | Log every lookup. Lines go to `Logf`, or to standard error when it is nil. |
 
+`cfg.Validate()`{% include unreleased.html library="Config.Validate" %} returns the configuration error `Run` would return without starting a scan or sending queries. Call it before `Run` or `Scan` when a form or pipeline needs to check a `Config` first. If the word list has no usable entries, the error matches `ErrNoWords`{% include unreleased.html library="ErrNoWords" %}; use `errors.Is(err, subenum.ErrNoWords)` to identify that case.
+
 ## Accounting
 
 `Stats` puts each candidate name into exactly one outcome: `Found`, `NXDomain`, `Timeout`, `Refused`, `Other` or `WildcardFiltered`. Alongside are `QueriesSent`, `Skipped` (left untested by `MaxQueries` or `MaxDuration`, with `Expired` set for the latter), `Excluded`, the result counters `Takeover` and `Internal`, and the resolver-pool counters `PoolHits`, `Confirmed` and `Unconfirmed`. `Aborted` means the reliability guard stopped the scan, so the negatives mean nothing. `Wildcard` and `WildcardFingerprint` describe a wildcard zone. `RetryInconclusive` fills `Retried`, `Recovered` and `Inconclusive` (the names still without an answer), and `AutoRate` fills `RateBackoffs` and `FinalRate`. `Total()` sums the outcomes. `Verdict(interrupted)`{% include unreleased.html library="Verdict" %} applies the CLI run-quality report's rules: `VerdictComplete`, `VerdictDegraded` or `VerdictUnreliable`, with the reason in plain words (naming `Config` fields such as `MaxQueries`).
