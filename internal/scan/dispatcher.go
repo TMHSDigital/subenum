@@ -465,7 +465,14 @@ func (d *dispatcher) expand(parent job) {
 	case d.cfg.scope.subtreeExcluded(parent.domain):
 		d.excluded += d.n
 	case d.capped:
-		d.skipped += d.n
+		// A parent found after the budget stopped admission: queue it and
+		// stop admission again, so its children are counted as the queued
+		// remainder is (#393): children -exclude rules out are excluded,
+		// not skipped, and children the visited set would drop are not
+		// counted twice.
+		d.frontier = append(d.frontier, expansion{parent: parent.domain, depth: parent.depth + 1})
+		d.remaining += d.n
+		d.stopAdmitting()
 	default:
 		d.frontier = append(d.frontier, expansion{parent: parent.domain, depth: parent.depth + 1})
 		d.remaining += d.n
