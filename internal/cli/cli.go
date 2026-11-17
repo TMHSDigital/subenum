@@ -602,20 +602,30 @@ func parseOutputs(specs []string, def output.Format) ([]outputTarget, error) {
 	return targets, nil
 }
 
-// checkOutputFiles refuses an -inconclusive, -stats or -sarif file that is
-// also an -o file or another of them: the last one written would replace the
-// others (#378).
+// checkOutputFiles refuses two outputs that name the same file: the last one
+// written would replace the others (#378, #395). -state is compared with every
+// output so an interrupted run cannot lose its resume state. -diff is compared
+// with the other non--o reports, but -o X -diff X is allowed (#297).
 func checkOutputFiles(f cliFlags, outputs []outputTarget) error {
 	type named struct{ flag, path string }
 	var files []named
 	for _, t := range outputs {
 		files = append(files, named{"-o", t.path})
 	}
-	for _, n := range []named{{"-inconclusive", f.inconFile}, {"-stats", f.statsFile}, {"-sarif", f.sarifFile}} {
+	for _, n := range []named{
+		{"-state", f.stateFile},
+		{"-inconclusive", f.inconFile},
+		{"-stats", f.statsFile},
+		{"-sarif", f.sarifFile},
+		{"-diff", f.diff},
+	} {
 		if n.path == "" {
 			continue
 		}
 		for _, prev := range files {
+			if n.flag == "-diff" && prev.flag == "-o" {
+				continue
+			}
 			if samePath(prev.path, n.path) {
 				return fmt.Errorf("%s %s and %s %s name the same file; give each its own", prev.flag, prev.path, n.flag, n.path)
 			}

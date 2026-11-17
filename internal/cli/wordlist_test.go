@@ -113,6 +113,10 @@ func TestOutputFilesSameFile(t *testing.T) {
 		"-o and -stats":                 {"-o", abs, "-stats", rel},
 		"-o and -sarif":                 {"-o", abs, "-sarif", abs},
 		"-stats and -inconclusive":      {"-stats", abs, "-inconclusive", rel},
+		"-state and -o":                 {"-state", abs, "-o", "text:" + rel},
+		"-state and -stats":             {"-state", abs, "-stats", rel},
+		"-state and -diff":              {"-state", abs, "-diff", rel},
+		"-diff and -stats":              {"-diff", abs, "-stats", rel},
 	}
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		cases["-o twice, another case"] = []string{"-o", abs, "-o", "jsonl:" + strings.ToUpper(abs)}
