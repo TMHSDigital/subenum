@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -175,6 +176,43 @@ func TestLoadSavedConfigMissing(t *testing.T) {
 	redirectConfig(t)
 	if _, ok := loadSavedConfig(); ok {
 		t.Error("expected ok=false when no config file exists")
+	}
+}
+
+func TestLoadSavedConfigCorrupt(t *testing.T) {
+	for name, data := range map[string]string{
+		"truncated":          `{"domain":`,
+		"invalid field type": `{"domain":"saved.example.com","concurrency":"many"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			redirectConfig(t)
+			p, err := configPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if sc, ok := loadSavedConfig(); ok || sc != (savedConfig{}) {
+				t.Fatalf("loadSavedConfig = %+v, %v; want empty config, false", sc, ok)
+			}
+			m := New(Options{})
+			if m.state != stateForm {
+				t.Fatalf("startup state = %v, want form", m.state)
+			}
+			defaults := newFormModel(savedConfig{})
+			for f, spec := range formFields {
+				if got, want := m.form.inputs[f].Value(), defaults.inputs[f].Value(); got != want {
+					t.Errorf("%s = %q, want default %q", spec.name(), got, want)
+				}
+				if m.form.toggles[f] != defaults.toggles[f] {
+					t.Errorf("%s = %v, want default %v", spec.name(), m.form.toggles[f], defaults.toggles[f])
+				}
+			}
+		})
 	}
 }
 
