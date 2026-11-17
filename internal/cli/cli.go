@@ -217,7 +217,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	}
 	fs.BoolVar(&f.tui, "tui", false, "Launch the interactive terminal UI, its form pre-filled from the other flags and the domain argument")
 	fs.BoolVar(&f.printConfig, "print-config", false, "Print every setting's effective value and its source (flag, env, config or default), then exit")
-	fs.BoolVar(&f.dryRun, "dry-run", false, "Print the plan without scanning: candidates after dedupe and -exclude, query and duration estimates, and the resolver preflight (its only DNS query); then exit")
+	fs.BoolVar(&f.dryRun, "dry-run", false, "Print the plan without scanning: candidates after dedupe and -exclude, query and duration estimates, and the resolver preflight (its only DNS query, also sent to each -r pool resolver); then exit")
 	fs.Var(&f.wordlists, "w", "Path to a wordlist `file` (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list")
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", scan.DefaultConcurrency, "Number of concurrent workers")

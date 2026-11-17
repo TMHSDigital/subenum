@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -40,8 +41,8 @@ func TestDryRunPlan(t *testing.T) {
 	}
 	p := plans[0]
 	want := dryRunTarget{Domain: "example.com", Candidates: 3, Duplicates: 1, Skipped: 1, Excluded: 1,
-		Queries: 6, QueriesMax: 18, Seconds: 1.5, SecondsMax: 4.5, PreflightOK: true}
-	if p != want {
+		Queries: 6, QueriesMax: 18, RateEffective: 4, Seconds: 1.5, SecondsMax: 4.5, PreflightOK: true}
+	if !reflect.DeepEqual(p, want) {
 		t.Errorf("plan = %+v\nwant   %+v", p, want)
 	}
 	if left, _ := os.ReadDir(dir); len(left) != 0 {
@@ -146,6 +147,58 @@ func TestDryRunOutOfScopeTarget(t *testing.T) {
 	_, stdout := runCLI(t, "", "-dry-run", "-simulate", "-progress=false", "-exclude", "example.com", "-w", wl, "example.com")
 	if !strings.Contains(stdout, "out of scope under -exclude") || strings.Contains(stdout, "candidates") {
 		t.Errorf("text plan does not mark the target out of scope:\n%s", stdout)
+	}
+}
+
+// TestDryRunResolverPool covers #376: with -r, the plan preflights every
+// pool member with the target's own query, reports a failing member without
+// failing the run, and bounds the duration by -rate-per-resolver times the
+// pool's size when that is below -rate.
+func TestDryRunResolverPool(t *testing.T) {
+	listen := func(reply dnsserver.Reply) *dnsserver.Server {
+		srv, err := dnsserver.Listen(dnsserver.Options{CountNames: true}, func(dnsserver.Query) dnsserver.Reply { return reply })
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	answers := dnsserver.Reply{A: []string{"192.0.2.1"}}
+	trusted, good, bad := listen(answers), listen(answers), listen(dnsserver.ServFail)
+	wl := writeFile(t, "wl.txt", e2eWords)
+	list := writeFile(t, "resolvers.txt", good.Addr+"\n"+bad.Addr+"\n")
+	args := []string{"-dns-server", trusted.Addr, "-r", list, "-rate-per-resolver", "3", "-timeout", "10000",
+		"-attempts", "1", "-type", "A", "-w", wl}
+
+	for _, tc := range []struct {
+		rate string
+		want int
+	}{{"0", 6}, {"4", 4}} {
+		code, plans := dryRunPlans(t, append(args, "-rate", tc.rate, "example.com")...)
+		if code != exitOK || len(plans) != 1 {
+			t.Fatalf("-rate %s: exit %d, %d plans; want 0 and 1 (a failing pool member does not fail the run)", tc.rate, code, len(plans))
+		}
+		p := plans[0]
+		if p.RateEffective != tc.want || p.Seconds != float64(p.Queries)/float64(tc.want) {
+			t.Errorf("-rate %s: rate_effective %d, seconds %v; want %d/s for %d queries", tc.rate, p.RateEffective, p.Seconds, tc.want, p.Queries)
+		}
+		want := []dryRunResolver{{Addr: good.Addr, Preflight: "found", OK: true}, {Addr: bad.Addr, Preflight: "error"}}
+		if !p.PreflightOK || !reflect.DeepEqual(p.PoolPreflight, want) {
+			t.Errorf("-rate %s: preflight ok=%v, pool preflight %+v; want ok and %+v", tc.rate, p.PreflightOK, p.PoolPreflight, want)
+		}
+	}
+	for _, srv := range []*dnsserver.Server{good, bad} {
+		if apex, all := srv.QueriesFor("example.com", dnsmessage.TypeA), srv.Queries(); apex == 0 || apex != all {
+			t.Errorf("pool member %s got %d queries, %d of them the apex preflight; want only the preflight", srv.Addr, all, apex)
+		}
+	}
+
+	_, stdout := runCLI(t, "", append(args, "-dry-run", "-progress=false", "example.com")...)
+	for _, want := range []string{"at 6/s (-rate-per-resolver 3 x 2 resolvers)", "pool        ok via " + good.Addr + ": found",
+		"pool        FAILED via " + bad.Addr + ": error"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("text plan lacks %q:\n%s", want, stdout)
+		}
 	}
 }
 

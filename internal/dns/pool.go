@@ -482,6 +482,27 @@ func (p *Pool) secondOpinion(ctx context.Context, m *PoolResolver, l Lookup, dom
 	return nx
 }
 
+// ProbeResult is one member's answer to Probe.
+type ProbeResult struct {
+	Addr    string
+	Outcome Outcome
+}
+
+// Probe looks domain up once on every member, in pool order, outside the
+// rotation and its accounting. Each lookup takes its slots of the member's
+// rate cap. -dry-run uses it as a per-resolver preflight (#376).
+func (p *Pool) Probe(ctx context.Context, l Lookup, domain string) []ProbeResult {
+	out := make([]ProbeResult, 0, len(p.members))
+	for _, m := range p.members {
+		outcome := OutcomeCanceled
+		if p.reserve(ctx, m, QueriesFor(l.Types)) == nil {
+			_, outcome = m.lookup(l).Resolve(ctx, domain)
+		}
+		out = append(out, ProbeResult{Addr: m.Addr, Outcome: outcome})
+	}
+	return out
+}
+
 // lookup is l as one try on m's resolver.
 func (m *PoolResolver) lookup(l Lookup) Lookup {
 	l.Resolver, l.Attempts = m.resolver, 1

@@ -290,7 +290,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab6`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
 | **Modes** | | |
 | `-tui` | `false` | Launch the interactive Terminal UI |
-| `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates, and the resolver preflight (its only DNS query, paced by `-rate` and skipped for a target `-exclude` rules out), then exit; JSON with `-format json` or `jsonl` |
+| `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates (at `-rate`, or `-rate-per-resolver` times the `-r` pool size when that is lower), and the resolver preflight (its only DNS query, also sent once to each `-r` pool resolver, paced by `-rate` and skipped for a target `-exclude` rules out; a failing pool resolver is reported but does not fail the run), then exit; JSON with `-format json` or `jsonl` |
 | `-print-config` | `false` | Print every setting's effective value and source (`flag`, env, config or default), then exit |
 | `-version` | n/a | Print version and exit |
 

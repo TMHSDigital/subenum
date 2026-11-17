@@ -24,17 +24,53 @@ type dryRunTarget struct {
 	// counts every retry -attempts allows. Both respect -max-queries.
 	Queries    int64 `json:"queries"`
 	QueriesMax int64 `json:"queries_max"`
-	// Seconds and SecondsMax are the time those queries take at -rate; 0
-	// when -rate is unlimited.
+	// RateEffective is the query rate a scan is held to: -rate, or with a -r
+	// pool -rate-per-resolver times the pool's size, whichever is lower; 0
+	// when neither bounds it (#376).
+	RateEffective int `json:"rate_effective,omitempty"`
+	// Seconds and SecondsMax are the time those queries take at
+	// RateEffective; 0 when it is unbounded.
 	Seconds    float64 `json:"seconds,omitempty"`
 	SecondsMax float64 `json:"seconds_max,omitempty"`
 	// Preflight is the resolver's answer for the domain itself, as a scan's
 	// preflight check gets it; empty in simulation mode.
 	Preflight   string `json:"preflight,omitempty"`
 	PreflightOK bool   `json:"preflight_ok"`
+	// PoolPreflight is each -r pool member's answer to the same query
+	// (#376). A failing member does not fail the dry run: a scan benches it
+	// and carries on with the others.
+	PoolPreflight []dryRunResolver `json:"pool_preflight,omitempty"`
 	// OutOfScope is set for a target -exclude rules out: a scan refuses it,
 	// so it has no candidates and gets no preflight query (#372).
 	OutOfScope bool `json:"out_of_scope,omitempty"`
+}
+
+// dryRunResolver is one -r pool member's preflight answer (#376).
+type dryRunResolver struct {
+	Addr      string `json:"address"`
+	Preflight string `json:"preflight"`
+	OK        bool   `json:"ok"`
+}
+
+// preflightOK reports whether a preflight answer shows a working resolver.
+func preflightOK(o dns.Outcome) bool {
+	return o == dns.OutcomeFound || o == dns.OutcomeNXDomain
+}
+
+// dryRunRate returns the query rate a scan is held to and the flags that set
+// it: -rate, or with a -r pool -rate-per-resolver times the pool's size,
+// whichever is lower (#376). 0 means neither bounds it.
+func dryRunRate(f cliFlags, pool *dns.Pool) (int, string) {
+	rate, by := f.rate, fmt.Sprintf("-rate %d", f.rate)
+	if pool != nil && f.ratePerRes > 0 {
+		if poolRate := f.ratePerRes * pool.Size(); rate <= 0 || poolRate < rate {
+			rate, by = poolRate, fmt.Sprintf("-rate-per-resolver %d x %d resolvers", f.ratePerRes, pool.Size())
+		}
+	}
+	if rate <= 0 {
+		return 0, ""
+	}
+	return rate, by
 }
 
 // dryRun prints what a scan would do without scanning: the candidates per
@@ -50,6 +86,8 @@ func (s *session) dryRun() int {
 	excluded := scan.Excluder(s.in.excludes)
 	// The preflights are paced by -rate like a scan's queries (#372).
 	ctx := dns.WithLimiter(context.Background(), dns.NewRateLimiter(f.rate))
+	rate, rateBy := dryRunRate(f, s.in.pool)
+	defer s.in.pool.CloseIdleConnections()
 	for _, target := range s.targets {
 		entries, duplicates, skipped := s.words.For(target)
 		p := dryRunTarget{Domain: target, Duplicates: duplicates, Skipped: skipped, PreflightOK: true}
@@ -73,16 +111,22 @@ func (s *session) dryRun() int {
 		// One lookup per name sends a query per type (#223, #249).
 		p.Queries = names * int64(dns.QueriesFor(s.in.recordTypes))
 		p.QueriesMax = p.Queries * int64(max(s.in.maxAttempts, 1))
-		if f.rate > 0 {
-			p.Seconds = float64(p.Queries) / float64(f.rate)
-			p.SecondsMax = float64(p.QueriesMax) / float64(f.rate)
+		p.RateEffective = rate
+		if rate > 0 {
+			p.Seconds = float64(p.Queries) / float64(rate)
+			p.SecondsMax = float64(p.QueriesMax) / float64(rate)
 		}
 		if !f.testMode {
 			lookup := dns.Lookup{Resolver: resolver, Timeout: timeout, Attempts: s.in.maxAttempts, Types: s.in.recordTypes}
 			_, outcome := lookup.Resolve(ctx, target)
 			p.Preflight = outcome.String()
-			p.PreflightOK = outcome == dns.OutcomeFound || outcome == dns.OutcomeNXDomain
+			p.PreflightOK = preflightOK(outcome)
 			failed = failed || !p.PreflightOK
+			if s.in.pool != nil {
+				for _, r := range s.in.pool.Probe(ctx, lookup, target) {
+					p.PoolPreflight = append(p.PoolPreflight, dryRunResolver{Addr: r.Addr, Preflight: r.Outcome.String(), OK: preflightOK(r.Outcome)})
+				}
+			}
 		}
 		plans = append(plans, p)
 	}
@@ -105,7 +149,7 @@ func (s *session) dryRun() int {
 			}
 		}
 	default:
-		s.printDryRun(plans)
+		s.printDryRun(plans, rateBy)
 	}
 	if notes := dryRunNotes(f, s.in.sources); len(notes) > 0 {
 		s.out.Info("Not included in the estimate: %s", strings.Join(notes, "; "))
@@ -116,8 +160,9 @@ func (s *session) dryRun() int {
 	return exitOK
 }
 
-// printDryRun writes the plan as text.
-func (s *session) printDryRun(plans []dryRunTarget) {
+// printDryRun writes the plan as text; rateBy names the flags that bound
+// the duration.
+func (s *session) printDryRun(plans []dryRunTarget, rateBy string) {
 	w := s.a.stdout
 	for _, p := range plans {
 		_, _ = fmt.Fprintf(w, "%s\n", p.Domain)
@@ -128,18 +173,25 @@ func (s *session) printDryRun(plans []dryRunTarget) {
 		_, _ = fmt.Fprintf(w, "  candidates  %d (%d duplicates removed, %d invalid skipped, %d excluded)\n", p.Candidates, p.Duplicates, p.Skipped, p.Excluded)
 		_, _ = fmt.Fprintf(w, "  queries     %d (up to %d with retries)\n", p.Queries, p.QueriesMax)
 		if p.Seconds > 0 {
-			_, _ = fmt.Fprintf(w, "  duration    %s (up to %s) at -rate %d\n", dryRunDuration(p.Seconds), dryRunDuration(p.SecondsMax), s.f.rate)
+			_, _ = fmt.Fprintf(w, "  duration    %s (up to %s) at %d/s (%s)\n", dryRunDuration(p.Seconds), dryRunDuration(p.SecondsMax), p.RateEffective, rateBy)
 		} else {
 			_, _ = fmt.Fprintf(w, "  duration    not bounded by -rate (unlimited)\n")
 		}
 		if p.Preflight != "" {
-			status := "ok"
-			if !p.PreflightOK {
-				status = "FAILED"
-			}
-			_, _ = fmt.Fprintf(w, "  preflight   %s via %s: %s\n", status, s.f.dnsServer, p.Preflight)
+			_, _ = fmt.Fprintf(w, "  preflight   %s via %s: %s\n", dryRunStatus(p.PreflightOK), s.f.dnsServer, p.Preflight)
+		}
+		for _, r := range p.PoolPreflight {
+			_, _ = fmt.Fprintf(w, "  pool        %s via %s: %s\n", dryRunStatus(r.OK), r.Addr, r.Preflight)
 		}
 	}
+}
+
+// dryRunStatus labels a preflight answer.
+func dryRunStatus(ok bool) string {
+	if ok {
+		return "ok"
+	}
+	return "FAILED"
 }
 
 // dryRunDuration rounds an estimate for display.
