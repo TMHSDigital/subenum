@@ -8,7 +8,6 @@
 [![Release](https://img.shields.io/github/v/release/TMHSDigital/subenum?style=for-the-badge&label=release&labelColor=0E1726&color=F2B441&logo=github&logoColor=E8ECF2)](https://github.com/TMHSDigital/subenum/releases)
 [![Go Reference](https://img.shields.io/badge/go-reference-4CC9A0?style=for-the-badge&labelColor=0E1726&logo=go&logoColor=E8ECF2)](https://pkg.go.dev/github.com/TMHSDigital/subenum/pkg/subenum)
 [![Container image](https://img.shields.io/badge/image-ghcr.io-F2B441?style=for-the-badge&labelColor=0E1726&logo=docker&logoColor=E8ECF2)](https://github.com/TMHSDigital/subenum/pkgs/container/subenum)
-[![Go 1.26+](https://img.shields.io/badge/go-1.26%2B-F2B441?style=for-the-badge&labelColor=0E1726&logo=go&logoColor=E8ECF2)](https://go.dev)
 
 <img src="docs/assets/badges.svg" alt="Linux, macOS, Windows, FreeBSD · one static binary · no API keys · GPL-3.0" width="626"/>
 
@@ -17,7 +16,7 @@
 Point it at a domain; it brute-forces DNS across a worker pool, accounts for every query, and prints the subdomains that resolve.<br>
 Built for pentesters, bug-bounty hunters, and operators doing authorized reconnaissance of their own infrastructure.
 
-<img src="docs/assets/demo.gif" alt="subenum in a terminal: lab 1 lists six hosts with their records and flags blog.lab.example as a dangling CNAME takeover candidate; lab 2 detects a wildcard zone, and with -force keeps only the three real hosts" width="720"/>
+<img src="docs/assets/demo.svg" alt="subenum in a terminal: lab 1 lists six hosts with their records and flags blog.lab.example as a dangling CNAME takeover candidate; lab 2 detects a wildcard zone, and with -force keeps only the three real hosts" width="860"/>
 
 **[Website](https://tmhsdigital.github.io/subenum/)** &nbsp;·&nbsp; [Quick Start](#quick-start) &nbsp;·&nbsp; [Install](#installation) &nbsp;·&nbsp; [Flags](#cli-flags) &nbsp;·&nbsp; [Labs](docs/labs.md) &nbsp;·&nbsp; [Go library](#go-library) &nbsp;·&nbsp; [MCP](#ai-agents-mcp) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md)
 
