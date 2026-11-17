@@ -532,3 +532,57 @@ func TestCappedExpandOfExcludedSubtree(t *testing.T) {
 		t.Errorf("excluded %d skipped %d, want the 5 children excluded and skipped unchanged at %d", d.excluded, d.skipped, skipped)
 	}
 }
+
+// TestCappedExpandCountsExcludedChildren covers #393: a parent of a recursive
+// scan that is found after a budget stopped admission has the children -exclude
+// rules out counted as excluded, not skipped, as stopAdmitting counts them.
+func TestCappedExpandCountsExcludedChildren(t *testing.T) {
+	entries := makeEntries(10)
+	d := testDispatcher(Config{Entries: entries, Recursive: true, MaxQueries: 5,
+		Exclude: []string{entries[9] + ".p0.example.com"}}, 2)
+	if got := len(drain(d)); got != 5 {
+		t.Fatalf("admitted %d, want 5", got)
+	}
+	if d.skipped != 5 || d.excluded != 0 {
+		t.Fatalf("before the late expand: skipped %d excluded %d, want 5 and 0", d.skipped, d.excluded)
+	}
+	d.expand(job{domain: "p0.example.com", depth: 1})
+	// p0's ten children: entries[9].p0 is excluded, the other nine are skipped.
+	if d.excluded != 1 || d.skipped != 14 || d.admitted+d.skipped+d.excluded != 20 {
+		t.Errorf("after the late expand: admitted %d skipped %d excluded %d, want 5, 14 and 1 (20 candidates)",
+			d.admitted, d.skipped, d.excluded)
+	}
+}
+
+// TestCappedExpandCountsRecursiveRepeatsOnce covers #393: a parent of a
+// recursive scan found after a budget stopped admission does not have the
+// children another parent already reached counted again, so admitted, skipped
+// and excluded still add up to the candidates the scan with no budget
+// generates, and an excluded child is excluded whichever parent reaches it.
+func TestCappedExpandCountsRecursiveRepeatsOnce(t *testing.T) {
+	for _, exclude := range [][]string{nil, {"x.a.b.example.com"}} {
+		cfg := Config{Entries: []string{"x", "x.a", "a.b", "b", "y"}, Recursive: true, MaxQueries: 4, Exclude: exclude}
+		// The same scan with no budget, expanding both parents.
+		full := cfg
+		full.MaxQueries = 0
+		all := testDispatcher(full, 3)
+		roots := len(drain(all))
+		all.expand(job{domain: "b.example.com", depth: 1})
+		all.expand(job{domain: "a.b.example.com", depth: 1})
+		candidates := roots + len(drain(all)) + all.excluded
+
+		d := testDispatcher(cfg, 3)
+		admitted := len(drain(d))
+		// Both parents resolve after the cap: b first, a.b second, so
+		// x.a.b.example.com is reached from both and counted once.
+		d.expand(job{domain: "b.example.com", depth: 1})
+		d.expand(job{domain: "a.b.example.com", depth: 1})
+		if admitted != 4 || !d.capped {
+			t.Fatalf("%v: admitted %d capped %v, want 4 and true", exclude, admitted, d.capped)
+		}
+		if d.skipped != candidates-admitted-all.excluded || d.excluded != all.excluded || admitted+d.skipped+d.excluded != candidates {
+			t.Errorf("%v: skipped %d excluded %d, want %d and %d (of %d candidates)",
+				exclude, d.skipped, d.excluded, candidates-admitted-all.excluded, all.excluded, candidates)
+		}
+	}
+}
