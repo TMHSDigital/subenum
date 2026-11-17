@@ -28,6 +28,10 @@ func TestRecordsChanged(t *testing.T) {
 		{"without CNAME lookups addresses decide", []dns.Record{cname("x.example"), a("192.0.2.1")}, []dns.Record{a("192.0.2.1")}, []string{"A", "AAAA"}, false},
 		{"no types compares every type", []dns.Record{a("192.0.2.1"), {Type: "TXT", Value: "v=spf1 -all"}}, []dns.Record{a("192.0.2.1")}, nil, true},
 		{"no types still prefers the alias", []dns.Record{cname("app.cdn.example"), a("192.0.2.1")}, []dns.Record{cname("app.cdn.example"), a("192.0.2.7")}, nil, false},
+		{"lower-case types", []dns.Record{a("192.0.2.1")}, []dns.Record{a("192.0.2.2")}, []string{"a"}, true},
+		{"space-padded types", []dns.Record{a("192.0.2.1")}, []dns.Record{a("192.0.2.2")}, []string{" a ", " CNAME"}, true},
+		{"lower-case cname still prefers the alias", []dns.Record{cname("app.cdn.example"), a("192.0.2.1")}, []dns.Record{cname("app.cdn.example"), a("192.0.2.7")}, []string{"a", "cname"}, false},
+		{"TXT case change", []dns.Record{{Type: "TXT", Value: "token=AbC"}}, []dns.Record{{Type: "TXT", Value: "token=abc"}}, []string{"txt"}, true},
 	} {
 		if got := RecordsChanged(c.prev, c.cur, c.types); got != c.want {
 			t.Errorf("%s: changed = %v, want %v", c.name, got, c.want)

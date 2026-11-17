@@ -23,15 +23,25 @@ func Name(s string) string {
 // (#189), while the addresses behind a CDN alias rotate with every TTL and
 // would make every CDN host look changed.
 func RecordsChanged(prev, cur []dns.Record, types []string) bool {
-	compared := func(t string) bool { return len(types) == 0 || slices.Contains(types, t) }
+	norm := make([]string, 0, len(types))
+	for _, t := range types {
+		if t = strings.ToUpper(strings.TrimSpace(t)); t != "" {
+			norm = append(norm, t)
+		}
+	}
+	compared := func(t string) bool { return len(norm) == 0 || slices.Contains(norm, t) }
 	set := func(rs []dns.Record, only string) map[string]struct{} {
 		s := map[string]struct{}{}
 		for _, r := range rs {
-			t := strings.ToUpper(r.Type)
+			t := strings.ToUpper(strings.TrimSpace(r.Type))
 			if (only != "" && t != only) || !compared(t) {
 				continue
 			}
-			s[t+" "+strings.ToLower(strings.TrimSuffix(r.Value, "."))] = struct{}{}
+			v := r.Value
+			if t != "TXT" {
+				v = strings.ToLower(strings.TrimSuffix(v, "."))
+			}
+			s[t+" "+v] = struct{}{}
 		}
 		return s
 	}
