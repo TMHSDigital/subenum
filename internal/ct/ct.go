@@ -90,7 +90,7 @@ func (c Client) Names(ctx context.Context, domain string) ([]string, error) {
 		if body.err != nil && len(set) > 0 {
 			// The body read failed midway (a timeout, a reset connection):
 			// keep the names parsed before the cut, as for the limit (#409).
-			return sortedNames(set), fmt.Errorf("%w: the answer was cut off: %v", ErrTruncated, body.err)
+			return sortedNames(set), fmt.Errorf("%w: the answer was cut off: %w", ErrTruncated, body.err)
 		}
 		return nil, fmt.Errorf("certificate transparency lookup: reading %s's answer: %w", resp.Request.URL.Host, err)
 	}
