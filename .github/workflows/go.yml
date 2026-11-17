@@ -260,6 +260,23 @@ jobs:
         test "${{ steps.bad.outcome }}" = failure
         test -z "${{ steps.bad.outputs.verdict }}"
 
+    # -version exits 0 before the outputs are opened, so no report is written.
+    # The step must still fail rather than pass on the previous use's outputs (#407).
+    - name: Use the action with -version
+      id: version
+      continue-on-error: true
+      uses: ./
+      with:
+        version: source
+        domain: lab.example
+        args: -version
+
+    - name: Check it failed without a report
+      shell: bash
+      run: |
+        test "${{ steps.version.outcome }}" = failure
+        test -z "${{ steps.version.outputs.verdict }}"
+
     # found counts the -permute hits too (#363).
     - name: Scan with -permute
       id: permute
