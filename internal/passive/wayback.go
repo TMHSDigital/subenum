@@ -83,6 +83,11 @@ func (w Wayback) Names(ctx context.Context, domain string) ([]string, error) {
 	body := &io.LimitedReader{R: resp.Body, N: waybackMaxBody}
 	names, lines, err := hostNames(body, domain)
 	if err != nil {
+		if len(names) > 0 {
+			// The body read failed midway (a timeout, a reset connection):
+			// keep the names read before the cut (#409).
+			return names, &Truncated{Source: "wayback", Why: fmt.Sprintf("the answer was cut off: %v", err)}
+		}
 		return nil, fmt.Errorf("wayback machine lookup: reading %s's answer: %w", resp.Request.URL.Host, err)
 	}
 	switch {
@@ -99,16 +104,19 @@ func (w Wayback) Names(ctx context.Context, domain string) ([]string, error) {
 const waybackMaxLine = 1 << 20
 
 // hostNames reads one archived URL per line and returns the hosts under
-// domain, relative to it, and how many lines it read.
+// domain, relative to it, and how many lines it read. On a read error it
+// returns the hosts read before it, with the error (#409).
 func hostNames(r io.Reader, domain string) ([]string, int, error) {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	set := map[string]bool{}
 	br := bufio.NewReaderSize(r, 64<<10)
 	lines := 0
+	var readErr error
 	for {
 		raw, tooLong, err := readURLLine(br)
 		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, lines, err
+			readErr = err // the partial line before the error is dropped
+			break
 		}
 		line := strings.TrimSpace(string(raw))
 		if tooLong {
@@ -126,7 +134,7 @@ func hostNames(r io.Reader, domain string) ([]string, int, error) {
 		out = append(out, n)
 	}
 	sort.Strings(out)
-	return out, lines, nil
+	return out, lines, readErr
 }
 
 // readURLLine reads one line, without its newline. A line over

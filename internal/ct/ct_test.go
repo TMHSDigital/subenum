@@ -147,6 +147,30 @@ func TestNamesOversizedBody(t *testing.T) {
 	}
 }
 
+// TestNamesStalledBody covers #409: a body that stalls past the timeout
+// keeps the names parsed before it, with ErrTruncated.
+func TestNamesStalledBody(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `[{"name_value":"a.example.com"},`)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	got, err := names(context.Background(), srv, 200*time.Millisecond)
+	if !errors.Is(err, ErrTruncated) {
+		t.Errorf("error = %v, want one wrapping ErrTruncated", err)
+	}
+	if want := []string{"a"}; !slices.Equal(got, want) {
+		t.Errorf("Names = %v, want the names before the stall %v", got, want)
+	}
+}
+
 func TestNamesNotAnArray(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"name_value": "a.example.com"}`))
