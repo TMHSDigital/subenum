@@ -350,6 +350,52 @@ jobs:
         test "${{ steps.after.outputs.added }}" = 0
         test "${{ steps.after.outputs.removed }}" = 0
 
+    # A resumed scan that finishes degraded leaves no state of its own; the
+    # artifact must drop the spent state so the next use starts over rather
+    # than resuming the same remainder forever (#396). Lab 5's timeouts make
+    # every pass degraded.
+    - name: Stop a failing scan at its time budget
+      id: stopped-degraded
+      uses: ./
+      with:
+        version: source
+        domain: example.com
+        wordlist: examples/labs/words.txt
+        args: -simulate-zone examples/labs/lab5-failures.zone -seed 7 -rate 5 -t 1
+        max-duration: 2s
+        baseline-artifact: subenum-ci-resume-degraded-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}
+
+    - name: Continue it to a degraded finish
+      id: resumed-degraded
+      uses: ./
+      with:
+        version: source
+        domain: example.com
+        wordlist: examples/labs/words.txt
+        args: -simulate-zone examples/labs/lab5-failures.zone -seed 7 -rate 5 -t 1
+        max-duration: 5m
+        baseline-artifact: subenum-ci-resume-degraded-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}
+
+    - name: Start over after the degraded finish
+      id: after-degraded
+      uses: ./
+      with:
+        version: source
+        domain: example.com
+        wordlist: examples/labs/words.txt
+        args: -simulate-zone examples/labs/lab5-failures.zone -seed 7 -rate 5 -t 1
+        max-duration: 2s
+        baseline-artifact: subenum-ci-resume-degraded-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}
+
+    - name: Check the spent state was not resumed again
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "${{ steps.stopped-degraded.outputs.resumed }}" = false
+        test "${{ steps.resumed-degraded.outputs.resumed }}" = true
+        test "${{ steps.resumed-degraded.outputs.verdict }}" = degraded
+        test "${{ steps.after-degraded.outputs.resumed }}" = false
+
   # The action's default install path, as users get it: download the latest
   # release, check it against checksums.txt and its attestation, unpack it
   # (#325). The action job above builds from source and never reaches that

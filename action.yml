@@ -306,6 +306,14 @@ runs:
           printf '%s\n' "$key" > "$carry/state.key"
           echo "carry-state=true" >> "$GITHUB_OUTPUT"
           echo "::notice::The scan stopped before it finished; the next run with baseline-artifact $BASELINE continues it."
+        elif [ -n "$BASELINE" ] && [ "$resumed" = true ]; then
+          # The resumed scan finished below complete and spent its state.
+          # Replace the artifact without that state, or every later run
+          # resumes the same remainder again (#396). The marker file keeps
+          # the upload from being empty when there are no results to carry.
+          if [ -s "$base/results.jsonl" ]; then cp "$base/results.jsonl" "$carry/"; fi
+          printf 'The resumed scan finished %s; the next run starts a new scan.\n' "$verdict" > "$carry/state-spent.txt"
+          echo "carry-state=true" >> "$GITHUB_OUTPUT"
         fi
         # 0 = ok, 4 = changes found; 3 = some -dL targets failed and 1 = the
         # scan failed, and the verdict says how bad, so fail-on decides. A 1
