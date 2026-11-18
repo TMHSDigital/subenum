@@ -41,7 +41,30 @@ func lookupCNAME(ctx context.Context, resolver *net.Resolver, name string) (stri
 	if err != nil {
 		return "", err
 	}
-	return canonicalName(msg, name), nil
+	target := canonicalName(msg, name)
+	if !validTarget(target) {
+		// Go's own lookups refuse such an answer with this error.
+		return "", &net.DNSError{Err: "DNS response contained records which contain invalid names", Name: name}
+	}
+	return target, nil
+}
+
+// validTarget reports whether name, which may end in a dot, is a host name
+// in presentation form: labels of 1 to 63 letters, digits, hyphens or
+// underscores, 253 bytes at most. dnsmessage hands back a name's raw bytes,
+// so a hostile answer could otherwise carry control bytes into results.
+func validTarget(name string) bool {
+	name = strings.TrimSuffix(name, ".")
+	if name == "" || len(name) > 253 || !validLabels(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c != '.' && c != '-' && c != '_' && (c < '0' || c > '9') && (c|0x20 < 'a' || c|0x20 > 'z') {
+			return false
+		}
+	}
+	return true
 }
 
 // rawLookup sends one qtype query for name over resolver.Dial, asking again

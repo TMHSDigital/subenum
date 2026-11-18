@@ -67,6 +67,37 @@ func TestCNAMEOneQuery(t *testing.T) {
 	}
 }
 
+// TestCNAMEInvalidTarget: an alias target that is not a host name (control
+// bytes, spaces, markup) is refused, as Go's own lookups refuse it, and
+// never reaches the results.
+func TestCNAMEInvalidTarget(t *testing.T) {
+	targets := map[string]string{
+		"esc.example.com":   "x\x1b[2J.example.net",
+		"space.example.com": "a b.example.net",
+		"tag.example.com":   "<b>.example.net",
+		"ok.example.com":    "_svc.edge-1.example.net",
+	}
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if target, ok := targets[q.Name]; ok {
+			return dnstest.Reply{CNAME: target}
+		}
+		return dnstest.NXDomain
+	})
+	l := Lookup{Resolver: NewResolver(time.Second, srv.Addr), Timeout: time.Second, Attempts: 1, Types: []string{"CNAME"}}
+	for name, target := range targets {
+		recs, outcome := l.Resolve(context.Background(), name)
+		if name == "ok.example.com" {
+			if outcome != OutcomeFound || len(recs) != 1 || recs[0].Value != target {
+				t.Errorf("%s: %v %v, want CNAME %s", name, outcome, recs, target)
+			}
+			continue
+		}
+		if outcome == OutcomeFound || len(recs) != 0 {
+			t.Errorf("%s: %v %q, want the invalid target refused", name, outcome, recs)
+		}
+	}
+}
+
 // TestCNAMETimeout: a server that never answers is a timeout, not a
 // negative, and a cancelled scan is cancelled.
 func TestCNAMETimeout(t *testing.T) {
