@@ -99,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: subenum
-        uses: TMHSDigital/subenum@v0.10.0  # pin a release, or its commit SHA
+        uses: TMHSDigital/subenum@v0.11.0  # pin a release, or its commit SHA
         with:
           domain: example.com            # a domain you own or may test
           wordlist: wordlist.txt
@@ -181,7 +181,7 @@ permissions:
 
 env:
   TARGET: example.com     # a domain you own or are authorized to scan
-  SUBENUM_VERSION: 0.10.0 # a release tag without the "v"
+  SUBENUM_VERSION: 0.11.0 # a release tag without the "v"
 
 jobs:
   monitor:

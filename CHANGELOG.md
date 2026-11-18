@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-18
+
 ### Added
 - `pkg/subenum`: `Config.Validate()` reports the error `Run` would return for a config, such as an unsupported type, an invalid `Exclude` pattern or `ErrNoWords`, without starting a scan or sending a query (#378).
 - `-simulate-zone` accepts the lab scenarios built into every binary by name, so release, container and `go install` users run the labs without cloning the repository: `subenum -simulate-zone lab1 lab.example` works from any directory (`lab1`, `lab1-first-scan` and `lab1-first-scan.zone` all name it), and without `-w` the scan uses the labs' own wordlist (`-w ""` keeps the bundled 5,000-word list). A path, or a file that exists under the given name, is still read from disk, and an unknown name lists the built-in scenarios (#354).
@@ -47,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The TUI's finished screen shows the run-quality verdict (`complete`, `degraded` or `unreliable`) with its reason above the counters, colored green, orange or red, so a scan that lost lookups or stopped at Max Duration no longer looks like a clean one. The counters line adds skipped candidates, retried and recovered names, takeover candidates and rate back-offs when there are any. The screen is the same height as before (#312).
 - `pkg/subenum` exports `ProbeZone(ctx, domain, ZoneOptions)`, which tries a zone transfer (AXFR) from the domain's name servers with `-axfr`'s limits (8 servers, 2 addresses each) and reports the names, the servers that allowed it and whether the zone uses plain NSEC (`ZoneInfo`), and `ZoneTransfer(ZoneOptions)`, a `Source` for `Config.Sources` that scans the transferred names. Its queries are not paced by `Rate`, as `-axfr`'s are not. The CLI and the library share the attempt in a new `internal/axfr` package (#314).
 - `-dry-run` takes the `-r` resolver pool into account: each pool resolver gets the target's preflight query too and has its own `pool` line (`pool_preflight` in JSON, with each resolver's `address`, `preflight` and `ok`), and the duration estimate uses `-rate-per-resolver` times the pool size when that is below `-rate` or `-rate` is unlimited, naming the flag that bounds it (`rate_effective` in JSON). A failing pool resolver does not fail the dry run, as a scan benches it and carries on (#376).
+- An `-r` resolver list takes DNS over TLS (`tls://host[:port]`) and DNS over HTTPS (`https://host/path`) entries as well as `ip[:port]`, and the forms can be mixed in one pool. Each member's lookups, CNAME queries included, use its own transport; `tls://x` and `tls://x:853` count as the same resolver, and stats and `-dry-run` show a member without a DoH credential (#404).
+- `wordlist-gen -from <results>` (repeatable) learns labels from earlier subenum results files, in any format subenum writes, so the naming habits found on one domain seed the list for the next; `-min-count` keeps only labels seen at least that often (#423).
+- Each result names the target that found it: a `target` field in JSON and JSONL, and a last `target` column in CSV under `-dL`, so the results of nested targets such as `example.com` and `dev.example.com` can be told apart. Text output is unchanged (#422).
+- Lab 6 (`lab6-ipv6`) is an exercise in finding IPv6-only services, which an `A`-only scan misses (#389).
 
 ### Changed
 - A `-recursive` scan over a wordlist of single labels no longer remembers every candidate it generated (about 75 MB per million), and one that reaches `-max-queries` or `-max-duration` counts the untested candidates without building each name, so it stops on time (#301).
@@ -72,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The names whose lookup timed out, was refused or failed are kept only when something reads them: for the `-inconclusive` file, and until the `-retry-inconclusive` pass has run. A scan without either only counts them, so under `-no-abort` or `-auto-rate` against a failing resolver memory no longer grows with every failed lookup (about 1 GB at 10M failures). When they are kept, a wordlist entry costs its index rather than its name. Counts, the report and `pkg/subenum`'s `Stats.Inconclusive` are unchanged; the `-resume` state lists the names only with `-inconclusive` (#300).
 - Less memory on large wordlists and busy scans: `-sources`, `-ct`, `-axfr` and `-permute` check their names against the wordlist without building a set as large as it (about 200 MB per feature and target on a 5M-line list), a `-simulate-zone` lab scan no longer keeps a count per queried name (about 170 MB on a 1M-line list), and a `CNAME` lookup reads a UDP answer into a buffer sized for the 1232-byte EDNS payload it advertises instead of 64 KB. Results are unchanged (#321).
 - The TUI's `charm.land/lipgloss/v2` moves from v2.0.6 to v2.1.1, which lowered its `go` line back to 1.26.0; Dependabot now skips only v2.1.0, the release that needed Go 1.26.7, instead of every later v2 release. The `go 1.26.0` minimum is unchanged. The Docker image's `org.opencontainers.image.licenses` label is now `GPL-3.0-only`, the SPDX id `CITATION.cff` uses, instead of the deprecated `GPL-3.0`, and the example workflows in the monitoring guide pin the same `upload-sarif` and `upload-artifact` commits as the repo's own workflows, which a test now keeps in step (#366).
+- The GitHub Action's `baseline-artifact` uses only an artifact that the same workflow uploaded from the repository's default branch, outside pull requests, rather than the newest artifact of that name from any run, and resumes a saved scan only when its command line is the one the Action builds from its inputs. Names in a `-diff` baseline that no host name can hold (control bytes, spaces, markup characters) are dropped when the file is read, and the monitoring guide's hand-written workflow filters its artifact the same way.
+- `-dry-run` probes the `-r` pool's resolvers at the same time, up to `-t` at once, instead of one after another, so a pool with dead resolvers no longer takes a timeout each (#399).
+- The TUI reads a wordlist file line by line, as `-w` does, instead of holding every raw line, and `-resume` hashes its input files as a stream (#411).
 
 ### Fixed
 - A TUI scan with a Resolver Pool now writes the pool's per-resolver accounting (the `resolvers` block of the summary, with each resolver's benched, throttled and contradicted counts) to its JSON or JSONL output file, as `-r` does on the command line; the TUI built the summary with its own copy of the CLI's code, which had missed it. Both front ends now build the summary and its source rows with the same code (#367).
@@ -123,10 +132,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An A or AAAA lookup that timed out no longer sends the same name again in the background. The repeats went out about five seconds apart on a reused socket, outside `-rate` and `-rate-per-resolver`, uncounted in the query total, and could continue after the scan had ended; a lookup whose time is up now gets no connection (#295).
 - The docs no longer present `-type NS` as available in the latest release. The site tags `NS`, `MX` and `TXT` as unreleased (new values of a released flag can now be tagged), the monitoring guide's code-scanning example no longer adds `NS` to a workflow pinned to a release that rejects it, and the README says its flag table describes `main` (#306).
 - `subenum -h` lists `subenum diff` among its usage lines, as it already did its exit code, and the docs catch up with the code: the monitoring guide's issue step is skipped rather than failing when the pinned release has no `changes` output, the README and Docker page mark `-sources`, `-axfr`, `subenum diff` and `subenum mcp` as unreleased, the library's `MaxDuration` says the preflight and wildcard probes are not counted, and the architecture notes and developer guide match the current packages, CSV columns and resume state (#379).
+- Internationalised targets are mapped with UTS #46 before Punycode, through `golang.org/x/net/idna`, so a domain pasted in decomposed form (`e` + U+0301) or in full-width letters scans the registered name instead of a different one; a disallowed code point is an error naming the label (#435).
+- A `-ct` or `-sources` answer cut off partway, by a timeout or a dropped connection, keeps the names read before the cut and is reported as truncated, instead of losing every name it had (#409).
+- `pkg/subenum`'s `Diff` accepts lower-case `types`, which used to compare nothing, and a TXT value whose letter case changed counts as changed (#397).
+- `-dns-server` takes a bare IP address and uses port 53, in the CLI, the TUI and `subenum mcp` (#425).
+- `-state` is checked against the output files too, so `-stats` or `-o` can no longer overwrite the resume state after it was saved, and `-diff` against the other report files; `-o X -diff X` stays allowed (#395).
+- A scan stopped by `-max-duration` no longer starts its `-permute` pass, in the CLI and the TUI (#390).
+- The GitHub Action fails the step when subenum exits 0 without a report (`-dry-run`, `-version`) instead of passing on stale outputs, and URL-encodes the `baseline-artifact` name in its artifact query (#407). A resumed scan that finishes degraded or unreliable no longer leaves its spent state in the baseline artifact, which made every later run resume the same remainder (#396).
+- A resumed pass that finds a restored name again counts its takeover, internal and partial flags once, not twice (#408).
+- The TUI asks before overwriting a file when saving results (#391), fills a blank numeric field with its default (#383), and `-tui` with `-simulate-zone` is refused with a usage error before the TUI starts (#382).
 
 ### Security
 - `go.mod` names a patched toolchain (`toolchain go1.26.11`) beside the unchanged `go 1.26.0` floor, so `go install` and the action's `version: source` build with the security-fixed `net/http`, `crypto/tls` and `crypto/x509` instead of the original 1.26.0 standard library; with the default `GOTOOLCHAIN=auto` an older local Go fetches it. Release binaries were already built with a current Go (#243).
 - The GitHub Action checks the downloaded release archive's build provenance with `gh attestation verify` as well as its `checksums.txt`, since an archive and its checksums file could be replaced together. The Pages workflow grants `pages: write` and `id-token: write` only to the job that deploys, not to the whole workflow (#210).
+- A DNS over HTTPS or DNS over TLS `-dns-server` (or `-r` member) is shown by scheme and host only, so a credential in its URL no longer reaches the run report, the JSONL summary line, error messages, `ProbeZone` and `ZoneTransfer` errors or a lookup error's `Server` field (#410).
 
 ## [0.10.0] - 2026-11-08
 
@@ -424,7 +443,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DNS resolution with configurable timeout
 - Command-line flags for wordlist, concurrency, and timeout
 
-[Unreleased]: https://github.com/TMHSDigital/subenum/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/TMHSDigital/subenum/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/TMHSDigital/subenum/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/TMHSDigital/subenum/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/TMHSDigital/subenum/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/TMHSDigital/subenum/compare/v0.7.0...v0.8.0

@@ -49,7 +49,7 @@ inputs:
       and still writes its results and report, with a degraded verdict. With
       baseline-artifact, the next run resumes where this one stopped, so a
       scheduled job works through a large wordlist over several runs.
-      Empty means no budget. Needs a subenum release newer than v0.10.0.
+      Empty means no budget. Needs subenum v0.11.0 or later.
     required: false
     default: ""
   fail-on:

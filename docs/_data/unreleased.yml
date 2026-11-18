@@ -4,49 +4,11 @@
 #
 # In the release commit, empty these lists and run `make docs-flags`.
 # subcommands (#245)
-commands:
-  - mcp
-  - diff
-flags:
-  - auto-rate
-  - axfr
-  - diff-records
-  - dry-run
-  - inconclusive
-  - log-format
-  - max-duration
-  - rate-per-resolver
-  - retry-inconclusive
-  - sources
-  - takeover-providers
-  - takeover-providers-only
+commands: []
+flags: []
 # new values of a flag that is itself released, as flag=VALUE (#306)
-values:
-  - type=NS
-  - type=MX
-  - type=TXT
-  - o=format:path
+values: []
 # action.yml inputs and outputs
-action:
-  - max-duration
-  - changed
-  - changes
-  - takeovers
-  - internal
-  - resumed
+action: []
 # pkg/subenum identifiers
-library:
-  - Config.Validate
-  - ErrNoWords
-  - AutoRate
-  - Diff
-  - Internal
-  - MaxDuration
-  - Permutations
-  - ProbeZone
-  - RatePerResolver
-  - Sources
-  - RetryInconclusive
-  - TakeoverProviders
-  - Verdict
-  - ZoneTransfer
+library: []
