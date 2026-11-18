@@ -616,6 +616,10 @@ func (c Config) options() (scan.Options, error) {
 		return scan.Options{}, fmt.Errorf("subenum: Domain: %w", err)
 	}
 
+	// Only the checks that differ from scan.Options.Validate live here: 0
+	// means "use the default" for these fields, so a negative value must be
+	// caught before the default replaces it. Every other range is checked
+	// once, by Validate below (#414).
 	switch {
 	case c.Concurrency < 0:
 		return scan.Options{}, fmt.Errorf("subenum: Concurrency must not be negative, got %d", c.Concurrency)
@@ -623,14 +627,8 @@ func (c Config) options() (scan.Options, error) {
 		return scan.Options{}, fmt.Errorf("subenum: Timeout must not be negative, got %s", c.Timeout)
 	case c.Attempts < 0:
 		return scan.Options{}, fmt.Errorf("subenum: Attempts must not be negative, got %d", c.Attempts)
-	case c.Rate < 0:
-		return scan.Options{}, fmt.Errorf("subenum: Rate must be 0 (unlimited) or positive, got %d", c.Rate)
-	case c.MaxQueries < 0:
-		return scan.Options{}, fmt.Errorf("subenum: MaxQueries must be 0 (unlimited) or positive, got %d", c.MaxQueries)
 	case c.Depth < 0:
 		return scan.Options{}, fmt.Errorf("subenum: Depth must not be negative, got %d", c.Depth)
-	case c.Simulate && c.HitRate != 0 && (c.HitRate < 1 || c.HitRate > 100):
-		return scan.Options{}, fmt.Errorf("subenum: HitRate must be 1-100, got %d", c.HitRate)
 	}
 
 	resolver := orDefaultString(c.Resolver, DefaultResolver)

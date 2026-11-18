@@ -74,6 +74,23 @@ func TestValidateHitRateOnlyWhenSimulate(t *testing.T) {
 	}
 }
 
+// TestValidateNumberErrorsUseFieldLabels covers #414: a value that is not a
+// whole number is reported under the field's on-screen label.
+func TestValidateNumberErrorsUseFieldLabels(t *testing.T) {
+	for _, field := range []int{fieldConcurrency, fieldTimeout, fieldAttempts, fieldHitRate,
+		fieldDepth, fieldRate, fieldMaxQueries, fieldRatePerResolver} {
+		m := newFormModel(savedConfig{})
+		m.inputs[fieldDomain].SetValue("example.com")
+		m.toggles[fieldSimulate] = true  // shows Hit Rate
+		m.toggles[fieldRecursive] = true // shows Depth
+		m.inputs[field].SetValue("lots")
+		_, errStr := m.validate()
+		if want := formFields[field].name() + " must be a whole number"; !strings.HasPrefix(errStr, want) {
+			t.Errorf("field %d: error %q, want it to start %q", field, errStr, want)
+		}
+	}
+}
+
 func TestValidateBlankNumericFieldsUseDefaults(t *testing.T) {
 	for _, field := range []int{fieldConcurrency, fieldTimeout, fieldAttempts, fieldHitRate,
 		fieldDepth, fieldRate, fieldMaxQueries, fieldRatePerResolver} {

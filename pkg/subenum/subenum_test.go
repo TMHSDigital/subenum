@@ -302,6 +302,24 @@ func TestValidateMatchesRun(t *testing.T) {
 	}
 }
 
+// TestValidateNamesConfigFields covers #414: the range checks Config shares
+// with the CLI and TUI (scan.Options.Validate) report the Config field.
+func TestValidateNamesConfigFields(t *testing.T) {
+	for field, cfg := range map[string]subenum.Config{
+		"Rate":            {Domain: "example.com", Simulate: true, Rate: -1},
+		"MaxQueries":      {Domain: "example.com", Simulate: true, MaxQueries: -1},
+		"HitRate":         {Domain: "example.com", Simulate: true, HitRate: 101},
+		"MaxDuration":     {Domain: "example.com", Simulate: true, MaxDuration: -time.Second},
+		"RatePerResolver": {Domain: "example.com", RatePerResolver: -1},
+		"Resolver":        {Domain: "example.com", Resolver: "not a resolver"},
+	} {
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), field) || !strings.HasPrefix(err.Error(), "subenum: ") {
+			t.Errorf("%s: Validate = %v, want a subenum error naming %s", field, err, field)
+		}
+	}
+}
+
 func TestDefaultWordsAreUsable(t *testing.T) {
 	words := subenum.DefaultWords()
 	if len(words) < 1000 {

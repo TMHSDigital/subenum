@@ -553,8 +553,9 @@ func (m *formModel) validate() (formValues, string) {
 
 	// The form only parses its text fields here; ranges and the resolver are
 	// checked by scan.Options.Validate, the same validator the CLI uses (#80).
-	// Blank values use the same defaults as remembered().
-	num := func(f int, name string) int {
+	// Blank values use the same defaults as remembered(). A parse error names
+	// the field by its on-screen label (#414).
+	num := func(f int) int {
 		s := strings.TrimSpace(text(f))
 		if err != nil {
 			return 0
@@ -564,27 +565,27 @@ func (m *formModel) validate() (formValues, string) {
 		}
 		n, perr := strconv.Atoi(s)
 		if perr != nil {
-			err = fmt.Errorf("%s must be a whole number, got %q", name, text(f))
+			err = fmt.Errorf("%s must be a whole number, got %q", formFields[f].name(), text(f))
 		}
 		keep(f, strconv.Itoa(n))
 		return n
 	}
-	concurrency := num(fieldConcurrency, "Concurrency")
-	timeout := num(fieldTimeout, "Timeout")
-	attempts := num(fieldAttempts, "Attempts")
+	concurrency := num(fieldConcurrency)
+	timeout := num(fieldTimeout)
+	attempts := num(fieldAttempts)
 	// Hit rate only matters in simulation mode, and depth only when
 	// recursive is on; otherwise their fields must not block the scan.
 	hitRate := scan.DefaultHitRate
 	if m.shown(fieldHitRate) {
-		hitRate = num(fieldHitRate, "Hit rate")
+		hitRate = num(fieldHitRate)
 	}
 	depth := 1
 	if m.shown(fieldDepth) {
-		depth = num(fieldDepth, "Depth")
+		depth = num(fieldDepth)
 	}
-	rate := num(fieldRate, "Rate")                    // blank means unlimited
-	maxQueries := num(fieldMaxQueries, "Max queries") // blank means unlimited
-	ratePerResolver := num(fieldRatePerResolver, formFields[fieldRatePerResolver].name())
+	rate := num(fieldRate)             // blank means unlimited
+	maxQueries := num(fieldMaxQueries) // blank means unlimited
+	ratePerResolver := num(fieldRatePerResolver)
 	var maxDuration time.Duration // blank means unlimited, as -max-duration 0
 	if s := strings.TrimSpace(text(fieldMaxDuration)); err == nil && s != "" {
 		var perr error
