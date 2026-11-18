@@ -424,7 +424,7 @@ func inputDigests(f cliFlags) (map[string]string, error) {
 	if _, ok := builtinLab(simZone); ok {
 		simZone = "" // compiled in, not a file; it does not move a saved position (#354)
 	}
-	paths := append(slices.Clone(f.wordlists.paths), f.domainList, f.excludeFile, f.resolvers, simZone, f.seedsFile, f.diff)
+	paths := append(slices.Clone(f.wordlists.paths), f.hostsFile, f.domainList, f.excludeFile, f.resolvers, simZone, f.seedsFile, f.diff)
 	for _, p := range paths {
 		d, err := fileDigest(p)
 		if err != nil {
@@ -535,8 +535,8 @@ func savedSources(sources []targetSource, scanned bool) map[string][]string {
 // state was saved.
 func saveResumeState(s *session) bool {
 	f, out, prev := s.f, s.out, s.resume
-	if f.wordlists.readsStdin() || f.domainList == "-" {
-		out.Info("Not saving resume state: the wordlist or domain list came from stdin")
+	if f.wordlists.readsStdin() || f.hostsFile == "-" || f.domainList == "-" {
+		out.Info("Not saving resume state: the wordlist, host list or domain list came from stdin")
 		return false
 	}
 	inputs, err := inputDigests(f)

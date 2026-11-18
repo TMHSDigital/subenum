@@ -269,6 +269,34 @@ func TestE2EFullNamesInWordlist(t *testing.T) {
 	}
 }
 
+// TestE2EHosts covers #351: -hosts resolves full names, each under the
+// most specific -dL target it belongs to, and skips names under none.
+func TestE2EHosts(t *testing.T) {
+	t.Parallel()
+	hosts := writeFile(t, "hosts.txt", "# from another tool\napi.lab.example\nwww.lab.example\nvpn.dev.lab.example\nmail.other.example\n")
+	targets := writeFile(t, "targets.txt", "lab.example\ndev.lab.example\n")
+	code, stdout, stderr := runCLIStreams(t, "-simulate", "-seed", "1", "-hit-rate", "100", "-progress=false", "-hosts", hosts, "-dL", targets)
+	if code != exitOK {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+	lines := strings.Fields(stdout)
+	sort.Strings(lines)
+	if strings.Join(lines, ",") != "api.lab.example,vpn.dev.lab.example,www.lab.example" {
+		t.Errorf("stdout = %q, want the in-scope names once each", stdout)
+	}
+	if !strings.Contains(stderr, "Note: 1 -hosts names are under none of the targets; skipped them") {
+		t.Errorf("missing out-of-scope note:\n%s", stderr)
+	}
+	for _, args := range [][]string{
+		{"-hosts", hosts, "-w", hosts, "lab.example"},
+		{"-hosts", hosts, "-recursive", "lab.example"},
+	} {
+		if code, _, stderr := runCLIStreams(t, append([]string{"-simulate"}, args...)...); code != exitUsage {
+			t.Errorf("%v: exit %d, want usage error\n%s", args, code, stderr)
+		}
+	}
+}
+
 func TestE2ESeedReproducible(t *testing.T) {
 	t.Parallel()
 	wl := writeFile(t, "wl.txt", e2eWords+"vpn\ncdn\nadmin\nportal\n")

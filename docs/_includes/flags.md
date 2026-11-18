@@ -17,6 +17,7 @@
 | `-force` | - | Continue scanning even if wildcard DNS is detected |
 | `-format <string>` | text | Output format: text, json, jsonl, or csv |
 | `-hit-rate <int>` | 15 | In simulation mode, percentage of names that resolve (1-100) |
+| `-hosts <file>` {% include unreleased.html flag="hosts" %} | - | A file of full host names to resolve instead of a wordlist, one per line (- for stdin); each target looks up only the names under it, names under no target are skipped |
 | `-inconclusive <string>` | - | Write the names still without an answer (timeout, refused, other) to this file, one per line, to rescan with -w |
 | `-log-format <string>` | text | Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged |
 | `-max-duration <duration>` | 0s | Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report, a degraded verdict and saved state for -resume to continue from |

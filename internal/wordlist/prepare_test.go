@@ -100,6 +100,31 @@ func TestForStripsTargetSuffix(t *testing.T) {
 	}
 }
 
+// TestLimitTo covers -hosts (#351): each target gets the prefixes of the
+// names under it, a name under a nested target goes to that target only, and
+// names under no target are counted, never used.
+func TestLimitTo(t *testing.T) {
+	lines := []string{"www.a.example", "x.a.example", "api.x.a.example", "WWW.A.Example.", "other.example", "a.example", "www", "b.a.example.org"}
+	p := Prepare(lines)
+	p.LimitTo([]string{"A.example.", "x.a.example"})
+	for domain, want := range map[string][]string{
+		"a.example":   {"www", "x"},
+		"x.a.example": {"api"},
+	} {
+		entries, dupes, _ := p.For(domain)
+		if !reflect.DeepEqual(entries, want) {
+			t.Errorf("For(%q) = %v, want %v", domain, entries, want)
+		}
+		if domain == "a.example" && dupes != 1 {
+			t.Errorf("For(%q) duplicates = %d, want 1", domain, dupes)
+		}
+	}
+	// other.example, a.example itself, www and b.a.example.org.
+	if n := p.Outside(); n != 4 {
+		t.Errorf("Outside() = %d, want 4", n)
+	}
+}
+
 // TestPrepareIndexAcrossGrowth covers #248: the entry index keeps finding
 // earlier entries while its table doubles many times, so repeats seen long
 // after their first occurrence (in another case) still count as duplicates,

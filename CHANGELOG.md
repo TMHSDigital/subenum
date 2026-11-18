@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `-hosts <file>` looks up a list of full host names, such as another tool's output or an old results file, instead of a wordlist, through the same wildcard filtering, resolver pool, pacing, verdict, `-diff` and output formats (`-` reads stdin). Targets still come from the `<domain>` argument or `-dL`: each looks up only the names under it, the most specific target when targets nest, and names under no target are out of scope, never queried, and counted in one note. It cannot be combined with `-w`, `-recursive` or `-tui` (#351).
+
 ## [0.11.0] - 2026-11-18
 
 ### Added

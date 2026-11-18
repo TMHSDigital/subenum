@@ -418,7 +418,7 @@ func (s *session) loadInputs() bool {
 	f, out := s.f, s.out
 	// The wordlist is read once (stdin can only be read once) and normalized
 	// per target, since the name-length limit depends on the domain.
-	if len(f.wordlists.paths) == 0 {
+	if len(f.wordlists.paths) == 0 && f.hostsFile == "" {
 		out.Info("No -w given: using the %s. Pass -w for a larger or target-specific list.", defaultWordlistName(f))
 	}
 	s.settings = effectiveSettings(s.fs)
@@ -442,8 +442,20 @@ func (s *session) loadInputs() bool {
 	}
 	s.words = words
 	if probe, _, _ := s.words.For(""); len(probe) == 0 {
-		out.Error("wordlist %s has no valid entries", f.wordlists.describe())
+		if f.hostsFile != "" {
+			out.Error("-hosts %s has no valid host names", f.hostsFile)
+		} else {
+			out.Error("wordlist %s has no valid entries", f.wordlists.describe())
+		}
 		return false
+	}
+	if f.hostsFile != "" {
+		// Each target looks up only the names under it; the rest are out of
+		// scope and never queried (#351).
+		s.words.LimitTo(s.targets)
+		if n := s.words.Outside(); n > 0 {
+			out.Info("Note: %d -hosts names are under none of the targets; skipped them", n)
+		}
 	}
 	if s.resume != nil {
 		// The bundled wordlist changes with the binary, so the file digests
@@ -660,7 +672,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		out.Info("=== [%d/%d] %s ===", i+1, len(s.targets), target)
 	}
 	entries, duplicates, skipped := s.words.For(target)
-	if n := s.words.Suffixed(target); n > 0 {
+	if n := s.words.Suffixed(target); n > 0 && s.f.hostsFile == "" {
 		out.Info("Note: %d wordlist entries ended in %s; used them as prefixes", n, target)
 	}
 	if skipped > 0 {
@@ -673,10 +685,14 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		}
 	}
 	if len(entries) == 0 {
-		out.Error("no valid wordlist entries for %s", target)
+		reason := "no valid wordlist entries"
+		if s.f.hostsFile != "" {
+			reason = "no -hosts names under this target"
+		}
+		out.Error("%s for %s", reason, target)
 		s.anyFailed = true
 		s.status[i] = report.StatusFailed
-		s.results[i] = targetResult{failed: true, err: "no valid wordlist entries"}
+		s.results[i] = targetResult{failed: true, err: reason}
 		s.failedTargets++
 		return true
 	}

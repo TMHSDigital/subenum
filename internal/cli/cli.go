@@ -116,6 +116,7 @@ type cliFlags struct {
 	printConfig  bool
 	dryRun       bool          // -dry-run: print the plan, scan nothing (#192)
 	wordlists    wordlistPaths // -w, repeatable (#199)
+	hostsFile    string        // -hosts: full host names to resolve instead of a wordlist (#351)
 	domainList   string
 	concurrency  int
 	timeoutMs    int
@@ -219,6 +220,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.printConfig, "print-config", false, "Print every setting's effective value and its source (flag, env, config or default), then exit")
 	fs.BoolVar(&f.dryRun, "dry-run", false, "Print the plan without scanning: candidates after dedupe and -exclude, query and duration estimates, and the resolver preflight (its only DNS query, also sent to each -r pool resolver); then exit")
 	fs.Var(&f.wordlists, "w", "Path to a wordlist `file` (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list")
+	fs.StringVar(&f.hostsFile, "hosts", "", "A `file` of full host names to resolve instead of a wordlist, one per line (- for stdin); each target looks up only the names under it, names under no target are skipped")
 	fs.StringVar(&f.domainList, "dL", "", "File of apex domains to scan, one per line (- for stdin); replaces the <domain> argument")
 	fs.IntVar(&f.concurrency, "t", scan.DefaultConcurrency, "Number of concurrent workers")
 	fs.IntVar(&f.timeoutMs, "timeout", scan.DefaultTimeoutMs, "DNS lookup timeout in milliseconds")
@@ -318,6 +320,20 @@ func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *outpu
 		out.Error("%s cannot all read standard input (-); it can only be read once, so give all but one a file", strings.Join(readers, ", "))
 		return false
 	}
+	if f.hostsFile != "" {
+		// A -w from the config file or SUBENUM_W is a default -hosts replaces.
+		switch {
+		case f.wordlists.chosen && !f.wordlists.replace:
+			out.Error("use either -w or -hosts, not both: -hosts names the hosts to look up instead of a wordlist")
+			return false
+		case f.recursive:
+			out.Error("-recursive cannot be used with -hosts: it scans a wordlist under each name found, and -hosts has none")
+			return false
+		case f.tui:
+			out.Error("-hosts is not available in the TUI")
+			return false
+		}
+	}
 	return true
 }
 
@@ -328,6 +344,7 @@ func stdinReaders(f cliFlags) []string {
 		names = append(names, "-w")
 	}
 	for _, c := range []struct{ name, path string }{
+		{"-hosts", f.hostsFile},
 		{"-dL", f.domainList},
 		{"-r", f.resolvers},
 		{"-exclude-file", f.excludeFile},
@@ -662,9 +679,12 @@ func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Wri
 		out.Info("Mode: LIVE DNS RESOLUTION")
 	}
 	out.Info("Target domain: %s", domain)
-	if len(f.wordlists.paths) == 0 {
+	switch {
+	case f.hostsFile != "":
+		out.Info("Hosts: %s", f.hostsFile)
+	case len(f.wordlists.paths) == 0:
 		out.Info("Wordlist: %s", defaultWordlistName(f))
-	} else {
+	default:
 		out.Info("Wordlist: %s", f.wordlists.describe())
 	}
 	out.Info("Concurrency: %d workers", f.concurrency)

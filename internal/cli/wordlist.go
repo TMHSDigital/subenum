@@ -86,6 +86,19 @@ func (w *wordlistPaths) describe() string { return strings.Join(w.paths, ", ") }
 // multi-million-line list are never all held at once (#248).
 func prepareWordlist(f cliFlags, in *runtimeInputs) (*wordlist.Prepared, error) {
 	pr := wordlist.NewPreparer()
+	if f.hostsFile != "" {
+		// Full host names, kept to the targets by the caller (#351).
+		var err error
+		if f.hostsFile == wordlist.Stdin && in.stdin != nil {
+			err = wordlist.EachLine(in.stdin, pr.Add)
+		} else {
+			err = wordlist.EachLineOf(f.hostsFile, pr.Add)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return pr.Prepared(), nil
+	}
 	if len(f.wordlists.paths) == 0 {
 		src := io.Reader(strings.NewReader(data.Subdomains5k))
 		if usesLabWords(f) {

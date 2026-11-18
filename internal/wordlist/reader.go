@@ -156,6 +156,66 @@ type Prepared struct {
 	invalid int      // lines that are not valid DNS labels
 	maxLen  int      // longest entry
 	dotted  int      // entries with more than one label, the only ones that can end in a target (#351)
+	// scope, when set, makes the entries full host names (-hosts, #351): a
+	// target uses only the names under it, and none of the others.
+	scope map[string]struct{}
+}
+
+// LimitTo makes p a list of full host names for these targets (-hosts,
+// #351): For(target) then returns the prefixes of the names under target,
+// leaving out names under a more specific target in the list, which uses
+// them itself. Names under no target are never used; Outside counts them.
+func (p *Prepared) LimitTo(targets []string) {
+	p.scope = make(map[string]struct{}, len(targets))
+	for _, t := range targets {
+		p.scope[strings.ToLower(strings.TrimSuffix(t, "."))] = struct{}{}
+	}
+}
+
+// owner returns the most specific LimitTo target that name is under, or "".
+func (p *Prepared) owner(name string) string {
+	for i := strings.IndexByte(name, '.'); i >= 0; {
+		if _, ok := p.scope[name[i+1:]]; ok {
+			return name[i+1:]
+		}
+		j := strings.IndexByte(name[i+1:], '.')
+		if j < 0 {
+			break
+		}
+		i += 1 + j
+	}
+	return ""
+}
+
+// Outside counts the distinct names of a LimitTo list that are under none
+// of its targets.
+func (p *Prepared) Outside() int {
+	n := 0
+	for _, entry := range p.entries {
+		if p.owner(entry) == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// under is For for a LimitTo list.
+func (p *Prepared) under(domain string) (entries []string, duplicates, skipped int) {
+	limit := maxNameLen - 1 - len(domain)
+	skipped = p.invalid
+	for i, entry := range p.entries {
+		if p.owner(entry) != domain {
+			continue
+		}
+		prefix := entry[:len(entry)-len(domain)-1]
+		if len(prefix) > limit {
+			skipped += int(p.counts[i])
+			continue
+		}
+		duplicates += int(p.counts[i]) - 1
+		entries = append(entries, prefix)
+	}
+	return entries, duplicates, skipped
 }
 
 // Prepare normalizes raw wordlist lines; see Build.
@@ -281,6 +341,9 @@ func (pr *Preparer) Prepared() *Prepared {
 // appending to it copies.
 func (p *Prepared) For(domain string) (entries []string, duplicates, skipped int) {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
+	if p.scope != nil && domain != "" {
+		return p.under(domain)
+	}
 	limit := maxNameLen - 1 - len(domain)
 	skipped = p.invalid
 	suffix := p.targetSuffix(domain)
