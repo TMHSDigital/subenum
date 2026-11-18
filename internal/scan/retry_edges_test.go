@@ -151,12 +151,15 @@ func TestPoolOfLiarsFallsBackToTrusted(t *testing.T) {
 	})
 	defer stopL()
 
-	pool := dns.NewPool([]string{liar}, time.Second)
+	// A passing run takes about 50ms; the 3s timeout and a second attempt
+	// leave room for a loopback answer that a loaded runner delays (#412).
+	const timeout = 3 * time.Second
+	pool := dns.NewPool([]string{liar}, timeout)
 	entries := append([]string{"www"}, makeEntries(20)...)
 	cfg := Config{
 		Domain: "example.com", Entries: entries, Concurrency: 1,
-		Timeout: time.Second, Attempts: 1, Types: []string{"A"},
-		Resolver: dns.NewResolver(time.Second, trusted), DNSServer: trusted, Pool: pool,
+		Timeout: timeout, Attempts: 2, Types: []string{"A"},
+		Resolver: dns.NewResolver(timeout, trusted), DNSServer: trusted, Pool: pool,
 	}
 	done, errs := runPool(t, cfg)
 	if len(errs) != 0 {
@@ -164,7 +167,8 @@ func TestPoolOfLiarsFallsBackToTrusted(t *testing.T) {
 	}
 	st := done.Stats
 	if st.Found != 1 || st.NXDomain != int64(len(entries)-1) {
-		t.Errorf("found %d nxdomain %d; want only www, and the trusted resolver's NXDOMAIN for the rest", st.Found, st.NXDomain)
+		t.Errorf("found %d nxdomain %d (timeout %d, other %d, unconfirmed %d); want only www, and the trusted resolver's NXDOMAIN for the rest",
+			st.Found, st.NXDomain, st.Timeout, st.Other, st.Unconfirmed)
 	}
 	if !pool.Stats()[0].Flagged {
 		t.Errorf("the lying member was never flagged: %+v", pool.Stats()[0])
