@@ -163,6 +163,50 @@ func TestPoolReservesWireQueries(t *testing.T) {
 	}
 }
 
+// TestPoolProbeRunsMembersConcurrently covers #399: stalled members are
+// probed side by side, so a probe costs about one timeout rather than one
+// per dead member, and the results stay in pool order.
+func TestPoolProbeRunsMembersConcurrently(t *testing.T) {
+	srv := startTestDNS(t, map[string]testReply{"example.com": {A: "192.0.2.10"}})
+	const dead = 6
+	addrs := make([]string, 0, dead+1)
+	for range dead {
+		addrs = append(addrs, startBlackHole(t))
+	}
+	addrs = append(addrs, srv.addr)
+	timeout := time.Second
+	p := NewPool(addrs, timeout)
+	defer p.CloseIdleConnections()
+
+	start := time.Now()
+	got := p.Probe(context.Background(), Lookup{Timeout: timeout, Attempts: 1, Types: []string{"A"}}, "example.com", len(addrs))
+	// Serially the dead members alone would take dead*timeout (6s).
+	if elapsed := time.Since(start); elapsed > dead*timeout/2 {
+		t.Fatalf("probe took %v; members were not probed concurrently", elapsed)
+	}
+	if len(got) != len(addrs) {
+		t.Fatalf("got %d results, want %d", len(got), len(addrs))
+	}
+	for i, r := range got {
+		want := OutcomeTimeout
+		if i == dead {
+			want = OutcomeFound
+		}
+		if r.Addr != addrs[i] || r.Outcome != want {
+			t.Errorf("result %d = %s %v, want %s %v", i, r.Addr, r.Outcome, addrs[i], want)
+		}
+	}
+
+	// One worker still probes every member, in order.
+	one := NewPool([]string{srv.addr, srv.addr}, timeout)
+	defer one.CloseIdleConnections()
+	for i, r := range one.Probe(context.Background(), Lookup{Timeout: timeout, Attempts: 1, Types: []string{"A"}}, "example.com", 0) {
+		if r.Outcome != OutcomeFound {
+			t.Errorf("single-worker result %d = %v, want found", i, r.Outcome)
+		}
+	}
+}
+
 // TestPoolRatePerResolver drives the per-resolver cap (#196) on a fake clock:
 // lookups go to members with room first, wait for the one that frees up
 // soonest when every cap is spent, and count each spent cap as throttled.

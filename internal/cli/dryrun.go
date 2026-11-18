@@ -123,7 +123,7 @@ func (s *session) dryRun() int {
 			p.PreflightOK = preflightOK(outcome)
 			failed = failed || !p.PreflightOK
 			if s.in.pool != nil {
-				for _, r := range s.in.pool.Probe(ctx, lookup, target) {
+				for _, r := range s.in.pool.Probe(ctx, lookup, target, f.concurrency) {
 					p.PoolPreflight = append(p.PoolPreflight, dryRunResolver{Addr: r.Addr, Preflight: r.Outcome.String(), OK: preflightOK(r.Outcome)})
 				}
 			}

@@ -488,18 +488,33 @@ type ProbeResult struct {
 	Outcome Outcome
 }
 
-// Probe looks domain up once on every member, in pool order, outside the
-// rotation and its accounting. Each lookup takes its slots of the member's
-// rate cap. -dry-run uses it as a per-resolver preflight (#376).
-func (p *Pool) Probe(ctx context.Context, l Lookup, domain string) []ProbeResult {
-	out := make([]ProbeResult, 0, len(p.members))
-	for _, m := range p.members {
-		outcome := OutcomeCanceled
-		if p.reserve(ctx, m, QueriesFor(l.Types)) == nil {
-			_, outcome = m.lookup(l).Resolve(ctx, domain)
-		}
-		out = append(out, ProbeResult{Addr: m.Addr, Outcome: outcome})
+// Probe looks domain up once on every member, outside the rotation and its
+// accounting, and returns the results in pool order. Each lookup takes its
+// slots of the member's rate cap. Up to workers members are probed at once,
+// so dead members cost about one timeout in all rather than one each (#399).
+// -dry-run uses it as a per-resolver preflight (#376).
+func (p *Pool) Probe(ctx context.Context, l Lookup, domain string, workers int) []ProbeResult {
+	out := make([]ProbeResult, len(p.members))
+	workers = max(min(workers, len(p.members)), 1)
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for i := range next {
+				m := p.members[i]
+				outcome := OutcomeCanceled
+				if p.reserve(ctx, m, QueriesFor(l.Types)) == nil {
+					_, outcome = m.lookup(l).Resolve(ctx, domain)
+				}
+				out[i] = ProbeResult{Addr: m.Addr, Outcome: outcome}
+			}
+		})
 	}
+	for i := range p.members {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
 	return out
 }
 
