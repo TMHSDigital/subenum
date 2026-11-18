@@ -72,6 +72,9 @@ type Result struct {
 	// source ("ct", "wayback") and "axfr", every one that had it, in that
 	// order; or "permute" alone for a -permute hit.
 	Sources []string `json:"sources,omitempty"`
+	// Target is the scanned domain that found the name, so -dL results with
+	// nested targets can be split per target (#422).
+	Target string `json:"target,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
@@ -104,6 +107,7 @@ type Writer struct {
 	takeoverColumn bool   // CSV carries a takeover_candidate column
 	diff           bool   // -diff output: +/- prefixes and a CSV change column
 	sourcesColumn  bool   // CSV carries a sources column (#273)
+	targetColumn   bool   // CSV carries a target column (#422)
 	headerDone     bool   // text file header written
 
 	jsonOpen  bool          // FormatJSON: the array's "[" and first element are written (#181)
@@ -175,6 +179,11 @@ func (w *Writer) SetTakeoverColumn(on bool) { w.takeoverColumn = on }
 // SetSourcesColumn adds a sources column to CSV output, after every other
 // column: each result's Sources joined with ";" (#273).
 func (w *Writer) SetSourcesColumn(on bool) { w.sourcesColumn = on }
+
+// SetTargetColumn adds a target column to CSV output, after every other
+// column: the scanned domain that found each result (#422). The CLI sets it
+// under -dL.
+func (w *Writer) SetTargetColumn(on bool) { w.targetColumn = on }
 
 // SetSeed records the simulation seed for the simulated-results file header.
 func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
@@ -341,6 +350,9 @@ func (w *Writer) ensureCSV() {
 	if w.sourcesColumn {
 		header = append(header, "sources")
 	}
+	if w.targetColumn {
+		header = append(header, "target")
+	}
 	if w.stdout {
 		w.csvStdout = csv.NewWriter(w.stdOut())
 		_ = w.csvStdout.Write(header)
@@ -370,6 +382,9 @@ func (w *Writer) writeCSVRows(res Result) {
 		}
 		if w.sourcesColumn {
 			row = append(row, strings.Join(res.Sources, ";"))
+		}
+		if w.targetColumn {
+			row = append(row, res.Target)
 		}
 		if w.csvStdout != nil {
 			_ = w.csvStdout.Write(row)

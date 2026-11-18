@@ -51,6 +51,7 @@ type session struct {
 	files   []resultFile   // the open -o files, each with the full current results
 	diff    *differ
 
+	target        string          // the target being scanned, named in each result (#422)
 	targetResults resultLog       // the current target's results: -permute seeds, saved on interrupt
 	takeovers     []output.Result // every target's takeover candidates, for -sarif
 	cands         *candidates.Set // the current target's candidates: what proposed each name (#273)
@@ -510,6 +511,7 @@ func (s *session) openOutputs() bool {
 		w.SetSeed(f.seed)
 		w.SetTakeoverColumn(dns.HintsTakeover(s.in.recordTypes))
 		w.SetSourcesColumn(true)
+		w.SetTargetColumn(f.domainList != "")
 	}
 	return true
 }
@@ -589,7 +591,7 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 		s.refound++
 		return
 	}
-	res := output.Result{Result: ev.Result, Permutation: permutation, Sources: candidates.FromPermute}
+	res := output.Result{Result: ev.Result, Permutation: permutation, Sources: candidates.FromPermute, Target: s.target}
 	if !permutation {
 		res.Sources = s.cands.SourcesOf(res.Subdomain)
 	}
@@ -653,6 +655,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	out := s.out
 	out.SetTarget(target) // JSON diagnostics name it (#198)
 	defer out.SetTarget("")
+	s.target = target
 	if len(s.targets) > 1 {
 		out.Info("=== [%d/%d] %s ===", i+1, len(s.targets), target)
 	}

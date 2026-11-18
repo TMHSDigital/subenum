@@ -159,6 +159,54 @@ func TestE2EDomainListSingleJSONArray(t *testing.T) {
 	}
 }
 
+// TestE2EDomainListNamesTarget covers #422: with nested -dL targets each
+// result names the target that found it, in JSONL and in a CSV column.
+func TestE2EDomainListNamesTarget(t *testing.T) {
+	t.Parallel()
+	wl := writeFile(t, "wl.txt", "api\napi.dev\n")
+	dl := writeFile(t, "domains.txt", "example.com\ndev.example.com\n")
+	code, out := runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-format", "jsonl", "-w", wl, "-dL", dl)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := map[string]bool{}
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		var r struct {
+			Subdomain string `json:"subdomain"`
+			Target    string `json:"target"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("bad JSONL line %q: %v", line, err)
+		}
+		if r.Subdomain == "" { // the summary line
+			continue
+		}
+		got[r.Subdomain+" "+r.Target] = true
+	}
+	for _, want := range []string{
+		"api.example.com example.com",
+		"api.dev.example.com example.com",
+		"api.dev.example.com dev.example.com",
+		"api.dev.dev.example.com dev.example.com",
+	} {
+		if !got[want] {
+			t.Errorf("missing result %q; got %v", want, got)
+		}
+	}
+
+	code, out = runCLI(t, "", "-simulate", "-hit-rate", "100", "-progress=false", "-format", "csv", "-w", wl, "-dL", dl)
+	if code != 0 {
+		t.Fatalf("csv: exit %d", code)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if !strings.HasSuffix(strings.TrimSpace(lines[0]), ",target") {
+		t.Fatalf("CSV header %q has no trailing target column", lines[0])
+	}
+	if !strings.Contains(out, "api.dev.dev.example.com,") || !strings.Contains(out, ",dev.example.com\n") {
+		t.Errorf("CSV rows do not name their target:\n%s", out)
+	}
+}
+
 func TestE2EStdinWordlistPlainOutput(t *testing.T) {
 	t.Parallel()
 	code, out := runCLI(t, "WWW\nmail\n# comment\n", "-simulate", "-hit-rate", "100", "-progress=false", "-w", "-", "example.com")

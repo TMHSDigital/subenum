@@ -375,7 +375,7 @@ subenum -w <wordlist> [flags] -dL <domains_file>
 
 Press `Ctrl+C` at any time to abort. In-flight queries drain, partial results are flushed, and the process exits with code 130 (143 for SIGTERM, as sent by `docker stop` or systemd). Interrupted lookups are not counted as resolver failures.
 
-With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end.
+With `-dL`, each domain is scanned in turn as an independent scan: `-max-queries`, `-rate` and the reliability guard apply per target. A failed target does not stop the others, but a reliability abort (the resolver looks overloaded) skips the remaining targets unless `-no-abort` is set. A per-target status list is printed at the end. Each JSON and JSONL result names the domain that found it in a `target` field, and under `-dL` CSV gains a last `target` column, so nested targets (`example.com` and `dev.example.com`) can be told apart; text output is unchanged.
 
 <details>
 <summary><strong>Exit codes</strong></summary>
