@@ -150,7 +150,10 @@ func Try(ctx context.Context, target string, o Options) Result {
 		wg.Go(func() { a.transfer(ctx, o, target, transferTimeout) })
 	}
 	wg.Wait()
+	// The names kept over all servers are bounded like one transfer's, so
+	// eight servers cannot add eight times as many candidates.
 	names := map[string]struct{}{}
+	capped := false
 	for _, a := range attempts {
 		for _, l := range a.logs {
 			logf(l.f, "%s", l.msg)
@@ -160,9 +163,18 @@ func Try(ctx context.Context, target string, o Options) Result {
 		if a.allowed {
 			res.Allowed = append(res.Allowed, a.host)
 			for _, n := range a.got {
-				names[strings.TrimSuffix(n, "."+target)] = struct{}{}
+				n = strings.TrimSuffix(n, "."+target)
+				if _, ok := names[n]; !ok && len(names) >= dns.MaxTransferNames {
+					capped = true
+					break
+				}
+				names[n] = struct{}{}
 			}
+			a.got = nil
 		}
+	}
+	if capped {
+		logf(o.Info, "-axfr: the transfers gave more than %d names; only the first %d are used", dns.MaxTransferNames, dns.MaxTransferNames)
 	}
 	for n := range names {
 		res.Names = append(res.Names, n)
@@ -203,6 +215,11 @@ func (a *attempt) transfer(ctx context.Context, o Options, target string, timeou
 		}
 		a.tried++
 		got, err := dns.Transfer(ctx, net.JoinHostPort(addr, o.Port), target, timeout)
+		if errors.Is(err, dns.ErrTransferTruncated) {
+			a.allowed, a.got = true, got
+			a.logf(o.Info, "Zone transfer: %s (%s) allowed AXFR of %s, but it was stopped: %v. Anyone can list this zone; restrict transfers to your secondaries.", a.host, addr, target, err)
+			return
+		}
 		if err != nil {
 			if errors.Is(err, dns.ErrTransferRefused) {
 				a.logf(o.Debug, "-axfr: %s (%s): %v", a.host, addr, err)

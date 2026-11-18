@@ -20,7 +20,19 @@ import (
 const (
 	axfrMaxRecords  = 1 << 20
 	axfrMaxMessages = 1 << 16
+	// axfrMaxNameBytes bounds the bytes of names one transfer holds: a
+	// compressed owner costs a few bytes on the wire and up to 253 in memory.
+	axfrMaxNameBytes = 4 << 20
 )
+
+// MaxTransferNames is the most names one transfer keeps, and the most an
+// -axfr attempt keeps over all its servers. A transfer that reaches it, or
+// axfrMaxNameBytes, stops and returns what it has with ErrTransferTruncated.
+const MaxTransferNames = 100_000
+
+// ErrTransferTruncated is returned by Transfer, with the names read so far,
+// when the zone has more names than a transfer keeps.
+var ErrTransferTruncated = errors.New("zone transfer truncated")
 
 // rcodeNotAuth is NOTAUTH (RFC 2845), which some servers send to refuse a
 // transfer; dnsmessage has no constant for it.
@@ -34,7 +46,8 @@ var ErrTransferRefused = errors.New("zone transfer refused")
 // of zone over TCP and returns the names in the zone: lowercase, without the
 // trailing dot, sorted, without duplicates, and without the apex itself.
 // Every record's owner counts, whatever its type. timeout bounds the whole
-// transfer, connection included.
+// transfer, connection included. A zone with more names than a transfer
+// keeps returns the names so far and an error wrapping ErrTransferTruncated.
 func Transfer(ctx context.Context, server, zone string, timeout time.Duration) ([]string, error) {
 	zone = strings.ToLower(strings.TrimSuffix(zone, "."))
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -61,7 +74,7 @@ func Transfer(ctx context.Context, server, zone string, timeout time.Duration) (
 	}
 
 	names := map[string]struct{}{}
-	soas, records := 0, 0
+	soas, records, held := 0, 0, 0
 	for range axfrMaxMessages {
 		msg, err := readStreamMessage(conn)
 		if err != nil {
@@ -75,7 +88,10 @@ func Transfer(ctx context.Context, server, zone string, timeout time.Duration) (
 			}
 			return nil, fmt.Errorf("zone transfer from %s: %w", server, err)
 		}
-		done, err := readTransferMessage(msg, id, zone, names, &soas, &records)
+		done, err := readTransferMessage(msg, id, zone, names, &held, &soas, &records)
+		if errors.Is(err, ErrTransferTruncated) {
+			return sortedNames(names), fmt.Errorf("%w at %d names", err, len(names))
+		}
 		if err != nil || done {
 			if err != nil {
 				return nil, err
@@ -86,12 +102,16 @@ func Transfer(ctx context.Context, server, zone string, timeout time.Duration) (
 	if soas < 2 {
 		return nil, fmt.Errorf("zone transfer from %s ended before the closing SOA", server)
 	}
+	return sortedNames(names), nil
+}
+
+func sortedNames(names map[string]struct{}) []string {
 	out := make([]string, 0, len(names))
 	for n := range names {
 		out = append(out, n)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out
 }
 
 // axfrQuery is a length-prefixed AXFR query for zone.
@@ -129,9 +149,11 @@ func readStreamMessage(r io.Reader) ([]byte, error) {
 }
 
 // readTransferMessage adds the owner names of one transfer message's answers
-// under zone to names, and reports whether the closing SOA arrived. The first
-// record of a transfer must be the zone's SOA, and the next SOA ends it.
-func readTransferMessage(msg []byte, id uint16, zone string, names map[string]struct{}, soas, records *int) (bool, error) {
+// under zone to names, counting their bytes in held, and reports whether the
+// closing SOA arrived. The first record of a transfer must be the zone's SOA,
+// and the next SOA ends it. Reaching MaxTransferNames or axfrMaxNameBytes
+// returns ErrTransferTruncated.
+func readTransferMessage(msg []byte, id uint16, zone string, names map[string]struct{}, held, soas, records *int) (bool, error) {
 	var p dnsmessage.Parser
 	hdr, err := p.Start(msg)
 	if err != nil {
@@ -177,7 +199,14 @@ func readTransferMessage(msg []byte, id uint16, zone string, names map[string]st
 		}
 		name := strings.ToLower(strings.TrimSuffix(rh.Name.String(), "."))
 		if name != zone && strings.HasSuffix(name, "."+zone) {
+			if _, ok := names[name]; ok {
+				continue
+			}
+			if len(names) >= MaxTransferNames || *held+len(name) > axfrMaxNameBytes {
+				return false, ErrTransferTruncated
+			}
 			names[name] = struct{}{}
+			*held += len(name)
 		}
 	}
 	if *records == 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -74,7 +75,7 @@ func TestReadTransferMessageRejectsBadMessages(t *testing.T) {
 		{name: "garbage", msg: []byte{0, 42, 0x80}, want: ""},
 	} {
 		records, soas := tc.records, 1
-		_, err := readTransferMessage(tc.msg, id, "example.test", map[string]struct{}{}, &soas, &records)
+		_, err := readTransferMessage(tc.msg, id, "example.test", map[string]struct{}{}, new(int), &soas, &records)
 		switch {
 		case err == nil:
 			t.Errorf("%s: accepted", tc.name)
@@ -83,6 +84,18 @@ func TestReadTransferMessageRejectsBadMessages(t *testing.T) {
 		case !tc.refused && !strings.Contains(err.Error(), tc.want):
 			t.Errorf("%s: err = %v, want it to contain %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+// TestReadTransferMessageNameBytes: long names stop a transfer at the byte
+// bound before the name count is reached.
+func TestReadTransferMessageNameBytes(t *testing.T) {
+	long := strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + ".example.test."
+	msg := msgWith(t, dnsmessage.Header{ID: 1, Response: true}, []rr{{"x." + long, dnsmessage.TypeA}, {"y." + long, dnsmessage.TypeA}})
+	names, held, soas, records := map[string]struct{}{}, axfrMaxNameBytes-200, 1, 1
+	_, err := readTransferMessage(msg, 1, "example.test", names, &held, &soas, &records)
+	if !errors.Is(err, ErrTransferTruncated) || len(names) != 1 {
+		t.Errorf("err = %v with %d names, want ErrTransferTruncated after 1", err, len(names))
 	}
 }
 
@@ -135,6 +148,26 @@ func TestTransferFromHostileServers(t *testing.T) {
 		addr := tcpServer(t, func(_ uint16, conn net.Conn) { _, _ = conn.Write([]byte{0, 200, 1, 2, 3}) })
 		if _, err := Transfer(context.Background(), addr, "example.test", 5*time.Second); !errors.Is(err, io.ErrUnexpectedEOF) {
 			t.Errorf("err = %v, want io.ErrUnexpectedEOF", err)
+		}
+	})
+	t.Run("more names than a transfer keeps", func(t *testing.T) {
+		addr := tcpServer(t, func(id uint16, conn net.Conn) {
+			writeFramed(conn, msgWith(t, dnsmessage.Header{ID: id, Response: true}, []rr{soa}))
+			for m := 0; m*1000 <= MaxTransferNames; m++ {
+				batch := make([]rr, 1000)
+				for i := range batch {
+					batch[i] = rr{fmt.Sprintf("h%d.example.test.", m*1000+i), dnsmessage.TypeA}
+				}
+				writeFramed(conn, msgWith(t, dnsmessage.Header{ID: id, Response: true}, batch))
+			}
+			writeFramed(conn, msgWith(t, dnsmessage.Header{ID: id, Response: true}, []rr{soa}))
+		})
+		names, err := Transfer(context.Background(), addr, "example.test", 10*time.Second)
+		if !errors.Is(err, ErrTransferTruncated) {
+			t.Fatalf("err = %v, want ErrTransferTruncated", err)
+		}
+		if len(names) != MaxTransferNames {
+			t.Errorf("kept %d names, want %d", len(names), MaxTransferNames)
 		}
 	})
 	t.Run("cancelled mid-transfer", func(t *testing.T) {
@@ -196,7 +229,7 @@ func FuzzReadTransferMessage(f *testing.F) {
 	f.Fuzz(func(t *testing.T, msg []byte) {
 		names := map[string]struct{}{}
 		soas, records := 0, 0
-		_, _ = readTransferMessage(msg, 1, "example.test", names, &soas, &records)
+		_, _ = readTransferMessage(msg, 1, "example.test", names, new(int), &soas, &records)
 		for n := range names {
 			if !strings.HasSuffix(n, ".example.test") {
 				t.Errorf("admitted %q, outside the zone", n)
