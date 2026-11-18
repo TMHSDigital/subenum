@@ -247,12 +247,17 @@ runs:
         resumed=false
         # The state's command line is replayed as it is, so it must be the one
         # this run would run anyway: a state that names other flags or paths
-        # starts a new scan. A resumed run appends -max-duration=VALUE, and a
-        # simulation pins a leading -seed; neither changes what is scanned.
-        want=$(printf '%s\0' "${flags[@]}" "${extra[@]}" "${target[@]}" | jq -Rsc 'split("\u0000") | .[:-1]')
+        # starts a new scan. The time budget is left out on both sides: it may
+        # change between runs (a resumed run appends -max-duration=VALUE), and
+        # a simulation pins a leading -seed; neither changes what is scanned.
+        strip='def strip: if length == 0 then .
+          elif .[0] == "-max-duration" then .[2:] | strip
+          elif (.[0] | startswith("-max-duration=")) then .[1:] | strip
+          else [.[0]] + (.[1:] | strip) end;'
+        want=$(printf '%s\0' "${flags[@]}" "${extra[@]}" "${target[@]}" | jq -Rsc "$strip"' split("\u0000") | .[:-1] | strip')
         same_args() {
-          jq -e --argjson want "$want" '(.args | if .[0] == "-seed" then .[2:] else . end
-            | map(select(startswith("-max-duration=") | not))) == $want' "$base/state.json" > /dev/null 2>&1
+          jq -e --argjson want "$want" "$strip"' (.args | if .[0] == "-seed" then .[2:] else . end | strip) == $want' \
+            "$base/state.json" > /dev/null 2>&1
         }
         if [ -z "$PREVIOUS" ] && [ -n "$BASELINE" ] && [ -s "$base/state.json" ]; then
           if [ "$(cat "$base/state.key" 2> /dev/null)" = "$key" ] && same_args; then
