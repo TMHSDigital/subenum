@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -227,6 +228,38 @@ func BenchmarkCapRecursiveDotted(b *testing.B) {
 		}
 		if _, ok := d.next(); ok || !d.capped {
 			b.Fatal("the budget did not stop admission")
+		}
+	}
+}
+
+// BenchmarkCapLateParent covers #398: a parent found after the budget
+// stopped admission costs the same whatever the wordlist's size, since the
+// counters' tables are built once, at the cap.
+func BenchmarkCapLateParent(b *testing.B) {
+	for _, size := range []int{100_000, 1_000_000} {
+		for _, tc := range []struct {
+			name    string
+			exclude []string
+		}{
+			{"dotted", nil}, // countUnbuiltRepeats
+			{"excluded", []string{"www.a1.example.com"}}, // countUnbuilt
+		} {
+			entries := makeEntries(size)
+			if tc.exclude == nil {
+				entries = append(entries, "dev.api")
+			}
+			b.Run(fmt.Sprintf("%s/%d", tc.name, size), func(b *testing.B) {
+				d := testDispatcher(Config{Entries: entries, Recursive: true, MaxQueries: 1, Exclude: tc.exclude}, 2)
+				d.next()
+				if _, ok := d.next(); ok || !d.capped {
+					b.Fatal("the budget did not stop admission")
+				}
+				i := 0
+				for b.Loop() {
+					d.expand(job{domain: fmt.Sprintf("p%d.example.com", i), depth: 1})
+					i++
+				}
+			})
 		}
 	}
 }

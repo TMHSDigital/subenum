@@ -61,6 +61,20 @@ type dispatcher struct {
 	// (scanState.rootOutcome); the dispatcher marks the entries out of
 	// scope, the workers the rest. Nil in tests that need no Stats.Repeat.
 	rootOutcome []uint8
+
+	// The lookup tables stopAdmitting's counters build from the entries and
+	// the scope, kept for the parents found after the cap (#398). Nil until
+	// first built.
+	unbuilt    *unbuiltTables
+	repeatWalk []int
+}
+
+// unbuiltTables are countUnbuilt's tables: the first labels of the exact
+// -exclude patterns below each parent, and each such label's index in the
+// entries (-1 when no entry is that label).
+type unbuiltTables struct {
+	labels map[string][]string
+	index  map[string]int
 }
 
 // multiLabelEntries is the set of entries that hold more than one label, for
@@ -323,21 +337,27 @@ func (d *dispatcher) stopAdmitting() {
 // checks the patterns directly below its parent against its cursor.
 func (d *dispatcher) countUnbuilt() {
 	s := d.cfg.scope
-	labels := make(map[string][]string) // parent -> first labels of the exact patterns below it
-	index := make(map[string]int)       // those labels -> their index in Entries, -1 if absent
-	for pattern := range s.exact {
-		if label, parent, ok := strings.Cut(pattern, "."); ok {
-			labels[parent] = append(labels[parent], label)
-			index[label] = -1
-		}
-	}
-	if len(index) > 0 {
-		for i, entry := range d.cfg.Entries {
-			if _, ok := index[entry]; ok {
-				index[entry] = i
+	// The tables depend only on the entries and the scope, so they are built
+	// once: a parent found after the cap calls this again (#394), and each
+	// call must not cost a pass over the wordlist (#398).
+	if d.unbuilt == nil {
+		t := &unbuiltTables{labels: make(map[string][]string), index: make(map[string]int)}
+		for pattern := range s.exact {
+			if label, parent, ok := strings.Cut(pattern, "."); ok {
+				t.labels[parent] = append(t.labels[parent], label)
+				t.index[label] = -1
 			}
 		}
+		if len(t.index) > 0 {
+			for i, entry := range d.cfg.Entries {
+				if _, ok := t.index[entry]; ok {
+					t.index[entry] = i
+				}
+			}
+		}
+		d.unbuilt = t
 	}
+	labels, index := d.unbuilt.labels, d.unbuilt.index
 	for _, e := range d.frontier[d.head:] {
 		left := d.n - e.next
 		if s.subtreeExcluded(e.parent) {
@@ -364,21 +384,26 @@ func (d *dispatcher) countUnbuilt() {
 // entry or a label prefix of one are walked, per queued expansion, and the
 // rest are counted without being built.
 func (d *dispatcher) countUnbuiltRepeats() {
-	prefixes := make(map[string]struct{})
-	for m := range d.multi {
-		prefixes[m] = struct{}{}
-		for i := 0; i < len(m); i++ {
-			if m[i] == '.' {
-				prefixes[m[:i]] = struct{}{}
+	// Built once, like countUnbuilt's tables (#398).
+	if d.repeatWalk == nil {
+		prefixes := make(map[string]struct{})
+		for m := range d.multi {
+			prefixes[m] = struct{}{}
+			for i := 0; i < len(m); i++ {
+				if m[i] == '.' {
+					prefixes[m[:i]] = struct{}{}
+				}
 			}
 		}
-	}
-	var walk []int // indexes of those entries, ascending
-	for i, entry := range d.cfg.Entries {
-		if _, ok := prefixes[entry]; ok {
-			walk = append(walk, i)
+		walk := []int{} // indexes of those entries, ascending; non-nil once built
+		for i, entry := range d.cfg.Entries {
+			if _, ok := prefixes[entry]; ok {
+				walk = append(walk, i)
+			}
 		}
+		d.repeatWalk = walk
 	}
+	walk := d.repeatWalk
 	for _, e := range d.frontier[d.head:] {
 		repeats := 0
 		first, _ := slices.BinarySearch(walk, e.next)
