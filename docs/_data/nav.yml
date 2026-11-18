@@ -8,6 +8,8 @@
       url: /start.html
     - title: CLI reference
       url: /cli.html
+    - title: Output fields
+      url: /output.html
 
 - section: Guides
   footer: true

@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tmhsdigital.github.io/subenum/schemas/stats.v1.json",
+  "title": "subenum run-quality report",
+  "description": "The report -stats writes, and the last line of -format jsonl output. Schema 1: fields are only ever added, so readers must accept fields they do not know; renaming or removing one, or changing its meaning, raises schema. See https://tmhsdigital.github.io/subenum/output.html.",
+  "type": "object",
+  "required": ["type", "schema", "tool", "version", "started", "duration_ms", "simulated", "rate_limit", "queries_sent", "achieved_qps", "verdict", "reason", "targets"],
+  "additionalProperties": true,
+  "properties": {
+    "type": { "const": "summary", "description": "Always summary: tells the report apart from the results in JSONL output." },
+    "schema": { "const": 1, "description": "The report's schema version." },
+    "tool": { "const": "subenum" },
+    "version": { "type": "string", "description": "The subenum version that wrote the report." },
+    "started": { "type": "string", "format": "date-time", "description": "When the run started (RFC 3339)." },
+    "duration_ms": { "type": "integer", "minimum": 0, "description": "How long the run took, in milliseconds." },
+    "simulated": { "type": "boolean", "description": "true for a -simulate run, whose results are invented." },
+    "seed": { "type": "integer", "minimum": 0, "description": "The -simulate seed. Absent outside simulation." },
+    "resolver": { "type": "string", "description": "The -dns-server, shown as its scheme and host only; with -simulate-zone, the lab's local server; with -r, the trusted resolver pool hits were re-validated against. Absent under -simulate." },
+    "zone": { "type": "string", "description": "The -simulate-zone scenario. Absent otherwise." },
+    "transport": { "type": "string", "enum": ["udp", "tls", "https"], "description": "How queries reached the resolver: udp (with TCP fallback), tls (DNS over TLS) or https (DNS over HTTPS). Absent under -simulate." },
+    "rate_limit": { "type": "integer", "minimum": 0, "description": "The -rate cap in queries per second; 0 is unlimited." },
+    "queries_sent": { "type": "integer", "minimum": 0, "description": "DNS queries sent on the wire, every target, record type, retry and probe included." },
+    "achieved_qps": { "type": "number", "minimum": 0, "description": "queries_sent divided by the run's duration." },
+    "verdict": { "$ref": "#/$defs/verdict", "description": "The worst target verdict: how far the results, and the absence of other names, can be trusted." },
+    "reason": { "type": "string", "description": "Why the run got its verdict, in plain words." },
+    "targets": { "type": "array", "items": { "$ref": "#/$defs/target" }, "description": "One entry per target, in scan order." },
+    "resolvers": { "type": "array", "items": { "$ref": "#/$defs/resolver" }, "description": "The -r pool's per-resolver accounting. Absent without -r." },
+    "diff": { "$ref": "#/$defs/diff", "description": "The -diff counts. Absent without -diff." }
+  },
+  "$defs": {
+    "verdict": { "type": "string", "enum": ["complete", "degraded", "unreliable"] },
+    "record": {
+      "type": "object",
+      "required": ["type", "value"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["domain", "status", "processed", "total", "found", "outcomes", "queries_sent", "skipped_by_cap", "wildcard", "verdict", "reason"],
+      "additionalProperties": true,
+      "properties": {
+        "domain": { "type": "string" },
+        "status": { "type": "string", "enum": ["ok", "failed", "skipped", "interrupted", "not_run"], "description": "skipped: left out after an earlier target's reliability abort; not_run: never reached." },
+        "error": { "type": "string", "description": "Why a failed target failed. Absent otherwise." },
+        "processed": { "type": "integer", "minimum": 0, "description": "Candidates the main pass looked up." },
+        "total": { "type": "integer", "minimum": 0, "description": "Candidates the main pass had, recursion levels included." },
+        "found": { "type": "integer", "minimum": 0, "description": "Names the main pass found." },
+        "outcomes": { "$ref": "#/$defs/outcomes" },
+        "queries_sent": { "type": "integer", "minimum": 0, "description": "This target's queries, its -permute pass included." },
+        "skipped_by_cap": { "type": "integer", "minimum": 0, "description": "Candidates a budget left untested." },
+        "stopped_by": { "type": "string", "enum": ["queries", "duration"], "description": "The budget that skipped candidates: -max-queries or -max-duration. Absent when none did." },
+        "takeover_candidates": { "type": "integer", "minimum": 0, "description": "Results with a takeover hint. Absent when 0." },
+        "internal_addresses": { "type": "integer", "minimum": 0, "description": "Results with a loopback, private, link-local, unspecified or CGNAT address. Absent when 0." },
+        "retried": { "type": "integer", "minimum": 0, "description": "Inconclusive names -retry-inconclusive looked up again. Absent when 0." },
+        "recovered": { "type": "integer", "minimum": 0, "description": "Retried names that then got an answer. Absent when 0." },
+        "rate_backoffs": { "type": "integer", "minimum": 0, "description": "Times -auto-rate halved the rate. Absent when 0." },
+        "final_rate": { "type": "integer", "minimum": 0, "description": "The rate -auto-rate ended at, in queries per second. Absent when it never backed off." },
+        "permutation": { "$ref": "#/$defs/permutation", "description": "The -permute pass. Absent when none ran." },
+        "ct_names": { "type": "integer", "minimum": 0, "description": "Names Certificate Transparency added; repeats the ct entry of sources. Absent when 0." },
+        "ct_error": { "type": "string", "description": "Why the Certificate Transparency lookup failed; repeats the ct entry of sources. Absent otherwise." },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/source" }, "description": "One entry per passive source asked (-ct, -sources). Absent when none was." },
+        "axfr_allowed": { "type": "array", "items": { "type": "string" }, "description": "Name servers that allowed an -axfr zone transfer, a misconfiguration. Absent when none did." },
+        "axfr_names": { "type": "integer", "minimum": 0, "description": "Names zone transfers added as candidates. Absent when 0." },
+        "axfr_error": { "type": "string", "description": "Why no zone transfer could be tried, such as a failed NS lookup. A refusal is not an error. Absent otherwise." },
+        "axfr_found": { "type": "integer", "minimum": 0, "description": "Results a zone transfer had proposed. Absent when 0." },
+        "zone_denial": { "type": "string", "enum": ["nsec", "nsec3", "none"], "description": "How the zone proves a name does not exist, from -axfr's DNSSEC probe: nsec means anyone can list it by walking it. Absent when not probed or no server answered." },
+        "pool_hits": { "type": "integer", "minimum": 0, "description": "-r: names a pool resolver said exist. Absent when 0." },
+        "confirmed": { "type": "integer", "minimum": 0, "description": "-r: pool hits the trusted resolver confirmed. Absent when 0." },
+        "unconfirmed": { "type": "integer", "minimum": 0, "description": "-r: pool hits the trusted resolver denied. Absent when 0." },
+        "wildcard": { "type": "boolean", "description": "true when the target answers names that do not exist." },
+        "wildcard_fingerprint": { "type": "array", "items": { "$ref": "#/$defs/record" }, "description": "The wildcard's answers, which results matching them are filtered by. Absent without a wildcard." },
+        "verdict": { "$ref": "#/$defs/verdict", "description": "The worse of the main and -permute passes' verdicts." },
+        "reason": { "type": "string", "description": "Why the target got its verdict; starts with permutation pass: when that pass decided it." }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "required": ["resolved", "nxdomain", "timeout", "refused", "other", "wildcard_filtered", "excluded"],
+      "additionalProperties": true,
+      "description": "How each lookup ended.",
+      "properties": {
+        "resolved": { "type": "integer", "minimum": 0 },
+        "nxdomain": { "type": "integer", "minimum": 0, "description": "No such name, NODATA included." },
+        "timeout": { "type": "integer", "minimum": 0 },
+        "refused": { "type": "integer", "minimum": 0 },
+        "other": { "type": "integer", "minimum": 0, "description": "SERVFAIL and other errors." },
+        "wildcard_filtered": { "type": "integer", "minimum": 0, "description": "Answers that matched the wildcard fingerprint and were dropped." },
+        "excluded": { "type": "integer", "minimum": 0, "description": "Candidates out of scope under -exclude, never queried." }
+      }
+    },
+    "permutation": {
+      "type": "object",
+      "required": ["seeds", "candidates", "found"],
+      "additionalProperties": true,
+      "properties": {
+        "seeds": { "type": "integer", "minimum": 0, "description": "Names the pass permuted." },
+        "candidates": { "type": "integer", "minimum": 0, "description": "Permutations built, minus wordlist entries." },
+        "found": { "type": "integer", "minimum": 0 },
+        "processed": { "type": "integer", "minimum": 0, "description": "Candidates the pass looked up. Absent when 0." },
+        "queries_sent": { "type": "integer", "minimum": 0, "description": "The pass's own queries, also counted in the target's. Absent when 0." },
+        "verdict": { "$ref": "#/$defs/verdict", "description": "The pass's own verdict. Absent when it did not scan." }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["name", "names", "found"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "enum": ["ct", "wayback"] },
+        "names": { "type": "integer", "minimum": 0, "description": "Names it added as candidates and -permute seeds." },
+        "found": { "type": "integer", "minimum": 0, "description": "Results it had proposed, whoever else did too." },
+        "error": { "type": "string", "description": "Why its lookup failed; the scan went on without it. Absent otherwise." },
+        "truncated": { "type": "boolean", "description": "true when the source stopped at one of its limits, so some names may be missing. Absent otherwise." }
+      }
+    },
+    "resolver": {
+      "type": "object",
+      "required": ["address", "lookups", "found", "nxdomain", "failed", "benched", "throttled", "canaries", "contradicted", "flagged"],
+      "additionalProperties": true,
+      "properties": {
+        "address": { "type": "string", "description": "The pool member, shown as its scheme and host only." },
+        "lookups": { "type": "integer", "minimum": 0 },
+        "found": { "type": "integer", "minimum": 0 },
+        "nxdomain": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0, "description": "Timeouts, refusals and other errors." },
+        "benched": { "type": "integer", "minimum": 0, "description": "Times it was taken out of rotation for failing." },
+        "throttled": { "type": "integer", "minimum": 0, "description": "Times a lookup found its -rate-per-resolver cap spent." },
+        "canaries": { "type": "integer", "minimum": 0, "description": "Honesty checks it answered." },
+        "contradicted": { "type": "integer", "minimum": 0, "description": "Answers another resolver proved wrong." },
+        "flagged": { "type": "boolean", "description": "true when it was taken out of rotation as lying." }
+      }
+    },
+    "diff": {
+      "type": "object",
+      "required": ["previous", "added", "removed"],
+      "additionalProperties": true,
+      "properties": {
+        "previous": { "type": "string", "description": "The -diff file." },
+        "added": { "type": "integer", "minimum": 0 },
+        "removed": { "type": "integer", "minimum": 0, "description": "Previous names a fresh lookup found gone (NXDOMAIN). Stays 0 when the run was not complete." },
+        "changed": { "type": "integer", "minimum": 0, "description": "-diff-records: names whose records changed. Absent when 0." },
+        "still_resolving": { "type": "integer", "minimum": 0, "description": "Previous names this run did not have as candidates but that still resolve. Absent when 0." },
+        "unverified": { "type": "integer", "minimum": 0, "description": "Previous names that could not be looked up again. Absent when 0." }
+      }
+    }
+  }
+}

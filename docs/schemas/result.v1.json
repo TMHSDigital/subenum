@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tmhsdigital.github.io/subenum/schemas/result.v1.json",
+  "title": "subenum result",
+  "description": "One result in subenum's JSON (an array of these) and JSONL (one per line) output. Version 1: fields are only ever added, so readers must accept fields they do not know. See https://tmhsdigital.github.io/subenum/output.html.",
+  "type": "object",
+  "required": ["subdomain", "records"],
+  "additionalProperties": true,
+  "properties": {
+    "subdomain": {
+      "type": "string",
+      "description": "The full name found, lower case, without a trailing dot."
+    },
+    "records": {
+      "type": "array",
+      "description": "The name's records of the looked-up -type record types. Empty for a name -diff reports as removed.",
+      "items": { "$ref": "#/$defs/record" }
+    },
+    "simulated": {
+      "type": "boolean",
+      "description": "true on every result of a -simulate run. Absent otherwise."
+    },
+    "takeover_candidate": {
+      "type": "string",
+      "description": "A DNS-only subdomain takeover hint: dangling, provider:<name> or dangling:<name>. Absent when there is none.",
+      "pattern": "^(dangling|provider:.+|dangling:.+)$"
+    },
+    "internal_address": {
+      "type": "string",
+      "description": "The most notable non-public scope among the name's addresses. Absent when every address is public.",
+      "enum": ["loopback", "unspecified", "link-local", "private", "cgnat"]
+    },
+    "partial": {
+      "type": "boolean",
+      "description": "true when the lookup of a requested record type failed on every attempt while another type answered: records may lack that type. Absent otherwise."
+    },
+    "change": {
+      "type": "string",
+      "description": "With -diff: added, removed, or (with -diff-records) changed. subenum diff writes missing instead of removed. Absent outside a diff.",
+      "enum": ["added", "removed", "changed", "missing"]
+    },
+    "previous_records": {
+      "type": "array",
+      "description": "The baseline's records of a changed name. Present only when change is changed.",
+      "items": { "$ref": "#/$defs/record" }
+    },
+    "permutation": {
+      "type": "boolean",
+      "description": "true for a name the -permute pass found. Absent otherwise."
+    },
+    "sources": {
+      "type": "array",
+      "description": "What proposed the name, in this order: wordlist, ct, wayback, axfr; or permute alone for a -permute hit. Absent on removed names and in subenum diff output.",
+      "items": { "type": "string", "enum": ["wordlist", "ct", "wayback", "axfr", "permute"] }
+    },
+    "target": {
+      "type": "string",
+      "description": "The scanned domain that found the name; tells -dL results with nested targets apart. Absent on removed names and in subenum diff output."
+    }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["type", "value"],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The record type.",
+          "enum": ["A", "AAAA", "CNAME", "NS", "MX", "TXT"]
+        },
+        "value": {
+          "type": "string",
+          "description": "An address; a host name for CNAME and NS; <preference> <host> for MX; the text for TXT, with a backslash and non-printable bytes written as \\DDD."
+        }
+      }
+    }
+  }
+}

@@ -600,6 +600,8 @@ When a result has a CNAME record, subenum resolves the CNAME target with the tru
 
 <br>
 
+Every JSON, JSONL and CSV field and every `-stats` report field, with when it is present and its values, is listed in the [output field reference](https://tmhsdigital.github.io/subenum/output.html), with JSON Schema files for results and the report.
+
 A recursive resolver asked about a subzone whose every name server is gone usually answers SERVFAIL instead of the delegation, so such a name is reported as inconclusive (see `-inconclusive`) rather than marked; scanning against the parent zone's authoritative server finds it.
 
 A target or name server that exists but has no A or AAAA record (NODATA, such as a name with only MX or TXT records) is not dangling: when the address lookup comes back empty, subenum sends one more A query and marks the name only on an NXDOMAIN answer. A probe that fails (timeout, SERVFAIL) marks nothing.

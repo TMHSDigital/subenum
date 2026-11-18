@@ -9,6 +9,7 @@ Where each piece of subenum's documentation lives and who it is for. The files u
 | [`README.md`](../README.md) | What subenum is, install, quick start, every flag, output formats, the TUI, completions and the man page |
 | [`docs/start.md`](start.md) | First scan, the run-quality verdict, what to read next |
 | [`docs/cli.md`](cli.md) | CLI reference: flags (generated from the code into [`_includes/flags.md`](_includes/flags.md)), exit codes, config file and `SUBENUM_*` defaults |
+| [`docs/output.md`](output.md) | Every JSON, JSONL and CSV result field and `-stats` report field, with the JSON Schema files in [`schemas/`](schemas/) that `TestSchemasMatchStructs` keeps in step with the code |
 | [`docs/pipelines.md`](pipelines.md) | Chaining with dnsx, httpx and nuclei; JSON logs; takeover candidates first |
 | [`docs/monitoring.md`](monitoring.md) | Scheduled scans with `-diff`, the GitHub Action ([`action.yml`](../action.yml)) and SARIF alerts |
 | [`docs/docker.md`](docker.md) | The container image: volumes, output files, permissions |

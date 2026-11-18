@@ -42,7 +42,9 @@ surprises:
 - **Stable flags.** No flag is renamed or removed without a deprecation release
   first (as `-retries` was for `-attempts`).
 - **Stable output schemas.** The JSON, JSONL and CSV fields are documented and
-  only ever gain fields, never lose or rename them.
+  only ever gain fields, never lose or rename them. The
+  [field reference](output.html) and its JSON Schema files are in place, and
+  a test keeps them in step with the code.
 - **Documented exit codes**, already in place (0, 1, 2, 3, 4, 130, 143).
 - **A run-quality report**, already in place (`-stats`, schema 1), so a result
   set says how far it can be trusted.
