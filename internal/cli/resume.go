@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"sort"
@@ -392,12 +393,18 @@ func fileDigest(path string) (string, error) {
 	if path == "" || path == "-" {
 		return "", nil
 	}
-	data, err := os.ReadFile(path)
+	// Streamed: a large wordlist is not read whole at Ctrl+C or on resume
+	// (#411). The digest is the same as hashing the whole file at once.
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // inputDigests fingerprints the inputs a resume must find unchanged. That

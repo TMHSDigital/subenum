@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -282,6 +284,24 @@ func TestE2EResumeCountsRefoundNamesOnce(t *testing.T) {
 	}
 	if tg := s.Targets[0]; tg.Found != int64(len(entries)) || tg.Processed != int64(len(entries)) {
 		t.Errorf("found %d, processed %d; want %d each", tg.Found, tg.Processed, len(entries))
+	}
+}
+
+// TestFileDigestMatchesWholeFileHash covers #411: the streamed digest equals
+// the whole-file SHA-256 earlier versions stored, so their states resume.
+func TestFileDigestMatchesWholeFileHash(t *testing.T) {
+	content := strings.Repeat("www\nmail\napi.dev\n", 50_000) // larger than one copy buffer
+	path := writeFile(t, "wl.txt", content)
+	got, err := fileDigest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(content))
+	if want := hex.EncodeToString(sum[:]); got != want {
+		t.Errorf("fileDigest = %s, want %s", got, want)
+	}
+	if got, err := fileDigest("-"); got != "" || err != nil {
+		t.Errorf("fileDigest(stdin) = %q, %v; want no digest", got, err)
 	}
 }
 

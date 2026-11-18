@@ -208,14 +208,16 @@ func loadWordlistCmd(vals formValues, o Options) tea.Cmd {
 }
 
 // loadWordlist reads the file named on the form, or the bundled list when the
-// field is empty, the way the CLI treats a missing -w (#288).
+// field is empty, the way the CLI treats a missing -w (#288). A file is
+// streamed, as the CLI streams -w, rather than held whole in memory (#411).
 func loadWordlist(vals formValues) (entries []string, skipped int, err error) {
-	if vals.wordlist != "" {
-		entries, _, skipped, err = wordlist.LoadWordlist(vals.wordlist, vals.Domain)
-		return entries, skipped, err
-	}
 	pr := wordlist.NewPreparer()
-	if err := wordlist.EachLine(strings.NewReader(data.Subdomains5k), pr.Add); err != nil {
+	if vals.wordlist != "" {
+		err = wordlist.EachLineOf(vals.wordlist, pr.Add)
+	} else {
+		err = wordlist.EachLine(strings.NewReader(data.Subdomains5k), pr.Add)
+	}
+	if err != nil {
 		return nil, 0, err
 	}
 	entries, _, skipped = pr.Prepared().For(vals.Domain)

@@ -20,6 +20,29 @@ func found(name string, records []dns.Record) output.Result {
 	return output.Result{Result: scan.Result{Subdomain: name, Records: records}}
 }
 
+// TestLoadWordlistFile covers #411: a wordlist file is streamed through the
+// same preparation as the CLI's -w: comments, duplicates and the target's own
+// suffix handled, invalid lines counted.
+func TestLoadWordlistFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wl.txt")
+	if err := os.WriteFile(path, []byte("# comment\nWWW\nwww\napi.example.com\nbad_label!\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vals := formValues{wordlist: path}
+	vals.Domain = "example.com"
+	entries, skipped, err := loadWordlist(vals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(entries, ",") != "www,api" || skipped != 1 {
+		t.Errorf("entries %v, skipped %d; want [www api] and 1", entries, skipped)
+	}
+	vals.wordlist = filepath.Join(t.TempDir(), "missing.txt")
+	if _, _, err := loadWordlist(vals); err == nil {
+		t.Error("a missing wordlist file was not an error")
+	}
+}
+
 // TestSummaryHasPoolResolvers covers #367: a scan with a resolver pool
 // reports each resolver's accounting in its summary, as the CLI's -r does,
 // and one without a pool reports none.
