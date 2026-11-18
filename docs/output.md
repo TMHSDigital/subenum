@@ -31,7 +31,7 @@ A test fails when a field is added to the code but not to these files, so they s
 | `sources` | array of strings | scan results | What proposed the name, in this order: `wordlist`, `ct`, `wayback`, `axfr`; or `permute` alone for a `-permute` hit. Not on removed names or in `subenum diff` output. |
 | `target` | string | scan results | The scanned domain that found the name, which tells `-dL` results with nested targets apart. Not on removed names or in `subenum diff` output. |
 
-A record's `type` is `A`, `AAAA`, `CNAME`, `NS`, `MX` or `TXT`. Its `value` is an address, a host name (`CNAME`, `NS`), `<preference> <host>` (`MX`), or the text (`TXT`), with a backslash and non-printable bytes written as `\DDD`.
+A record's `type` is `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT` or `SRV`{% include unreleased.html value="type=SRV" %}. Its `value` is an address, a host name (`CNAME`, `NS`), `<preference> <host>` (`MX`), the text (`TXT`), with a backslash and non-printable bytes written as `\DDD`, or `<priority> <weight> <port> <target>` (`SRV`).
 
 ## Results: CSV
 

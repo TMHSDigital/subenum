@@ -50,7 +50,7 @@ httpx -silent -l names.txt
 
 With `-format jsonl`, the same report is the last line of the output, so one
 file holds both. `-o` can be given more than once, and a format prefix
-(`jsonl:results.jsonl`){% include unreleased.html value="o=format:path" %}
+(`jsonl:results.jsonl`)
 gives a file its own format, so one run saves bare names for the next tool and
 JSONL with the report (and a future `-diff` baseline):
 
@@ -68,7 +68,7 @@ output silently replacing the other.
 
 With CNAME lookups, subenum marks names whose alias target does not resolve or
 points at a takeover-prone service; with NS lookups
-(`-type NS`{% include unreleased.html value="type=NS" %}), names delegated to a name
+(`-type NS`), names delegated to a name
 server that does not exist (`dangling-ns`). Send those to a closer look before the
 rest:
 

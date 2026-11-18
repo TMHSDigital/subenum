@@ -821,7 +821,7 @@ func TestMCPInvalidCallsSpendNoBudget(t *testing.T) {
 	tool := scanTool(mcpConfig{allow: []string{"lab.example"}, dnsServer: srv.Addr, maxQueries: 10, rate: 1000,
 		maxDuration: time.Minute, timeout: 5 * time.Second, maxCalls: 1})
 	for _, bad := range []string{
-		`{"domain": "lab.example", "words": ["www"], "types": ["SRV"]}`,
+		`{"domain": "lab.example", "words": ["www"], "types": ["CAA"]}`,
 		`{"domain": "lab.example", "words": []}`,
 		`{"domain": "lab.example", "words": ["www"], "exclude": ["*."]}`,
 	} {

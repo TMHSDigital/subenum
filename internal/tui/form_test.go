@@ -167,9 +167,9 @@ func TestMoveFocusSkipsGatedFields(t *testing.T) {
 func TestValidateRejectsBadRecordType(t *testing.T) {
 	m := newFormModel(savedConfig{})
 	m.inputs[fieldDomain].SetValue("example.com")
-	m.inputs[fieldTypes].SetValue("A,SRV")
+	m.inputs[fieldTypes].SetValue("A,CAA")
 	if _, errStr := m.validate(); errStr == "" {
-		t.Error("expected validation error for unsupported record type SRV")
+		t.Error("expected validation error for unsupported record type CAA")
 	}
 }
 

@@ -281,7 +281,7 @@ func TestZeroConfigUsesDefaults(t *testing.T) {
 // without starting a scan.
 func TestValidateMatchesRun(t *testing.T) {
 	for name, cfg := range map[string]subenum.Config{
-		"types":   {Domain: "example.com", Simulate: true, Types: []string{"SRV"}},
+		"types":   {Domain: "example.com", Simulate: true, Types: []string{"CAA"}},
 		"words":   {Domain: "example.com", Simulate: true, Words: []string{}},
 		"exclude": {Domain: "example.com", Simulate: true, Exclude: []string{"*."}},
 	} {
@@ -356,7 +356,7 @@ func TestConfigErrors(t *testing.T) {
 		{"negative max queries", subenum.Config{Domain: "example.com", MaxQueries: -5}, "MaxQueries"},
 		{"negative depth", subenum.Config{Domain: "example.com", Depth: -1}, "Depth"},
 		{"hit rate too high", subenum.Config{Domain: "example.com", Simulate: true, HitRate: 101}, "HitRate"},
-		{"unknown record type", subenum.Config{Domain: "example.com", Types: []string{"SRV"}}, "Types"},
+		{"unknown record type", subenum.Config{Domain: "example.com", Types: []string{"CAA"}}, "Types"},
 		{"bad resolver", subenum.Config{Domain: "example.com", Resolver: "not-an-address"}, "Resolver"},
 		{"bad exclude", subenum.Config{Domain: "example.com", Exclude: []string{"*"}}, "Exclude"},
 		{"pool with simulate", subenum.Config{Domain: "example.com", Simulate: true, ResolverPool: []string{"192.0.2.1"}}, "ResolverPool"},

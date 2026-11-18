@@ -53,6 +53,7 @@ type Reply struct {
 	NS    []string // name servers for NS queries
 	MX    []string // "<preference> <host>" (or just "<host>", preference 10) for MX queries
 	TXT   []string // texts for TXT queries, one record each
+	SRV   []string // "<priority> <weight> <port> <target>" for SRV queries
 
 	// Transfer answers an AXFR query for the queried zone: its SOA, an A
 	// record (192.0.2.1) for each of these names, and the SOA again (#85).
@@ -572,7 +573,36 @@ var answerBuilders = map[dnsmessage.Type]answerBuilder{
 	dnsmessage.TypeNS:   addNS,
 	dnsmessage.TypeMX:   addMX,
 	dnsmessage.TypeTXT:  addTXT,
+	dnsmessage.TypeSRV:  addSRV,
 	dnsmessage.TypeAXFR: addTransfer,
+}
+
+// addSRV adds one SRV record per "<priority> <weight> <port> <target>"
+// value; malformed values are skipped.
+func addSRV(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, v := range r.SRV {
+		f := strings.Fields(v)
+		if len(f) != 4 {
+			continue
+		}
+		var nums [3]uint16
+		ok := true
+		for i := range nums {
+			x, err := strconv.ParseUint(f[i], 10, 16)
+			ok = ok && err == nil
+			nums[i] = uint16(x)
+		}
+		target, err := dnsmessage.NewName(fqdn(f[3]))
+		if !ok || err != nil {
+			continue
+		}
+		if err := b.SRVResource(rrHeader(owner, dnsmessage.TypeSRV), dnsmessage.SRVResource{Priority: nums[0], Weight: nums[1], Port: nums[2], Target: target}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // addTransfer answers a zone transfer in one message: the zone's SOA, an A

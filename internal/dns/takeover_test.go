@@ -122,6 +122,26 @@ func TestTakeoverHint(t *testing.T) {
 	}
 }
 
+// TestResolveSRV covers #419: -type SRV looks up a service name as given,
+// and its records read "<priority> <weight> <port> <target>", sorted.
+func TestResolveSRV(t *testing.T) {
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		if q.Name == "_sip._tcp.example.com" {
+			return dnstest.Reply{SRV: []string{"20 0 5060 SIP2.example.com.", "10 5 5060 sip.example.com"}}
+		}
+		return dnstest.NXDomain
+	})
+	l := Lookup{Resolver: NewResolver(time.Second, srv.Addr), Timeout: time.Second, Attempts: 1, Types: []string{"SRV"}}
+	recs, outcome := l.Resolve(context.Background(), "_sip._tcp.example.com")
+	want := []Record{{Type: "SRV", Value: "10 5 5060 sip.example.com"}, {Type: "SRV", Value: "20 0 5060 sip2.example.com"}}
+	if outcome != OutcomeFound || !slices.Equal(recs, want) {
+		t.Errorf("_sip._tcp.example.com = %v %v, want %v", recs, outcome, want)
+	}
+	if _, outcome := l.Resolve(context.Background(), "_xmpp._tcp.example.com"); outcome != OutcomeNXDomain {
+		t.Errorf("_xmpp._tcp.example.com = %v, want a negative", outcome)
+	}
+}
+
 // TestResolveNSMXTXT covers #194: -type NS, MX and TXT look the records up,
 // a name without them is a negative, and a delegation whose name server does
 // not exist gets the dangling-ns hint while a healthy one gets none.

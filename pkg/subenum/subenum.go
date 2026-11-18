@@ -94,7 +94,7 @@ type Config struct {
 	Rate int
 
 	// Types are the record types to look up: "A", "AAAA", "CNAME", "NS",
-	// "MX" and "TXT". Nil looks up A and AAAA. CNAME and NS are what
+	// "MX", "TXT" and "SRV". Nil looks up A and AAAA. CNAME and NS are what
 	// populate Result.Takeover.
 	Types []string
 
@@ -200,7 +200,7 @@ type TakeoverProvider struct {
 
 // Record is one DNS record behind a result.
 type Record struct {
-	Type  string // "A", "AAAA", "CNAME", "NS", "MX" or "TXT"
+	Type  string // "A", "AAAA", "CNAME", "NS", "MX", "TXT" or "SRV"
 	Value string // an address, a CNAME target, a name server, "<preference> <host>" (MX) or a text (TXT)
 }
 

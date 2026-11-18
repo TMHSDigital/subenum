@@ -67,7 +67,7 @@ func TestDiffSubcommand(t *testing.T) {
 		t.Errorf("text file: code %d, stdout %q, stderr %q", code, out, errOut)
 	}
 
-	for _, args := range [][]string{{prev}, {prev, cur, cur}, {"-format", "xml", prev, cur}, {"-type", "SRV", prev, cur}} {
+	for _, args := range [][]string{{prev}, {prev, cur, cur}, {"-format", "xml", prev, cur}, {"-type", "CAA", prev, cur}} {
 		if code, _, _ := run(args...); code != exitUsage {
 			t.Errorf("diff %v: code %d, want %d", args, code, exitUsage)
 		}

@@ -381,6 +381,6 @@ The following capabilities are implemented and available today:
 
 See `docs/ROADMAP.md` for the next-pass list. Areas still open:
 
-*   **Additional record types**: `Lookup.ResolveTypes` covers A, AAAA, CNAME, NS, MX and TXT; a new type is a case in `lookupType`, an entry in `typeOrder` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
+*   **Additional record types**: `Lookup.ResolveTypes` covers A, AAAA, CNAME, NS, MX, TXT and SRV; a new type is a case in `lookupType`, an entry in `typeOrder` and `queriesPerType`, and (to test it) an answer builder in `internal/dnsserver` and a record type in `internal/labzone`.
 
 When working on new features, please update the documentation accordingly and add tests to cover the new functionality. 

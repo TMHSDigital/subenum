@@ -43,7 +43,7 @@ type Config struct {
 	// it again once they succeed, instead of letting the reliability guard
 	// abort at the first sign of rate-limiting (#220).
 	AutoRate   bool
-	Types      []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT); empty = A,AAAA
+	Types      []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT, SRV); empty = A,AAAA
 	Recursive  bool     // enumerate subdomains of discovered subdomains
 	Depth      int      // max recursion depth (1 = no recursion)
 	NoAbort    bool     // keep scanning after the reliability guard fires

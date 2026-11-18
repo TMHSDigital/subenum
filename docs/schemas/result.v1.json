@@ -67,11 +67,11 @@
         "type": {
           "type": "string",
           "description": "The record type.",
-          "enum": ["A", "AAAA", "CNAME", "NS", "MX", "TXT"]
+          "enum": ["A", "AAAA", "CNAME", "NS", "MX", "TXT", "SRV"]
         },
         "value": {
           "type": "string",
-          "description": "An address; a host name for CNAME and NS; <preference> <host> for MX; the text for TXT, with a backslash and non-printable bytes written as \\DDD."
+          "description": "An address; a host name for CNAME and NS; <preference> <host> for MX; the text for TXT, with a backslash and non-printable bytes written as \\DDD; <priority> <weight> <port> <target> for SRV."
         }
       }
     }

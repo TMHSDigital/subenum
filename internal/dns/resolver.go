@@ -21,7 +21,8 @@ import (
 
 // Record is a single resolved DNS record. Type is "A", "AAAA", "CNAME", etc.
 // Value is the IP address (A/AAAA), the target name (CNAME), the name server
-// (NS), "<preference> <host>" (MX) or the text (TXT).
+// (NS), "<preference> <host>" (MX), the text (TXT) or
+// "<priority> <weight> <port> <target>" (SRV).
 type Record struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
@@ -38,7 +39,7 @@ var DefaultTypes = []string{"A", "AAAA"}
 // typeOrder is every record type -type accepts, in the order help and
 // completion list them. It is the one list (#264): Types serves it to the
 // CLI's completion and the MCP schema, and queriesPerType must price each.
-var typeOrder = []string{"A", "AAAA", "CNAME", "NS", "MX", "TXT"}
+var typeOrder = []string{"A", "AAAA", "CNAME", "NS", "MX", "TXT", "SRV"}
 
 // Types returns the record types -type accepts, in a fixed order.
 func Types() []string { return slices.Clone(typeOrder) }
@@ -308,7 +309,7 @@ func fqdn(domain string) string {
 // These slots are reserved before the lookup's timeout starts; anything sent
 // beyond them (Go's retries, a TCP retry after truncation) is charged as it
 // is dialed (see NewResolver).
-var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 1, "NS": 1, "MX": 1, "TXT": 1}
+var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 1, "NS": 1, "MX": 1, "TXT": 1, "SRV": 1}
 
 // QueriesFor is how many queries one lookup of types puts on the wire, by
 // queriesPerType; empty types means DefaultTypes, as in ResolveTypes. The
@@ -489,6 +490,21 @@ func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t str
 		for _, txt := range txts {
 			recs = append(recs, Record{Type: "TXT", Value: EscapeTXT(txt)})
 		}
+		return recs, nil
+	case "SRV":
+		// SRV records sit at service names such as _sip._tcp.example.com,
+		// which an empty service and protocol look up as given (#419).
+		_, srvs, err := resolver.LookupSRV(ctx, "", "", name)
+		if err != nil {
+			return nil, err
+		}
+		recs := make([]Record, 0, len(srvs))
+		for _, s := range srvs {
+			recs = append(recs, Record{Type: "SRV", Value: fmt.Sprintf("%d %d %d %s", s.Priority, s.Weight, s.Port, strings.ToLower(strings.TrimSuffix(s.Target, ".")))})
+		}
+		// Go shuffles records of equal priority by weight; sorted, the same
+		// answer always reads the same, so -diff-records sees no change.
+		slices.SortFunc(recs, func(a, b Record) int { return strings.Compare(a.Value, b.Value) })
 		return recs, nil
 	}
 	return nil, nil

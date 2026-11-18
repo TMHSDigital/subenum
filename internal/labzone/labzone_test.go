@@ -128,6 +128,18 @@ func TestAnswerNSMXTXT(t *testing.T) {
 	}
 }
 
+// TestAnswerSRV covers #419: an SRV record at a service name keeps its
+// numbers, and its host resolves against the scanned domain.
+func TestAnswerSRV(t *testing.T) {
+	z := mustParse(t, strings.Join([]string{
+		"_sip._tcp  SRV 10 5 5060 sip",
+		"_sip._tcp  SRV 20 0 5060 sip.example.net.",
+	}, "\n"))
+	if want := []string{"10 5 5060 sip.lab.example", "20 0 5060 sip.example.net"}; !slices.Equal(z.Answer("_sip._tcp", "lab.example").SRV, want) {
+		t.Errorf("SRV = %q, want %q", z.Answer("_sip._tcp", "lab.example").SRV, want)
+	}
+}
+
 func TestHandler(t *testing.T) {
 	z := mustParse(t, scenario)
 	h := z.Handler([]string{"lab.example", "other.test"})
@@ -174,8 +186,10 @@ func TestParseErrors(t *testing.T) {
 		{"www A", "line 1: want <name> A <value>"},
 		{"www a 192.0.2.1 extra", "line 1: want <name> A <value>"},
 		{"www MX", "line 1: want <name> MX <value>"},
-		{"www SRV x", "line 1: unknown type SRV (known: A, AAAA, CNAME, NS, MX, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
-		{"www srv x", "line 1: unknown type srv (known: A, AAAA, CNAME, NS, MX, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www CAA x", "line 1: unknown type CAA (known: A, AAAA, CNAME, NS, MX, SRV, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www caa x", "line 1: unknown type caa (known: A, AAAA, CNAME, NS, MX, SRV, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"_sip._tcp SRV 10 5", "line 1: want <name> SRV <priority> <weight> <port> <host>"},
+		{"_sip._tcp SRV 10 5 x sip", "line 1: bad SRV number \"x\""},
 		{"www MX mail", "line 1: want <name> MX <preference> <host>"},
 		{"www MX x mail", "line 1: bad MX preference \"x\""},
 		{"www NS @", "line 1: bad NS host \"@\""},

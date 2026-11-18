@@ -57,13 +57,14 @@ type entry struct {
 	a, aaaa []string
 	cname   string
 	ns, mx  []string // hosts as written (relative or absolute); MX keeps "<pref> <host>"
+	srv     []string // "<priority> <weight> <port> <host>", host as written
 	txt     []string
 	fail    *dnsserver.Reply // TIMEOUT, SERVFAIL, REFUSED or NXDOMAIN
 }
 
 // hasRecords reports whether e holds any record other than a CNAME.
 func (e *entry) hasRecords() bool {
-	return len(e.a)+len(e.aaaa)+len(e.ns)+len(e.mx)+len(e.txt) > 0
+	return len(e.a)+len(e.aaaa)+len(e.ns)+len(e.mx)+len(e.srv)+len(e.txt) > 0
 }
 
 // failure is a type that makes a name fail instead of holding records; a
@@ -211,6 +212,18 @@ var recordTypes = []recordType{
 			return fmt.Errorf("bad MX preference %q", pref)
 		}
 		return addHost(e, owner, "MX", strings.TrimSpace(host), pref+" ", &e.mx)
+	}},
+	{name: "SRV", rest: true, add: func(e *entry, owner, value string) error {
+		f := strings.Fields(value)
+		if len(f) != 4 {
+			return fmt.Errorf("want <name> SRV <priority> <weight> <port> <host>")
+		}
+		for _, n := range f[:3] {
+			if _, err := strconv.ParseUint(n, 10, 16); err != nil {
+				return fmt.Errorf("bad SRV number %q", n)
+			}
+		}
+		return addHost(e, owner, "SRV", f[3], strings.Join(f[:3], " ")+" ", &e.srv)
 	}},
 	{name: "TXT", rest: true, add: func(e *entry, owner, value string) error {
 		if e.cname != "" {
@@ -405,6 +418,11 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 		for _, v := range e.mx {
 			pref, h, _ := strings.Cut(v, " ")
 			r.MX = append(r.MX, pref+" "+absolute(h, origin))
+		}
+		for _, v := range e.srv {
+			if i := strings.LastIndexByte(v, ' '); i >= 0 {
+				r.SRV = append(r.SRV, v[:i+1]+absolute(v[i+1:], origin))
+			}
 		}
 		return r
 	}

@@ -8,7 +8,8 @@ commands: []
 flags:
   - hosts
 # new values of a flag that is itself released, as flag=VALUE (#306)
-values: []
+values:
+  - type=SRV
 # action.yml inputs and outputs
 action: []
 # pkg/subenum identifiers
