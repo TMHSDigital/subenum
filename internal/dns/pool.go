@@ -99,7 +99,9 @@ type PoolAnswer struct {
 }
 
 // ParseResolverList parses resolver addresses, one per line or entry, as
-// ip or ip:port (port 53 by default). Blank lines and # comments are skipped.
+// ip or ip:port (port 53 by default), tls://host[:port] (DNS over TLS, port
+// 853 by default) or https://host/path (DNS over HTTPS), the forms
+// -dns-server takes (#404). Blank lines and # comments are skipped.
 func ParseResolverList(lines []string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
@@ -108,12 +110,28 @@ func ParseResolverList(lines []string) ([]string, error) {
 		if s == "" || strings.HasPrefix(s, "#") {
 			continue
 		}
+		if t := Transport(s); t != TransportUDP {
+			if err := validate.DNSServer(s); err != nil {
+				return nil, fmt.Errorf("invalid resolver %q: %w", DisplayServer(s), err)
+			}
+			if t == TransportTLS {
+				// tls://1.1.1.1 and tls://1.1.1.1:853 are one resolver.
+				if addr, _, err := validate.DoTAddress(s); err == nil {
+					s = "tls://" + addr
+				}
+			}
+			if !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+			continue
+		}
 		if net.ParseIP(s) != nil {
 			s = net.JoinHostPort(s, "53")
 		}
 		host, port, err := net.SplitHostPort(s)
 		if err != nil || net.ParseIP(host) == nil || port == "" {
-			return nil, fmt.Errorf("invalid resolver %q: want ip or ip:port", line)
+			return nil, fmt.Errorf("invalid resolver %q: want ip, ip:port, tls://host[:port] or https://host/path", line)
 		}
 		if err := validate.Port(port); err != nil {
 			return nil, fmt.Errorf("invalid resolver %q: %w", line, err)
@@ -133,7 +151,10 @@ func NewPool(addrs []string, timeout time.Duration) *Pool {
 	p := &Pool{now: time.Now, sleep: sleepCtx, canarySeen: map[string]bool{}}
 	budget := newIdleBudget()
 	for _, a := range addrs {
-		p.members = append(p.members, &PoolResolver{Addr: a, resolver: newResolver(timeout, a, budget), stats: ResolverStats{Addr: a}})
+		// Addr is only shown (stats, -dry-run), so a DoH member's URL is shown
+		// without its credentials (#410); the resolver dials the full value.
+		shown := DisplayServer(a)
+		p.members = append(p.members, &PoolResolver{Addr: shown, resolver: newResolver(timeout, a, budget), stats: ResolverStats{Addr: shown}})
 	}
 	return p
 }

@@ -263,7 +263,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.String("resume", "", "Resume a run that was interrupted, ran out of -max-duration or was aborted, from its state file (no other arguments but the pacing flags -rate, -rate-per-resolver, -t, -timeout, -attempts, -auto-rate, -no-abort and -max-duration)")
 	fs.StringVar(&f.diff, "diff", "", "Previous results file (any -format); report only names added or removed since then, and exit 4 when there are changes")
 	fs.BoolVar(&f.diffRecords, "diff-records", false, "With -diff, also report names whose records changed (a re-pointed CNAME, moved addresses), compared over the -type record types; needs a json, jsonl or csv -diff file")
-	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server")
+	fs.StringVar(&f.resolvers, "r", "", "File of resolvers (ip[:port], tls://host[:port] or https://host/path, one per line) to spread queries over; every hit is re-validated against -dns-server")
 	fs.IntVar(&f.ratePerRes, "rate-per-resolver", 0, "With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited)")
 	fs.Usage = func() {
 		w := fs.Output()

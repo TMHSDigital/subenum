@@ -26,7 +26,7 @@
 | `-permute` | - | After each scan, scan permutations of the names found (api -&gt; api-dev, dev-api, dev.api, api2, ...) |
 | `-print-config` | - | Print every setting's effective value and its source (flag, env, config or default), then exit |
 | `-progress` | true | Show progress during scanning |
-| `-r <string>` | - | File of resolvers (ip or ip:port, one per line) to spread queries over; every hit is re-validated against -dns-server |
+| `-r <string>` | - | File of resolvers (ip[:port], tls://host[:port] or https://host/path, one per line) to spread queries over; every hit is re-validated against -dns-server |
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |
 | `-rate-per-resolver <int>` {% include unreleased.html flag="rate-per-resolver" %} | - | With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited) |
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |

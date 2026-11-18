@@ -140,6 +140,29 @@ func TestTransportsAgree(t *testing.T) {
 	}
 }
 
+// TestPoolMembersUseTheirTransport covers #404: an -r list may mix UDP, DoT
+// and DoH members, and each member's lookups of every record type, the raw
+// CNAME query included, go over its own transport.
+func TestPoolMembersUseTheirTransport(t *testing.T) {
+	_, servers := startAllTransports(t)
+	lines := []string{servers[TransportUDP], servers[TransportTLS], servers[TransportHTTPS]}
+	p, err := NewPoolFromLines(lines, 2*time.Second, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.CloseIdleConnections()
+	for name, types := range map[string][]string{
+		"www.example.com":   {"A", "AAAA"},
+		"alias.example.com": {"CNAME"},
+	} {
+		for i, r := range p.Probe(context.Background(), Lookup{Timeout: 2 * time.Second, Attempts: 1, Types: types}, name, len(lines)) {
+			if r.Outcome != OutcomeFound {
+				t.Errorf("%s %v via %s (%s): outcome %v, want found", name, types, r.Addr, Transport(lines[i]), r.Outcome)
+			}
+		}
+	}
+}
+
 // TestDoTReusesConnections: sequential DoT lookups share pooled connections
 // instead of paying a TLS handshake per query.
 func TestDoTReusesConnections(t *testing.T) {

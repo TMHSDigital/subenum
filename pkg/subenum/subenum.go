@@ -64,8 +64,9 @@ type Config struct {
 	// over HTTPS. Empty means DefaultResolver.
 	Resolver string
 
-	// ResolverPool spreads candidate lookups over several plain-UDP
-	// resolvers ("ip" or "ip:port"), which is faster but less trustworthy
+	// ResolverPool spreads candidate lookups over several resolvers ("ip",
+	// "ip:port", "tls://host[:port]" or "https://host/path", as Resolver
+	// takes them), which is faster but less trustworthy
 	// than one server. Every name a pool member reports is re-checked
 	// against Resolver, and only Resolver's answer is reported. Preflight
 	// and wildcard probes always use Resolver.

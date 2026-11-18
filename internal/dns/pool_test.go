@@ -22,6 +22,32 @@ func TestParseResolverList(t *testing.T) {
 	}
 }
 
+// TestParseResolverListEncrypted covers #404: DoT and DoH entries are taken
+// as -dns-server takes them, a DoT entry's default port is made explicit so
+// it dedupes, and a bad entry's error never shows a DoH credential.
+func TestParseResolverListEncrypted(t *testing.T) {
+	got, err := ParseResolverList([]string{"1.1.1.1", "tls://dns.example", "tls://dns.example:853", "https://dns.example/dns-query", "tls://[2001:db8::1]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1.1.1.1:53", "tls://dns.example:853", "https://dns.example/dns-query", "tls://[2001:db8::1]:853"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for _, bad := range []string{"tls://", "tls://dns.example:99999", "ftp://dns.example", "https://user:s3cret@/path"} {
+		_, err := ParseResolverList([]string{bad})
+		if err == nil {
+			t.Errorf("%q accepted", bad)
+		} else if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("%q: error shows the credential: %v", bad, err)
+		}
+	}
+	p := NewPool([]string{"https://user:s3cret@dns.example/q/t0ken"}, time.Second)
+	if st := p.Stats()[0]; st.Addr != "https://dns.example/…" {
+		t.Errorf("pool member shown as %q, want it without credentials", st.Addr)
+	}
+}
+
 func TestParseResolverListRejectsBadPorts(t *testing.T) {
 	for _, line := range []string{"9.9.9.9:abc", "9.9.9.9:99999", "9.9.9.9:0", "9.9.9.9:-1"} {
 		_, err := ParseResolverList([]string{"1.1.1.1", line})
