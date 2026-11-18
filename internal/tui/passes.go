@@ -90,7 +90,7 @@ func permutationCmd(domain string, entries, found []string, cands *candidates.Se
 		if len(rel) == 0 {
 			return permutationReadyMsg{}
 		}
-		perms, tooLong := candidates.Permutations(domain, entries, rel)
+		perms, tooLong, _ := candidates.Permutations(domain, entries, rel)
 		return permutationReadyMsg{seeds: len(rel), candidates: perms, tooLong: tooLong}
 	}
 }

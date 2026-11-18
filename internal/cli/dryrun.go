@@ -7,9 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
+	"github.com/TMHSDigital/subenum/internal/permute"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
 
@@ -210,7 +212,7 @@ func dryRunNotes(f cliFlags, sources []string) []string {
 		notes = append(notes, "-axfr names (a zone transfer from each name server at scan time)")
 	}
 	if f.permute || f.seedsFile != "" {
-		notes = append(notes, "the -permute pass (built from what the scan finds)")
+		notes = append(notes, fmt.Sprintf("the -permute pass (built from what the scan finds: up to %d candidates per name, at most %d per target)", permute.PerSeed, candidates.MaxPermutations))
 	}
 	if f.recursive {
 		notes = append(notes, "-recursive levels (built from what the scan finds)")

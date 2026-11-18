@@ -156,12 +156,37 @@ func RelativeSeeds(target string, found []string, seeds map[string]struct{}) []s
 // dropped and counted in tooLong: they would otherwise fail as "other" and
 // count against the reliability guard (#111). The permutations are checked
 // against entries in one pass, with no map as large as the wordlist (#321).
-func Permutations(target string, entries, rel []string) (candidates []string, tooLong int) {
+//
+// The permutations are built in one set, wordlist entries are deleted from
+// it, and only the survivors are copied out, so no second or third copy of
+// the list is held (#400). At most MaxPermutations are built; capped reports
+// that the seeds gave more.
+func Permutations(target string, entries, rel []string) (candidates []string, tooLong int, capped bool) {
 	skip := make(map[string]bool, len(rel))
 	for _, s := range rel {
 		skip[s] = true
 	}
-	generated := wordlist.NotIn(permute.Generate(rel, permute.Words, skip), entries)
-	candidates, _, tooLong = wordlist.Build(generated, target)
-	return candidates, tooLong
+	set, capped := permute.GenerateSet(rel, permute.Words, skip, MaxPermutations)
+	for _, e := range entries {
+		if len(set) == 0 {
+			break
+		}
+		delete(set, e)
+	}
+	limit := 253 - 1 - len(strings.TrimSuffix(target, "."))
+	candidates = make([]string, 0, len(set))
+	for c := range set {
+		if len(c) > limit {
+			tooLong++
+			continue
+		}
+		candidates = append(candidates, c)
+	}
+	sort.Strings(candidates)
+	return candidates, tooLong, capped
 }
+
+// MaxPermutations bounds one target's -permute pass: about 93 candidates
+// per seed name, so a target with tens of thousands of source names would
+// otherwise build millions of them before -max-queries applies (#400).
+const MaxPermutations = 1_000_000

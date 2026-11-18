@@ -76,7 +76,7 @@ func writeState(t *testing.T, st resumeState) string {
 // candidatesFor rebuilds a target's -permute candidate list from its
 // main-pass names, as runPermutationPass does.
 func candidatesFor(target string, entries []string, found []string) []string {
-	c, _ := candidates.Permutations(target, entries, candidates.RelativeSeeds(target, found, nil))
+	c, _, _ := candidates.Permutations(target, entries, candidates.RelativeSeeds(target, found, nil))
 	return c
 }
 

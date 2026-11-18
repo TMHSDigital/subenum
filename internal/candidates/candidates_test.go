@@ -81,7 +81,7 @@ func TestNoWordlistSizedMap(t *testing.T) {
 	}
 
 	var perms []string
-	if b := allocated(func() { perms, _ = Permutations("example.com", entries, []string{"api"}) }); b > limit {
+	if b := allocated(func() { perms, _, _ = Permutations("example.com", entries, []string{"api"}) }); b > limit {
 		t.Errorf("Permutations allocated %d bytes, want at most %d", b, limit)
 	}
 	if len(perms) == 0 || slices.Contains(perms, "api") {
@@ -95,7 +95,7 @@ func TestPermutationsRespectNameLength(t *testing.T) {
 	label := strings.Repeat("a", 60)
 	target := strings.Join([]string{label, label, label, "example"}, ".") // 191 characters
 	seed := strings.Repeat("b", 55) + "." + target                        // 247 characters
-	perms, tooLong := Permutations(target, nil, RelativeSeeds(target, []string{seed}, nil))
+	perms, tooLong, _ := Permutations(target, nil, RelativeSeeds(target, []string{seed}, nil))
 	if tooLong == 0 || len(perms) == 0 {
 		t.Fatalf("%d candidates, %d too long; want some of each", len(perms), tooLong)
 	}
@@ -103,5 +103,42 @@ func TestPermutationsRespectNameLength(t *testing.T) {
 		if n := len(c) + 1 + len(target); n > 253 {
 			t.Errorf("candidate %s is %d characters long", c, n)
 		}
+	}
+}
+
+// TestPermutationsCapped covers #400: a seed list that would build more than
+// MaxPermutations candidates stops there, the same way every time, so a
+// resumed pass rebuilds the same list.
+func TestPermutationsCapped(t *testing.T) {
+	seeds := make([]string, MaxPermutations/90+100)
+	for i := range seeds {
+		seeds[i] = fmt.Sprintf("h%06d", i)
+	}
+	slices.Sort(seeds)
+	a, _, capped := Permutations("example.com", nil, seeds)
+	if !capped || len(a) != MaxPermutations {
+		t.Fatalf("%d candidates, capped %v; want %d, capped", len(a), capped, MaxPermutations)
+	}
+	b, _, _ := Permutations("example.com", nil, seeds)
+	if !slices.Equal(a, b) {
+		t.Error("two builds from the same seeds differ")
+	}
+	if _, _, capped := Permutations("example.com", nil, seeds[:10]); capped {
+		t.Error("ten seeds reported as capped")
+	}
+}
+
+// BenchmarkPermutations50k covers #400: the pass for 50,000 seed names, as
+// a large Certificate Transparency footprint gives.
+func BenchmarkPermutations50k(b *testing.B) {
+	seeds := make([]string, 50_000)
+	for i := range seeds {
+		seeds[i] = fmt.Sprintf("host%05d", i)
+	}
+	slices.Sort(seeds)
+	entries := []string{"www", "api", "dev"}
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _, _ = Permutations("example.com", entries, seeds)
 	}
 }

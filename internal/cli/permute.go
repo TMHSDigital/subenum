@@ -46,7 +46,7 @@ func finishedPermutation(p permuteInput) *permutationResult {
 	if len(rel) == 0 {
 		return nil
 	}
-	perms, _ := candidates.Permutations(p.target, p.entries, rel)
+	perms, _, _ := candidates.Permutations(p.target, p.entries, rel)
 	res := &permutationResult{seeds: len(rel), candidates: len(perms), found: p.restoredHits}
 	if p.prev != nil {
 		res.pass = targetResult{done: true, final: p.prev.event()}
@@ -68,10 +68,13 @@ func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permut
 	if len(rel) == 0 {
 		return nil
 	}
-	perms, tooLong := candidates.Permutations(target, p.entries, rel)
+	perms, tooLong, capped := candidates.Permutations(target, p.entries, rel)
 	res := &permutationResult{seeds: len(rel), candidates: len(perms), found: p.restoredHits}
 	if len(perms) == 0 {
 		return res
+	}
+	if capped {
+		out.Info("Permutation pass for %s: %d seed names give more than %d candidates; the pass stops building them there, taking the seeds in sorted order", target, len(rel), candidates.MaxPermutations)
 	}
 	if tooLong > 0 {
 		out.Info("Permutation pass for %s: skipped %d candidates longer than 253 characters", target, tooLong)

@@ -509,7 +509,7 @@ subenum -permute -format jsonl -o results.jsonl example.com
 
 <br>
 
-The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist, and any whose full name would pass 253 characters, are skipped. It is one level deep even under `-recursive`, so a permutation hit is reported but not expanded further. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates, hits, `processed` and `queries_sent` of the pass per target. The target's `queries_sent` includes the pass, and its `verdict` is the worse of the two passes'; when it is the permutation pass's, the `reason` starts with `permutation pass:`.
+The pass is a normal scan with the same preflight, wildcard filtering, `-rate`, `-max-queries` and `-exclude`; candidates already in the wordlist, and any whose full name would pass 253 characters, are skipped. Each seed name gives up to 93 candidates, and a target's pass builds at most 1,000,000 (taking the seeds in sorted order, with a note when it stops there), so tens of thousands of `-ct` names cannot build millions before `-max-queries` applies. It is one level deep even under `-recursive`, so a permutation hit is reported but not expanded further. Its hits carry `"permutation": true` in JSON/JSONL, and the run-quality report shows the seeds, candidates, hits, `processed` and `queries_sent` of the pass per target. The target's `queries_sent` includes the pass, and its `verdict` is the worse of the two passes'; when it is the permutation pass's, the `reason` starts with `permutation pass:`.
 
 </details>
 

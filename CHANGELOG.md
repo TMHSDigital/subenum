@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `-hosts <file>` looks up a list of full host names, such as another tool's output or an old results file, instead of a wordlist, through the same wildcard filtering, resolver pool, pacing, verdict, `-diff` and output formats (`-` reads stdin). Targets still come from the `<domain>` argument or `-dL`: each looks up only the names under it, the most specific target when targets nest, and names under no target are out of scope, never queried, and counted in one note. It cannot be combined with `-w`, `-recursive` or `-tui` (#351).
 
+### Changed
+- The `-permute` pass is built in one set instead of three copies, and a target's pass builds at most 1,000,000 candidates (the seeds taken in sorted order, with a note when it stops there). For 50,000 seed names, as a large Certificate Transparency footprint gives, building the pass took about 11 s and 1.8 GB of allocations and now takes under 1 s and 150 MB. The `-dry-run` notes give the pass's bound: up to 93 candidates per name (#400).
+
 ## [0.11.0] - 2026-11-18
 
 ### Added
