@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 )
@@ -34,7 +35,7 @@ func Parse(data []byte) (Baseline, error) {
 	b := Baseline{Names: map[string]struct{}{}, Records: map[string][]dns.Record{}}
 	add := func(name string, records ...dns.Record) {
 		name = Name(name)
-		if name == "" {
+		if name == "" || !plausibleName(name) {
 			return
 		}
 		b.Names[name] = struct{}{}
@@ -103,4 +104,14 @@ func Parse(data []byte) (Baseline, error) {
 		}
 	}
 	return b, nil
+}
+
+// plausibleName rejects what no DNS host name holds: control bytes, spaces,
+// and markup characters. A baseline is input the run did not produce itself,
+// so such a name would otherwise reach the terminal, the -o file and the
+// Action's step summary as a "removed" result.
+func plausibleName(name string) bool {
+	return !strings.ContainsFunc(name, func(r rune) bool {
+		return !unicode.IsPrint(r) || unicode.IsSpace(r) || strings.ContainsRune("`|<>[](){}\\\"'", r)
+	})
 }

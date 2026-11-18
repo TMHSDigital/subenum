@@ -31,7 +31,8 @@ inputs:
   baseline-artifact:
     description: >-
       Name of a workflow artifact holding the previous results. The newest one
-      is downloaded and diffed against, and a complete run uploads its results
+      that this workflow uploaded from the default branch, outside pull
+      requests, is downloaded and diffed against, and a complete run uploads its results
       under the same name for next time. A run that max-duration stops saves
       its resume state there too, and the next run continues that scan rather
       than starting over. Empty disables it.
@@ -174,12 +175,30 @@ runs:
         # upload-artifact allows &, +, # and % in names. Encode the name so the
         # query string cannot truncate or reinterpret it (#407).
         encoded=$(jq -rn --arg n "$NAME" '$n|@uri')
-        run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$encoded&per_page=1" \
-          --jq '.artifacts[0] | select(.expired == false) | .workflow_run.id // empty')
+        # Any workflow run can upload an artifact under this name, a fork pull
+        # request's included. Take the newest one that this workflow uploaded
+        # from the default branch of this repository, outside pull requests.
+        branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+        workflow="${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY"/}"
+        workflow="${workflow%%@*}"
+        run=""
+        # Newest first. The artifact's own head fields rule out forks and other
+        # branches cheaply; the run itself says which workflow and event made it.
+        candidates=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$encoded&per_page=100" \
+          --jq '.artifacts[] | select(.expired == false) | .workflow_run
+            | select(.head_repository_id == .repository_id) | "\(.id) \(.head_branch)"')
+        while read -r id head; do
+          [ -n "$id" ] && [ "$head" = "$branch" ] || continue
+          made=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '"\(.path | sub("@.*$"; "")) \(.event)"')
+          case "$made" in
+            "$workflow pull_request"*) ;;
+            "$workflow "*) run="$id"; break ;;
+          esac
+        done <<< "$candidates"
         if [ -n "$run" ]; then
           gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "$NAME" --dir "$dir"
         else
-          echo "No baseline artifact named $NAME yet; this run sets it."
+          echo "No baseline artifact named $NAME from this workflow on $branch yet; this run sets it."
         fi
 
     - name: Scan
@@ -226,8 +245,17 @@ runs:
         base="$RUNNER_TEMP/subenum-baseline"
         key=$(printf '%s\n' "$DOMAIN" "$DOMAINS_FILE" "$WORDLIST" "$ARGS" "$SARIF" "$out" "$prev")
         resumed=false
+        # The state's command line is replayed as it is, so it must be the one
+        # this run would run anyway: a state that names other flags or paths
+        # starts a new scan. A resumed run appends -max-duration=VALUE, and a
+        # simulation pins a leading -seed; neither changes what is scanned.
+        want=$(printf '%s\0' "${flags[@]}" "${extra[@]}" "${target[@]}" | jq -Rsc 'split("\u0000") | .[:-1]')
+        same_args() {
+          jq -e --argjson want "$want" '(.args | if .[0] == "-seed" then .[2:] else . end
+            | map(select(startswith("-max-duration=") | not))) == $want' "$base/state.json" > /dev/null 2>&1
+        }
         if [ -z "$PREVIOUS" ] && [ -n "$BASELINE" ] && [ -s "$base/state.json" ]; then
-          if [ "$(cat "$base/state.key" 2> /dev/null)" = "$key" ]; then
+          if [ "$(cat "$base/state.key" 2> /dev/null)" = "$key" ] && same_args; then
             echo "Resuming the scan an earlier run's time budget stopped."
             subenum -resume "$base/state.json" -max-duration "${MAX_DURATION:-0}" > "$out/changes.jsonl" || code=$?
             if [ -s "$out/run.json" ]; then

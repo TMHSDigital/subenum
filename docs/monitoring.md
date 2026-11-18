@@ -120,7 +120,7 @@ jobs:
 | `wordlist` | bundled top 5000 | `-w` |
 | `args` | | Extra flags, separated by spaces or newlines (an `args: \|` block works) |
 | `previous` | | A previous results file to diff against (add `-diff-records` to `args` to also catch record changes) |
-| `baseline-artifact` | | Artifact name for the baseline: downloaded before, replaced after a complete run. A run that `max-duration` stops saves its resume state there too, and the next run continues that scan |
+| `baseline-artifact` | | Artifact name for the baseline: downloaded before, replaced after a complete run. Only an artifact that the same workflow uploaded from the default branch, outside pull requests, is used. A run that `max-duration` stops saves its resume state there too, and the next run continues that scan |
 | `sarif` | | Write takeover candidates as SARIF |
 | `max-duration`{% include unreleased.html action="max-duration" %} | | Time budget, e.g. `20m` (`-max-duration`). Keep it under the job's `timeout-minutes`: a job killed by its timeout leaves no report, while a scan that reaches its budget stops testing new names and still writes results and a `degraded` report. The CLI also saves a resume state then (`subenum-resume.json`, or the `-state` path), and `subenum -resume <file>` tests the names the budget left. With `baseline-artifact`, the action keeps that state in the artifact, next to the previous results it still diffs against, and the next run resumes the scan instead of starting over, so a scheduled job works through a large wordlist over several runs; the baseline is replaced once a run completes. A change to the inputs or to the wordlist file discards the state with a notice and starts a new scan |
 | `fail-on` | `unreliable` | Fail on this verdict or worse: `unreliable`, `degraded` or `never`. With `never`, a failed scan (verdict `unreliable`) still passes the step; a usage error or a run with no report always fails |
@@ -203,12 +203,16 @@ jobs:
       - name: Download previous results
         # The newest results artifact, from the last complete run: unlike a
         # cache, it does not expire after a skipped week (artifacts keep 90
-        # days here).
+        # days here). A fork's pull request can upload an artifact under the
+        # same name, so take only one uploaded from this repository's default
+        # branch.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=subenum-results&per_page=1" \
-            --jq '.artifacts[0] | select(.expired == false) | .workflow_run.id // empty')
+          branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=subenum-results&per_page=100" |
+            jq -r --arg b "$branch" 'first(.artifacts[] | select(.expired == false) | .workflow_run
+              | select(.head_repository_id == .repository_id and .head_branch == $b) | .id) // empty')
           if [ -n "$run" ]; then
             gh run download "$run" --repo "$GITHUB_REPOSITORY" --name subenum-results
           fi

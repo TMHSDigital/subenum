@@ -58,6 +58,26 @@ func TestParseBaselineTextChangesAndBOM(t *testing.T) {
 	}
 }
 
+// A baseline may come from outside the run (a downloaded artifact): names no
+// DNS host has, with escape sequences or markup, are dropped instead of being
+// reported as removed into the terminal or the Action's step summary.
+func TestParseBaselineDropsImplausibleNames(t *testing.T) {
+	content := `{"subdomain":"\u001b[2J\u001b[31mPWNED gone.lab.example"}` + "\n" +
+		`{"subdomain":"a` + "`" + `](https://x.invalid).lab.example"}` + "\n" +
+		`{"subdomain":"tab\there.lab.example"}` + "\n" +
+		`{"subdomain":"www.lab.example"}` + "\n" +
+		`{"subdomain":"_dmarc.lab.example"}` + "\n" +
+		`{"subdomain":"*.lab.example"}` + "\n"
+	b, err := parseBaseline([]byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"*.lab.example", "_dmarc.lab.example", "www.lab.example"}
+	if got := slices.Sorted(maps.Keys(b.names)); !slices.Equal(got, want) {
+		t.Errorf("names %q, want %q", got, want)
+	}
+}
+
 func TestE2EDiffRejectsMalformedBaselines(t *testing.T) {
 	valid := writeFile(t, "valid.txt", "www.example.com\n")
 	for _, tc := range malformedBaselines {
