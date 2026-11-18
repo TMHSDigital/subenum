@@ -186,3 +186,74 @@ func TestRunInterspersedFlags(t *testing.T) {
 		t.Errorf("-o -- then positional: exit %d, stderr %q; want 2 naming -bogus", code, stderr.String())
 	}
 }
+
+// TestLearnLabelsEveryFormat covers #423: -from reads results in every output
+// format and ranks the labels under the apex by how often they occur.
+func TestLearnLabelsEveryFormat(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"text": "k8s.example.com\nFound: api.k8s.example.com\nstg.example.com\n",
+		"json": `[{"subdomain":"k8s.example.com","records":[]},{"subdomain":"api.k8s.example.com","records":[]},{"subdomain":"stg.example.com","records":[]}]`,
+		"jsonl": `{"subdomain":"k8s.example.com"}` + "\n" + `{"subdomain":"api.k8s.example.com"}` + "\n" +
+			`{"subdomain":"stg.example.com"}` + "\n" + `{"type":"summary","verdict":"complete"}` + "\n",
+		"csv": "subdomain,type,value\nk8s.example.com,A,192.0.2.1\napi.k8s.example.com,A,192.0.2.2\nstg.example.com,A,192.0.2.3\n",
+	}
+	for format, content := range files {
+		path := filepath.Join(dir, format)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := learnLabels([]string{path}, "", 1)
+		if err != nil {
+			t.Fatalf("%s: %v", format, err)
+		}
+		// k8s twice; api and stg once each, alphabetically.
+		if want := []string{"k8s", "api", "stg"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: learned %q, want %q", format, got, want)
+		}
+	}
+}
+
+func TestLearnLabelsApexAndMinCount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "res.txt")
+	content := "int.dev.acme.co.uk\nvpn-int.acme.co.uk\nint.shop.acme.example\nwww.acme.example\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// acme.co.uk drops "co"; -domain names a deeper apex for its own names.
+	got, err := learnLabels([]string{path}, "shop.acme.example", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"int", "dev", "vpn-int", "www"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("learned %q, want %q", got, want)
+	}
+	if got, _ := learnLabels([]string{path}, "", 2); !reflect.DeepEqual(got, []string{"int"}) {
+		t.Errorf("-min-count 2 learned %q, want only int", got)
+	}
+}
+
+// TestRunFromLeadsAndDedups: learned labels come first and a common prefix
+// they repeat is not written twice.
+func TestRunFromLeadsAndDedups(t *testing.T) {
+	dir := t.TempDir()
+	res := filepath.Join(dir, "res.jsonl")
+	if err := os.WriteFile(res, []byte(`{"subdomain":"k8s.example.com"}`+"\n"+`{"subdomain":"www.example.com"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "wl.txt")
+	if code := run([]string{"-from", res, "-o", out}, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if lines[0] != "k8s" || lines[1] != "www" || strings.Count(string(data), "\nwww\n") != 1 {
+		t.Errorf("wordlist starts %q; want k8s, www first and www once", lines[:3])
+	}
+	if code := run([]string{"-from", filepath.Join(dir, "missing"), "-o", filepath.Join(dir, "x.txt")}, io.Discard, io.Discard); code != 1 {
+		t.Errorf("missing -from file: exit %d, want 1", code)
+	}
+}

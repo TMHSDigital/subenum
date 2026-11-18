@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/csv"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -62,79 +60,14 @@ func loadBaseline(path string) (baseline, error) {
 	return parseBaseline(data)
 }
 
-// parseBaseline is loadBaseline on a results file's contents.
+// parseBaseline is loadBaseline on a results file's contents; the parser
+// lives in internal/diff, which wordlist-gen's -from shares (#423).
 func parseBaseline(data []byte) (baseline, error) {
-	b := baseline{names: map[string]struct{}{}, records: map[string][]dns.Record{}}
-	add := func(name string, records ...dns.Record) string {
-		name = diff.Name(name)
-		if name != "" {
-			b.names[name] = struct{}{}
-			for _, r := range records {
-				if r.Type != "" {
-					b.records[name] = append(b.records[name], r)
-				}
-			}
-		}
-		return name
+	d, err := diff.Parse(data)
+	if err != nil {
+		return baseline{}, err
 	}
-	text := strings.TrimPrefix(string(data), string(rune(0xFEFF)))
-	trimmed := strings.TrimSpace(text)
-
-	if strings.HasPrefix(trimmed, "[") {
-		var results []output.Result
-		if err := json.Unmarshal([]byte(trimmed), &results); err != nil {
-			return baseline{}, err
-		}
-		for _, r := range results {
-			add(r.Subdomain, r.Records...)
-		}
-		b.hasRecords = true
-		return b, nil
-	}
-	if strings.HasPrefix(trimmed, "subdomain,") {
-		rows, err := csv.NewReader(strings.NewReader(trimmed)).ReadAll()
-		if err != nil {
-			return baseline{}, err
-		}
-		for _, row := range rows[1:] {
-			switch {
-			case len(row) >= 3:
-				add(row[0], dns.Record{Type: row[1], Value: row[2]})
-			case len(row) > 0:
-				add(row[0])
-			}
-		}
-		b.hasRecords = true
-		return b, nil
-	}
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case line == "" || strings.HasPrefix(line, "#"):
-			continue
-		case strings.HasPrefix(line, "{"):
-			var r struct {
-				Type      string       `json:"type"`
-				Subdomain string       `json:"subdomain"`
-				Records   []dns.Record `json:"records"`
-			}
-			if err := json.Unmarshal([]byte(line), &r); err != nil {
-				return baseline{}, err
-			}
-			if r.Type != "summary" {
-				add(r.Subdomain, r.Records...)
-				b.hasRecords = true
-			}
-		default:
-			for _, p := range []string{"Found (SIMULATED):", "Found:", "+ ", "- ", "~ "} {
-				line = strings.TrimSpace(strings.TrimPrefix(line, p))
-			}
-			if fields := strings.Fields(line); len(fields) > 0 {
-				add(fields[0])
-			}
-		}
-	}
-	return b, nil
+	return baseline{names: d.Names, records: d.Records, hasRecords: d.HasRecords}, nil
 }
 
 const diffUsage = "Usage: subenum diff [-records] [-type A,AAAA,CNAME] [-format text|json|jsonl|csv] <previous> <current>"

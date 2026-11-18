@@ -30,7 +30,12 @@ go build -buildvcs=false -o wordlist-gen wordlist-gen.go
 
 # Add custom combinations
 ./wordlist-gen -domain company-name.com -combine "dev,test,staging" -f -o company-wordlist.txt
+
+# Learn an organisation's naming habits from earlier results
+./wordlist-gen -from results.jsonl -from old-scan.txt -min-count 2 -o learned.txt
 ```
+
+`-from` reads earlier subenum results in any output format (text, JSON, JSONL or CSV, the formats `-diff` reads), takes the labels of each name below its apex (`api.k8s.example.com` gives `api` and `k8s`), and writes them first, most frequent first, ahead of the common prefixes, which are not repeated. The apex is `-domain` when a name ends in it, and otherwise the registrable domain (`example.com`, `acme.co.uk`).
 
 ### Parameters
 
@@ -41,6 +46,8 @@ go build -buildvcs=false -o wordlist-gen wordlist-gen.go
 | `-common` | Include common subdomain prefixes | `true` |
 | `-domain` | Domain to extract terms from | `""` (empty) |
 | `-combine` | Comma-separated prefixes to combine with other terms; each must be a valid DNS label | `""` (empty) |
+| `-from` | Earlier subenum results file to learn labels from, most frequent first; repeatable | none |
+| `-min-count` | With `-from`, drop labels seen fewer than this many times | `1` |
 | `-v` | Print every generated entry to stdout | `false` |
 
 ### Example
