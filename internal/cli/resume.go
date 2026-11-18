@@ -178,16 +178,39 @@ func (p *resumePass) merge(ev scan.Event) scan.Event {
 	return ev
 }
 
-// withoutRefound drops from a resumed pass's final event the n names it found
-// again after restoring them from the state. The resume point repeats up to a
-// worker pool's worth of lookups, and the saved pass already counts those
-// names as processed and found, so merging would count them twice (#156).
-func withoutRefound(ev scan.Event, n int) scan.Event {
-	d := int64(n)
-	ev.Found = max(ev.Found-d, 0)
-	ev.Processed = max(ev.Processed-d, 0)
-	ev.Total = max(ev.Total-d, 0) // merge adds the saved part's processed, which has them (#341)
-	ev.Stats.Found = max(ev.Stats.Found-d, 0)
+// refoundCount counts the restored names a resumed pass found again, and
+// their flags, which the pass counted as it reported them (#156, #408).
+type refoundCount struct {
+	names, takeover, internal, partial int64
+}
+
+func (c *refoundCount) add(r scan.Result) {
+	c.names++
+	if r.Takeover != "" {
+		c.takeover++
+	}
+	if r.Internal != "" {
+		c.internal++
+	}
+	if r.Partial {
+		c.partial++
+	}
+}
+
+// withoutRefound drops from a resumed pass's final event the names it found
+// again after restoring them from the state, with their takeover, internal
+// and partial flags. The resume point repeats up to a worker pool's worth of
+// lookups, and the saved pass already counts those names and flags, so
+// merging would count them twice (#156, #408). The pool's PoolHits and
+// Confirmed count lookups, repeated ones included, and are left as they are.
+func withoutRefound(ev scan.Event, n refoundCount) scan.Event {
+	ev.Found = max(ev.Found-n.names, 0)
+	ev.Processed = max(ev.Processed-n.names, 0)
+	ev.Total = max(ev.Total-n.names, 0) // merge adds the saved part's processed, which has them (#341)
+	ev.Stats.Found = max(ev.Stats.Found-n.names, 0)
+	ev.Stats.Takeover = max(ev.Stats.Takeover-n.takeover, 0)
+	ev.Stats.Internal = max(ev.Stats.Internal-n.internal, 0)
+	ev.Stats.Partial = max(ev.Stats.Partial-n.partial, 0)
 	return ev
 }
 

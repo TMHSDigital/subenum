@@ -57,7 +57,7 @@ type session struct {
 	cands         *candidates.Set // the current target's candidates: what proposed each name (#273)
 	foundBy       map[string]int  // the current target's results per source (#273)
 	restored      map[string]bool // names re-emitted from a -resume state
-	refound       int             // restored names a resumed pass found again (#156)
+	refound       refoundCount    // restored names a resumed pass found again (#156, #408)
 
 	status        []report.Status
 	results       []targetResult
@@ -588,7 +588,7 @@ func (s *session) handleSignals(ctx context.Context, cancel context.CancelFunc) 
 // were already written.
 func (s *session) emitResult(ev scan.Event, permutation bool) {
 	if s.restored[ev.Result.Subdomain] {
-		s.refound++
+		s.refound.add(ev.Result)
 		return
 	}
 	res := output.Result{Result: ev.Result, Permutation: permutation, Sources: candidates.FromPermute, Target: s.target}
@@ -684,6 +684,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	// when the output shows them or -diff compares them (#183).
 	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil}
 	s.entryDigests[i] = entryDigest(entries)
+	// Restored names are per target: nested -dL targets can both find a
+	// name, and each reports it (#408).
+	s.restored = map[string]bool{}
 	saved := s.resume.target(target)
 	// Passive sources (-ct, -sources) propose names; each is still looked up
 	// like a wordlist entry (#130, #193). One set of the entries serves
@@ -758,10 +761,10 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		if saved != nil {
 			p.prev = saved.Permute
 		}
-		s.refound = 0
+		s.refound = refoundCount{}
 		res.permutation = runPermutationPass(ctx, s, p)
-		if p := res.permutation; p != nil && s.refound > 0 {
-			p.found -= s.refound
+		if p := res.permutation; p != nil && s.refound.names > 0 {
+			p.found -= int(s.refound.names)
 			if p.pass.done {
 				p.pass.final = withoutRefound(p.pass.final, s.refound)
 			}
@@ -804,7 +807,7 @@ func (s *session) mainPass(ctx context.Context, p scanPass, saved *resumePass) t
 		p.maxQueries = left
 		saved.handOverPending(&p, s.f.retryIncon)
 	}
-	s.refound = 0
+	s.refound = refoundCount{}
 	res := scanTarget(ctx, s, p, s.emitMain)
 	if saved != nil && res.done {
 		res.final = saved.merge(withoutRefound(res.final, s.refound))

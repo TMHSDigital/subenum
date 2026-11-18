@@ -285,6 +285,60 @@ func TestE2EResumeCountsRefoundNamesOnce(t *testing.T) {
 	}
 }
 
+// TestWithoutRefoundDropsFlags covers #408: a refound name's takeover,
+// internal and partial flags were counted by the saved part and again by the
+// resumed pass, so they come off the resumed side with the name.
+func TestWithoutRefoundDropsFlags(t *testing.T) {
+	var n refoundCount
+	for _, r := range []scan.Result{
+		{Subdomain: "a.example.com", Takeover: "github-pages"},
+		{Subdomain: "b.example.com", Internal: "private", Partial: true},
+		{Subdomain: "c.example.com"},
+	} {
+		n.add(r)
+	}
+	ev := scan.Event{Found: 5, Processed: 9, Total: 9, Stats: scan.Stats{Found: 5, Takeover: 2, Internal: 1, Partial: 1}}
+	got := withoutRefound(ev, n)
+	want := scan.Event{Found: 2, Processed: 6, Total: 6, Stats: scan.Stats{Found: 2, Takeover: 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("withoutRefound = %+v, want %+v", got, want)
+	}
+}
+
+// TestE2EResumeNestedTargetsKeepTheirNames covers #408: names restored for
+// one -dL target are not dropped from a later target that finds them too.
+func TestE2EResumeNestedTargetsKeepTheirNames(t *testing.T) {
+	t.Parallel()
+	wl := writeFile(t, "wl.txt", "api\napi.dev\n")
+	dl := writeFile(t, "domains.txt", "example.com\ndev.example.com\n")
+	args := []string{"-simulate", "-seed", "5", "-hit-rate", "100", "-t", "1", "-progress=false", "-format", "jsonl", "-w", wl, "-dL", dl}
+	// The first target finished before the interrupt; the second had not
+	// started.
+	first := []output.Result{
+		{Result: scan.Result{Subdomain: "api.example.com"}},
+		{Result: scan.Result{Subdomain: "api.dev.example.com"}},
+	}
+	path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{
+		{Domain: "example.com", Done: true, RootDone: 2, Processed: 2, Total: 2, Results: first, Stats: scan.Stats{Found: 2}},
+		{Domain: "dev.example.com"},
+	}})
+	code, out := runCLI(t, "", "-resume", path)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got, s := jsonlRecords(t, out)
+	seen := map[string]bool{}
+	for _, r := range got {
+		seen[r.Subdomain+" "+r.Target] = true
+	}
+	if !seen["api.dev.example.com dev.example.com"] {
+		t.Errorf("api.dev.example.com missing from the second target's results: %v", seen)
+	}
+	if len(s.Targets) != 2 || s.Targets[1].Found != 2 {
+		t.Errorf("second target found = %+v, want 2", s.Targets)
+	}
+}
+
 // TestE2EResumeKeepsQueryBudget covers #108: a resumed scan gets only what
 // is left of -max-queries, and none once it is spent.
 func TestE2EResumeKeepsQueryBudget(t *testing.T) {
