@@ -70,3 +70,31 @@ func TestCreateFileFollowsSymlink(t *testing.T) {
 		t.Errorf("target mode %v, want its original 0640", fi.Mode().Perm())
 	}
 }
+
+// TestWriteFileNoFollowReplacesSymlink: a file the user did not name, such
+// as the default resume state, replaces a symlink at its path and leaves
+// the file the link points at untouched.
+func TestWriteFileNoFollowReplacesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "elsewhere.txt")
+	if err := os.WriteFile(target, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "state.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileNoFollow(link, []byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(target); string(data) != "keep\n" {
+		t.Errorf("link target holds %q, want it untouched", data)
+	}
+	fi, err := os.Lstat(link)
+	if err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("state path mode %v (err %v), want a regular file", fi.Mode(), err)
+	}
+	if data, _ := os.ReadFile(link); string(data) != "{}\n" {
+		t.Errorf("state file holds %q, want the new state", data)
+	}
+}

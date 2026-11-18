@@ -607,11 +607,15 @@ func saveResumeState(s *session) bool {
 	return true
 }
 
-// writeResumeState saves where an interrupted run stopped.
+// writeResumeState saves where an interrupted run stopped. The default file
+// is written without following a symlink there: the user never named it.
 func writeResumeState(path string, st resumeState) error {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
+	}
+	if path == defaultStateFile {
+		return output.WriteFileNoFollow(path, append(data, '\n'))
 	}
 	return output.WriteFile(path, append(data, '\n'))
 }

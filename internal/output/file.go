@@ -30,11 +30,22 @@ type File struct {
 // would, so a umask of 077 keeps results private (#119). A path that is a
 // symlink is followed: the file it points at is replaced and the link kept.
 func CreateFile(path string) (*File, error) {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
+	return createFile(path, true)
+}
+
+// createFile is CreateFile; without follow, a symlink or other non-regular
+// file at path is not opened but replaced by the new file, and what a link
+// pointed at is left alone.
+func createFile(path string, follow bool) (*File, error) {
+	stat := os.Lstat
+	if follow {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			path = resolved
+		}
+		stat = os.Stat
 	}
 	keep := os.FileMode(0)
-	if fi, err := os.Stat(path); err == nil {
+	if fi, err := stat(path); err == nil && (follow || fi.Mode().IsRegular()) {
 		if !fi.Mode().IsRegular() {
 			// No O_TRUNC: truncating a device or pipe is meaningless, and
 			// Windows rejects it on the NUL device with ERROR_INVALID_FUNCTION
@@ -60,7 +71,17 @@ func CreateFile(path string) (*File, error) {
 // WriteFile writes data to path the way CreateFile does: atomically, so a
 // failed write leaves an existing file unchanged (#331).
 func WriteFile(path string, data []byte) error {
-	f, err := CreateFile(path)
+	return writeFile(path, data, true)
+}
+
+// WriteFileNoFollow is WriteFile for a file the user did not name: a symlink
+// or other non-regular file at path is replaced, never written through.
+func WriteFileNoFollow(path string, data []byte) error {
+	return writeFile(path, data, false)
+}
+
+func writeFile(path string, data []byte, follow bool) error {
+	f, err := createFile(path, follow)
 	if err != nil {
 		return err
 	}
