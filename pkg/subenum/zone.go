@@ -7,6 +7,7 @@ import (
 
 	"github.com/TMHSDigital/subenum/internal/axfr"
 	"github.com/TMHSDigital/subenum/internal/candidates"
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
@@ -68,7 +69,7 @@ func probeZone(ctx context.Context, domain string, opts ZoneOptions, skip func(s
 		resolver = normalized
 	}
 	if err := validate.DNSServer(resolver); err != nil {
-		return ZoneInfo{}, fmt.Errorf("subenum: Resolver %s: %w", resolver, err)
+		return ZoneInfo{}, fmt.Errorf("subenum: Resolver %s: %w", dns.DisplayServer(resolver), err)
 	}
 	timeout := opts.Timeout
 	if timeout == 0 {

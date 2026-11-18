@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+// TestDNSServerErrorHidesURL covers #410: a malformed DoH URL's error does
+// not repeat the URL, which can hold a credential.
+func TestDNSServerErrorHidesURL(t *testing.T) {
+	err := DNSServer("https://user:s3cret@/dns-query")
+	if err == nil || strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("DNSServer error = %v; want an error without the URL", err)
+	}
+}
+
 func TestDNSServer(t *testing.T) {
 	validServers := []string{
 		"8.8.8.8:53",

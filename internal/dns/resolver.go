@@ -159,6 +159,7 @@ func NewResolver(timeout time.Duration, dnsServer string) *net.Resolver {
 // the resolver's own.
 func newResolver(timeout time.Duration, dnsServer string, budget *idleBudget) *net.Resolver {
 	dl := newDialer(timeout, dnsServer, budget) // UDP/TCP, DoT or DoH (#86)
+	shown := DisplayServer(dnsServer)           // what errors name; no DoH credential (#410)
 	r := &net.Resolver{
 		PreferGo: true,
 		Dial: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
@@ -175,7 +176,7 @@ func newResolver(timeout time.Duration, dnsServer string, budget *idleBudget) *n
 			}
 			b, _ := dialCtx.Value(budgetKey{}).(*wireBudget)
 			if b != nil {
-				b.server.Store(dnsServer)
+				b.server.Store(shown)
 				if b.dials.Add(1) > b.prepaid {
 					if err := limiterFrom(dialCtx).Wait(dialCtx); err != nil {
 						return nil, err

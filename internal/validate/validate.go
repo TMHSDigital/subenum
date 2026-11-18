@@ -90,7 +90,9 @@ func DNSServer(server string) error {
 	case strings.HasPrefix(server, "https://"):
 		u, err := url.Parse(server)
 		if err != nil || u.Host == "" {
-			return fmt.Errorf("invalid DNS-over-HTTPS URL %q, expected https://host/path", server)
+			// The URL is not echoed: it can hold a credential, and callers
+			// name the server in its display form (#410).
+			return fmt.Errorf("invalid DNS-over-HTTPS URL, expected https://host/path")
 		}
 		return nil
 	case strings.Contains(server, "://"):
