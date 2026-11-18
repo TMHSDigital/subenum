@@ -70,8 +70,6 @@ Constraints to keep in mind when changing the code.
 - **DNS goes through Go's stdlib resolver.** Its internal retries depend on the
   host's resolver configuration. `-rate` charges every query it dials, but the
   number of queries per lookup is not fully under subenum's control.
-- **IDN targets use a plain RFC 3492 Punycode encoder**, not full UTS #46
-  mapping, so a domain must be typed in its usual lowercase form.
 - **The reliability guard is tested with injected timeouts, not simulate
   misses,** because simulate misses classify as NXDOMAIN, which is excluded from
   the failure rate by design.
