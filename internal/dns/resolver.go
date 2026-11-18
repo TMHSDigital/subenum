@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Record is a single resolved DNS record. Type is "A", "AAAA", "CNAME", etc.
@@ -485,11 +487,33 @@ func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t str
 		}
 		recs := make([]Record, 0, len(txts))
 		for _, txt := range txts {
-			recs = append(recs, Record{Type: "TXT", Value: txt})
+			recs = append(recs, Record{Type: "TXT", Value: EscapeTXT(txt)})
 		}
 		return recs, nil
 	}
 	return nil, nil
+}
+
+// EscapeTXT makes a TXT string safe to print: a backslash, an invalid
+// UTF-8 byte and every byte of a non-printable character (controls,
+// line breaks, format characters such as bidi overrides) become a
+// zone-file style \DDD escape. Whoever runs the scanned zone writes its
+// TXT records, so the raw text must not reach a terminal or a result
+// line unescaped.
+func EscapeTXT(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == '\\' || (r == utf8.RuneError && size <= 1) || !unicode.IsPrint(r) {
+			for _, c := range []byte(s[i : i+size]) {
+				fmt.Fprintf(&b, "\\%03d", c)
+			}
+		} else {
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	return b.String()
 }
 
 // Logf receives verbose per-lookup lines. The dns package never writes to

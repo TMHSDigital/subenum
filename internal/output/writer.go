@@ -332,6 +332,16 @@ func (w *Writer) writeJSONL(res Result) {
 	}
 }
 
+// csvSafe keeps a record value from being read as a formula when the CSV
+// is opened in a spreadsheet: a value starting with =, +, -, @, a tab or
+// a carriage return gets a leading single quote.
+func csvSafe(v string) string {
+	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		return "'" + v
+	}
+	return v
+}
+
 func (w *Writer) ensureCSV() {
 	if w.csvInit {
 		return
@@ -370,7 +380,7 @@ func (w *Writer) writeCSVRows(res Result) {
 		rows = []dns.Record{{}}
 	}
 	for _, r := range rows {
-		row := []string{res.Subdomain, r.Type, r.Value}
+		row := []string{res.Subdomain, r.Type, csvSafe(r.Value)}
 		if w.simulate {
 			row = append(row, "true")
 		}

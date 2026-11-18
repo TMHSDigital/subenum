@@ -134,6 +134,28 @@ func TestWriterCSVStdoutStreams(t *testing.T) {
 	}
 }
 
+// TestWriterCSVFormulaValues checks that a record value a spreadsheet would
+// read as a formula is written with a leading single quote.
+func TestWriterCSVFormulaValues(t *testing.T) {
+	var out bytes.Buffer
+	w := New(nil, false, FormatCSV)
+	w.SetStdout(&out)
+	w.Emit(found("www.example.com", []dns.Record{
+		{Type: "TXT", Value: "=1+1"},
+		{Type: "TXT", Value: "@SUM(A1)"},
+		{Type: "TXT", Value: "-2"},
+		{Type: "TXT", Value: "v=spf1 -all"},
+	}))
+	if err := w.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"TXT,'=1+1\n", "TXT,'@SUM(A1)\n", "TXT,'-2\n", "TXT,v=spf1 -all\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("CSV %q lacks %q", out.String(), want)
+		}
+	}
+}
+
 func TestWriterCSVEmptyRecords(t *testing.T) {
 	tmp, err := os.CreateTemp("", "output-csv-empty-*.csv")
 	if err != nil {

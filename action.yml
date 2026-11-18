@@ -321,7 +321,10 @@ runs:
             echo "**Changes since the previous results:** $added added, $removed removed, $changed changed."
             jq -rn 'limit(50; inputs | select(.change == "added") | "- `+ \(.subdomain)`")' "$out/changes.jsonl"
             jq -rn 'limit(50; inputs | select(.change == "removed") | "- `- \(.subdomain)`")' "$out/changes.jsonl"
-            jq -rn 'limit(50; inputs | select(.change == "changed") | "- `~ \(.subdomain)`: \([.previous_records[]? | "\(.type) \(.value)"] | join(", ")) -> \([.records[] | "\(.type) \(.value)"] | join(", "))")' "$out/changes.jsonl"
+            # Record values come from the scanned zone: each list goes in a
+            # code span with backticks and control characters taken out.
+            jq -rn 'def span: if length == 0 then "none" else "`" + (join(", ") | gsub("[`[:cntrl:]]"; "?")) + "`" end;
+              limit(50; inputs | select(.change == "changed") | "- `~ \(.subdomain)`: \([.previous_records[]? | "\(.type) \(.value)"] | span) -> \([.records[] | "\(.type) \(.value)"] | span)")' "$out/changes.jsonl"
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 
