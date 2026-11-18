@@ -245,10 +245,11 @@ var unsavedSettings = map[string]bool{"seed": true, "state": true, "v": true, "p
 // pacingFlags may be given next to -resume to change how fast the rest of
 // the scan goes, for example after timeouts piled up (#309). They change
 // neither the candidate list nor the wildcard fingerprint, so the saved
-// position keeps its meaning; the value says whether the flag is a boolean.
+// position keeps its meaning. Whether one is a boolean comes from the flag
+// itself (#402).
 var pacingFlags = map[string]bool{
-	"rate": false, "rate-per-resolver": false, "t": false, "timeout": false,
-	"attempts": false, "auto-rate": true, "no-abort": true, "max-duration": false,
+	"rate": true, "rate-per-resolver": true, "t": true, "timeout": true,
+	"attempts": true, "auto-rate": true, "no-abort": true, "max-duration": true,
 }
 
 // pacingFlagList names the pacing flags for messages, in a fixed order.
@@ -354,12 +355,19 @@ scan:
 // pacingOverrides checks that the arguments given next to -resume are all
 // pacing flags, and returns them with each value joined to its flag.
 func pacingOverrides(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	boolFlag := map[string]bool{}
+	for _, f := range flagInfos() {
+		boolFlag[f.name] = f.isBool
+	}
 	var out []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		name, _, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-"), "=")
-		isBool, ok := pacingFlags[name]
-		if !ok || !strings.HasPrefix(a, "-") {
+		isBool := boolFlag[name]
+		if !pacingFlags[name] || !strings.HasPrefix(a, "-") {
 			return nil, fmt.Errorf("-resume takes only the pacing flags %s next to the state file, which holds the other arguments; got %q", pacingFlagList(), a)
 		}
 		if !isBool && !hasValue {

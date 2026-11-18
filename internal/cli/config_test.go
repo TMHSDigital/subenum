@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -326,6 +327,32 @@ func TestFileFlagsAreComplete(t *testing.T) {
 	for name := range fileFlags {
 		if !slices.ContainsFunc(flagInfos(), func(f flagInfo) bool { return f.name == name }) {
 			t.Errorf("fileFlags lists -%s, which is not a flag", name)
+		}
+	}
+}
+
+// TestFlagTraitMapsNameRealFlags covers #402: every name-keyed table of
+// flag behaviour names a registered flag, so a renamed or misspelled flag
+// fails here instead of silently doing nothing.
+func TestFlagTraitMapsNameRealFlags(t *testing.T) {
+	registered := map[string]bool{}
+	for _, f := range flagInfos() {
+		registered[f.name] = true
+	}
+	// The flag package answers -h and -help itself; they are never registered.
+	builtin := map[string]bool{"h": true, "help": true}
+	for table, names := range map[string][]string{
+		"noDefaultFlags":  slices.Collect(maps.Keys(noDefaultFlags)),
+		"listFlags":       slices.Collect(maps.Keys(listFlags)),
+		"repeatFlags":     slices.Collect(maps.Keys(repeatFlags)),
+		"unsavedSettings": slices.Collect(maps.Keys(unsavedSettings)),
+		"pacingFlags":     slices.Collect(maps.Keys(pacingFlags)),
+		"valueChoices":    slices.Collect(maps.Keys(valueChoices)),
+	} {
+		for _, name := range names {
+			if !registered[name] && !builtin[name] {
+				t.Errorf("%s lists -%s, which is not a flag", table, name)
+			}
 		}
 	}
 }
