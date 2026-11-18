@@ -403,7 +403,7 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 			return false, nil, false, false // interrupted during preflight: not a resolver failure
 		}
 		if outcome != dns.OutcomeFound && outcome != dns.OutcomeNXDomain {
-			msg := fmt.Sprintf("resolver %s failed preflight for %s: %s after %d attempt(s)", cfg.DNSServer, cfg.Domain, outcome, cfg.Attempts)
+			msg := fmt.Sprintf("resolver %s failed preflight for %s: %s after %d attempt(s)", dns.DisplayServer(cfg.DNSServer), cfg.Domain, outcome, cfg.Attempts)
 			events <- Event{Kind: EventError, Fatal: true, Message: msg}
 			return false, nil, false, true
 		}

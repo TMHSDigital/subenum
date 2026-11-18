@@ -18,6 +18,28 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 )
 
+// TestDisplayServerHidesCredentials covers #410: a DoH URL's userinfo, path
+// and query never reach a report, log or error.
+func TestDisplayServerHidesCredentials(t *testing.T) {
+	for in, want := range map[string]string{
+		"8.8.8.8:53":                                   "8.8.8.8:53",
+		"[2001:db8::1]:53":                             "[2001:db8::1]:53",
+		"tls://dns.example:853":                        "tls://dns.example:853",
+		"tls://user:secret@dns.example":                "tls://dns.example",
+		"https://dns.example":                          "https://dns.example",
+		"https://dns.example/":                         "https://dns.example",
+		"https://dns.example/dns-query":                "https://dns.example/…",
+		"https://user:secret@127.0.0.1:1/q/token":      "https://127.0.0.1:1/…",
+		"https://dns.example/dns-query?key=secret":     "https://dns.example/…",
+		"https://dns.example?key=secret":               "https://dns.example/…",
+		"https://user:secret@dns.example:8443%zz/path": "https://…",
+	} {
+		if got := DisplayServer(in); got != want {
+			t.Errorf("DisplayServer(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // startAllTransports serves one zone over UDP/TCP, DoT and DoH and returns
 // the -dns-server value for each transport.
 func startAllTransports(t *testing.T) (*dnstest.Server, map[string]string) {

@@ -639,7 +639,7 @@ func (c Config) options() (scan.Options, error) {
 	}
 	if !c.Simulate {
 		if err := validate.DNSServer(resolver); err != nil {
-			return scan.Options{}, fmt.Errorf("subenum: Resolver %s: %w", resolver, err)
+			return scan.Options{}, fmt.Errorf("subenum: Resolver %s: %w", dns.DisplayServer(resolver), err)
 		}
 	}
 

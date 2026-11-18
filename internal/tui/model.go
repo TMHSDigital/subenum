@@ -653,7 +653,7 @@ func (m *Model) summary(final scan.Event) output.Summary {
 		Started:   m.started,
 		Simulated: m.vals.Simulate,
 		Seed:      m.seed,
-		Resolver:  m.vals.DNSServer,
+		Resolver:  dns.DisplayServer(m.vals.DNSServer),
 		RateLimit: m.vals.Rate,
 	}, []output.TargetSummary{t}, m.pool, time.Since(m.started))
 }

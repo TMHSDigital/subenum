@@ -40,6 +40,26 @@ func Transport(server string) string {
 	return TransportUDP
 }
 
+// DisplayServer is a -dns-server value as reports, results, logs and errors
+// show it (#410). A DoH URL can carry a credential, as userinfo (sent as Basic
+// auth) or as a token in its path or query, so a tls:// or https:// server
+// shows only its scheme and host, with "/…" standing for a path or query.
+// Only the transport sees the full value.
+func DisplayServer(server string) string {
+	if Transport(server) == TransportUDP {
+		return server
+	}
+	u, err := url.Parse(server)
+	if err != nil || u.Host == "" {
+		return strings.SplitN(server, "://", 2)[0] + "://…"
+	}
+	out := u.Scheme + "://" + u.Host
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		out += "/…"
+	}
+	return out
+}
+
 // testRootCAs, when set by tests, replaces the system roots for DoT and DoH.
 var testRootCAs *x509.CertPool
 

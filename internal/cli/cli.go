@@ -414,7 +414,7 @@ func loadPool(f cliFlags, in *runtimeInputs, out *output.Writer) (*dns.Pool, int
 		out.Error("-r: %v", err)
 		return nil, exitUsage
 	}
-	out.Info("Resolver pool: %d resolvers; every hit is re-validated against %s", pool.Size(), f.dnsServer)
+	out.Info("Resolver pool: %d resolvers; every hit is re-validated against %s", pool.Size(), dns.DisplayServer(f.dnsServer))
 	return pool, exitOK
 }
 
@@ -671,7 +671,7 @@ func logVerboseStart(f cliFlags, domain string, maxAttempts int, out *output.Wri
 	out.Info("Timeout: %d ms", f.timeoutMs)
 	out.Info("Attempts: %d", maxAttempts)
 	if !f.testMode {
-		out.Info("DNS Server: %s", f.dnsServer)
+		out.Info("DNS Server: %s", dns.DisplayServer(f.dnsServer))
 	}
 	if len(f.outputs.specs) > 0 {
 		out.Info("Output file: %s", f.outputs.describe())

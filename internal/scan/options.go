@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/validate"
 )
 
@@ -93,7 +94,7 @@ func (o Options) Validate() error {
 			server = normalized
 		}
 		if err := validate.DNSServer(server); err != nil {
-			return fmt.Errorf("DNS server %s: %w", o.DNSServer, err)
+			return fmt.Errorf("DNS server %s: %w", dns.DisplayServer(o.DNSServer), err)
 		}
 	}
 	return ValidateExcludes(o.Exclude)

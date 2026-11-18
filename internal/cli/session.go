@@ -831,7 +831,7 @@ func (s *session) recordTarget(i int, res targetResult) (next bool) {
 		s.status[i] = report.StatusInterrupted
 	}
 	if res.resolverAbort && i < len(s.targets)-1 {
-		s.out.Error("resolver %s looks overloaded; skipping the %d remaining targets (use -no-abort to continue)", s.f.dnsServer, len(s.targets)-1-i)
+		s.out.Error("resolver %s looks overloaded; skipping the %d remaining targets (use -no-abort to continue)", dns.DisplayServer(s.f.dnsServer), len(s.targets)-1-i)
 		for j := i + 1; j < len(s.targets); j++ {
 			s.status[j] = report.StatusSkipped
 			s.failedTargets++

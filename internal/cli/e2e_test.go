@@ -207,6 +207,35 @@ func TestE2EDomainListNamesTarget(t *testing.T) {
 	}
 }
 
+// TestE2EDoHCredentialsStayOutOfReports covers #410: a DoH -dns-server
+// whose URL carries a credential is not copied into the report, the JSONL
+// summary line or the preflight error. The closed local port fails the
+// preflight without sending anything off the machine.
+func TestE2EDoHCredentialsStayOutOfReports(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	wl := writeFile(t, "wl.txt", "www\n")
+	stats, res := filepath.Join(dir, "run.json"), filepath.Join(dir, "res.jsonl")
+	code, stdout, stderr := runCLIStreams(t, "-silent", "-format", "jsonl", "-o", res, "-stats", stats, "-timeout", "300",
+		"-attempts", "1", "-w", wl, "-dns-server", "https://user:s3cret@127.0.0.1:1/dns-query/t0ken", "example.com")
+	if code == exitOK {
+		t.Fatalf("exit %d; the preflight against a closed port should fail", code)
+	}
+	report, err := os.ReadFile(stats)
+	if err != nil {
+		t.Fatalf("reading -stats: %v\n%s", err, stderr)
+	}
+	results, _ := os.ReadFile(res)
+	for name, text := range map[string]string{"report": string(report), "results": string(results), "stdout": stdout, "stderr": stderr} {
+		if strings.Contains(text, "s3cret") || strings.Contains(text, "t0ken") || strings.Contains(text, "user:") {
+			t.Errorf("%s carries the DoH credential:\n%s", name, text)
+		}
+	}
+	if !strings.Contains(string(report), `"https://127.0.0.1:1/…"`) {
+		t.Errorf("report does not name the resolver by scheme and host:\n%s", report)
+	}
+}
+
 func TestE2EStdinWordlistPlainOutput(t *testing.T) {
 	t.Parallel()
 	code, out := runCLI(t, "WWW\nmail\n# comment\n", "-simulate", "-hit-rate", "100", "-progress=false", "-w", "-", "example.com")

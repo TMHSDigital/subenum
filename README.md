@@ -283,7 +283,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-diff-records` | `false` | With `-diff`, also report names whose records changed (`~`): a re-pointed CNAME or moved addresses, compared over the `-type` record types. Needs a JSON, JSONL or CSV `-diff` file |
 | **Resuming** | | |
 | `-resume <file>` | n/a | Resume a run that was interrupted, ran out of `-max-duration` or was aborted, from its state file; takes no other arguments but the pacing flags (`-rate`, `-t`, `-timeout`, ...) |
-| `-state <file>` | `subenum-resume.json` | Where a run that was interrupted, ran out of `-max-duration` or was aborted saves its state for `-resume` |
+| `-state <file>` | `subenum-resume.json` | Where a run that was interrupted, ran out of `-max-duration` or was aborted saves its state for `-resume`. The state holds the full command line, so a credential in a `-dns-server` URL is in it; reports, results and logs show such a server only as its scheme and host |
 | **Simulation and labs** | | |
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |

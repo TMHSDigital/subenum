@@ -178,7 +178,7 @@ func (s *session) printDryRun(plans []dryRunTarget, rateBy string) {
 			_, _ = fmt.Fprintf(w, "  duration    not bounded by -rate (unlimited)\n")
 		}
 		if p.Preflight != "" {
-			_, _ = fmt.Fprintf(w, "  preflight   %s via %s: %s\n", dryRunStatus(p.PreflightOK), s.f.dnsServer, p.Preflight)
+			_, _ = fmt.Fprintf(w, "  preflight   %s via %s: %s\n", dryRunStatus(p.PreflightOK), dns.DisplayServer(s.f.dnsServer), p.Preflight)
 		}
 		for _, r := range p.PoolPreflight {
 			_, _ = fmt.Fprintf(w, "  pool        %s via %s: %s\n", dryRunStatus(r.OK), r.Addr, r.Preflight)

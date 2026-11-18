@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/candidates"
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/report"
 	"github.com/TMHSDigital/subenum/internal/scan"
@@ -22,7 +23,7 @@ func buildSummary(s *session, elapsed time.Duration) output.Summary {
 		Started:   s.started,
 		Simulated: f.testMode,
 		Seed:      f.seed,
-		Resolver:  f.dnsServer,
+		Resolver:  dns.DisplayServer(f.dnsServer),
 		Zone:      f.simZone,
 		RateLimit: f.rate,
 	}, summaries, s.in.pool, elapsed)
