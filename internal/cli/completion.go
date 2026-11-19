@@ -37,7 +37,7 @@ var valueChoices = map[string][]string{
 }
 
 // subcommands are the non-scan words subenum accepts as its first argument.
-var subcommands = []string{"completion", "diff", "man", "mcp"}
+var subcommands = []string{"completion", "diff", "man", "mcp", "report"}
 
 type flagInfo struct {
 	name, arg, usage string
@@ -55,7 +55,7 @@ func flagInfos() []flagInfo {
 	return out
 }
 
-// runSubcommand handles `completion`, `diff`, `man` and the hidden
+// runSubcommand handles `completion`, `diff`, `man`, `report` and the hidden
 // `generate-assets`. ok is false when args[0] is not a subcommand.
 func runSubcommand(args []string, stdout, stderr io.Writer) (code int, ok bool) {
 	if len(args) == 0 {
@@ -64,6 +64,8 @@ func runSubcommand(args []string, stdout, stderr io.Writer) (code int, ok bool) 
 	switch args[0] {
 	case "diff":
 		return runDiff(args[1:], stdout, stderr), true
+	case "report":
+		return runReport(args[1:], stdout, stderr), true
 	case "completion":
 		if len(args) != 2 {
 			_, _ = fmt.Fprintln(stderr, "Usage: subenum completion bash|zsh|fish|powershell")

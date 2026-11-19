@@ -1,0 +1,46 @@
+{
+  "type": "summary",
+  "schema": 1,
+  "tool": "subenum",
+  "version": "v0.11.0",
+  "started": "2026-11-18T12:00:00Z",
+  "duration_ms": 5400,
+  "simulated": false,
+  "resolver": "192.0.2.53:53",
+  "rate_limit": 20,
+  "queries_sent": 40,
+  "achieved_qps": 7.4,
+  "verdict": "degraded",
+  "reason": "3 lookups timed out; names among them may exist",
+  "targets": [
+    {
+      "domain": "example.com",
+      "status": "ok",
+      "processed": 10,
+      "total": 10,
+      "found": 3,
+      "outcomes": {"resolved": 3, "nxdomain": 4, "timeout": 3, "refused": 0, "other": 0, "wildcard_filtered": 0, "excluded": 0},
+      "queries_sent": 30,
+      "skipped_by_cap": 0,
+      "takeover_candidates": 3,
+      "internal_addresses": 1,
+      "permutation": {"seeds": 3, "candidates": 4, "found": 1, "processed": 4, "queries_sent": 8, "verdict": "complete"},
+      "wildcard": false,
+      "verdict": "degraded",
+      "reason": "3 lookups timed out; names among them may exist"
+    },
+    {
+      "domain": "example.org",
+      "status": "ok",
+      "processed": 5,
+      "total": 5,
+      "found": 0,
+      "outcomes": {"resolved": 0, "nxdomain": 5, "timeout": 0, "refused": 0, "other": 0, "wildcard_filtered": 0, "excluded": 0},
+      "queries_sent": 10,
+      "skipped_by_cap": 0,
+      "wildcard": false,
+      "verdict": "complete",
+      "reason": "every candidate was tested and every lookup was conclusive"
+    }
+  ]
+}

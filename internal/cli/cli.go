@@ -275,6 +275,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 		_, _ = fmt.Fprintln(w, "Usage: subenum [-w <wordlist_file>] [options] <domain>")
 		_, _ = fmt.Fprintln(w, "       subenum [-w <wordlist_file>] [options] -dL <domains_file>")
 		_, _ = fmt.Fprintln(w, "       "+strings.TrimPrefix(diffUsage, "Usage: "))
+		_, _ = fmt.Fprintln(w, "       "+strings.TrimPrefix(reportUsage, "Usage: "))
 		_, _ = fmt.Fprintln(w, "       subenum mcp [-allow domains] [flags]     (subenum mcp -h for its flags)")
 		_, _ = fmt.Fprintln(w, "       subenum completion bash|zsh|fish|powershell")
 		_, _ = fmt.Fprintln(w, "       subenum man")

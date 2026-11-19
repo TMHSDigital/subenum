@@ -1,0 +1,6 @@
+{"subdomain":"a.example.com","records":[{"type":"A","value":"192.0.2.1"}],"change":"added","sources":["wordlist"]}
+{"subdomain":"b.example.com","records":[{"type":"A","value":"192.0.2.2"}],"change":"added","sources":["wordlist"]}
+{"subdomain":"c.example.com","records":[{"type":"A","value":"192.0.2.3"}],"change":"added","sources":["wordlist"]}
+{"subdomain":"txt.example.com","records":[{"type":"TXT","value":"v=new `quoted`\nline"}],"change":"changed","previous_records":[{"type":"TXT","value":"v=old"}],"sources":["wordlist"]}
+{"subdomain":"gone.example.com","records":[],"change":"removed"}
+{"type":"summary","schema":1,"verdict":"complete"}

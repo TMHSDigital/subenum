@@ -132,7 +132,14 @@ Outputs: `verdict`, `resumed`{% include unreleased.html action="resumed" %} (`tr
 `internal`{% include unreleased.html action="internal" %} (names answering with an address that is not public), and the paths `results` (JSONL),
 `stats` (the run-quality report) and `changes`{% include unreleased.html action="changes" %} (JSONL, one line per added, removed or
 changed name with a `change` field; empty when there were no previous results to
-diff against). The job summary lists the takeover candidates under the table.
+diff against). The job summary is `subenum report`'s{% include unreleased.html command="report" %}: the verdict, a table of the targets, the takeover candidates, and the names added, removed and changed, each list cut at 50 entries with a count of the rest.
+
+Other CI systems and cron jobs get the same summary from the binary. Run the scan with `-stats`, `-o` in JSONL, and, with `-diff`, standard output saved as the changes, then print the Markdown:
+
+```bash
+subenum -format jsonl -o results.jsonl -stats run.json -diff previous.jsonl example.com > changes.jsonl
+subenum report -stats run.json -results results.jsonl -changes changes.jsonl > summary.md
+```
 
 To open an issue with the new names, add a step after the action (the job
 then also needs `issues: write`). It reads the `changes`{% include unreleased.html action="changes" %}

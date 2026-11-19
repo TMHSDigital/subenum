@@ -1,0 +1,31 @@
+{
+  "type": "summary",
+  "schema": 1,
+  "tool": "subenum",
+  "version": "v0.11.0",
+  "started": "2026-11-18T12:00:00Z",
+  "duration_ms": 900,
+  "simulated": false,
+  "resolver": "192.0.2.53:53",
+  "rate_limit": 0,
+  "queries_sent": 16,
+  "achieved_qps": 17.8,
+  "verdict": "complete",
+  "reason": "every candidate was tested and every lookup was conclusive",
+  "targets": [
+    {
+      "domain": "example.com",
+      "status": "ok",
+      "processed": 8,
+      "total": 8,
+      "found": 5,
+      "outcomes": {"resolved": 5, "nxdomain": 3, "timeout": 0, "refused": 0, "other": 0, "wildcard_filtered": 0, "excluded": 0},
+      "queries_sent": 16,
+      "skipped_by_cap": 0,
+      "wildcard": false,
+      "verdict": "complete",
+      "reason": "every candidate was tested and every lookup was conclusive"
+    }
+  ],
+  "diff": {"previous": "previous.jsonl", "added": 3, "removed": 1, "changed": 1}
+}

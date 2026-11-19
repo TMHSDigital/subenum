@@ -13,6 +13,7 @@ subenum completion bash|zsh|fish|powershell
 subenum man
 subenum diff [-records] [-type A,AAAA,CNAME] [-format text|json|jsonl|csv] <previous> <current>
 subenum mcp [-allow domains] [flags]
+subenum report -stats <run.json> [-results <results.jsonl>] [-changes <changes.jsonl>] [-limit 50]
 ```
 
 Flags may appear before or after the domain. The domain is normalized to its host name before scanning: a URL's scheme and path, a `:port` and a leading `*.` are removed and an internationalized name becomes punycode, so `https://app.example.com/login` scans `app.example.com`, not `example.com`.
@@ -20,6 +21,8 @@ Flags may appear before or after the domain. The domain is normalized to its hos
 `completion` prints a shell completion script and `man` prints the man page, both generated from the same flags; release archives ship them under `completions/` and `man/`. `mcp`{% include unreleased.html command="mcp" %} serves subenum to AI agents over the Model Context Protocol, within the domains, resolver and budgets you give it; see [AI agents (MCP)](mcp.html) for its flags.
 
 `diff`{% include unreleased.html command="diff" %} compares two saved results files, in any format subenum writes, without sending a DNS query. It prints `+ name` for names only in `<current>` and `- name` for names only in `<previous>` (`change` is `added` or `missing` in JSON, JSONL and CSV). A missing name is not proven gone, since nothing is looked up; `-diff` during a scan checks each one with a fresh lookup first. `-records` also prints `~ name` (`changed`) for names in both files whose records differ, compared as `-diff-records` does over the `-type` record types (every type by default); it needs JSON, JSONL or CSV files, and compares names only otherwise. The exit code is `4` when the files differ.
+
+`report`{% include unreleased.html command="report" %} prints a run's summary as Markdown, the one the [GitHub Action](monitoring.html#the-subenum-github-action) writes to the job page, so other CI systems and a terminal get it too. It reads the `-stats` file, and optionally the run's JSONL results (`-results`, for the takeover candidates) and its `-diff` output (`-changes`, standard output of a `-format jsonl -diff` run, for the names added, removed and changed). It prints the verdict and its reason, a table of the targets (verdict, names found with `-permute` hits, queries, takeover candidates, internal addresses), the takeover candidates, and with `-diff` the change counts and lists. Each list shows at most `-limit` entries (default 50) and ends with `...and N more`. Record values, which the scanned zone controls, are shown with backticks and control characters replaced. It sends no DNS query.
 
 ## Flags
 

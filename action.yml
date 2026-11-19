@@ -301,32 +301,15 @@ runs:
           if [ -n "$prev" ]; then echo "changes=$out/changes.jsonl"; fi
         } >> "$GITHUB_OUTPUT"
 
-        {
-          echo "### subenum: $verdict"
-          echo
-          echo "$reason"
-          echo
-          echo "| Target | Verdict | Found | Queries | Takeover candidates | Internal addresses |"
-          echo "|---|---|---|---|---|---|"
-          jq -r '.targets[] | "| \(.domain) | \(.verdict) | \((.found // 0) + (.permutation.found // 0)) | \(.queries_sent // 0) | \(.takeover_candidates // 0) | \(.internal_addresses // 0) |"' "$out/run.json"
-          if [ "$takeovers" != 0 ]; then
-            echo
-            echo "**Takeover candidates:** $takeovers"
-            # jq stops at 50 itself: `| head -50` would close the pipe under
-            # pipefail and fail the step on a long list.
-            jq -rn 'limit(50; inputs | select(.takeover_candidate) | "- `\(.subdomain)`: \(.takeover_candidate)")' "$out/results.jsonl"
-          fi
-          if [ -n "$prev" ]; then
-            echo
-            echo "**Changes since the previous results:** $added added, $removed removed, $changed changed."
-            jq -rn 'limit(50; inputs | select(.change == "added") | "- `+ \(.subdomain)`")' "$out/changes.jsonl"
-            jq -rn 'limit(50; inputs | select(.change == "removed") | "- `- \(.subdomain)`")' "$out/changes.jsonl"
-            # Record values come from the scanned zone: each list goes in a
-            # code span with backticks and control characters taken out.
-            jq -rn 'def span: if length == 0 then "none" else "`" + (join(", ") | gsub("[`[:cntrl:]]"; "?")) + "`" end;
-              limit(50; inputs | select(.change == "changed") | "- `~ \(.subdomain)`: \([.previous_records[]? | "\(.type) \(.value)"] | span) -> \([.records[] | "\(.type) \(.value)"] | span)")' "$out/changes.jsonl"
-          fi
-        } >> "$GITHUB_STEP_SUMMARY"
+        # The job summary is subenum report's (#421): each list stops at 50
+        # entries and says how many more there are. A release from before
+        # the subcommand gets the verdict alone.
+        report=(report -stats "$out/run.json" -results "$out/results.jsonl")
+        if [ -n "$prev" ]; then report+=(-changes "$out/changes.jsonl"); fi
+        if ! subenum "${report[@]}" >> "$GITHUB_STEP_SUMMARY" 2> /dev/null; then
+          printf '### subenum: %s\n\n%s\n\nThis subenum release has no `subenum report`; set `version` to a later one for the full summary.\n' \
+            "$verdict" "$reason" >> "$GITHUB_STEP_SUMMARY"
+        fi
 
         # The artifact carries a complete run's results, or a stopped run's
         # resume state next to the results it still diffs against (#352).

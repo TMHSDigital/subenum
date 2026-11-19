@@ -1,0 +1,5 @@
+{"subdomain":"shop.example.com","records":[{"type":"CNAME","value":"shop.example-cdn.net"}],"takeover_candidate":"provider:example-cdn","sources":["wordlist"]}
+{"subdomain":"old.example.com","records":[{"type":"CNAME","value":"gone.example.net"}],"takeover_candidate":"dangling","sources":["wordlist"]}
+{"subdomain":"db.example.com","records":[{"type":"A","value":"10.0.0.5"}],"internal_address":"private","sources":["wordlist"]}
+{"subdomain":"legacy.example.com","records":[{"type":"NS","value":"ns.gone.example"}],"takeover_candidate":"dangling:ns","sources":["wordlist"]}
+{"type":"summary","schema":1,"verdict":"degraded"}

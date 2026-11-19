@@ -1,0 +1,3 @@
+{"subdomain":"www.example.com","records":[{"type":"A","value":"192.0.2.10"}],"sources":["wordlist"]}
+{"subdomain":"mail.example.com","records":[{"type":"A","value":"192.0.2.11"}],"sources":["wordlist"]}
+{"type":"summary","schema":1,"verdict":"complete"}
