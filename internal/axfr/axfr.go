@@ -40,6 +40,19 @@ type Options struct {
 	// Skip, when set, reports name server hosts that are out of scope
 	// (-exclude): they are neither resolved nor contacted (#372).
 	Skip func(host string) bool
+	// Server, when set ("host:port"), receives every transfer and the
+	// denial probe in place of the name servers' addresses, which are still
+	// looked up: a lab run sends them to its local server, so nothing leaves
+	// the machine (#434).
+	Server string
+}
+
+// endpoint is where a request meant for a name server address goes.
+func (o Options) endpoint(addr string) string {
+	if o.Server != "" {
+		return o.Server
+	}
+	return net.JoinHostPort(addr, o.Port)
 }
 
 // Result is what an attempt found.
@@ -63,7 +76,7 @@ func logf(f func(string, ...any), format string, args ...any) {
 // which is reported like an allowed transfer. A failed probe is "" so the
 // next address is tried.
 func probeDenial(ctx context.Context, o Options, host, addr, target string) dns.Denial {
-	d, err := dns.ProbeDenial(ctx, net.JoinHostPort(addr, o.Port), target, o.Timeout)
+	d, err := dns.ProbeDenial(ctx, o.endpoint(addr), target, o.Timeout)
 	if err != nil {
 		logf(o.Debug, "-axfr: DNSSEC denial probe to %s (%s): %v", host, addr, err)
 		return ""
@@ -214,7 +227,7 @@ func (a *attempt) transfer(ctx context.Context, o Options, target string, timeou
 			return
 		}
 		a.tried++
-		got, err := dns.Transfer(ctx, net.JoinHostPort(addr, o.Port), target, timeout)
+		got, err := dns.Transfer(ctx, o.endpoint(addr), target, timeout)
 		if errors.Is(err, dns.ErrTransferTruncated) {
 			a.allowed, a.got = true, got
 			a.logf(o.Info, "Zone transfer: %s (%s) allowed AXFR of %s, but it was stopped: %v. Anyone can list this zone; restrict transfers to your secondaries.", a.host, addr, target, err)

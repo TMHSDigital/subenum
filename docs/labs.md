@@ -201,6 +201,38 @@ subenum -simulate-zone lab6 -type AAAA -show-records lab.example
 
 </details>
 
+## Lab 7: a zone transfer{% include unreleased.html value="simulate-zone=lab7" %}
+
+```bash
+subenum -simulate-zone lab7 -format jsonl lab.example
+subenum -simulate-zone lab7 -axfr -format jsonl lab.example
+```
+
+The lab's name server hands its whole zone to anyone who asks, the
+misconfiguration `-axfr` looks for. In lab mode the transfer goes to the lab
+server, never to the name server's real address.
+
+1. Which names does the second run find that the first does not, and what is
+   their `sources`?
+2. What does the second run print on stderr about the name server?
+3. Copy `examples/labs/lab7-zone-transfer.zone`, delete its `$TRANSFER allow`
+   line and run the copy with `-axfr -v`. What changes?
+
+<details markdown="1">
+<summary>Answers</summary>
+
+1. `billing-legacy`, `k8s-ingress-eu2` and `ns1`: no wordlist holds them. Their
+   `sources` is `["axfr"]`, while `www`, `mail` and `vpn` say
+   `["wordlist", "axfr"]`. Every transferred name is still looked up, so a
+   stale entry would not be reported.
+2. That `ns1.lab.example` allowed a transfer of `lab.example` and that anyone
+   can list the zone: a finding to report in itself. `-stats` names the
+   server under `axfr_allowed`.
+3. The server refuses, as most do. The scan is the wordlist's alone, and `-v`
+   says that no name server allowed a transfer.
+
+</details>
+
 ## Writing your own scenario
 
 A scenario is a plain text file. Names are relative to the domain you scan,
@@ -209,6 +241,7 @@ and `#` starts a comment:
 ```text
 $DELAY 20ms            # every answer waits this long
 $REFUSE-ABOVE 50       # answer REFUSED past 50 queries a second
+$TRANSFER allow        # answer a zone transfer (-axfr); the default is refuse
 @        A        192.0.2.1             # the scanned domain itself
 www      A        192.0.2.10
 www      AAAA     2001:db8::10
@@ -241,7 +274,9 @@ lab points at a real host.
 
 Scenarios work with the other flags, such as `-dL` (each listed domain gets
 the same zone), `-permute`, `-diff`, `-format json` and `-stats`, which
-records the scenario file under `zone`. `-simulate-zone` cannot be combined
-with `-simulate`, `-dns-server`, `-r`, `-ct`, `-sources` or `-axfr`, whether they
+records the scenario file under `zone`. With `-axfr`, the transfer and its
+DNSSEC probe go to the lab server, whatever address the scenario gives its
+name servers. `-simulate-zone` cannot be combined
+with `-simulate`, `-dns-server`, `-r`, `-ct` or `-sources`, whether they
 come from the command line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
 rather than send a query off the machine.

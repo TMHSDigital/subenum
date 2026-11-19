@@ -124,7 +124,7 @@ report's `zone_transfer` lists the name servers that `allowed` one (anyone
 can then list the zone, a finding in itself) and the zone's `denial`
 (`nsec` means it can be walked). Name servers under `exclude` are not asked.
 Without `-axfr`, a call that sets it is refused. `lab_scan` has no
-`zone_transfer`: the lab server does not answer transfers.
+`zone_transfer` yet; the command line practises transfers in Lab 7.
 
 The caps cannot be turned off: `-rate`, `-max-queries`, `-max-duration`,
 `-timeout` and `-max-calls` must be positive. A session is one run of the

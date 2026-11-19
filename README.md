@@ -292,7 +292,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
-| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab6`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
+| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab7`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
 | **Modes** | | |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates (at `-rate`, or `-rate-per-resolver` times the `-r` pool size when that is lower), and the resolver preflight (its only DNS query, also sent once to each `-r` pool resolver, paced by `-rate` and skipped for a target `-exclude` rules out; a failing pool resolver is reported but does not fail the run), then exit; JSON with `-format json` or `jsonl` |
@@ -495,7 +495,7 @@ subenum -axfr -type A,AAAA,CNAME example.com
 
 The same step asks one name server about a name that does not exist, with DNSSEC records requested. A zone signed with plain NSEC proves the absence by naming its neighbours, so anyone can walk the chain to list every name, transfer or not: subenum reports that as `Zone walkable` and records `zone_denial` (`nsec`, `nsec3` or `none`) in the report. It does not walk the zone itself.
 
-The transfers and the probe go straight to the target's name servers, not through `-dns-server`: at most 8 servers and 2 addresses each, one query per address, at most 100,000 names kept (a larger zone is cut there and the cut is reported), plus the NS and address lookups and one denial probe, all counted in the report's `queries_sent` but not paced by `-rate`. Simulation ignores `-axfr`, lab mode refuses it, and a resumed scan reuses the names the interrupted run got.
+The transfers and the probe go straight to the target's name servers, not through `-dns-server`: at most 8 servers and 2 addresses each, one query per address, at most 100,000 names kept (a larger zone is cut there and the cut is reported), plus the NS and address lookups and one denial probe, all counted in the report's `queries_sent` but not paced by `-rate`. Simulation ignores `-axfr`, lab mode sends it to the lab server (Lab 7 practises it), and a resumed scan reuses the names the interrupted run got.
 
 </details>
 

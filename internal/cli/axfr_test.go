@@ -522,16 +522,41 @@ func TestZoneTransferStopsWhenCancelled(t *testing.T) {
 	}
 }
 
-// TestE2ELabRefusesAXFR: a transfer would go to the zone's real name
-// servers, so lab mode refuses -axfr; simulation ignores it with a note.
-func TestE2ELabRefusesAXFR(t *testing.T) {
+// TestE2ELabAXFR covers #434: in lab mode -axfr asks the lab server, so a
+// scenario with $TRANSFER allow gives its names with source axfr, and one
+// without it refuses the transfer. Lab 7's name server address is in
+// TEST-NET, which a transfer sent to it could not reach. Simulation still
+// ignores -axfr with a note.
+func TestE2ELabAXFR(t *testing.T) {
 	t.Parallel()
-	zone := filepath.Join("examples", "labs", "lab1-first-scan.zone")
-	if code, out := runCLIMerged(t, "-axfr", "-simulate-zone", zone, "lab.example"); code != exitUsage || !strings.Contains(out, "-axfr") {
-		t.Errorf("lab: exit %d\n%s", code, out)
+	code, out := runCLIMerged(t, "-axfr", "-simulate-zone", "lab7", "-format", "jsonl", "-progress=false", "lab.example")
+	got := seenResults(t, lastJSONLines(out))
+	if code != exitOK || !slices.Equal(got["billing-legacy.lab.example"].Sources, []string{"axfr"}) || !strings.Contains(out, "allowed AXFR of lab.example") {
+		t.Errorf("lab7: exit %d, results %v\n%s", code, got, out)
+	}
+
+	refusing := writeFile(t, "refuse.zone", "@ NS ns1\nns1 A 192.0.2.53\nwww A 192.0.2.10\nhidden A 192.0.2.11\n")
+	stats := filepath.Join(t.TempDir(), "run.json")
+	code, out = runCLIMerged(t, "-axfr", "-simulate-zone", refusing, "-w", writeFile(t, "w.txt", "www\n"), "-stats", stats, "-progress=false", "lab.example")
+	if code != exitOK || strings.Contains(out, "hidden.lab.example") || strings.Contains(out, "allowed AXFR") {
+		t.Errorf("without $TRANSFER allow: exit %d\n%s", code, out)
+	}
+	if b, err := os.ReadFile(stats); err != nil || strings.Contains(string(b), "axfr_allowed") {
+		t.Errorf("without $TRANSFER allow the report lists a server that allowed it: %s %v", b, err)
 	}
 	wl := writeFile(t, "wl.txt", "www\n")
 	if code, out := runCLIMerged(t, "-axfr", "-simulate", "-seed", "1", "-progress=false", "-w", wl, "example.com"); code != 0 || !strings.Contains(out, "-axfr is ignored in simulation mode") {
 		t.Errorf("simulate: exit %d\n%s", code, out)
 	}
+}
+
+// lastJSONLines keeps the lines of merged output that are JSON objects.
+func lastJSONLines(out string) string {
+	var b strings.Builder
+	for line := range strings.Lines(out) {
+		if strings.HasPrefix(line, "{") {
+			b.WriteString(line)
+		}
+	}
+	return b.String()
 }

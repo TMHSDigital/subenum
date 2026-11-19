@@ -1,0 +1,14 @@
+# Lab 7: zone transfer. This zone's name server hands its whole zone to
+# anyone who asks, the misconfiguration -axfr looks for, and two hosts are
+# names no wordlist holds. Run:
+#   subenum -simulate-zone lab7 -axfr -format jsonl lab.example
+# Then remove the $TRANSFER line from a copy of this file and run it again.
+$TRANSFER allow
+@                 A      192.0.2.1
+@                 NS     ns1
+ns1               A      192.0.2.53
+www               A      192.0.2.10
+mail              A      192.0.2.20
+vpn               A      192.0.2.30
+billing-legacy    A      192.0.2.70
+k8s-ingress-eu2   A      10.20.0.7

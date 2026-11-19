@@ -10,6 +10,7 @@
 //
 //	$DELAY 20ms            # every answer waits this long
 //	$REFUSE-ABOVE 50       # answer REFUSED past 50 queries a second
+//	$TRANSFER allow        # answer a zone transfer (AXFR); the default is refuse
 //	@        A        192.0.2.1
 //	www      A        192.0.2.10
 //	www      AAAA     2001:db8::10
@@ -35,12 +36,14 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 // Zone is a parsed scenario.
@@ -51,6 +54,24 @@ type Zone struct {
 
 	Delay       time.Duration // $DELAY
 	RefuseAbove int           // $REFUSE-ABOVE; 0 means no limit
+	// Transfer answers a zone transfer (AXFR) of the scanned domain with
+	// every name the file defines; without it a transfer is refused, as
+	// most servers do ($TRANSFER, #434).
+	Transfer bool
+}
+
+// transferNames lists the names a transfer of origin gives: every name the
+// file defines, except the apex, wildcards and failing names, sorted.
+func (z *Zone) transferNames(origin string) []string {
+	var names []string
+	for rel, e := range z.entries {
+		if rel == "" || e.fail != nil {
+			continue
+		}
+		names = append(names, rel+"."+origin)
+	}
+	slices.Sort(names)
+	return names
 }
 
 type entry struct {
@@ -169,6 +190,17 @@ var directives = []directive{
 			return fmt.Errorf("bad $REFUSE-ABOVE %q: want a positive number of queries per second", arg)
 		}
 		z.RefuseAbove = v
+		return nil
+	}},
+	{"$TRANSFER", "$TRANSFER allow|refuse", func(z *Zone, arg string) error {
+		switch strings.ToLower(arg) {
+		case "allow":
+			z.Transfer = true
+		case "refuse":
+			z.Transfer = false
+		default:
+			return fmt.Errorf("bad $TRANSFER %q: want allow or refuse", arg)
+		}
 		return nil
 	}},
 }
@@ -520,6 +552,16 @@ func (z *Zone) Handler(origins []string) dnsserver.Handler {
 			if rel, ok := relative(q.Name, o); ok && len(o) > best {
 				best = len(o)
 				r = z.Answer(rel, o)
+				if q.Type == dnsmessage.TypeAXFR {
+					switch {
+					case rel != "":
+						r = dnsserver.Refused // transfers are of the zone
+					case z.Transfer:
+						r.Transfer = z.transferNames(o)
+					default:
+						r = dnsserver.Refused
+					}
+				}
 			}
 		}
 		if !r.Drop {

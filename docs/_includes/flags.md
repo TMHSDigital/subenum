@@ -42,7 +42,7 @@
 | `-show-records` | - | In text format, append each result's records (TYPE=value) |
 | `-silent` | - | Pipeline mode: bare result names on stdout, and only errors (and a simulation warning) on stderr |
 | `-simulate` | - | Run in simulation mode without actual DNS queries (for testing) |
-| `-simulate-zone <string>` | - | Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6), via a local DNS server, so no traffic leaves the machine (see the Labs page) |
+| `-simulate-zone <string>` | - | Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab7), via a local DNS server, so no traffic leaves the machine (see the Labs page) lab7: {% include unreleased.html value="simulate-zone=lab7" %} |
 | `-sources <string>` | - | Comma-separated keyless passive sources whose names become candidates and -permute seeds: ct (Certificate Transparency, crt.sh), wayback (Wayback Machine); one HTTPS request per source and target |
 | `-srv` {% include unreleased.html flag="srv" %} | - | Also look up a built-in list of about 50 service names (\_sip.\_tcp, \_autodiscover.\_tcp, \_ldap.\_tcp, ...) under each target; needs SRV in -type |
 | `-state <string>` | subenum-resume.json | Where a run that was interrupted, ran out of -max-duration or was aborted saves its state for -resume |

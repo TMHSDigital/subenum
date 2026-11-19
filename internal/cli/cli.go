@@ -237,7 +237,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
 	fs.IntVar(&f.testHitRate, "hit-rate", scan.DefaultHitRate, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
-	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6), via a local DNS server, so no traffic leaves the machine (see the Labs page)")
+	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab7), via a local DNS server, so no traffic leaves the machine (see the Labs page)")
 	fs.Var(&f.outputs, "o", "Write results to `file` (in addition to stdout); repeat for several files, each in -format or in the format named as a prefix, format:path (jsonl:results.jsonl)")
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain, 1 = no retry (default 1)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
@@ -395,7 +395,8 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 			{"r", f.resolvers != ""},
 			{"ct", f.ct},                 // an HTTPS request to crt.sh
 			{"sources", f.sources != ""}, // HTTPS requests to passive sources
-			{"axfr", f.axfr},             // transfers from the zone's real name servers
+			// -axfr is allowed: in lab mode its transfers go to the lab
+			// server (#434).
 		} {
 			if c.set || flagSet(fs, c.name) {
 				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with %s", in.defaults.describe(fs, c.name))

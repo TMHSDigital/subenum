@@ -69,6 +69,11 @@ func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *r
 	if f.verbose {
 		opts.Debug = info
 	}
+	if f.simZone != "" {
+		// Lab mode: the lab server answers for every name server, so the
+		// transfer never leaves the machine (#434).
+		opts.Server = f.dnsServer
+	}
 	r := axfr.Try(ctx, target, opts)
 	res := targetAXFR{names: r.Names, allowed: r.Allowed, tried: r.Tried, denial: r.Denial, queries: r.Queries, done: true, err: r.Err}
 	if r.Err != "" {
