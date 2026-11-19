@@ -250,6 +250,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-seeds <file>` | n/a | Results file (any `-format`) whose names also seed `-permute`; implies `-permute` |
 | `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
+| `-follow-records` | `false` | Also test the names under the target that found names' `CNAME`, `MX` and `NS` records point at (`lb-7.int` behind `app CNAME lb-7.int`), once each, unless they are already candidates; their `sources` is `records`, and they count against `-max-queries` and `-max-duration` |
 | `-recursive-w <file>` | the `-w` list | Wordlist of the labels `-recursive` tries under each name it finds, at depth 2 and below (`-` reads stdin); repeatable. A short list here makes deep recursion affordable |
 | **Resolvers and pacing** | | |
 | `-dns-server <addr>` | `8.8.8.8:53` | DNS server: `ip:port` (UDP, TCP fallback), `tls://host[:853]` (DNS over TLS) or `https://host/path` (DNS over HTTPS); validated on startup |

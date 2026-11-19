@@ -395,7 +395,7 @@ var tuiOmittedFlags = map[string]bool{
 	"sarif": true, "exclude-file": true, "ct": true, "axfr": true, "seeds": true, "state": true,
 	"diff": true, "diff-records": true, "dL": true, "seed": true, "resume": true, "log-format": true,
 	"inconclusive": true, "takeover-providers": true, "takeover-providers-only": true,
-	"hosts": true, "recursive-w": true,
+	"hosts": true, "recursive-w": true, "follow-records": true,
 }
 
 // TestSettingNamesAgreeAcrossFrontEnds covers #160: every flag is either wired

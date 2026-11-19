@@ -144,6 +144,7 @@ type cliFlags struct {
 	recursive    bool
 	depth        int
 	deepWords    wordlistPaths // -recursive-w: the labels tried below depth 1 (#403)
+	followRecs   bool          // -follow-records: test in-scope CNAME, MX and NS targets (#432)
 	noAbort      bool
 	maxQueries   int
 	maxDuration  time.Duration // -max-duration: time budget for the whole run (#190)
@@ -192,14 +193,15 @@ func (in *runtimeInputs) readLines(path string) ([]string, error) {
 
 // scanPass is one scan of one target: its main pass or its -permute pass.
 type scanPass struct {
-	domain      string
-	entries     []string
-	deepEntries []string       // -recursive-w entries; nil means entries (#403)
-	maxQueries  int            // this pass's -max-queries budget
-	resumeFrom  int            // set while resuming (#73)
-	resumeNames []string       // names found before the interrupt
-	flat        bool           // one level deep: -recursive does not apply (#111)
-	retryPrior  []scan.Pending // names the stopped run left for its retry pass (#315)
+	domain       string
+	entries      []string
+	deepEntries  []string       // -recursive-w entries; nil means entries (#403)
+	maxQueries   int            // this pass's -max-queries budget
+	resumeFrom   int            // set while resuming (#73)
+	resumeNames  []string       // names found before the interrupt
+	resumeFollow []string       // -follow-records targets of those names (#432)
+	flat         bool           // one level deep: -recursive does not apply (#111)
+	retryPrior   []scan.Pending // names the stopped run left for its retry pass (#315)
 }
 
 // parseFlags parses args (without the program name). Flags may appear before or
@@ -247,6 +249,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.autoRate, "auto-rate", false, "When over 20% of the last 200 lookups fail, halve the query rate and keep going (up to 6 times, down to 5 queries/s) instead of aborting; speed back up once lookups succeed")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
+	fs.BoolVar(&f.followRecs, "follow-records", false, "Also test the names under the target that found names' CNAME, MX and NS records point at, once each, unless they are already candidates; they count against -max-queries")
 	fs.Var(&f.deepWords, "recursive-w", "Path to a wordlist `file` (- for stdin) of the labels -recursive tries under each name it finds, at depth 2 and below; repeat to combine several; omitted: the -w list")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
@@ -862,12 +865,15 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 			Types:            in.recordTypes,
 			Recursive:        recursive,
 			Depth:            depth,
-			Rate:             f.rate,
-			AutoRate:         f.autoRate,
-			MaxQueries:       p.maxQueries,
-			Deadline:         in.deadline,
-			Exclude:          in.excludes,
-			ResumeFrom:       p.resumeFrom,
+			// The -permute pass tests variants, not what records name.
+			FollowRecords: f.followRecs && !p.flat,
+			ResumeFollow:  p.resumeFollow,
+			Rate:          f.rate,
+			AutoRate:      f.autoRate,
+			MaxQueries:    p.maxQueries,
+			Deadline:      in.deadline,
+			Exclude:       in.excludes,
+			ResumeFrom:    p.resumeFrom,
 			// The retry pass belongs to the scan, so a resumed scan runs it
 			// too, for the names the stopped run left it as well (#315).
 			RetryInconclusive: f.retryIncon,

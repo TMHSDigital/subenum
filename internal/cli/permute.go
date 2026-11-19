@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/output"
@@ -36,6 +37,35 @@ func mainPassNames(results []output.Result) []string {
 		}
 	}
 	return names
+}
+
+// recordTargets returns the CNAME, MX and NS targets of results that are not
+// results themselves, for a resumed -follow-records scan to queue again
+// (#432). The scan keeps the ones under its target and in scope.
+func recordTargets(results []output.Result) []string {
+	found := make(map[string]bool, len(results))
+	for _, r := range results {
+		found[strings.ToLower(r.Subdomain)] = true
+	}
+	var out []string
+	for _, r := range results {
+		for _, rec := range r.Records {
+			var name string
+			switch rec.Type {
+			case "CNAME", "NS":
+				name = rec.Value
+			case "MX":
+				if fields := strings.Fields(rec.Value); len(fields) > 0 {
+					name = fields[len(fields)-1]
+				}
+			}
+			if name = strings.ToLower(strings.TrimSuffix(name, ".")); name != "" && !found[name] {
+				found[name] = true // once
+				out = append(out, name)
+			}
+		}
+	}
+	return out
 }
 
 // finishedPermutation is the -permute pass of a target finished before the

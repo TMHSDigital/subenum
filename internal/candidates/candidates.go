@@ -18,13 +18,16 @@ const (
 	Wordlist = "wordlist"
 	AXFR     = "axfr"
 	Permute  = "permute"
+	Records  = "records" // a -follow-records target (#432)
 )
 
-// FromWordlist and FromPermute are the sources of a wordlist name and a
-// -permute hit, shared by every such result.
+// FromWordlist, FromPermute and FromRecords are the sources of a wordlist
+// name, a -permute hit and a -follow-records hit, shared by every such
+// result.
 var (
 	FromWordlist = []string{Wordlist}
 	FromPermute  = []string{Permute}
+	FromRecords  = []string{Records}
 )
 
 // Set is a target's candidate entries and -permute seeds as the passive

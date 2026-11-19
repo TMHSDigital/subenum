@@ -34,6 +34,7 @@ func targetSummary(domain string, status report.Status, res targetResult) output
 	report.Sources(&t, res.sources, res.foundBy)
 	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
 	t.AXFRFound = res.foundBy[candidates.AXFR]
+	t.RecordsFound = res.foundBy[candidates.Records]
 	t.ZoneDenial = string(res.axfr.denial)
 	t.QueriesSent += res.axfr.queries // the NS and address lookups and the transfers (#85)
 	if p := res.permutation; p != nil && res.done && status != report.StatusNotRun && status != report.StatusSkipped {

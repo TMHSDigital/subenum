@@ -224,6 +224,9 @@ func dryRunNotes(f cliFlags, sources []string, deep *wordlist.Prepared) []string
 			notes = append(notes, "-recursive levels (built from what the scan finds: the -w candidates again under each name found)")
 		}
 	}
+	if f.followRecs {
+		notes = append(notes, "-follow-records targets (named by the records of what the scan finds)")
+	}
 	if !f.testMode {
 		notes = append(notes, "wildcard probes")
 	}

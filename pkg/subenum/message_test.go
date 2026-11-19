@@ -38,12 +38,13 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"ResumeFrom":    "the library does not resume interrupted scans",
 		"ResumeParents": "the library does not resume interrupted scans",
 		"RetryPrior":    "the library does not resume interrupted scans",
+		"ResumeFollow":  "the library does not resume interrupted scans",
 		"Resolver":      "scan.Run builds the resolver from DNSServer",
 	}
 	c := Config{
 		Domain: "example.com", Words: []string{"www"}, Concurrency: 7, Timeout: 700 * time.Millisecond,
 		Resolver: "192.0.2.53:53", HitRate: 40, Seed: 9, Attempts: 2, Force: true, Types: []string{"A"},
-		Recursive: true, Depth: 3, RecursiveWords: []string{"x"}, Rate: 50, AutoRate: true, MaxQueries: 10, MaxDuration: time.Minute,
+		Recursive: true, Depth: 3, RecursiveWords: []string{"x"}, FollowRecords: true, Rate: 50, AutoRate: true, MaxQueries: 10, MaxDuration: time.Minute,
 		Exclude: []string{"vpn.example.com"}, NoAbort: true, Verbose: true, Logf: func(string, ...any) {},
 		RetryInconclusive: true, RatePerResolver: 5, ResolverPool: []string{"192.0.2.1"},
 		TakeoverProviders: []TakeoverProvider{{Suffix: ".example-cdn.net", Name: "example-cdn"}},

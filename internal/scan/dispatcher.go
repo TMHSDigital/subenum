@@ -70,6 +70,16 @@ type dispatcher struct {
 	repeatWalk []int
 	// rrepeatWalk is repeatWalk for RecursiveEntries (#403).
 	rrepeatWalk []int
+
+	// FollowRecords (#432): follows[fhead:] are the queued targets,
+	// followSeen every target queued or skipped, and entrySet and deepSet
+	// the entries at depth 1 and below, to tell candidates apart. All nil
+	// until the first target arrives.
+	follows           []string
+	fhead             int
+	followSeen        map[string]struct{}
+	entrySet, deepSet map[string]struct{}
+	maxDepth          int
 }
 
 // unbuiltTables are countUnbuilt's tables: the first labels of the exact
@@ -182,6 +192,7 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		start:      start,
 		rootDone:   make([]bool, n-start),
 		watermark:  start,
+		maxDepth:   maxDepth,
 	}
 	if d.multi != nil {
 		d.visited = make(map[string]struct{})
@@ -200,6 +211,18 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 				d.remaining += len(d.cfg.entriesAt(depth + 1))
 			}
 		}
+	}
+	// A resumed FollowRecords scan queues again the targets the names found
+	// before the interrupt point at (#432).
+	if cfg.FollowRecords && len(cfg.ResumeFollow) > 0 {
+		var targets []string
+		for _, name := range cfg.ResumeFollow {
+			name = strings.ToLower(strings.TrimSuffix(name, "."))
+			if strings.HasSuffix(name, "."+cfg.Domain) && !cfg.scope.excluded(name) {
+				targets = append(targets, name)
+			}
+		}
+		d.follow(targets)
 	}
 	return d
 }
@@ -331,6 +354,13 @@ func (d *dispatcher) settle(i int) {
 // walked name that could repeat joins it and is counted once. Without
 // exclusions only the entries that can begin a repeat are walked (#365).
 func (d *dispatcher) stopAdmitting() {
+	// Queued FollowRecords targets are in scope (excluded ones are never
+	// queued), so each is skipped (#432).
+	if n := len(d.follows) - d.fhead; n > 0 {
+		d.skipped += n
+		d.remaining -= n
+	}
+	d.follows, d.fhead = nil, 0
 	switch {
 	case d.visited == nil && d.cfg.scope.empty():
 		d.skipped += d.remaining
@@ -483,8 +513,24 @@ func (d *dispatcher) total() int64 {
 	return int64(t)
 }
 
-// next generates the next admissible job, if any.
+// next generates the next admissible job, if any. FollowRecords targets go
+// first: a found name's records point at them (#432).
 func (d *dispatcher) next() (job, bool) {
+	if d.fhead < len(d.follows) {
+		if d.cfg.pastDeadline() {
+			d.expired = true
+			d.stopAdmitting()
+			return job{}, false
+		}
+		if d.cfg.MaxQueries > 0 && d.admitted >= d.cfg.MaxQueries {
+			d.stopAdmitting()
+			return job{}, false
+		}
+		name, _ := d.nextFollowed()
+		d.admitted++
+		// At the depth limit: a target is tested, never expanded.
+		return job{domain: name, depth: max(d.maxDepth, 1), root: -1, followed: true}, true
+	}
 	for d.head < len(d.frontier) {
 		e := &d.frontier[d.head]
 		entries := d.cfg.entriesAt(e.depth)
@@ -519,6 +565,12 @@ func (d *dispatcher) next() (job, bool) {
 		if !d.firstVisit(entry, name, e.depth) {
 			d.settle(root)
 			continue
+		}
+		if e.depth > 1 && d.followSeen != nil {
+			// Already tested, or queued, as a FollowRecords target (#432).
+			if _, ok := d.followSeen[name]; ok {
+				continue
+			}
 		}
 		if d.cfg.scope.excluded(name) {
 			d.excluded++
@@ -649,13 +701,92 @@ func (d *dispatcher) finish(ctx context.Context, stats *counters, events chan<- 
 	}
 }
 
+// handoff is what workers send the dispatcher: found parents to expand,
+// FollowRecords targets to queue (#432), and completed jobs.
+type handoff struct {
+	enqueue   <-chan job
+	follow    <-chan []string
+	completed <-chan []completion
+}
+
+// follow queues the FollowRecords targets of a found name (#432): each name
+// once, and none that the scan already has as a candidate. After a budget
+// stopped admission they are counted as skipped.
+func (d *dispatcher) follow(names []string) {
+	if d.followSeen == nil {
+		d.followSeen = make(map[string]struct{})
+		d.entrySet = make(map[string]struct{}, len(d.cfg.Entries))
+		for _, e := range d.cfg.Entries {
+			d.entrySet[e] = struct{}{}
+		}
+		d.deepSet = d.entrySet
+		if d.cfg.RecursiveEntries != nil {
+			d.deepSet = make(map[string]struct{}, len(d.cfg.RecursiveEntries))
+			for _, e := range d.cfg.RecursiveEntries {
+				d.deepSet[e] = struct{}{}
+			}
+		}
+	}
+	for _, name := range names {
+		if _, dup := d.followSeen[name]; dup || d.isCandidate(name) {
+			continue
+		}
+		d.followSeen[name] = struct{}{}
+		if d.capped {
+			d.skipped++
+			continue
+		}
+		d.follows = append(d.follows, name)
+		d.remaining++
+	}
+}
+
+// isCandidate reports whether the scan tests name anyway: as a wordlist
+// entry under the target, or as an entry under a parent queued for
+// expansion.
+func (d *dispatcher) isCandidate(name string) bool {
+	rel, ok := strings.CutSuffix(name, "."+d.cfg.Domain)
+	if !ok {
+		return false
+	}
+	if _, ok := d.entrySet[rel]; ok {
+		return true
+	}
+	for i := 0; i < len(rel); i++ {
+		if rel[i] != '.' {
+			continue
+		}
+		if _, queued := d.expanded[rel[i+1:]+"."+d.cfg.Domain]; queued {
+			if _, ok := d.deepSet[rel[:i]]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// nextFollowed takes the next queued FollowRecords target, if any.
+func (d *dispatcher) nextFollowed() (string, bool) {
+	if d.fhead == len(d.follows) {
+		return "", false
+	}
+	name := d.follows[d.fhead]
+	d.fhead++
+	if d.fhead == len(d.follows) {
+		d.follows, d.fhead = d.follows[:0], 0
+	}
+	d.remaining--
+	return name, true
+}
+
 // run hands jobs to workers, in chunks (see nextChunk), until no candidate
 // is left and every dispatched job has completed, or ctx is cancelled; then
 // it closes jobs. Workers send found parents on enqueue (before reporting on
 // completed), and run expands them. total receives the progress total as it
 // changes.
-func (d *dispatcher) run(ctx context.Context, workers int, jobs chan<- []job, enqueue <-chan job, completed <-chan []completion,
+func (d *dispatcher) run(ctx context.Context, workers int, jobs chan<- []job, in handoff,
 	total *atomic.Int64, stats *counters, events chan<- Event) {
+	enqueue, completed := in.enqueue, in.completed
 	defer close(jobs)
 	// The deadline timer wakes the dispatcher while it waits on a busy
 	// worker pool, so the budget holds even if no job completes (#190).
@@ -697,6 +828,9 @@ func (d *dispatcher) run(ctx context.Context, workers int, jobs chan<- []job, en
 			return
 		case parent := <-enqueue:
 			d.expand(parent)
+			publish()
+		case names := <-in.follow:
+			d.follow(names)
 			publish()
 		case out <- ready:
 			d.pending += len(ready)

@@ -50,8 +50,8 @@
     },
     "sources": {
       "type": "array",
-      "description": "What proposed the name, in this order: wordlist, ct, wayback, axfr; or permute alone for a -permute hit. Absent on removed names and in subenum diff output.",
-      "items": { "type": "string", "enum": ["wordlist", "ct", "wayback", "axfr", "permute"] }
+      "description": "What proposed the name, in this order: wordlist, ct, wayback, axfr; or permute alone for a -permute hit, records alone for a -follow-records hit. Absent on removed names and in subenum diff output.",
+      "items": { "type": "string", "enum": ["wordlist", "ct", "wayback", "axfr", "permute", "records"] }
     },
     "target": {
       "type": "string",

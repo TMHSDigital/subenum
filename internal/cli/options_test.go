@@ -31,7 +31,8 @@ func TestScanOptionsSetsEveryField(t *testing.T) {
 		pool:      dns.NewPool([]string{"192.0.2.1:53"}, time.Second),
 		providers: dns.TakeoverProviders{}, deadline: time.Now().Add(time.Minute),
 	}
-	p := scanPass{domain: "example.com", entries: []string{"www"}, deepEntries: []string{"x"}, maxQueries: 10, resumeFrom: 1, resumeNames: []string{"www.example.com"},
+	f.followRecs = true
+	p := scanPass{domain: "example.com", entries: []string{"www"}, deepEntries: []string{"x"}, resumeFollow: []string{"lb.example.com"}, maxQueries: 10, resumeFrom: 1, resumeNames: []string{"www.example.com"},
 		retryPrior: []scan.Pending{{Name: "api.example.com", Outcome: dns.OutcomeTimeout}}}
 	opts := scanOptions(f, in, p, func(string, ...any) {})
 	checkEveryOptionSet(t, opts, cliUnmapped)

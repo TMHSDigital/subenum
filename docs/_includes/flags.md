@@ -14,6 +14,7 @@
 | `-dry-run` | - | Print the plan without scanning: candidates after dedupe and -exclude, query and duration estimates, and the resolver preflight (its only DNS query, also sent to each -r pool resolver); then exit |
 | `-exclude <string>` | - | Comma-separated out-of-scope names and \*.parent patterns; never queried or expanded |
 | `-exclude-file <string>` | - | File of out-of-scope names and \*.parent patterns, one per line (# comments allowed) |
+| `-follow-records` {% include unreleased.html flag="follow-records" %} | - | Also test the names under the target that found names' CNAME, MX and NS records point at, once each, unless they are already candidates; they count against -max-queries |
 | `-force` | - | Continue scanning even if wildcard DNS is detected |
 | `-format <string>` | text | Output format: text, json, jsonl, or csv |
 | `-hit-rate <int>` | 15 | In simulation mode, percentage of names that resolve (1-100) |

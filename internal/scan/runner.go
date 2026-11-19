@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,12 +48,17 @@ type Config struct {
 	// AutoRate halves the rate when most recent lookups fail, and raises
 	// it again once they succeed, instead of letting the reliability guard
 	// abort at the first sign of rate-limiting (#220).
-	AutoRate   bool
-	Types      []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT, SRV); empty = A,AAAA
-	Recursive  bool     // enumerate subdomains of discovered subdomains
-	Depth      int      // max recursion depth (1 = no recursion)
-	NoAbort    bool     // keep scanning after the reliability guard fires
-	MaxQueries int      // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
+	AutoRate  bool
+	Types     []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT, SRV); empty = A,AAAA
+	Recursive bool     // enumerate subdomains of discovered subdomains
+	// FollowRecords also tests the names under the target that a found
+	// name's CNAME, MX or NS records point at, once each, unless they are
+	// already candidates (#432). They are tested like any candidate, within
+	// MaxQueries and Deadline, and not expanded by Recursive.
+	FollowRecords bool
+	Depth         int  // max recursion depth (1 = no recursion)
+	NoAbort       bool // keep scanning after the reliability guard fires
+	MaxQueries    int  // cap on admitted candidate names (jobs), not wire queries (0 = unlimited)
 	// Deadline stops admitting candidates at this instant (-max-duration,
 	// #190); lookups in flight finish and the rest are counted as skipped.
 	// It is an instant rather than a duration so one budget can span every
@@ -78,6 +85,9 @@ type Config struct {
 	// recursive scan still has to expand.
 	ResumeFrom    int
 	ResumeParents []string
+	// ResumeFollow are the FollowRecords targets of the names found before
+	// the interrupt that are not among them, queued again (#432).
+	ResumeFollow []string
 	// RetryPrior are the names the earlier part of a resumed scan left for
 	// its retry pass (its Stats.Pending); under RetryInconclusive this scan's
 	// retry pass looks them up (#315).
@@ -213,9 +223,10 @@ func workerCount(cfg Config, maxDepth int) int {
 // job is a single unit of work: a fully qualified domain to test and its depth
 // in the recursion tree (initial entries are depth 1).
 type job struct {
-	domain string
-	depth  int
-	root   int // index into cfg.Entries for a depth-1 job, else -1
+	domain   string
+	depth    int
+	root     int  // index into cfg.Entries for a depth-1 job, else -1
+	followed bool // a found name's record named it (FollowRecords, #432)
 }
 
 // completion reports a job back to the dispatcher. finished is false when
@@ -342,8 +353,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	workers := workerCount(cfg, maxDepth)
 	jobs := make(chan []job, handoffPerWorker*workers)
 	enqueue := make(chan job)
+	follow := make(chan []string) // FollowRecords targets, sent like found parents (#432)
 	completed := make(chan []completion, handoffPerWorker*workers)
-	st.enqueue = enqueue
+	st.enqueue, st.follow = enqueue, follow
 
 	stopTicker := st.startTicker(ctx)
 	cfg.ResumeParents = st.gateResumeParents(ctx, workers)
@@ -351,7 +363,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	// dispatched job has completed, or ctx is cancelled (see dispatcher).
 	disp := newDispatcher(cfg, maxDepth)
 	disp.rootOutcome = st.rootOutcome // it marks the entries out of scope
-	go disp.run(ctx, workers, jobs, enqueue, completed, &st.total, &st.stats, events)
+	go disp.run(ctx, workers, jobs, handoff{enqueue: enqueue, follow: follow, completed: completed}, &st.total, &st.stats, events)
 	st.runWorkers(ctx, workers, jobs, completed)
 	if cfg.RetryInconclusive {
 		st.retryPending(ctx, workers)
@@ -553,7 +565,8 @@ type scanState struct {
 	maxDepth  int
 	limiter   *dns.RateLimiter // paces simulated and hooked jobs; nil for live lookups, which pace per query
 	events    chan<- Event
-	enqueue   chan<- job // found parents, for the dispatcher to expand
+	enqueue   chan<- job      // found parents, for the dispatcher to expand
+	follow    chan<- []string // FollowRecords targets, for the dispatcher to queue (#432)
 	processed atomic.Int64
 	found     atomic.Int64
 	total     atomic.Int64 // the progress total; the dispatcher updates it as recursion adds work
@@ -635,7 +648,18 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 		return true
 	}
 
-	s.report(ctx, j.domain, records, partial)
+	s.report(ctx, j.domain, records, partial, j.followed)
+
+	if cfg.FollowRecords {
+		// Sent before the job completes, as a parent is, so the dispatcher
+		// cannot finish before it has queued them.
+		if targets := followTargets(cfg, records); len(targets) > 0 {
+			select {
+			case s.follow <- targets:
+			case <-ctx.Done():
+			}
+		}
+	}
 
 	if cfg.Recursive && j.depth < maxDepth && s.expandable(ctx, j.domain) {
 		// Hand the parent to the dispatcher, which generates its children.
@@ -711,8 +735,37 @@ func (s *scanState) gateResumeParents(ctx context.Context, workers int) []string
 	return gated
 }
 
-// report counts a found name and sends it as a result.
-func (s *scanState) report(ctx context.Context, name string, records []dns.Record, partial bool) {
+// followTargets returns the names records point at that a FollowRecords scan
+// tests (#432): CNAME, MX and NS targets under the target, lower case,
+// without the target itself and without the ones -exclude rules out.
+func followTargets(cfg Config, records []dns.Record) []string {
+	var out []string
+	for _, r := range records {
+		var name string
+		switch r.Type {
+		case "CNAME", "NS":
+			name = r.Value
+		case "MX":
+			fields := strings.Fields(r.Value) // "<preference> <host>"
+			if len(fields) == 0 {
+				continue
+			}
+			name = fields[len(fields)-1]
+		default:
+			continue
+		}
+		name = strings.ToLower(strings.TrimSuffix(name, "."))
+		if !strings.HasSuffix(name, "."+cfg.Domain) || cfg.scope.excluded(name) || slices.Contains(out, name) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// report counts a found name and sends it as a result. followed marks a
+// name a FollowRecords scan took from another result's records.
+func (s *scanState) report(ctx context.Context, name string, records []dns.Record, partial, followed bool) {
 	cfg := s.cfg
 	s.found.Add(1)
 	if partial {
@@ -740,7 +793,7 @@ func (s *scanState) report(ctx context.Context, name string, records []dns.Recor
 	if internal != "" {
 		s.stats.internal.Add(1)
 	}
-	s.events <- Event{Kind: EventResult, Result: Result{Subdomain: name, Records: records, Simulated: cfg.Simulate, Takeover: takeover, Internal: internal, Partial: partial}}
+	s.events <- Event{Kind: EventResult, Followed: followed, Result: Result{Subdomain: name, Records: records, Simulated: cfg.Simulate, Takeover: takeover, Internal: internal, Partial: partial}}
 }
 
 // resolveViaPool looks name up through the resolver pool and re-validates a

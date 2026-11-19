@@ -101,4 +101,7 @@ type Event struct {
 	// has not failed. Consumers read this instead of working it out from
 	// the errors they saw and their own copy of NoAbort (#308).
 	Failed bool
+	// Followed is set on an EventResult for a name a FollowRecords scan
+	// tested because another result's CNAME, MX or NS record named it (#432).
+	Followed bool
 }

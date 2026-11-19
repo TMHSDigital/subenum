@@ -108,6 +108,12 @@ type Config struct {
 	// MaxQueries as well.
 	Depth int
 
+	// FollowRecords also looks up the names under the domain that a found
+	// name's CNAME, MX or NS records point at, once each, unless they are
+	// already candidates, within MaxQueries. Their results' Sources are
+	// "records" (#432).
+	FollowRecords bool
+
 	// RecursiveWords are the labels a recursive scan tries under each name
 	// it finds, at depth 2 and below, cleaned like Words. Nil uses Words;
 	// a short list makes deep recursion affordable (#403).
@@ -240,7 +246,9 @@ type Result struct {
 	// answered, so Records may lack records of the failed type.
 	Partial bool
 
-	// Sources names what proposed the name (#273): "wordlist" for Words
+	// Sources names what proposed the name (#273): "records" alone for a
+	// name FollowRecords took from another result's records (#432),
+	// otherwise "wordlist" for Words
 	// (and, with Recursive, an entry below a found name), and each of
 	// Config.Sources that returned it. A source is named by its Name()
 	// string method when it has one ("ct" and "wayback" for the built-in
@@ -529,7 +537,11 @@ func run(ctx context.Context, cfg Config, tweak func(*scan.Options)) (<-chan Eve
 		// channel ends with exactly one KindDone too.
 		for ev := range in {
 			e := translate(ev)
-			if e.Kind == KindResult {
+			switch {
+			case e.Kind != KindResult:
+			case ev.Followed:
+				e.Result.Sources = candidates.FromRecords // FollowRecords (#432)
+			default:
 				e.Result.Sources = cands.SourcesOf(e.Result.Name)
 			}
 			forward(ctx, out, e)
@@ -680,23 +692,24 @@ func (c Config) options() (scan.Options, error) {
 			RecursiveEntries: deep,
 			Concurrency:      orDefault(c.Concurrency, DefaultConcurrency),
 			// Whole milliseconds, rounded up, as the CLI's -timeout takes.
-			Timeout:    time.Duration(ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout))) * time.Millisecond,
-			DNSServer:  resolver,
-			Simulate:   c.Simulate,
-			HitRate:    orDefault(c.HitRate, DefaultHitRate),
-			Seed:       seed,
-			Attempts:   orDefault(c.Attempts, DefaultAttempts),
-			Force:      c.Force,
-			Types:      types,
-			Recursive:  c.Recursive,
-			Depth:      orDefault(c.Depth, 1),
-			Rate:       c.Rate,
-			AutoRate:   c.AutoRate,
-			MaxQueries: c.MaxQueries,
-			Exclude:    c.Exclude,
-			NoAbort:    c.NoAbort,
-			Verbose:    c.Verbose,
-			Logf:       dns.Logf(c.Logf),
+			Timeout:       time.Duration(ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout))) * time.Millisecond,
+			DNSServer:     resolver,
+			Simulate:      c.Simulate,
+			HitRate:       orDefault(c.HitRate, DefaultHitRate),
+			Seed:          seed,
+			Attempts:      orDefault(c.Attempts, DefaultAttempts),
+			Force:         c.Force,
+			Types:         types,
+			Recursive:     c.Recursive,
+			FollowRecords: c.FollowRecords,
+			Depth:         orDefault(c.Depth, 1),
+			Rate:          c.Rate,
+			AutoRate:      c.AutoRate,
+			MaxQueries:    c.MaxQueries,
+			Exclude:       c.Exclude,
+			NoAbort:       c.NoAbort,
+			Verbose:       c.Verbose,
+			Logf:          dns.Logf(c.Logf),
 
 			RetryInconclusive: c.RetryInconclusive,
 			ListInconclusive:  true, // Stats.Inconclusive is part of the API

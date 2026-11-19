@@ -19,11 +19,12 @@ func inconclusive(o dns.Outcome) bool {
 // demand, so the list does not keep the job's name string alive (#300);
 // only a recursive child, which has no such index, keeps its name.
 type pendingLookup struct {
-	name    string // a recursive child's full name; "" for a depth-1 name
-	root    int    // index into cfg.Entries for a depth-1 name, else -1
-	outcome dns.Outcome
-	prior   bool // from Config.RetryPrior: an earlier part of a resumed scan looked it up (#315)
-	retried bool // the retry pass looked it up again, still without an answer
+	name     string // a recursive child's full name; "" for a depth-1 name
+	root     int    // index into cfg.Entries for a depth-1 name, else -1
+	outcome  dns.Outcome
+	prior    bool // from Config.RetryPrior: an earlier part of a resumed scan looked it up (#315)
+	retried  bool // the retry pass looked it up again, still without an answer
+	followed bool // a FollowRecords target (#432), so a find keeps that source
 }
 
 // Pending is a name whose lookup was inconclusive and that the retry pass
@@ -38,7 +39,7 @@ func pendingOf(j job, o dns.Outcome) pendingLookup {
 	if j.root >= 0 {
 		return pendingLookup{root: j.root, outcome: o}
 	}
-	return pendingLookup{name: j.domain, root: -1, outcome: o}
+	return pendingLookup{name: j.domain, root: -1, outcome: o, followed: j.followed}
 }
 
 // domain is the name that was looked up.
@@ -232,6 +233,6 @@ func (s *scanState) retry(ctx context.Context, it pendingLookup) {
 	st.add(outcome)
 	s.moveRepeat(it, repeatCode(outcome))
 	if outcome == dns.OutcomeFound {
-		s.report(ctx, name, records, partial)
+		s.report(ctx, name, records, partial, it.followed)
 	}
 }

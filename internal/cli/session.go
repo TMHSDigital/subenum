@@ -626,7 +626,10 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 		return
 	}
 	res := output.Result{Result: ev.Result, Permutation: permutation, Sources: candidates.FromPermute, Target: s.target}
-	if !permutation {
+	switch {
+	case ev.Followed:
+		res.Sources = candidates.FromRecords // a found name's record named it (#432)
+	case !permutation:
 		res.Sources = s.cands.SourcesOf(res.Subdomain)
 	}
 	for _, src := range res.Sources {
@@ -719,8 +722,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		return true
 	}
 	// A resumed run re-emits these results; their records are needed only
-	// when the output shows them or -diff compares them (#183).
-	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil}
+	// when the output shows them, -diff compares them (#183), or a resume
+	// follows them again (-follow-records, #432).
+	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil || s.f.followRecs}
 	s.entryDigests[i] = entryDigest(entries)
 	// Restored names are per target: nested -dL targets can both find a
 	// name, and each reports it (#408).
@@ -783,6 +787,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			out.Info("%s finished its main pass before the run stopped; %d results restored", target, len(saved.Results))
 		} else {
 			pass.resumeFrom, pass.resumeNames = saved.RootDone, s.targetResults.mainPassNames()
+			if s.f.followRecs {
+				pass.resumeFollow = recordTargets(s.targetResults.results())
+			}
 			out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
 		}
 	}

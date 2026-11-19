@@ -102,6 +102,9 @@ type TargetSummary struct {
 	AXFRError   string   `json:"axfr_error,omitempty"`
 	// AXFRFound counts the results a zone transfer had proposed (#273).
 	AXFRFound int `json:"axfr_found,omitempty"`
+	// RecordsFound counts the results -follow-records found: names a found
+	// name's CNAME, MX or NS record pointed at (#432).
+	RecordsFound int `json:"records_found,omitempty"`
 	// ZoneDenial is how the zone proves a name does not exist, from -axfr's
 	// DNSSEC probe: "nsec" (walkable: every name can be listed), "nsec3" or
 	// "none" (unsigned) (#234).
