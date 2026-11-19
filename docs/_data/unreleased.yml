@@ -7,6 +7,7 @@
 commands: []
 flags:
   - hosts
+  - recursive-w
 # new values of a flag that is itself released, as flag=VALUE (#306)
 values:
   - type=SRV

@@ -31,7 +31,7 @@
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |
 | `-rate-per-resolver <int>` | - | With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited) |
 | `-recursive` | - | Recursively enumerate subdomains of discovered subdomains |
-| `-recursive-w <file>` | - | Path to a wordlist file (- for stdin) of the labels -recursive tries under each name it finds, at depth 2 and below; repeat to combine several; omitted: the -w list |
+| `-recursive-w <file>` {% include unreleased.html flag="recursive-w" %} | - | Path to a wordlist file (- for stdin) of the labels -recursive tries under each name it finds, at depth 2 and below; repeat to combine several; omitted: the -w list |
 | `-resume <string>` | - | Resume a run that was interrupted, ran out of -max-duration or was aborted, from its state file (no other arguments but the pacing flags -rate, -rate-per-resolver, -t, -timeout, -attempts, -auto-rate, -no-abort and -max-duration) |
 | `-retries <int>` | - | Deprecated: use -attempts instead |
 | `-retry-inconclusive` | - | After each scan, look up once more (against -dns-server) every name that timed out, was refused or failed; names it resolves are reported, but not expanded by -recursive |
