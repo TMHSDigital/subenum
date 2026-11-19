@@ -46,7 +46,7 @@ var listFlags = map[string]bool{"exclude": true, "type": true, "sources": true}
 // the listFlags, a config-file or SUBENUM_* string is a comma-separated list
 // and the config file may give a JSON array; each array entry is one value,
 // commas and all (#353).
-var repeatFlags = map[string]bool{"w": true, "o": true}
+var repeatFlags = map[string]bool{"w": true, "o": true, "recursive-w": true}
 
 // repeatValue is the Value of a repeatFlag: the values given, in order.
 type repeatValue interface{ list() []string }

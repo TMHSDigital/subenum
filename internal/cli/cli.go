@@ -143,6 +143,7 @@ type cliFlags struct {
 	recordTypes  string
 	recursive    bool
 	depth        int
+	deepWords    wordlistPaths // -recursive-w: the labels tried below depth 1 (#403)
 	noAbort      bool
 	maxQueries   int
 	maxDuration  time.Duration // -max-duration: time budget for the whole run (#190)
@@ -193,6 +194,7 @@ func (in *runtimeInputs) readLines(path string) ([]string, error) {
 type scanPass struct {
 	domain      string
 	entries     []string
+	deepEntries []string       // -recursive-w entries; nil means entries (#403)
 	maxQueries  int            // this pass's -max-queries budget
 	resumeFrom  int            // set while resuming (#73)
 	resumeNames []string       // names found before the interrupt
@@ -245,6 +247,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.autoRate, "auto-rate", false, "When over 20% of the last 200 lookups fail, halve the query rate and keep going (up to 6 times, down to 5 queries/s) instead of aborting; speed back up once lookups succeed")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
+	fs.Var(&f.deepWords, "recursive-w", "Path to a wordlist `file` (- for stdin) of the labels -recursive tries under each name it finds, at depth 2 and below; repeat to combine several; omitted: the -w list")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")
 	fs.DurationVar(&f.maxDuration, "max-duration", 0, "Time budget for the whole run, e.g. 20m (0 = unlimited); then no new names are tested, lookups in flight finish, and the run ends with its report, a degraded verdict and saved state for -resume to continue from")
@@ -316,6 +319,16 @@ func validateArgs(f cliFlags, positionals []string, fs *flag.FlagSet, out *outpu
 		out.Error("-w - is given %d times; standard input can only be read once", n)
 		return false
 	}
+	if n := countStdin(f.deepWords.paths); n > 1 {
+		out.Error("-recursive-w - is given %d times; standard input can only be read once", n)
+		return false
+	}
+	// A config-file or SUBENUM_* value is a default for recursive runs, so
+	// only a command-line -recursive-w needs -recursive.
+	if len(f.deepWords.paths) > 0 && !f.deepWords.replace && !f.recursive {
+		out.Error("-recursive-w needs -recursive: it names the labels tried under each name found")
+		return false
+	}
 	if readers := stdinReaders(f); len(readers) > 1 {
 		out.Error("%s cannot all read standard input (-); it can only be read once, so give all but one a file", strings.Join(readers, ", "))
 		return false
@@ -342,6 +355,9 @@ func stdinReaders(f cliFlags) []string {
 	var names []string
 	if f.wordlists.readsStdin() {
 		names = append(names, "-w")
+	}
+	if f.deepWords.readsStdin() {
+		names = append(names, "-recursive-w")
 	}
 	for _, c := range []struct{ name, path string }{
 		{"-hosts", f.hostsFile},
@@ -820,25 +836,26 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 	}
 	return scan.Options{
 		Config: scan.Config{
-			Domain:      p.domain,
-			Entries:     p.entries,
-			Concurrency: f.concurrency,
-			Timeout:     time.Duration(f.timeoutMs) * time.Millisecond,
-			DNSServer:   dnsServer,
-			Simulate:    f.testMode,
-			HitRate:     f.testHitRate,
-			Seed:        f.seed,
-			Attempts:    in.maxAttempts,
-			Force:       f.force,
-			Types:       in.recordTypes,
-			Recursive:   recursive,
-			Depth:       depth,
-			Rate:        f.rate,
-			AutoRate:    f.autoRate,
-			MaxQueries:  p.maxQueries,
-			Deadline:    in.deadline,
-			Exclude:     in.excludes,
-			ResumeFrom:  p.resumeFrom,
+			Domain:           p.domain,
+			Entries:          p.entries,
+			RecursiveEntries: p.deepEntries,
+			Concurrency:      f.concurrency,
+			Timeout:          time.Duration(f.timeoutMs) * time.Millisecond,
+			DNSServer:        dnsServer,
+			Simulate:         f.testMode,
+			HitRate:          f.testHitRate,
+			Seed:             f.seed,
+			Attempts:         in.maxAttempts,
+			Force:            f.force,
+			Types:            in.recordTypes,
+			Recursive:        recursive,
+			Depth:            depth,
+			Rate:             f.rate,
+			AutoRate:         f.autoRate,
+			MaxQueries:       p.maxQueries,
+			Deadline:         in.deadline,
+			Exclude:          in.excludes,
+			ResumeFrom:       p.resumeFrom,
 			// The retry pass belongs to the scan, so a resumed scan runs it
 			// too, for the names the stopped run left it as well (#315).
 			RetryInconclusive: f.retryIncon,

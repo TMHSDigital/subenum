@@ -114,7 +114,14 @@ func prepareWordlist(f cliFlags, in *runtimeInputs) (*wordlist.Prepared, error) 
 		}
 		return pr.Prepared(), nil
 	}
-	for _, p := range f.wordlists.paths {
+	return prepareFiles(f.wordlists.paths, in)
+}
+
+// prepareFiles normalizes the lines of each file in paths, in order; "-" is
+// standard input.
+func prepareFiles(paths []string, in *runtimeInputs) (*wordlist.Prepared, error) {
+	pr := wordlist.NewPreparer()
+	for _, p := range paths {
 		var err error
 		if p == wordlist.Stdin && in.stdin != nil {
 			err = wordlist.EachLine(in.stdin, pr.Add)
@@ -126,6 +133,16 @@ func prepareWordlist(f cliFlags, in *runtimeInputs) (*wordlist.Prepared, error) 
 		}
 	}
 	return pr.Prepared(), nil
+}
+
+// prepareDeepWordlist reads the -recursive-w files, the labels a recursive
+// scan tries below depth 1 (#403). Nil when the run has none, or is not
+// recursive, so each level tries the -w list.
+func prepareDeepWordlist(f cliFlags, in *runtimeInputs) (*wordlist.Prepared, error) {
+	if len(f.deepWords.paths) == 0 || !f.recursive || f.depth < 2 {
+		return nil, nil
+	}
+	return prepareFiles(f.deepWords.paths, in)
 }
 
 // countStdin counts the "-" entries in paths.

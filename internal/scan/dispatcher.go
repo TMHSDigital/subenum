@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -67,6 +68,8 @@ type dispatcher struct {
 	// first built.
 	unbuilt    *unbuiltTables
 	repeatWalk []int
+	// rrepeatWalk is repeatWalk for RecursiveEntries (#403).
+	rrepeatWalk []int
 }
 
 // unbuiltTables are countUnbuilt's tables: the first labels of the exact
@@ -75,18 +78,32 @@ type dispatcher struct {
 type unbuiltTables struct {
 	labels map[string][]string
 	index  map[string]int
+	// rindex is index for RecursiveEntries, the entries below depth 1
+	// (#403); nil when the scan has none.
+	rindex map[string]int
 }
 
-// multiLabelEntries is the set of entries that hold more than one label, for
-// a recursive scan that has any; nil otherwise.
-func multiLabelEntries(recursive, multiLabel bool, entries []string) map[string]struct{} {
+// indexFor returns the index table for the entries an expansion at depth
+// tries.
+func (t *unbuiltTables) indexFor(depth int) map[string]int {
+	if depth > 1 && t.rindex != nil {
+		return t.rindex
+	}
+	return t.index
+}
+
+// multiLabelEntries is the set of entries, from every list given, that hold
+// more than one label, for a recursive scan that has any; nil otherwise.
+func multiLabelEntries(recursive, multiLabel bool, lists ...[]string) map[string]struct{} {
 	if !recursive || !multiLabel {
 		return nil
 	}
 	multi := make(map[string]struct{})
-	for _, e := range entries {
-		if strings.Contains(e, ".") {
-			multi[e] = struct{}{}
+	for _, entries := range lists {
+		for _, e := range entries {
+			if strings.Contains(e, ".") {
+				multi[e] = struct{}{}
+			}
 		}
 	}
 	return multi
@@ -145,7 +162,10 @@ func hasMultiLabel(entries []string) bool {
 func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 	n := len(cfg.Entries)
 	start := min(max(cfg.ResumeFrom, 0), n)
-	multiLabel := hasMultiLabel(cfg.Entries)
+	if !cfg.Recursive {
+		cfg.RecursiveEntries = nil // never tried: no level below 1
+	}
+	multiLabel := hasMultiLabel(cfg.Entries) || hasMultiLabel(cfg.RecursiveEntries)
 	d := &dispatcher{
 		cfg: cfg,
 		n:   n,
@@ -155,7 +175,7 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		// names those entries begin. Without it a multi-million-entry list
 		// skips a map as large as the list (#248), and a recursive scan one
 		// that grows with every candidate (#301, #359).
-		multi:      multiLabelEntries(cfg.Recursive, multiLabel, cfg.Entries),
+		multi:      multiLabelEntries(cfg.Recursive, multiLabel, cfg.Entries, cfg.RecursiveEntries),
 		multiLabel: multiLabel,
 		frontier:   []expansion{{parent: cfg.Domain, depth: 1, next: start}},
 		remaining:  n - start,
@@ -177,7 +197,7 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		for _, p := range cfg.ResumeParents {
 			if name, depth, ok := resumeParent(d.cfg, p, maxDepth); ok && d.markExpanded(name) {
 				d.frontier = append(d.frontier, expansion{parent: name, depth: depth + 1})
-				d.remaining += n
+				d.remaining += len(d.cfg.entriesAt(depth + 1))
 			}
 		}
 	}
@@ -241,6 +261,17 @@ func resumeDepths(cfg Config) map[string]int {
 			}
 		}
 	}
+	// isDeep holds the same prefixes for the entries tried below depth 1,
+	// when they are a list of their own (#403).
+	isDeep := isEntry
+	if cfg.RecursiveEntries != nil {
+		isDeep = maps.Clone(isEntry)
+		for _, e := range cfg.RecursiveEntries {
+			if _, ok := isDeep[e]; ok {
+				isDeep[e] = true
+			}
+		}
+	}
 	for _, e := range cfg.Entries {
 		if _, ok := isEntry[e]; ok {
 			isEntry[e] = true
@@ -257,7 +288,7 @@ func resumeDepths(cfg Config) map[string]int {
 			best = 1
 		}
 		for i := 0; i < len(rel) && best != 1; i++ {
-			if rel[i] != '.' || !isEntry[rel[:i]] || !parents[rel[i+1:]] {
+			if rel[i] != '.' || !isDeep[rel[:i]] || !parents[rel[i+1:]] {
 				continue
 			}
 			if d := find(rel[i+1:]); d > 0 && (best == 0 || d+1 < best) {
@@ -309,8 +340,9 @@ func (d *dispatcher) stopAdmitting() {
 		d.countUnbuiltRepeats()
 	default:
 		for _, e := range d.frontier[d.head:] {
-			for i := e.next; i < d.n; i++ {
-				entry := d.cfg.Entries[i]
+			entries := d.cfg.entriesAt(e.depth)
+			for i := e.next; i < len(entries); i++ {
+				entry := entries[i]
 				name := entry + "." + e.parent
 				if !d.firstVisit(entry, name, e.depth) {
 					continue
@@ -348,18 +380,17 @@ func (d *dispatcher) countUnbuilt() {
 				t.index[label] = -1
 			}
 		}
-		if len(t.index) > 0 {
-			for i, entry := range d.cfg.Entries {
-				if _, ok := t.index[entry]; ok {
-					t.index[entry] = i
-				}
-			}
+		if d.cfg.RecursiveEntries != nil {
+			t.rindex = maps.Clone(t.index)
+			placeLabels(t.rindex, d.cfg.RecursiveEntries)
 		}
+		placeLabels(t.index, d.cfg.Entries)
 		d.unbuilt = t
 	}
-	labels, index := d.unbuilt.labels, d.unbuilt.index
+	labels := d.unbuilt.labels
 	for _, e := range d.frontier[d.head:] {
-		left := d.n - e.next
+		index := d.unbuilt.indexFor(e.depth)
+		left := len(d.cfg.entriesAt(e.depth)) - e.next
 		if s.subtreeExcluded(e.parent) {
 			d.excluded += left
 			continue
@@ -372,6 +403,19 @@ func (d *dispatcher) countUnbuilt() {
 		}
 		d.excluded += out
 		d.skipped += left - out
+	}
+}
+
+// placeLabels sets each label of index that is an entry to its position in
+// entries.
+func placeLabels(index map[string]int, entries []string) {
+	if len(index) == 0 {
+		return
+	}
+	for i, entry := range entries {
+		if _, ok := index[entry]; ok {
+			index[entry] = i
+		}
 	}
 }
 
@@ -395,26 +439,38 @@ func (d *dispatcher) countUnbuiltRepeats() {
 				}
 			}
 		}
-		walk := []int{} // indexes of those entries, ascending; non-nil once built
-		for i, entry := range d.cfg.Entries {
-			if _, ok := prefixes[entry]; ok {
-				walk = append(walk, i)
-			}
+		d.repeatWalk = prefixWalk(prefixes, d.cfg.Entries)
+		if d.cfg.RecursiveEntries != nil {
+			d.rrepeatWalk = prefixWalk(prefixes, d.cfg.RecursiveEntries)
 		}
-		d.repeatWalk = walk
 	}
-	walk := d.repeatWalk
 	for _, e := range d.frontier[d.head:] {
+		entries, walk := d.cfg.Entries, d.repeatWalk
+		if e.depth > 1 && d.cfg.RecursiveEntries != nil {
+			entries, walk = d.cfg.RecursiveEntries, d.rrepeatWalk
+		}
 		repeats := 0
 		first, _ := slices.BinarySearch(walk, e.next)
 		for _, i := range walk[first:] {
-			entry := d.cfg.Entries[i]
+			entry := entries[i]
 			if !d.firstVisit(entry, entry+"."+e.parent, e.depth) {
 				repeats++
 			}
 		}
-		d.skipped += d.n - e.next - repeats
+		d.skipped += len(entries) - e.next - repeats
 	}
+}
+
+// prefixWalk returns the indexes of the entries in prefixes, ascending;
+// non-nil, so a built walk is told apart from none.
+func prefixWalk(prefixes map[string]struct{}, entries []string) []int {
+	walk := []int{}
+	for i, entry := range entries {
+		if _, ok := prefixes[entry]; ok {
+			walk = append(walk, i)
+		}
+	}
+	return walk
 }
 
 // total is the progress total: jobs admitted plus candidates not yet
@@ -431,7 +487,8 @@ func (d *dispatcher) total() int64 {
 func (d *dispatcher) next() (job, bool) {
 	for d.head < len(d.frontier) {
 		e := &d.frontier[d.head]
-		if e.next == d.n {
+		entries := d.cfg.entriesAt(e.depth)
+		if e.next == len(entries) {
 			d.head++
 			// Compact only once the consumed prefix is at least half the
 			// slice, so each element is copied O(1) times.
@@ -451,7 +508,7 @@ func (d *dispatcher) next() (job, bool) {
 			d.stopAdmitting()
 			return job{}, false
 		}
-		entry := d.cfg.Entries[e.next]
+		entry := entries[e.next]
 		e.next++
 		d.remaining--
 		name := entry + "." + e.parent
@@ -484,11 +541,12 @@ func (d *dispatcher) expand(parent job) {
 	if !d.markExpanded(parent.domain) {
 		return
 	}
+	children := len(d.cfg.entriesAt(parent.depth + 1))
 	switch {
 	// An excluded subtree is excluded whether or not a budget has run out,
 	// as countUnbuilt counts it, so it cannot lower the verdict (#238).
 	case d.cfg.scope.subtreeExcluded(parent.domain):
-		d.excluded += d.n
+		d.excluded += children
 	case d.capped:
 		// A parent found after the budget stopped admission: queue it and
 		// stop admission again, so its children are counted as the queued
@@ -496,11 +554,11 @@ func (d *dispatcher) expand(parent job) {
 		// not skipped, and children the visited set would drop are not
 		// counted twice.
 		d.frontier = append(d.frontier, expansion{parent: parent.domain, depth: parent.depth + 1})
-		d.remaining += d.n
+		d.remaining += children
 		d.stopAdmitting()
 	default:
 		d.frontier = append(d.frontier, expansion{parent: parent.domain, depth: parent.depth + 1})
-		d.remaining += d.n
+		d.remaining += children
 	}
 }
 

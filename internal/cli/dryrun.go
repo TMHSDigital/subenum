@@ -13,6 +13,7 @@ import (
 	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/permute"
 	"github.com/TMHSDigital/subenum/internal/scan"
+	"github.com/TMHSDigital/subenum/internal/wordlist"
 )
 
 // dryRunTarget is one target's -dry-run plan (#192).
@@ -153,7 +154,7 @@ func (s *session) dryRun() int {
 	default:
 		s.printDryRun(plans, rateBy)
 	}
-	if notes := dryRunNotes(f, s.in.sources); len(notes) > 0 {
+	if notes := dryRunNotes(f, s.in.sources, s.deepWords); len(notes) > 0 {
 		s.out.Info("Not included in the estimate: %s", strings.Join(notes, "; "))
 	}
 	if failed {
@@ -202,8 +203,8 @@ func dryRunDuration(seconds float64) string {
 }
 
 // dryRunNotes names the work a scan may add that a dry run cannot count
-// without sending queries.
-func dryRunNotes(f cliFlags, sources []string) []string {
+// without sending queries. deep is the -recursive-w list, if any.
+func dryRunNotes(f cliFlags, sources []string, deep *wordlist.Prepared) []string {
 	var notes []string
 	for _, src := range sources {
 		notes = append(notes, fmt.Sprintf("%s names (fetched at scan time)", passive.Labels[src]))
@@ -214,8 +215,14 @@ func dryRunNotes(f cliFlags, sources []string) []string {
 	if f.permute || f.seedsFile != "" {
 		notes = append(notes, fmt.Sprintf("the -permute pass (built from what the scan finds: up to %d candidates per name, at most %d per target)", permute.PerSeed, candidates.MaxPermutations))
 	}
-	if f.recursive {
-		notes = append(notes, "-recursive levels (built from what the scan finds)")
+	if f.recursive && f.depth > 1 {
+		// What each found name costs is known; how many are found is not.
+		if deep != nil {
+			entries, _, _ := deep.For("")
+			notes = append(notes, fmt.Sprintf("-recursive levels (built from what the scan finds: %d -recursive-w candidates under each name found)", len(entries)))
+		} else {
+			notes = append(notes, "-recursive levels (built from what the scan finds: the -w candidates again under each name found)")
+		}
 	}
 	if !f.testMode {
 		notes = append(notes, "wildcard probes")

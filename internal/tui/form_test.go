@@ -541,6 +541,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"Verbose":           "the scan screen shows events itself; there is no debug log",
 		"Logf":              "the scan screen shows events itself; there is no debug log",
 		"Resolver":          "scan.Run builds the resolver from DNSServer",
+		"RecursiveEntries":  "the form has no -recursive-w field; every level uses the wordlist",
 	}
 	m := filledForm(t)
 	v, errStr := m.validate()

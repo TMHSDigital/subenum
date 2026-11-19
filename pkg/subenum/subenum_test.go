@@ -300,6 +300,10 @@ func TestValidateMatchesRun(t *testing.T) {
 	if err := (subenum.Config{Domain: "example.com", Words: []string{}}).Validate(); !errors.Is(err, subenum.ErrNoWords) {
 		t.Errorf("empty words: got %v, want ErrNoWords", err)
 	}
+	// #403: a RecursiveWords list with nothing usable is refused too.
+	if err := (subenum.Config{Domain: "example.com", Simulate: true, Recursive: true, Depth: 2, RecursiveWords: []string{"bad_label!"}}).Validate(); !errors.Is(err, subenum.ErrNoWords) {
+		t.Errorf("empty recursive words: got %v, want ErrNoWords", err)
+	}
 }
 
 // TestValidateNamesConfigFields covers #414: the range checks Config shares

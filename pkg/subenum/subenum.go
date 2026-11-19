@@ -104,8 +104,14 @@ type Config struct {
 
 	// Depth is the deepest level a recursive scan reaches. 1, the default,
 	// does not recurse. Each level multiplies the candidate count by
-	// len(Words), so set MaxQueries as well.
+	// len(Words), or by len(RecursiveWords) when it is set, so set
+	// MaxQueries as well.
 	Depth int
+
+	// RecursiveWords are the labels a recursive scan tries under each name
+	// it finds, at depth 2 and below, cleaned like Words. Nil uses Words;
+	// a short list makes deep recursion affordable (#403).
+	RecursiveWords []string
 
 	// MaxQueries caps how many candidate names are tested. 0 is unlimited.
 	MaxQueries int
@@ -655,6 +661,12 @@ func (c Config) options() (scan.Options, error) {
 	if len(entries) == 0 {
 		return scan.Options{}, ErrNoWords
 	}
+	var deep []string
+	if c.RecursiveWords != nil {
+		if deep, _, _ = wordlist.Build(c.RecursiveWords, domain); len(deep) == 0 {
+			return scan.Options{}, fmt.Errorf("%w: RecursiveWords", ErrNoWords)
+		}
+	}
 
 	seed := c.Seed
 	for c.Simulate && seed == 0 {
@@ -663,9 +675,10 @@ func (c Config) options() (scan.Options, error) {
 
 	opts := scan.Options{
 		Config: scan.Config{
-			Domain:      domain,
-			Entries:     entries,
-			Concurrency: orDefault(c.Concurrency, DefaultConcurrency),
+			Domain:           domain,
+			Entries:          entries,
+			RecursiveEntries: deep,
+			Concurrency:      orDefault(c.Concurrency, DefaultConcurrency),
 			// Whole milliseconds, rounded up, as the CLI's -timeout takes.
 			Timeout:    time.Duration(ceilMillis(orDefaultDuration(c.Timeout, DefaultTimeout))) * time.Millisecond,
 			DNSServer:  resolver,

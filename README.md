@@ -250,6 +250,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-seeds <file>` | n/a | Results file (any `-format`) whose names also seed `-permute`; implies `-permute` |
 | `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
+| `-recursive-w <file>` | the `-w` list | Wordlist of the labels `-recursive` tries under each name it finds, at depth 2 and below (`-` reads stdin); repeatable. A short list here makes deep recursion affordable |
 | **Resolvers and pacing** | | |
 | `-dns-server <addr>` | `8.8.8.8:53` | DNS server: `ip:port` (UDP, TCP fallback), `tls://host[:853]` (DNS over TLS) or `https://host/path` (DNS over HTTPS); validated on startup |
 | `-r <file>` | n/a | Resolver pool: one resolver per line, in any form `-dns-server` takes: `ip`, `ip:port`, `tls://host[:port]` (DNS over TLS) or `https://host/path` (DNS over HTTPS); the forms can be mixed. Lookups rotate over the healthy resolvers (a resolver failing over half its recent lookups is benched for 30s), retries go to a different resolver, and every hit is re-validated against `-dns-server`, whose answer is the one reported. NXDOMAIN answers are checked too: each resolver is periodically asked about a name `-dns-server` confirmed (a canary), and an NXDOMAIN from one that has not passed a canary is confirmed by a second resolver. A resolver contradicted three times is flagged and dropped for the run. Preflight and wildcard checks use `-dns-server` |

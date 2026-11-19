@@ -27,18 +27,22 @@ type Config struct {
 	// Entries are the labels to try, unique and normalized (wordlist.Build
 	// and Prepare guarantee both); a non-recursive scan does not dedupe them
 	// again (#248).
-	Entries     []string
-	Concurrency int
-	Timeout     time.Duration
-	DNSServer   string
-	Simulate    bool
-	HitRate     int
-	Seed        uint64 // simulation seed: the same seed reproduces the same simulated results
-	Attempts    int
-	Force       bool
-	Verbose     bool     // log every lookup; through Logf when set, else unsynchronized to stderr
-	Logf        dns.Logf // receives verbose lines when Verbose is set
-	Rate        int      // max DNS messages per second on the wire, all workers combined (0 = unlimited)
+	Entries []string
+	// RecursiveEntries are the labels a recursive scan tries under each name
+	// it finds, at depth 2 and below (-recursive-w, #403); unique and
+	// normalized like Entries. Nil means Entries.
+	RecursiveEntries []string
+	Concurrency      int
+	Timeout          time.Duration
+	DNSServer        string
+	Simulate         bool
+	HitRate          int
+	Seed             uint64 // simulation seed: the same seed reproduces the same simulated results
+	Attempts         int
+	Force            bool
+	Verbose          bool     // log every lookup; through Logf when set, else unsynchronized to stderr
+	Logf             dns.Logf // receives verbose lines when Verbose is set
+	Rate             int      // max DNS messages per second on the wire, all workers combined (0 = unlimited)
 	// AutoRate halves the rate when most recent lookups fail, and raises
 	// it again once they succeed, instead of letting the reliability guard
 	// abort at the first sign of rate-limiting (#220).
@@ -159,6 +163,13 @@ func settle(ctx context.Context, o dns.Outcome) dns.Outcome {
 // RecursionCeiling returns the theoretical job count for a recursive scan:
 // sum over d=1..depth of n^d, as a float so large wordlists do not overflow.
 func RecursionCeiling(n, depth int) float64 {
+	return RecursionCeilingOf(n, n, depth)
+}
+
+// RecursionCeilingOf is RecursionCeiling for a scan that tries n entries at
+// depth 1 and m under each found name below it (-recursive-w, #403): sum over
+// d=1..depth of n*m^(d-1).
+func RecursionCeilingOf(n, m, depth int) float64 {
 	if n <= 0 || depth <= 0 {
 		return 0
 	}
@@ -166,9 +177,23 @@ func RecursionCeiling(n, depth int) float64 {
 	term = float64(n)
 	for d := 1; d <= depth; d++ {
 		total += term
-		term *= float64(n)
+		term *= float64(max(m, 0))
 	}
 	return total
+}
+
+// recursionCeiling is the job ceiling of cfg's entries to depth.
+func recursionCeiling(cfg Config, depth int) float64 {
+	return RecursionCeilingOf(len(cfg.Entries), len(cfg.entriesAt(2)), depth)
+}
+
+// entriesAt returns the labels an expansion at depth tries: Entries at depth
+// 1, and RecursiveEntries below it when they are given (#403).
+func (c Config) entriesAt(depth int) []string {
+	if depth > 1 && c.RecursiveEntries != nil {
+		return c.RecursiveEntries
+	}
+	return c.Entries
 }
 
 // workerCount caps the pool at the most jobs the scan can produce, so a huge
@@ -178,7 +203,7 @@ func workerCount(cfg Config, maxDepth int) int {
 	if cfg.Recursive {
 		depth = maxDepth
 	}
-	work := RecursionCeiling(len(cfg.Entries), depth)
+	work := recursionCeiling(cfg, depth)
 	if cfg.MaxQueries > 0 {
 		work = min(work, float64(cfg.MaxQueries))
 	}
@@ -379,11 +404,15 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 	}
 
 	if cfg.Recursive {
-		ceiling := RecursionCeiling(len(cfg.Entries), maxDepth)
+		ceiling := recursionCeiling(*cfg, maxDepth)
+		entries := fmt.Sprintf("%d entries", len(cfg.Entries))
+		if cfg.RecursiveEntries != nil {
+			entries += fmt.Sprintf(" (%d below depth 1)", len(cfg.RecursiveEntries))
+		}
 		if ceiling > recursionRefuseCeiling && cfg.MaxQueries == 0 && !cfg.Force {
 			events <- Event{Kind: EventError, Fatal: true, Message: fmt.Sprintf(
-				"refusing to start: {recursive} {depth} %d with %d entries can generate up to %.1e queries; set {max_queries} or {force}",
-				maxDepth, len(cfg.Entries), ceiling)}
+				"refusing to start: {recursive} {depth} %d with %s can generate up to %.1e queries; set {max_queries} or {force}",
+				maxDepth, entries, ceiling)}
 			return false, nil, false, true
 		}
 		consider := "Consider {max_queries}."
@@ -391,8 +420,8 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 			consider = fmt.Sprintf("Consider {depth} %d or {max_queries}.", maxDepth-1)
 		}
 		events <- Event{Kind: EventNotice, Notice: NoticeCeiling, Message: fmt.Sprintf(
-			"Warning: {recursive} {depth} %d with %d entries can generate up to %.1e queries.\n%s",
-			maxDepth, len(cfg.Entries), ceiling, consider)}
+			"Warning: {recursive} {depth} %d with %s can generate up to %.1e queries.\n%s",
+			maxDepth, entries, ceiling, consider)}
 	}
 
 	if cfg.live() {

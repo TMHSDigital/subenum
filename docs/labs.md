@@ -145,7 +145,10 @@ subenum -simulate-zone lab4 -recursive -depth 3 lab.example
 3. subenum refuses to start: with 5,000 words, depth 3 could mean over 100
    billion queries. Recursion multiplies the wordlist at every level, so it
    asks you to set `-max-queries` (or `-force`) first. Against a real target,
-   that guard is what keeps a scan from becoming a flood.
+   that guard is what keeps a scan from becoming a flood. A shorter list for
+   the deeper levels also keeps it small: `-recursive-w` names the labels
+   tried under each name found, so `-w` with 5,000 words and `-recursive-w`
+   with 100 cost 5,000 queries for depth 1 and 100 for each name found.
 
 </details>
 

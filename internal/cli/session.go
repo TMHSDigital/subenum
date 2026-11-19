@@ -44,6 +44,7 @@ type session struct {
 	settings    map[string]string // effective settings, saved for -resume
 	targets     []string
 	words       *wordlist.Prepared
+	deepWords   *wordlist.Prepared  // -recursive-w; nil means words (#403)
 	seeds       map[string]struct{} // -seeds names
 
 	out     *output.Writer // stdout: every result, or under -diff the changes
@@ -441,6 +442,16 @@ func (s *session) loadInputs() bool {
 		return false
 	}
 	s.words = words
+	if s.deepWords, err = prepareDeepWordlist(f, &s.in); err != nil {
+		out.Error("reading -recursive-w file: %v", err)
+		return false
+	}
+	if s.deepWords != nil {
+		if probe, _, _ := s.deepWords.For(""); len(probe) == 0 {
+			out.Error("-recursive-w %s has no valid entries", f.deepWords.describe())
+			return false
+		}
+	}
 	if probe, _, _ := s.words.For(""); len(probe) == 0 {
 		if f.hostsFile != "" {
 			out.Error("-hosts %s has no valid host names", f.hostsFile)
@@ -734,6 +745,11 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	}
 	entries, seeds := cands.Entries(), cands.Seeds()
 	pass := scanPass{domain: target, entries: entries, maxQueries: s.f.maxQueries}
+	if s.deepWords != nil {
+		// The name-length limit is the target's, as for -w; a label too
+		// long under a deeper parent fails its lookup like any other.
+		pass.deepEntries, _, _ = s.deepWords.For(target)
+	}
 	var mainSaved *resumePass
 	restoredHits := 0 // permutation results restored from the state
 	if saved != nil {
