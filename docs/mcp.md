@@ -81,6 +81,14 @@ scan, and `depth` (up to 3) enumerates again under the names found. The report
 counts `retried`, `recovered`, `rate_backoffs` and `excluded`. Every one of
 these stays within `max_queries` and `-max-duration`.
 
+`permute`, on `scan` and `lab_scan`, adds a second pass after the scan, as the
+command line's `-permute` does: it tests variants of the names found (`api`
+suggests `api-dev`, `dev-api`, `api2`) that the scan did not already test,
+within what the scan left of `max_queries` and `-max-duration`. Its finds join
+`results`, and the report's `permutation` gives its `candidates`, `tested`,
+`found`, `skipped_by_cap` and its own `verdict` and `reason`. A scan that
+spent the whole budget leaves the pass `degraded` with every variant skipped.
+
 ## Running it
 
 ```bash
@@ -97,6 +105,7 @@ subenum mcp -allow example.com,example.org    # adds scan, for these domains
 | `-max-duration` | 2m | Longest one call may scan |
 | `-timeout` | 1000 | Live-scan lookup timeout in milliseconds |
 | `-sources` | none | Passive sources (`ct`, `wayback`) a `scan` call may ask for |
+| `-axfr` | off | Let a `scan` call ask the domain's name servers for a zone transfer (`zone_transfer`) |
 | `-max-calls` | 100 | Most `scan` calls one session may make; with `-max-queries` it caps the session's live lookups. A call refused for its arguments (`not_run` before any query) does not count |
 
 Passive sources are off unless you enable them, because they send the domain
@@ -105,6 +114,17 @@ to third parties (crt.sh, the Wayback Machine). With `-sources ct,wayback`,
 after dedupe, count against `max_queries`, and are each verified by a lookup.
 The report lists each source with the number of names it proposed, or the
 error it hit; a failed source does not stop the scan.
+
+Zone transfers are off unless you start the server with `-axfr`, because
+their queries go to the target's own name servers (about four per server)
+and are not paced by `-rate`. With it, `scan` gains a `zone_transfer`
+argument that does what the command line's `-axfr` does before the scan:
+the names a transfer gives are verified by a lookup like a source's, and the
+report's `zone_transfer` lists the name servers that `allowed` one (anyone
+can then list the zone, a finding in itself) and the zone's `denial`
+(`nsec` means it can be walked). Name servers under `exclude` are not asked.
+Without `-axfr`, a call that sets it is refused. `lab_scan` has no
+`zone_transfer`: the lab server does not answer transfers.
 
 The caps cannot be turned off: `-rate`, `-max-queries`, `-max-duration`,
 `-timeout` and `-max-calls` must be positive. A session is one run of the

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/TMHSDigital/subenum/internal/axfr"
+	"github.com/TMHSDigital/subenum/internal/candidates"
 	"github.com/TMHSDigital/subenum/internal/diff"
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/mcp"
@@ -94,6 +96,7 @@ var remediationProps = schemaObject{
 	{"auto_rate", map[string]any{"type": "boolean", "description": "Halve the query rate while many lookups fail and raise it again once they succeed, never above the starting rate, instead of giving up."}},
 	{"exclude", map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": maxMCPExclude, "description": "Names out of scope that are never queried: one name (mail.example.com) or a branch (*.corp.example.com)."}},
 	{"depth", map[string]any{"type": "integer", "minimum": 1, "maximum": maxMCPDepth, "description": "Enumerate the words again under every name found, down to this many levels; default 1, no recursion. Every level stays within max_queries."}},
+	{"permute", map[string]any{"type": "boolean", "description": "After the scan, test variants of the names found (api suggests api-dev, dev-api, api2), as the command line's -permute does, within what is left of max_queries. The report's permutation says what the pass tested; its finds join results."}},
 }
 
 // remediation holds the remediationProps arguments.
@@ -102,6 +105,7 @@ type remediation struct {
 	AutoRate          bool     `json:"auto_rate"`
 	Exclude           []string `json:"exclude"`
 	Depth             int      `json:"depth"`
+	Permute           bool     `json:"permute"` // run by runMCPCall, not set on the Config (#405)
 }
 
 // apply checks the arguments and sets them on cfg.
@@ -201,7 +205,7 @@ func labScanTool(cfg mcpConfig) mcp.Tool {
 			}
 			defer srv.Close()
 			scanCfg.Resolver = srv.Addr
-			report := runMCPScan(ctx, scanCfg, args.Offset)
+			report := runMCPCall(ctx, scanCfg, args.Offset, args.Permute)
 			report.Scenario = args.Scenario
 			return report.result()
 		},
@@ -217,6 +221,9 @@ type scanArgs struct {
 	MaxQueries int      `json:"max_queries"`
 	Offset     int      `json:"offset"`
 	Sources    []string `json:"sources"`
+	// ZoneTransfer asks the domain's name servers for a zone transfer; only
+	// offered when the operator started the server with -axfr (#405).
+	ZoneTransfer bool `json:"zone_transfer"`
 	remediation
 }
 
@@ -230,6 +237,9 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 	}
 	if len(cfg.sources) > 0 {
 		props = append(props, schemaField{"sources", map[string]any{"type": "array", "items": map[string]any{"enum": cfg.sources}, "description": "Passive sources to seed candidates from before the scan; default none. Their names are added to words after dedupe, count against max_queries, and are each verified by a lookup. One HTTPS request per source."}})
+	}
+	if cfg.axfr {
+		props = append(props, schemaField{"zone_transfer", map[string]any{"type": "boolean", "description": "Before the scan, ask each of the domain's name servers for a full zone transfer (AXFR), and one how the zone proves a name does not exist. The names a transfer gives are added like a source's and verified by a lookup. A server that allows it is a finding: the report's zone_transfer lists them. These queries go to the domain's own name servers, about four per server, and are not paced."}})
 	}
 	schema := inputSchema(append(props, remediationProps...), "domain")
 	var calls atomic.Int64 // scan calls this session has made
@@ -245,6 +255,9 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			var args scanArgs
 			if err := strictUnmarshal(raw, &args); err != nil {
 				return mcp.Errorf("invalid arguments: %v", err)
+			}
+			if args.ZoneTransfer && !cfg.axfr {
+				return mcp.Errorf("zone transfers are off: the operator did not start the server with -axfr")
 			}
 			var counted []*countedSource
 			for _, name := range args.Sources {
@@ -301,7 +314,14 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 			if calls.Add(1) > int64(cfg.maxCalls) {
 				return mcp.Errorf("session budget spent: the operator allows %d scan calls per session (-max-calls)", cfg.maxCalls)
 			}
-			report := runMCPScan(ctx, scanCfg, args.Offset)
+			var zone *mcpZoneTransfer
+			if args.ZoneTransfer && !scan.TargetOutOfScope(scanCfg.Exclude, domain) {
+				var names []string
+				zone, names = mcpZoneTransferOf(ctx, cfg, domain, scanCfg.Exclude)
+				scanCfg.Sources = append(scanCfg.Sources, namesSource{name: candidates.AXFR, names: names})
+			}
+			report := runMCPCall(ctx, scanCfg, args.Offset, args.Permute)
+			report.ZoneTransfer = zone
 			for _, c := range counted {
 				s := mcpSource{Name: c.name, Names: c.names}
 				var tr *passive.Truncated
@@ -317,6 +337,33 @@ func scanTool(cfg mcpConfig) mcp.Tool {
 		},
 	}
 }
+
+// mcpZoneTransferOf asks domain's name servers for a zone transfer, as the
+// command line's -axfr does, skipping those exclude rules out of scope
+// (#405). It returns the report's summary and the names the transfers gave.
+func mcpZoneTransferOf(ctx context.Context, cfg mcpConfig, domain string, exclude []string) (*mcpZoneTransfer, []string) {
+	port := cfg.transferPort
+	if port == "" {
+		port = "53"
+	}
+	r := axfr.Try(ctx, domain, axfr.Options{Resolver: cfg.dnsServer, Port: port, Timeout: cfg.timeout, Skip: scan.Excluder(exclude)})
+	allowed := r.Allowed
+	if allowed == nil {
+		allowed = []string{}
+	}
+	return &mcpZoneTransfer{Names: len(r.Names), Allowed: allowed, Denial: string(r.Denial), Error: r.Err}, r.Names
+}
+
+// namesSource hands a scan names already gathered, under a source's name,
+// so its results say where they came from.
+type namesSource struct {
+	name  string
+	names []string
+}
+
+func (s namesSource) Name() string { return s.name }
+
+func (s namesSource) Names(context.Context, string) ([]string, error) { return s.names, nil }
 
 // allowed reports whether domain is an allow-listed apex or under one.
 func allowed(allow []string, domain string) bool {

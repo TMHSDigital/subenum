@@ -58,6 +58,12 @@ type mcpConfig struct {
 	timeout     time.Duration // one lookup, live scans
 	sources     []string      // passive sources a scan call may ask for (#268)
 	maxCalls    int           // scan calls one session may make (#240)
+	// axfr lets a scan call ask for a zone transfer (#405). Off by default:
+	// its queries go to the target's own name servers and are not paced.
+	axfr bool
+	// transferPort is the port zone transfers go to; tests point it at a
+	// local server. Empty means 53.
+	transferPort string
 }
 
 // defaultMCPMaxCalls bounds a session's scan calls, so an agent that loops
@@ -126,6 +132,7 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 	fs.IntVar(&timeoutMs, "timeout", int(subenum.DefaultTimeout/time.Millisecond), "Live-scan DNS lookup timeout in milliseconds")
 	fs.IntVar(&cfg.maxCalls, "max-calls", defaultMCPMaxCalls, "Most scan calls one session may make; with -max-queries it caps the session's live lookups")
 	fs.StringVar(&sources, "sources", "", "Comma-separated passive sources ("+strings.Join(mcpSourceNames(), ", ")+") a scan call may ask for. Off by default: they send the domain to third parties")
+	fs.BoolVar(&cfg.axfr, "axfr", false, "Let a scan call ask each name server of the domain for a zone transfer (zone_transfer). Off by default: those queries go to the target's own name servers and are not paced by -rate")
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(stderr, "Usage: %s mcp [flags]\n\n", ProgramName)
 		_, _ = fmt.Fprintln(stderr, "Serves subenum to AI agents over the Model Context Protocol (stdio).")
@@ -199,7 +206,8 @@ func parseMCPFlags(args []string, stderr io.Writer) (cfg mcpConfig, code int, ok
 
 func mcpServer(cfg mcpConfig) *mcp.Server {
 	tools := []mcp.Tool{labScanTool(cfg)}
-	instructions := "subenum enumerates subdomains by DNS. lab_scan practises on local fictional zones and is always safe. "
+	instructions := "subenum enumerates subdomains by DNS. lab_scan practises on local fictional zones and is always safe. " +
+		"Both scan tools take permute, a second pass over variants of the names found (api suggests api-dev, api2) within the same max_queries. "
 	if len(cfg.allow) > 0 {
 		tools = append(tools, scanTool(cfg))
 		instructions += fmt.Sprintf("scan enumerates real domains, only under %s, with at most %d names per call at %d queries per second. ",
@@ -207,6 +215,9 @@ func mcpServer(cfg mcpConfig) *mcp.Server {
 		if len(cfg.sources) > 0 {
 			instructions += fmt.Sprintf("scan can also seed candidates from passive sources (%s) when a call lists them in sources. ",
 				strings.Join(cfg.sources, ", "))
+		}
+		if cfg.axfr {
+			instructions += "scan can ask the domain's name servers for a zone transfer when a call sets zone_transfer; one that allows it is a finding in itself. "
 		}
 	} else {
 		instructions += "Live scanning is off: the operator allowed no domains. "

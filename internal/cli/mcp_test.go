@@ -570,6 +570,9 @@ func TestMCPReportSchemaCoversTheReport(t *testing.T) {
 		t.Helper()
 		fields := map[string]bool{}
 		for i := range typ.NumField() {
+			if !typ.Field(i).IsExported() {
+				continue // never encoded
+			}
 			name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
 			fields[name] = true
 			if _, ok := schemaProps[name]; !ok {
@@ -586,6 +589,8 @@ func TestMCPReportSchemaCoversTheReport(t *testing.T) {
 	check("results[]", reflect.TypeOf(mcpResult{}), props(top["results"].(map[string]any)["items"].(map[string]any)))
 	check("outcomes", reflect.TypeOf(mcpOutcomes{}), props(top["outcomes"].(map[string]any)))
 	check("sources[]", reflect.TypeOf(mcpSource{}), props(top["sources"].(map[string]any)["items"].(map[string]any)))
+	check("zone_transfer", reflect.TypeOf(mcpZoneTransfer{}), props(top["zone_transfer"].(map[string]any)))
+	check("permutation", reflect.TypeOf(mcpPermutation{}), props(top["permutation"].(map[string]any)))
 }
 
 // TestMCPInputSchemasMatchArgs is #330's drift guard on the input side:
@@ -606,21 +611,22 @@ func TestMCPInputSchemasMatchArgs(t *testing.T) {
 		slices.Sort(names)
 		return names
 	}
-	withSources := mcpConfig{maxQueries: 10, allow: []string{"example.com"}, sources: []string{"ct"}}
+	withSources := mcpConfig{maxQueries: 10, allow: []string{"example.com"}, sources: []string{"ct"}, axfr: true}
 	noSources := mcpConfig{maxQueries: 10, allow: []string{"example.com"}}
 	for _, tc := range []struct {
 		name string
 		tool mcp.Tool
 		args any
-		omit string // a field the schema leaves out in this configuration
+		omit []string // fields the schema leaves out in this configuration
 	}{
-		{"lab_scan", labScanTool(withSources), labScanArgs{}, ""},
-		{"scan", scanTool(withSources), scanArgs{}, ""},
-		// Without -sources the schema offers no sources argument; a call
-		// that passes one gets "sources are off" rather than "unknown field".
-		{"scan without -sources", scanTool(noSources), scanArgs{}, "sources"},
-		{"explain_stats", explainStatsTool(), explainStatsArgs{}, ""},
-		{"diff", diffTool(), diffArgs{}, ""},
+		{"lab_scan", labScanTool(withSources), labScanArgs{}, nil},
+		{"scan", scanTool(withSources), scanArgs{}, nil},
+		// Without -sources or -axfr the schema offers no sources or
+		// zone_transfer argument; a call that passes one gets "sources are
+		// off" or "zone transfers are off" rather than "unknown field".
+		{"scan without -sources", scanTool(noSources), scanArgs{}, []string{"sources", "zone_transfer"}},
+		{"explain_stats", explainStatsTool(), explainStatsArgs{}, nil},
+		{"diff", diffTool(), diffArgs{}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema struct {
@@ -635,7 +641,7 @@ func TestMCPInputSchemasMatchArgs(t *testing.T) {
 				props = append(props, name)
 			}
 			slices.Sort(props)
-			want := slices.DeleteFunc(argNames(tc.args), func(n string) bool { return n == tc.omit })
+			want := slices.DeleteFunc(argNames(tc.args), func(n string) bool { return slices.Contains(tc.omit, n) })
 			if !slices.Equal(props, want) {
 				t.Errorf("inputSchema properties %v, argument struct fields %v", props, want)
 			}
@@ -979,6 +985,9 @@ func TestMCPDiffSchemaCoversTheReport(t *testing.T) {
 		t.Helper()
 		var fields, keys []string
 		for i := range typ.NumField() {
+			if !typ.Field(i).IsExported() {
+				continue // never encoded
+			}
 			name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
 			fields = append(fields, name)
 		}

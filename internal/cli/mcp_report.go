@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/libhook"
@@ -32,8 +33,37 @@ type mcpReport struct {
 	Wildcard   bool        `json:"wildcard,omitempty"`
 	Notices    []string    `json:"notices,omitempty"`
 	Sources    []mcpSource `json:"sources,omitempty"`
-	MaxQueries int         `json:"max_queries"`
-	Rate       int         `json:"rate,omitempty"`
+	// ZoneTransfer and Permutation are set when the call asked for them
+	// (#405).
+	ZoneTransfer *mcpZoneTransfer `json:"zone_transfer,omitempty"`
+	Permutation  *mcpPermutation  `json:"permutation,omitempty"`
+	MaxQueries   int              `json:"max_queries"`
+	Rate         int              `json:"rate,omitempty"`
+
+	stats subenum.Stats // the scan's, for a permutation pass that follows it
+}
+
+// mcpZoneTransfer is what a call's zone_transfer learned (#405): the names
+// the transfers gave, which name servers allowed one, and how the zone
+// proves a name does not exist.
+type mcpZoneTransfer struct {
+	Names   int      `json:"names"`
+	Allowed []string `json:"allowed"`
+	Denial  string   `json:"denial,omitempty"`
+	Error   string   `json:"error,omitempty"`
+}
+
+// mcpPermutation is the permutation pass a call's permute ran after the
+// scan (#405): variants of the names found, tested within what is left of
+// the call's max_queries and time budget.
+type mcpPermutation struct {
+	Candidates int    `json:"candidates"` // variants not already tested
+	Tested     int64  `json:"tested"`
+	Found      int    `json:"found"` // names the pass added to results
+	Skipped    int64  `json:"skipped_by_cap,omitempty"`
+	Verdict    string `json:"verdict"`
+	Reason     string `json:"reason"`
+	Error      string `json:"error,omitempty"`
 }
 
 // mcpSource is what one passive source proposed, or the error it hit.
@@ -104,6 +134,7 @@ func runMCPScan(ctx context.Context, cfg subenum.Config, offset int) *mcpReport 
 			stats = ev.Stats
 		}
 	}
+	report.stats = stats
 	report.Found = len(report.Results)
 	report.Outcomes = mcpOutcomes{NXDomain: stats.NXDomain, Timeout: stats.Timeout, Refused: stats.Refused, Other: stats.Other, WildcardFiltered: stats.WildcardFiltered}
 	report.Skipped = stats.Skipped
@@ -114,6 +145,88 @@ func runMCPScan(ctx context.Context, cfg subenum.Config, offset int) *mcpReport 
 		report.Reason += fmt.Sprintf("; call again with offset %d to test the words after these", report.NextOffset)
 	}
 	return report
+}
+
+// runMCPCall runs a call's scan and, when it asked for permute, the
+// permutation pass after it (#405).
+func runMCPCall(ctx context.Context, cfg subenum.Config, offset int, permute bool) *mcpReport {
+	start := time.Now()
+	report := runMCPScan(ctx, cfg, offset)
+	if permute {
+		report.Permutation = permutationPass(ctx, cfg, report, time.Since(start))
+	}
+	return report
+}
+
+// permutationPass scans the variants of the names report found that the
+// scan did not already test, as the CLI's -permute does, within what the
+// scan left of cfg's max_queries and time budget. Its finds join report's
+// results.
+func permutationPass(ctx context.Context, cfg subenum.Config, report *mcpReport, elapsed time.Duration) *mcpPermutation {
+	p := &mcpPermutation{}
+	if report.Error != "" || ctx.Err() != nil || report.Verdict == verdictNotRun {
+		p.Verdict, p.Reason = verdictNotRun, "the scan stopped early, so no permutation pass ran"
+		return p
+	}
+	tested := map[string]bool{}
+	for _, w := range cfg.Words {
+		tested[strings.ToLower(w)] = true
+	}
+	var seeds []string
+	for _, r := range report.Results {
+		if rel, ok := strings.CutSuffix(r.Name, "."+cfg.Domain); ok && rel != "" {
+			seeds = append(seeds, rel)
+			tested[rel] = true
+		}
+	}
+	var words []string
+	for _, w := range subenum.Permutations(seeds, nil) {
+		if !tested[w] {
+			words = append(words, w)
+		}
+	}
+	p.Candidates = len(words)
+	budget := cfg.MaxQueries - int(report.stats.Total())
+	left := cfg.MaxDuration - elapsed
+	switch {
+	case len(words) == 0:
+		p.Verdict, p.Reason = subenum.VerdictComplete, "no variants to test: nothing was found, or every variant was already tested"
+		return p
+	case cfg.MaxQueries > 0 && budget <= 0:
+		p.Skipped = int64(len(words))
+		p.Verdict, p.Reason = subenum.VerdictDegraded, "the scan spent max_queries, so no variant was tested; call again with a larger max_queries or fewer words"
+		return p
+	case cfg.MaxDuration > 0 && left <= 0:
+		p.Skipped = int64(len(words))
+		p.Verdict, p.Reason = subenum.VerdictDegraded, "the scan spent the server's -max-duration, so no variant was tested"
+		return p
+	}
+	pcfg := cfg
+	pcfg.Words, pcfg.Sources, pcfg.Recursive, pcfg.Depth = words, nil, false, 0
+	if cfg.MaxQueries > 0 {
+		pcfg.MaxQueries = budget
+	}
+	if cfg.MaxDuration > 0 {
+		pcfg.MaxDuration = left
+	}
+	pr := runMCPScan(ctx, pcfg, 0)
+	seen := map[string]bool{}
+	for _, r := range report.Results {
+		seen[r.Name] = true
+	}
+	for _, r := range pr.Results {
+		if !seen[r.Name] {
+			report.Results = append(report.Results, r)
+			p.Found++
+		}
+	}
+	report.Found = len(report.Results)
+	for _, n := range pr.Notices {
+		report.Notices = append(report.Notices, "permute: "+n)
+	}
+	p.Tested, p.Skipped = pr.stats.Total(), pr.Skipped
+	p.Verdict, p.Reason, p.Error = pr.Verdict, pr.Reason, pr.Error
+	return p
 }
 
 // mcpReasonTerms renders the Config fields a verdict reason names in the
@@ -276,6 +389,21 @@ var mcpReportSchema = json.RawMessage(`{
       "properties": {"name": {"type": "string"}, "names": {"type": "integer"}, "error": {"type": "string"}, "truncated": {"type": "boolean", "description": "the source hit one of its limits: its names were used, but some hosts may be missing"}},
       "required": ["name", "names"]
     }},
+    "zone_transfer": {"type": "object", "description": "zone_transfer calls only", "properties": {
+      "names": {"type": "integer", "description": "names the transfers gave; each was looked up like a word"},
+      "allowed": {"type": "array", "items": {"type": "string"}, "description": "name servers that allowed a full zone transfer: anyone can list the zone, a finding in itself"},
+      "denial": {"enum": ["nsec", "nsec3", "none"], "description": "how the zone proves a name does not exist; nsec means anyone can list every name by walking the zone"},
+      "error": {"type": "string"}
+    }, "required": ["names", "allowed"]},
+    "permutation": {"type": "object", "description": "permute calls only: the pass over variants of the names found", "properties": {
+      "candidates": {"type": "integer", "description": "variants not already tested"},
+      "tested": {"type": "integer"},
+      "found": {"type": "integer", "description": "names the pass added to results"},
+      "skipped_by_cap": {"type": "integer"},
+      "verdict": {"enum": ["complete", "degraded", "unreliable", "not_run"]},
+      "reason": {"type": "string"},
+      "error": {"type": "string"}
+    }, "required": ["candidates", "tested", "found", "verdict", "reason"]},
     "max_queries": {"type": "integer"},
     "rate": {"type": "integer"}
   },
