@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `-srv` looks up a built-in list of 48 service names (`_sip._tcp`, `_autodiscover._tcp`, `_ldap._tcp`, `_xmpp-server._tcp`, ...) under each target, after the wordlist, and reports the ones with SRV records with `sources: ["srv"]`. It needs `SRV` in `-type`, so the extra query per name is a choice. The names count against `-max-queries`, `-dry-run` counts them, and they do not seed `-permute`. With `SRV` in `-type`, a service whose target host does not exist is a `dangling-srv` takeover candidate, with its own SARIF rule. The result schema's `takeover_candidate` pattern now also allows `dangling-ns`, which it wrongly rejected (#419).
 
 ### Changed
+- With `-axfr` and passive sources (`-ct`, `-sources`), a target's zone transfer now runs while the sources are asked, instead of after them, so a slow crt.sh answer no longer adds the transfer's time on top. Messages and candidates come in the same order as before (#365).
 - The `-permute` pass is built in one set instead of three copies, and a target's pass builds at most 1,000,000 candidates (the seeds taken in sorted order, with a note when it stops there). For 50,000 seed names, as a large Certificate Transparency footprint gives, building the pass took about 11 s and 1.8 GB of allocations and now takes under 1 s and 150 MB. The `-dry-run` notes give the pass's bound: up to 93 candidates per name (#400).
 
 ## [0.11.0] - 2026-11-18

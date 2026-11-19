@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -738,21 +739,33 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	// A target -exclude rules out is refused by the scan's preflight; it gets
 	// no passive lookup and no zone transfer before that either (#372).
 	inScope := !scan.TargetOutOfScope(s.in.excludes, target)
+	// The zone transfer runs while the passive sources are asked: they are
+	// independent, and a source can take tens of seconds (#365). Its lines
+	// are held and printed after the sources', and its names added after
+	// theirs, as when the two ran one after the other.
+	var axfrInfo targetAXFR
+	var axfrLines heldLines
+	var transfer sync.WaitGroup
+	if s.f.axfr && inScope {
+		transfer.Go(func() {
+			axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, axfrLines.Info, scan.Excluder(s.in.excludes))
+		})
+	}
 	var sourceInfo []targetSource
 	if inScope {
 		sourceInfo = passiveNames(ctx, s.in.sources, target, saved, out, s.a.sourceURLs)
 	}
+	transfer.Wait()
 	for _, src := range sourceInfo {
 		added := cands.Add(src.Source, src.Names)
 		if src.Fetched {
 			out.Info("%s", passive.AddedLine(passive.Labels[src.Source], len(src.Names), target, added))
 		}
 	}
-	var axfrInfo targetAXFR
+	axfrLines.replay(out.Info)
 	if s.f.axfr && inScope {
 		// Transferred names are candidates like -ct's: each is still looked
 		// up, so only names that resolve are reported (#85).
-		axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, out, scan.Excluder(s.in.excludes))
 		added := cands.Add(candidates.AXFR, axfrInfo.names)
 		if len(axfrInfo.allowed) > 0 {
 			out.Info("%s", passive.AddedLine("Zone transfer", len(axfrInfo.names), target, added))

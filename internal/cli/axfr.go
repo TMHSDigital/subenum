@@ -2,12 +2,39 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/TMHSDigital/subenum/internal/axfr"
 	"github.com/TMHSDigital/subenum/internal/dns"
-	"github.com/TMHSDigital/subenum/internal/output"
 )
+
+// heldLines keeps Info lines to print later, so work that runs alongside
+// other work prints in the order it would have run in (#365). It is safe
+// for concurrent use.
+type heldLines struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+// Info holds one formatted line.
+func (h *heldLines) Info(format string, a ...any) {
+	h.mu.Lock()
+	h.lines = append(h.lines, fmt.Sprintf(format, a...))
+	h.mu.Unlock()
+}
+
+// replay prints the held lines through info, in order, and forgets them.
+func (h *heldLines) replay(info func(string, ...any)) {
+	h.mu.Lock()
+	lines := h.lines
+	h.lines = nil
+	h.mu.Unlock()
+	for _, line := range lines {
+		info("%s", line)
+	}
+}
 
 // targetAXFR is a target's zone transfer attempt (#85).
 type targetAXFR struct {
@@ -25,7 +52,7 @@ type targetAXFR struct {
 // implementation (#314). A resumed run reuses the names the interrupted run
 // got, so its candidate list matches. Name servers skip rules out of scope
 // are neither resolved nor contacted (#372).
-func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *resumeTarget, out *output.Writer, skip func(string) bool) targetAXFR {
+func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *resumeTarget, info func(string, ...any), skip func(string) bool) targetAXFR {
 	if saved != nil && saved.AXFRDone {
 		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, denial: dns.Denial(saved.Denial), done: true}
 	}
@@ -36,20 +63,20 @@ func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *r
 		Resolver: f.dnsServer,
 		Port:     port,
 		Timeout:  time.Duration(f.timeoutMs) * time.Millisecond,
-		Info:     out.Info,
+		Info:     info,
 		Skip:     skip,
 	}
 	if f.verbose {
-		opts.Debug = out.Info
+		opts.Debug = info
 	}
 	r := axfr.Try(ctx, target, opts)
 	res := targetAXFR{names: r.Names, allowed: r.Allowed, tried: r.Tried, denial: r.Denial, queries: r.Queries, done: true, err: r.Err}
 	if r.Err != "" {
-		out.Info("Warning: -axfr: %s; scanning %s without a zone transfer", r.Err, target)
+		info("Warning: -axfr: %s; scanning %s without a zone transfer", r.Err, target)
 		return res
 	}
 	if len(r.Allowed) == 0 && f.verbose && ctx.Err() == nil {
-		out.Info("-axfr: no name server of %s allowed a zone transfer (%d addresses asked)", target, r.Tried)
+		info("-axfr: no name server of %s allowed a zone transfer (%d addresses asked)", target, r.Tried)
 	}
 	return res
 }

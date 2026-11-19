@@ -513,7 +513,7 @@ func TestZoneTransferStopsWhenCancelled(t *testing.T) {
 	}
 	out := output.New(nil, false, output.FormatText)
 	out.SetStderr(io.Discard)
-	res := zoneTransfer(ctx, cliFlags{timeoutMs: 5000, dnsServer: srv.Addr}, port, "example.test", nil, out, nil)
+	res := zoneTransfer(ctx, cliFlags{timeoutMs: 5000, dnsServer: srv.Addr}, port, "example.test", nil, out.Info, nil)
 	if res.tried != 1 {
 		t.Errorf("addresses asked = %d, want 1: the second came after the cancel", res.tried)
 	}
