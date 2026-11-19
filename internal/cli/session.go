@@ -487,7 +487,7 @@ func (s *session) loadInputs() bool {
 			out.Error("reading -diff file: %v", err)
 			return false
 		}
-		s.diff = &differ{previous: previous.names, current: map[string]struct{}{}}
+		s.diff = &differ{previous: previous.names, current: map[string]struct{}{}, firstSeen: previous.firstSeen, lastSeen: previous.lastSeen}
 		if f.diffRecords && !s.diff.withRecords(previous, s.in.recordTypes) {
 			out.Info("Note: -diff-records: %s has no records (text format), so only names are compared; save results with -format jsonl, json or csv", f.diff)
 		}
@@ -525,7 +525,18 @@ func (s *session) openOutputs() bool {
 		writers = append(writers, w)
 	}
 	s.out.SetDiff(s.diff != nil)
+	// A real run dates what it finds (#420); simulated and lab runs do not,
+	// so a seeded run's output stays the same byte for byte.
+	stamp := !f.testMode && f.simZone == ""
+	var firstSeen map[string]string
+	if s.diff != nil {
+		firstSeen = s.diff.firstSeen
+	}
+	runAt := s.a.clock()
 	for _, w := range writers {
+		if stamp {
+			w.SetSeen(runAt, firstSeen)
+		}
 		// Bare names when piped or -silent (no "Found:" banner), human-friendly
 		// on a terminal.
 		w.SetPlain(f.silent || !isTerminal(s.a.stdout))

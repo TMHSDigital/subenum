@@ -779,6 +779,17 @@ type runArgs struct {
 	sourceURLs map[string]string
 	// axfrPort is the port zone transfers are requested on; "" is 53.
 	axfrPort string
+	// now is the clock that dates results' first_seen and last_seen
+	// (#420); nil is time.Now.
+	now func() time.Time
+}
+
+// clock returns the time results are dated with.
+func (a runArgs) clock() time.Time {
+	if a.now == nil {
+		return time.Now()
+	}
+	return a.now()
 }
 
 // transferPort is the port -axfr asks name servers on.

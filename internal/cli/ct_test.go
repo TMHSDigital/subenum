@@ -156,7 +156,7 @@ func TestE2EPassiveSources(t *testing.T) {
 	sourceArgs.args = append([]string{"-format", "csv"}, scanArgs...)
 	code, out = runCLIWith(t, sourceArgs)
 	rows, err := csv.NewReader(strings.NewReader(out)).ReadAll()
-	if err != nil || len(rows) == 0 || !slices.Equal(rows[0], []string{"subdomain", "type", "value", "sources"}) {
+	if err != nil || len(rows) == 0 || !slices.Equal(rows[0], []string{"subdomain", "type", "value", "sources", "first_seen", "last_seen"}) {
 		t.Fatalf("csv: exit %d, err %v, rows %q; want a sources column", code, err, rows)
 	}
 	got = map[string]string{}

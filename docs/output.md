@@ -30,6 +30,10 @@ A test fails when a field is added to the code but not to these files, so they s
 | `permutation` | boolean | when set | `true` for a name the `-permute` pass found. |
 | `sources` | array of strings | scan results | What proposed the name, in this order: `wordlist`, `ct`, `wayback`, `axfr`; or `permute` alone for a `-permute` hit. Not on removed names or in `subenum diff` output. |
 | `target` | string | scan results | The scanned domain that found the name, which tells `-dL` results with nested targets apart. Not on removed names or in `subenum diff` output. |
+| `first_seen` | string | real runs | When the name was first seen, as an RFC 3339 time in UTC: the earliest `first_seen` the `-diff` baseline gave it (JSON, JSONL or CSV), else this run's time. Never on `-simulate` or `-simulate-zone` runs, so seeded output stays reproducible. On a removed name, and in `subenum diff` output, it is copied from the file the name came from. |
+| `last_seen` | string | real runs | When a run last found the name: this run's time, in RFC 3339 UTC. Copied as `first_seen` is on removed names and in `subenum diff` output. |
+
+A run's results all carry the same time, taken when the run starts. Pass each run's JSONL or CSV file to the next run's `-diff` (as the [GitHub Action](monitoring.html) does with its baseline) and `first_seen` carries forward, so a takeover candidate or an internal address shows how long it has been there.
 
 A record's `type` is `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT` or `SRV`{% include unreleased.html value="type=SRV" %}. Its `value` is an address, a host name (`CNAME`, `NS`), `<preference> <host>` (`MX`), the text (`TXT`), with a backslash and non-printable bytes written as `\DDD`, or `<priority> <weight> <port> <target>` (`SRV`).
 
@@ -47,6 +51,7 @@ CSV has one row per record, so a name with three records has three rows, and a n
 | `change` | `-diff` | As in JSON. |
 | `sources` | scan results | As in JSON, joined with `;`. |
 | `target` | `-dL` | As in JSON. |
+| `first_seen`, `last_seen` | real runs, and `subenum diff` of files that have them | As in JSON; empty where a name has none. |
 
 ## Text
 

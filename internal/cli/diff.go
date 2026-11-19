@@ -33,6 +33,11 @@ type differ struct {
 	// the comparison is off or the baseline has no records.
 	records map[string][]dns.Record
 	types   []string
+
+	// The baseline's first_seen and last_seen by name (#420): a name found
+	// again keeps its first_seen, and a removed name reports both as the
+	// baseline had them.
+	firstSeen, lastSeen map[string]string
 }
 
 // baseline is a previous results file: its names, and the records behind
@@ -41,6 +46,8 @@ type baseline struct {
 	names      map[string]struct{}
 	records    map[string][]dns.Record
 	hasRecords bool
+	// first_seen and last_seen by name, from a file that has them (#420).
+	firstSeen, lastSeen map[string]string
 }
 
 // loadPrevious reads the names from a previous subenum results file in any
@@ -67,7 +74,7 @@ func parseBaseline(data []byte) (baseline, error) {
 	if err != nil {
 		return baseline{}, err
 	}
-	return baseline{names: d.Names, records: d.Records, hasRecords: d.HasRecords}, nil
+	return baseline{names: d.Names, records: d.Records, hasRecords: d.HasRecords, firstSeen: d.FirstSeen, lastSeen: d.LastSeen}, nil
 }
 
 const diffUsage = "Usage: subenum diff [-records] [-type A,AAAA,CNAME] [-format text|json|jsonl|csv] <previous> <current>"
@@ -125,25 +132,29 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	out.SetPlain(true)
 	out.SetDiff(true)
 	out.SetShowRecords(*records)
+	// first_seen and last_seen are copied through from the file a name comes
+	// from, unchanged: nothing was looked up (#420).
+	out.SetSeenColumns(len(prev.firstSeen)+len(prev.lastSeen)+len(cur.firstSeen)+len(cur.lastSeen) > 0)
 	d := compareBaselines(prev, cur, *records, types)
 	if *records && !d.compared {
 		out.Info("Note: -records needs JSON, JSONL or CSV files; comparing names only")
 	}
 
-	emit := func(name, change string, recs, previous []dns.Record) {
+	emit := func(name, change string, from baseline, recs, previous []dns.Record) {
 		if recs == nil {
 			recs = []dns.Record{}
 		}
-		out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: recs}, Change: change, PreviousRecords: previous})
+		out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: recs}, Change: change, PreviousRecords: previous,
+			FirstSeen: from.firstSeen[name], LastSeen: from.lastSeen[name]})
 	}
 	for _, name := range d.added {
-		emit(name, "added", cur.records[name], nil)
+		emit(name, "added", cur, cur.records[name], nil)
 	}
 	for _, name := range d.changed {
-		emit(name, "changed", cur.records[name], prev.records[name])
+		emit(name, "changed", cur, cur.records[name], prev.records[name])
 	}
 	for _, name := range d.missing {
-		emit(name, "missing", prev.records[name], nil)
+		emit(name, "missing", prev, prev.records[name], nil)
 	}
 	if err := out.Finish(); err != nil {
 		out.Error("writing output: %v", err)
@@ -302,7 +313,8 @@ func emitRemoved(ctx context.Context, s *session, summary *output.Summary) int64
 			diffSummary.Unverified++ // never looked up; not a found name (#151)
 		case outcome == dns.OutcomeNXDomain:
 			d.removed++
-			out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: []dns.Record{}}, Change: "removed"})
+			out.Emit(output.Result{Result: scan.Result{Subdomain: name, Records: []dns.Record{}}, Change: "removed",
+				FirstSeen: d.firstSeen[name], LastSeen: d.lastSeen[name]})
 		case outcome == dns.OutcomeFound:
 			diffSummary.StillResolving++
 		default:

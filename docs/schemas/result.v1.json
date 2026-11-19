@@ -56,6 +56,16 @@
     "target": {
       "type": "string",
       "description": "The scanned domain that found the name; tells -dL results with nested targets apart. Absent on removed names and in subenum diff output."
+    },
+    "first_seen": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 time in UTC: the earliest first_seen the -diff baseline gave the name, else the run's time. Real runs only, never simulated ones. On removed names, and in subenum diff output, copied from the file the name came from."
+    },
+    "last_seen": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 time in UTC: the time of the run that found the name. Real runs only, never simulated ones. On removed names, and in subenum diff output, copied from the file the name came from."
     }
   },
   "$defs": {

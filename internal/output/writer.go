@@ -75,6 +75,12 @@ type Result struct {
 	// Target is the scanned domain that found the name, so -dL results with
 	// nested targets can be split per target (#422).
 	Target string `json:"target,omitempty"`
+	// FirstSeen and LastSeen date a name across runs (#420), as RFC 3339
+	// times in UTC: when a run last found it, and the earliest first_seen
+	// the -diff baseline gave it (else that run's time). Set on real runs,
+	// never on simulated ones, so seeded output stays reproducible.
+	FirstSeen string `json:"first_seen,omitempty"`
+	LastSeen  string `json:"last_seen,omitempty"`
 }
 
 // Writer synchronises all output. Results go to stdout (and optionally a file);
@@ -109,6 +115,13 @@ type Writer struct {
 	sourcesColumn  bool   // CSV carries a sources column (#273)
 	targetColumn   bool   // CSV carries a target column (#422)
 	headerDone     bool   // text file header written
+
+	// first_seen and last_seen (#420): seenAt stamps each result found this
+	// run, firstSeen holds the baseline's first_seen by name, and
+	// seenColumns adds both CSV columns.
+	seenAt      string
+	firstSeen   map[string]string
+	seenColumns bool
 
 	jsonOpen  bool          // FormatJSON: the array's "[" and first element are written (#181)
 	jsonBuf   bytes.Buffer  // FormatJSON: one element, reused
@@ -185,6 +198,31 @@ func (w *Writer) SetSourcesColumn(on bool) { w.sourcesColumn = on }
 // under -dL.
 func (w *Writer) SetTargetColumn(on bool) { w.targetColumn = on }
 
+// SetSeen stamps every result found this run (#420): last_seen is at, in
+// UTC, and first_seen is the earlier of at and firstSeen[name], a baseline's
+// first_seen. CSV gains first_seen and last_seen columns, after every other
+// column. A removed or missing result, not found this run, keeps the values
+// it was given.
+func (w *Writer) SetSeen(at time.Time, firstSeen map[string]string) {
+	w.seenAt, w.firstSeen, w.seenColumns = at.UTC().Format(time.RFC3339), firstSeen, true
+}
+
+// SetSeenColumns adds the first_seen and last_seen CSV columns without
+// stamping results, for output that copies them from files (#420).
+func (w *Writer) SetSeenColumns(on bool) { w.seenColumns = on }
+
+// stampSeen sets res's first_seen and last_seen when SetSeen is on and res
+// was found this run.
+func (w *Writer) stampSeen(res *Result) {
+	if w.seenAt == "" || res.Change == "removed" || res.Change == "missing" {
+		return
+	}
+	res.LastSeen, res.FirstSeen = w.seenAt, w.seenAt
+	if first := w.firstSeen[strings.ToLower(res.Subdomain)]; first != "" && first < w.seenAt {
+		res.FirstSeen = first
+	}
+}
+
 // SetSeed records the simulation seed for the simulated-results file header.
 func (w *Writer) SetSeed(seed uint64) { w.seed = seed }
 
@@ -200,6 +238,7 @@ func (w *Writer) Emit(res Result) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	res.Simulated = w.simulate
+	w.stampSeen(&res)
 
 	// stdout and the stderr progress line may share a screen or a merged
 	// stream; blank the progress line so the result starts on a clean line.
@@ -363,6 +402,9 @@ func (w *Writer) ensureCSV() {
 	if w.targetColumn {
 		header = append(header, "target")
 	}
+	if w.seenColumns {
+		header = append(header, "first_seen", "last_seen")
+	}
 	if w.stdout {
 		w.csvStdout = csv.NewWriter(w.stdOut())
 		_ = w.csvStdout.Write(header)
@@ -395,6 +437,9 @@ func (w *Writer) writeCSVRows(res Result) {
 		}
 		if w.targetColumn {
 			row = append(row, res.Target)
+		}
+		if w.seenColumns {
+			row = append(row, res.FirstSeen, res.LastSeen)
 		}
 		if w.csvStdout != nil {
 			_ = w.csvStdout.Write(row)
