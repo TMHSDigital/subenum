@@ -24,9 +24,10 @@ COPY main.go ./
 COPY internal/ ./internal/
 # subenum mcp runs scans through the public library (#131).
 COPY pkg/ ./pkg/
-# The default wordlist is embedded in the binary (#63), and so are the lab
-# scenarios that subenum mcp's lab_scan serves (#131).
-COPY data/subdomains-5k.txt data/data.go ./data/
+# The default wordlist is embedded in the binary (#63), and so are -srv's
+# service names (#419) and the lab scenarios that subenum mcp's lab_scan
+# serves (#131).
+COPY data/subdomains-5k.txt data/srv.txt data/data.go ./data/
 COPY examples/labs/*.zone examples/labs/words.txt examples/labs/labs.go ./examples/labs/
 
 # Build the binary with optimizations
