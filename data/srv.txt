@@ -1,0 +1,52 @@
+# Service names -srv looks up under each target (#419): the _service._proto
+# labels of common SRV records, one per line. An SRV record names the host and
+# port a service runs on, so these find services a host-name wordlist never
+# does: directory, mail, chat, voice, calendar and file services.
+_autodiscover._tcp
+_caldav._tcp
+_caldavs._tcp
+_carddav._tcp
+_carddavs._tcp
+_ftp._tcp
+_gc._tcp
+_h323cs._tcp
+_h323ls._udp
+_http._tcp
+_https._tcp
+_imap._tcp
+_imaps._tcp
+_jabber._tcp
+_kerberos-master._tcp
+_kerberos-master._udp
+_kerberos._tcp
+_kerberos._udp
+_kpasswd._tcp
+_kpasswd._udp
+_ldap._tcp
+_ldaps._tcp
+_matrix._tcp
+_minecraft._tcp
+_mongodb._tcp
+_mysql._tcp
+_ntp._udp
+_pop3._tcp
+_pop3s._tcp
+_sip._tcp
+_sip._tls
+_sip._udp
+_sipfederationtls._tcp
+_sips._tcp
+_smtp._tcp
+_stun._tcp
+_stun._udp
+_stuns._tcp
+_submission._tcp
+_submissions._tcp
+_turn._tcp
+_turn._udp
+_turns._tcp
+_vlmcs._tcp
+_xmpp-client._tcp
+_xmpp-server._tcp
+_xmpps-client._tcp
+_xmpps-server._tcp

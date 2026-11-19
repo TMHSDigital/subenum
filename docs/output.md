@@ -22,13 +22,13 @@ A test fails when a field is added to the code but not to these files, so they s
 | `subdomain` | string | always | The full name, lower case, without a trailing dot. |
 | `records` | array of `{type, value}` | always | The name's records of the `-type` record types. Empty for a name `-diff` reports as removed. |
 | `simulated` | boolean | when set | `true` on every result of a `-simulate` run. |
-| `takeover_candidate` | string | when set | A DNS-only [takeover hint](https://github.com/TMHSDigital/subenum#subdomain-takeover-hints): `dangling`, `provider:<name>` or `dangling:<name>`. Needs `CNAME` or `NS` in `-type`. |
+| `takeover_candidate` | string | when set | A DNS-only [takeover hint](https://github.com/TMHSDigital/subenum#subdomain-takeover-hints): `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, `dangling-ns` for a delegation, `dangling-srv` for a service whose target host does not exist. Needs `CNAME`, `NS` or `SRV` in `-type`. |
 | `internal_address` | string | when set | The most notable non-public scope among the name's addresses: `loopback`, `unspecified`, `link-local`, `private` or `cgnat`. |
 | `partial` | boolean | when set | `true` when a requested record type's lookup failed on every attempt while another type answered: `records` may lack that type. |
 | `change` | string | with `-diff` | `added`, `removed`, or with `-diff-records` `changed`. `subenum diff` writes `missing` instead of `removed`, because it looks nothing up. |
 | `previous_records` | array of `{type, value}` | when `change` is `changed` | The baseline's records of the name. |
 | `permutation` | boolean | when set | `true` for a name the `-permute` pass found. |
-| `sources` | array of strings | scan results | What proposed the name, in this order: `wordlist`, `ct`, `wayback`, `axfr`; or `permute` alone for a `-permute` hit, `records` alone for a `-follow-records` hit. Not on removed names or in `subenum diff` output. |
+| `sources` | array of strings | scan results | What proposed the name, in this order: `wordlist`, `ct`, `wayback`, `axfr`, `srv`; or `permute` alone for a `-permute` hit, `records` alone for a `-follow-records` hit. Not on removed names or in `subenum diff` output. |
 | `target` | string | scan results | The scanned domain that found the name, which tells `-dL` results with nested targets apart. Not on removed names or in `subenum diff` output. |
 | `first_seen` | string | real runs | When the name was first seen, as an RFC 3339 time in UTC: the earliest `first_seen` the `-diff` baseline gave it (JSON, JSONL or CSV), else this run's time. Never on `-simulate` or `-simulate-zone` runs, so seeded output stays reproducible. On a removed name, and in `subenum diff` output, it is copied from the file the name came from. |
 | `last_seen` | string | real runs | When a run last found the name: this run's time, in RFC 3339 UTC. Copied as `first_seen` is on removed names and in `subenum diff` output. |
@@ -47,7 +47,7 @@ CSV has one row per record, so a name with three records has three rows, and a n
 | `type` | always | The record type. |
 | `value` | always | The record value. A value starting with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so a spreadsheet does not read it as a formula. |
 | `simulated` | `-simulate` | `true`. |
-| `takeover_candidate` | `CNAME` or `NS` in `-type` | As in JSON; empty when there is no hint. |
+| `takeover_candidate` | `CNAME`, `NS` or `SRV` in `-type` | As in JSON; empty when there is no hint. |
 | `change` | `-diff` | As in JSON. |
 | `sources` | scan results | As in JSON, joined with `;`. |
 | `target` | `-dL` | As in JSON. |

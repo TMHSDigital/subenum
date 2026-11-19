@@ -258,6 +258,12 @@ func TestTakeoverHintNODATA(t *testing.T) {
 		{[]Record{{Type: "CNAME", Value: "flaky.example.net"}}, ""},
 		{[]Record{{Type: "NS", Value: "ns-noaddr.example.net"}}, ""},
 		{[]Record{{Type: "NS", Value: "ns-gone.example.net"}}, DanglingNS},
+		// SRV targets (#419): a host that does not exist is dangling; one
+		// without addresses, "." (no service) and a malformed value are not.
+		{[]Record{{Type: "SRV", Value: "10 5 5060 sip-gone.example.net"}}, DanglingSRV},
+		{[]Record{{Type: "SRV", Value: "10 5 5060 mail-only.example.net."}}, ""},
+		{[]Record{{Type: "SRV", Value: "0 0 0 ."}}, ""},
+		{[]Record{{Type: "SRV", Value: "sip-gone.example.net"}}, ""},
 	} {
 		if got := TakeoverHint(ctx, l, tc.records); got != tc.want {
 			t.Errorf("TakeoverHint(%v) = %q, want %q", tc.records, got, tc.want)

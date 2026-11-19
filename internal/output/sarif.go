@@ -92,6 +92,11 @@ func takeoverRule(marker string) sarifRule {
 		r.ShortDescription.Text = "Subzone is delegated to a name server that does not exist"
 		r.FullDescription.Text = "The subdomain is delegated (NS records) to a name server whose name returns NXDOMAIN. Whoever registers that name answers for the whole subzone. Remove the delegation or point it at name servers you control."
 		r.DefaultConfiguration.Level, r.Properties.SecuritySeverity = "error", "8.6"
+	case kind == "dangling-srv":
+		r.ID, r.Name = "subenum/dangling-srv", "DanglingSRV"
+		r.ShortDescription.Text = "Service record points at a host that does not exist"
+		r.FullDescription.Text = "The subdomain is a service (SRV record) whose target host returns NXDOMAIN. Whoever registers that host receives the service's clients. Remove the record or point it at a host you control."
+		r.DefaultConfiguration.Level, r.Properties.SecuritySeverity = "error", "7.5"
 	case kind == "dangling" && provider == "":
 		r.ID, r.Name = "subenum/dangling-cname", "DanglingCNAME"
 		r.ShortDescription.Text = "CNAME points at a name that does not exist"

@@ -100,12 +100,29 @@ func (s *session) dryRun() int {
 			plans = append(plans, p)
 			continue
 		}
-		for _, e := range entries {
+		count := func(e string) {
 			if len(s.in.excludes) > 0 && excluded(e+"."+target) {
 				p.Excluded++
-				continue
+				return
 			}
 			p.Candidates++
+		}
+		for _, e := range entries {
+			count(e)
+		}
+		if f.srv {
+			// The service names a scan adds after the entries (#419).
+			listed := map[string]bool{}
+			for _, e := range entries {
+				if strings.HasPrefix(e, "_") {
+					listed[e] = true
+				}
+			}
+			for _, name := range srvNames() {
+				if !listed[name] {
+					count(name)
+				}
+			}
 		}
 		names := int64(p.Candidates)
 		if f.maxQueries > 0 {

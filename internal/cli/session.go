@@ -758,6 +758,12 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			out.Info("%s", passive.AddedLine("Zone transfer", len(axfrInfo.names), target, added))
 		}
 	}
+	if s.f.srv && inScope {
+		// Service names are looked up like wordlist entries, after them, so
+		// a resumed scan rebuilds the same list (#419).
+		names := srvNames()
+		out.Info("%s", passive.AddedLine("-srv", len(names), target, cands.AddUnseeded(candidates.SRV, names)))
+	}
 	entries, seeds := cands.Entries(), cands.Seeds()
 	pass := scanPass{domain: target, entries: entries, maxQueries: s.f.maxQueries}
 	if s.deepWords != nil {

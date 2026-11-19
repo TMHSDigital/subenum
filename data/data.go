@@ -10,3 +10,9 @@ import _ "embed"
 //
 //go:embed subdomains-5k.txt
 var Subdomains5k string
+
+// SRVServices are the _service._proto names -srv looks up under each
+// target, one per line, with # comments (#419).
+//
+//go:embed srv.txt
+var SRVServices string

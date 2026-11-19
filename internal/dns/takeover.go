@@ -137,9 +137,10 @@ func ParseTakeoverProviders(lines []string, only bool) (TakeoverProviders, error
 }
 
 // HintsTakeover reports whether a scan of these record types can produce
-// takeover hints: CNAME targets and NS delegations are what gets checked.
+// takeover hints: CNAME targets, NS delegations and SRV targets (#419) are
+// what gets checked.
 func HintsTakeover(types []string) bool {
-	return slices.Contains(types, "CNAME") || slices.Contains(types, "NS")
+	return slices.Contains(types, "CNAME") || slices.Contains(types, "NS") || slices.Contains(types, "SRV")
 }
 
 // DanglingNS is the takeover marker of a delegated name whose name server
@@ -234,7 +235,32 @@ func (c *TakeoverCache) Hint(ctx context.Context, l Lookup, records []Record) st
 			return DanglingNS
 		}
 	}
+	// A service whose target host does not exist (#419): whoever registers
+	// it receives the service's clients, as with a dangling CNAME.
+	for _, r := range records {
+		if target := srvTarget(r); target != "" && !c.skip(target) && c.outcome(ctx, l, target) == OutcomeNXDomain {
+			return DanglingSRV
+		}
+	}
 	return ""
+}
+
+// DanglingSRV is the takeover marker of a service whose SRV target host
+// does not exist (#419).
+const DanglingSRV = "dangling-srv"
+
+// srvTarget returns the target host of an SRV record ("<priority> <weight>
+// <port> <target>"), or "" for another type or the "." that says the
+// service is not offered.
+func srvTarget(r Record) string {
+	if r.Type != "SRV" {
+		return ""
+	}
+	fields := strings.Fields(r.Value)
+	if len(fields) != 4 || fields[3] == "." {
+		return ""
+	}
+	return strings.TrimSuffix(fields[3], ".")
 }
 
 // skip reports whether name must not be looked up.

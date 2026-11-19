@@ -22,8 +22,8 @@
     },
     "takeover_candidate": {
       "type": "string",
-      "description": "A DNS-only subdomain takeover hint: dangling, provider:<name> or dangling:<name>. Absent when there is none.",
-      "pattern": "^(dangling|provider:.+|dangling:.+)$"
+      "description": "A DNS-only subdomain takeover hint: dangling, provider:<name> or dangling:<name> for a CNAME, dangling-ns for a delegation to a name server that does not exist, dangling-srv for a service whose target host does not exist. Absent when there is none.",
+      "pattern": "^(dangling|dangling-ns|dangling-srv|provider:.+|dangling:.+)$"
     },
     "internal_address": {
       "type": "string",
@@ -50,8 +50,8 @@
     },
     "sources": {
       "type": "array",
-      "description": "What proposed the name, in this order: wordlist, ct, wayback, axfr; or permute alone for a -permute hit, records alone for a -follow-records hit. Absent on removed names and in subenum diff output.",
-      "items": { "type": "string", "enum": ["wordlist", "ct", "wayback", "axfr", "permute", "records"] }
+      "description": "What proposed the name, in this order: wordlist, ct, wayback, axfr, srv; or permute alone for a -permute hit, records alone for a -follow-records hit. Absent on removed names and in subenum diff output.",
+      "items": { "type": "string", "enum": ["wordlist", "ct", "wayback", "axfr", "permute", "records", "srv"] }
     },
     "target": {
       "type": "string",

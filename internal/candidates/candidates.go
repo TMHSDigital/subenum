@@ -19,6 +19,7 @@ const (
 	AXFR     = "axfr"
 	Permute  = "permute"
 	Records  = "records" // a -follow-records target (#432)
+	SRV      = "srv"     // a -srv service name (#419)
 )
 
 // FromWordlist, FromPermute and FromRecords are the sources of a wordlist
@@ -65,6 +66,17 @@ func (c *Set) Seeds() map[string]struct{} { return c.seeds }
 // the wordlist's own resume positions stay put, and returns how many were
 // new. Names too long for the target are dropped by wordlist.Build.
 func (c *Set) Add(source string, names []string) int {
+	return c.add(source, names, true)
+}
+
+// AddUnseeded is Add for names that must not seed the -permute pass, such
+// as -srv's service names (#419): permuting "_sip._tcp" proposes nothing a
+// zone would hold.
+func (c *Set) AddUnseeded(source string, names []string) int {
+	return c.add(source, names, false)
+}
+
+func (c *Set) add(source string, names []string, seed bool) int {
 	if len(names) == 0 {
 		return 0
 	}
@@ -88,6 +100,9 @@ func (c *Set) Add(source string, names []string) int {
 			mask = 1
 		}
 		c.from[n] = mask | bit
+	}
+	if !seed {
+		return len(added)
 	}
 	if !c.owned {
 		own := make(map[string]struct{}, len(c.seeds)+len(names))

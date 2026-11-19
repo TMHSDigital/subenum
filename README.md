@@ -250,6 +250,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-seeds <file>` | n/a | Results file (any `-format`) whose names also seed `-permute`; implies `-permute` |
 | `-recursive` | `false` | Recursively enumerate subdomains of discovered subdomains |
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
+| `-srv` | `false` | Also look up a built-in list of about 50 service names (`_sip._tcp`, `_autodiscover._tcp`, `_ldap._tcp`, ...) under each target, which host-name wordlists never hold; needs `SRV` in `-type`. Their `sources` is `srv`, and a service whose target host does not exist is a `dangling-srv` takeover candidate |
 | `-follow-records` | `false` | Also test the names under the target that found names' `CNAME`, `MX` and `NS` records point at (`lb-7.int` behind `app CNAME lb-7.int`), once each, unless they are already candidates; their `sources` is `records`, and they count against `-max-queries` and `-max-duration` |
 | `-recursive-w <file>` | the `-w` list | Wordlist of the labels `-recursive` tries under each name it finds, at depth 2 and below (`-` reads stdin); repeatable. A short list here makes deep recursion affordable |
 | **Resolvers and pacing** | | |
@@ -593,6 +594,7 @@ When a result has a CNAME record, subenum resolves the CNAME target with the tru
 | `provider:<name>` | The target is at a service where dangling records have allowed takeovers (S3, GitHub Pages, Heroku, Azure, Fastly, Shopify, ...) |
 | `dangling:<name>` | Both: a takeover-prone service and a target that does not exist |
 | `dangling-ns` | With `-type` including `NS`: the name is a delegated subzone, and one of its name servers does not exist (NXDOMAIN). Whoever registers that name server answers for the whole subzone |
+| `dangling-srv` | With `-type` including `SRV`: the name is a service whose target host does not exist (NXDOMAIN). Whoever registers that host receives the service's clients |
 
 > [!IMPORTANT]
 > Takeover markers are DNS-only hints. subenum sends no HTTP requests to the candidates; a `provider:` match is often a perfectly healthy service. Verify every candidate by hand, and only against targets you are authorized to test.
@@ -608,7 +610,7 @@ A recursive resolver asked about a subzone whose every name server is gone usual
 
 A target or name server that exists but has no A or AAAA record (NODATA, such as a name with only MX or TXT records) is not dangling: when the address lookup comes back empty, subenum sends one more A query and marks the name only on an NXDOMAIN answer. A probe that fails (timeout, SERVFAIL) marks nothing.
 
-A CNAME target or name server that `-exclude` puts out of scope is never looked up: it can still get `provider:<name>`, which needs no query, but never `dangling` or `dangling-ns`.
+A CNAME target, name server or SRV target that `-exclude` puts out of scope is never looked up: it can still get `provider:<name>`, which needs no query, but never `dangling`, `dangling-ns` or `dangling-srv`.
 
 The marker is a `takeover_candidate` field in JSON and JSONL, a `takeover_candidate` column in CSV, `TAKEOVER?=<marker>` in text with `-show-records`, and a count in the breakdown and the run-quality report. A dangling CNAME makes A/AAAA lookups fail, so scan with CNAME records included to find them: `-type A,AAAA,CNAME`.
 

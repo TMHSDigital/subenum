@@ -145,6 +145,17 @@ func prepareDeepWordlist(f cliFlags, in *runtimeInputs) (*wordlist.Prepared, err
 	return prepareFiles(f.deepWords.paths, in)
 }
 
+// srvNames returns -srv's built-in service names (#419).
+func srvNames() []string {
+	var names []string
+	for line := range strings.Lines(data.SRVServices) {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			names = append(names, line)
+		}
+	}
+	return names
+}
+
 // countStdin counts the "-" entries in paths.
 func countStdin(paths []string) int {
 	n := 0

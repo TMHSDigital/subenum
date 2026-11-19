@@ -145,6 +145,7 @@ type cliFlags struct {
 	depth        int
 	deepWords    wordlistPaths // -recursive-w: the labels tried below depth 1 (#403)
 	followRecs   bool          // -follow-records: test in-scope CNAME, MX and NS targets (#432)
+	srv          bool          // -srv: look up the built-in _service._proto names (#419)
 	noAbort      bool
 	maxQueries   int
 	maxDuration  time.Duration // -max-duration: time budget for the whole run (#190)
@@ -249,6 +250,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.autoRate, "auto-rate", false, "When over 20% of the last 200 lookups fail, halve the query rate and keep going (up to 6 times, down to 5 queries/s) instead of aborting; speed back up once lookups succeed")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
+	fs.BoolVar(&f.srv, "srv", false, "Also look up a built-in list of about 50 service names (_sip._tcp, _autodiscover._tcp, _ldap._tcp, ...) under each target; needs SRV in -type")
 	fs.BoolVar(&f.followRecs, "follow-records", false, "Also test the names under the target that found names' CNAME, MX and NS records point at, once each, unless they are already candidates; they count against -max-queries")
 	fs.Var(&f.deepWords, "recursive-w", "Path to a wordlist `file` (- for stdin) of the labels -recursive tries under each name it finds, at depth 2 and below; repeat to combine several; omitted: the -w list")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
@@ -408,6 +410,13 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 	}
 	if f.diffRecords && f.diff == "" {
 		out.Error("-diff-records compares records against a previous results file; add -diff <file>")
+		return "", false
+	}
+	// A service name has SRV records and rarely an address, so without SRV
+	// its lookups would find nothing; requiring it keeps the query cost of
+	// the extra type visible (#419).
+	if f.srv && !slices.Contains(in.recordTypes, "SRV") {
+		out.Error("-srv looks up service names, which have SRV records; add SRV to -type (for example -type A,AAAA,SRV)")
 		return "", false
 	}
 	if f.concurrency > highConcurrency {
