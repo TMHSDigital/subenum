@@ -125,7 +125,13 @@ func TestCheckWildcardInconclusive(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := startTestDNS(t, map[string]testReply{"*": tc.reply})
 			timeout := 100 * time.Millisecond
-			is, fp, err := Lookup{Resolver: srv.Resolver(timeout), Timeout: timeout, Attempts: 2, Types: []string{"A"}}.CheckWildcard(context.Background(), "example.com")
+			// Count queries as the client dials them rather than as the
+			// server receives them: on a loaded machine an attempt's 100 ms
+			// can run out before its packet is written, so the server may
+			// see one query although the probe was retried (#439).
+			var dialed atomic.Int64
+			ctx := WithQueryCounter(context.Background(), &dialed)
+			is, fp, err := Lookup{Resolver: srv.Resolver(timeout), Timeout: timeout, Attempts: 2, Types: []string{"A"}}.CheckWildcard(ctx, "example.com")
 			if !errors.Is(err, ErrWildcardInconclusive) {
 				t.Fatalf("err = %v, want ErrWildcardInconclusive", err)
 			}
@@ -135,8 +141,8 @@ func TestCheckWildcardInconclusive(t *testing.T) {
 			// The check stops at the first inconclusive probe, after its two
 			// attempts. Go's resolver may itself retry a SERVFAIL, so only
 			// require that the retry happened.
-			if got := srv.Queries(); got < 2 {
-				t.Fatalf("queries = %d, want >= 2 (the probe retried)", got)
+			if got := dialed.Load(); got < 2 {
+				t.Fatalf("queries dialed = %d, want >= 2 (the probe retried)", got)
 			}
 		})
 	}
