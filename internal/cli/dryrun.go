@@ -229,6 +229,9 @@ func dryRunNotes(f cliFlags, sources []string, deep *wordlist.Prepared) []string
 	if f.axfr {
 		notes = append(notes, "-axfr names (a zone transfer from each name server at scan time)")
 	}
+	if f.nsecWalk {
+		notes = append(notes, "-nsec-walk names (a walk of a plain-NSEC zone at scan time, one query per name)")
+	}
 	if f.permute || f.seedsFile != "" {
 		notes = append(notes, fmt.Sprintf("the -permute pass (built from what the scan finds: up to %d candidates per name, at most %d per target)", permute.PerSeed, candidates.MaxPermutations))
 	}

@@ -69,8 +69,8 @@ type Result struct {
 	// Permutation marks a name found by the -permute pass (#72).
 	Permutation bool `json:"permutation,omitempty"`
 	// Sources names what proposed the name (#273): "wordlist", a passive
-	// source ("ct", "wayback") and "axfr", every one that had it, in that
-	// order; or "permute" alone for a -permute hit.
+	// source ("ct", "wayback"), "axfr", "nsec" and "srv", every one that
+	// had it, in that order; or "permute" alone for a -permute hit.
 	Sources []string `json:"sources,omitempty"`
 	// Target is the scanned domain that found the name, so -dL results with
 	// nested targets can be split per target (#422).

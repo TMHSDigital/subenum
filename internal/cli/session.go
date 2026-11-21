@@ -411,6 +411,10 @@ func (s *session) announceSimulation() {
 		out.Info("Note: -axfr is ignored in simulation mode, which sends no DNS queries")
 		f.axfr = false
 	}
+	if f.nsecWalk {
+		out.Info("Note: -nsec-walk is ignored in simulation mode, which sends no DNS queries")
+		f.nsecWalk = false
+	}
 }
 
 // loadInputs checks a -resume run against its inputs and reads the wordlist
@@ -746,9 +750,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	var axfrInfo targetAXFR
 	var axfrLines heldLines
 	var transfer sync.WaitGroup
-	if s.f.axfr && inScope {
+	if (s.f.axfr || s.f.nsecWalk) && inScope {
 		transfer.Go(func() {
-			axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, axfrLines.Info, scan.Excluder(s.in.excludes))
+			axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, axfrLines.Info, scan.Excluder(s.in.excludes), s.in.deadline)
 		})
 	}
 	var sourceInfo []targetSource
@@ -769,6 +773,13 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 		added := cands.Add(candidates.AXFR, axfrInfo.names)
 		if len(axfrInfo.allowed) > 0 {
 			out.Info("%s", passive.AddedLine("Zone transfer", len(axfrInfo.names), target, added))
+		}
+	}
+	if s.f.nsecWalk && inScope {
+		// Walked names are candidates too, after the transfer's (#437).
+		added := cands.Add(candidates.NSEC, axfrInfo.walked)
+		if len(axfrInfo.walked) > 0 {
+			out.Info("%s", passive.AddedLine("NSEC walk", len(axfrInfo.walked), target, added))
 		}
 	}
 	if s.f.srv && inScope {

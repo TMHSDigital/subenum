@@ -11,6 +11,7 @@
 //	$DELAY 20ms            # every answer waits this long
 //	$REFUSE-ABOVE 50       # answer REFUSED past 50 queries a second
 //	$TRANSFER allow        # answer a zone transfer (AXFR); the default is refuse
+//	$DNSSEC nsec           # prove absent names with NSEC (walkable), or nsec3; the default is none
 //	@        A        192.0.2.1
 //	www      A        192.0.2.10
 //	www      AAAA     2001:db8::10
@@ -58,6 +59,64 @@ type Zone struct {
 	// every name the file defines; without it a transfer is refused, as
 	// most servers do ($TRANSFER, #434).
 	Transfer bool
+	// DNSSEC is how answers prove a name does not exist ($DNSSEC, #437):
+	// "nsec" adds the NSEC record that covers the name, so the zone can be
+	// walked; "nsec3" adds an NSEC3 record; "" (none, the default) adds
+	// nothing, as for an unsigned zone.
+	DNSSEC string
+}
+
+// nsecChain lists the owner names of origin's NSEC chain in canonical order
+// (RFC 4034 section 6.1): the apex, every name the file defines except
+// failing ones, and the wildcards (*.dev). Names that exist only as an
+// ancestor of another own no record, so they have no NSEC record either.
+func (z *Zone) nsecChain(origin string) []string {
+	chain := []string{origin}
+	for rel, e := range z.entries {
+		if rel != "" && e.fail == nil {
+			chain = append(chain, rel+"."+origin)
+		}
+	}
+	for parent := range z.wildcards {
+		chain = append(chain, absolute(strings.TrimSuffix("*."+parent, "."), origin))
+	}
+	slices.SortFunc(chain, canonicalCompare)
+	return slices.Compact(chain)
+}
+
+// canonicalCompare orders names as RFC 4034 section 6.1 does: label by
+// label from the right, a name before every name below it.
+func canonicalCompare(a, b string) int {
+	la, lb := strings.Split(a, "."), strings.Split(b, ".")
+	for i, j := len(la)-1, len(lb)-1; i >= 0 && j >= 0; i, j = i-1, j-1 {
+		if c := strings.Compare(la[i], lb[j]); c != 0 {
+			return c
+		}
+	}
+	return len(la) - len(lb)
+}
+
+// sign adds the proof of absence $DNSSEC asks for to r, the answer to name:
+// for a name that owns no record of its own (one that does not exist, an
+// ancestor of a deeper name, or a name a wildcard answers), the NSEC record
+// of chain that covers it, or an NSEC3 record.
+func (z *Zone) sign(r dnsserver.Reply, name string, chain []string) dnsserver.Reply {
+	if z.DNSSEC == "" || r.Drop || r.RCode != dnsmessage.RCodeSuccess && r.RCode != dnsmessage.RCodeNameError {
+		return r
+	}
+	i, owner := slices.BinarySearchFunc(chain, name, canonicalCompare)
+	if owner {
+		return r
+	}
+	switch z.DNSSEC {
+	case "nsec3":
+		r.Denial = "nsec3"
+	case "nsec":
+		// chain[i-1] is the last name before name; the apex sorts first, so
+		// i is at least 1. The last record leads back to the apex.
+		r.NSEC = []dnsserver.NSEC{{Owner: chain[i-1], Next: chain[i%len(chain)]}}
+	}
+	return r
 }
 
 // transferNames lists the names a transfer of origin gives: every name the
@@ -200,6 +259,17 @@ var directives = []directive{
 			z.Transfer = false
 		default:
 			return fmt.Errorf("bad $TRANSFER %q: want allow or refuse", arg)
+		}
+		return nil
+	}},
+	{"$DNSSEC", "$DNSSEC nsec|nsec3|none", func(z *Zone, arg string) error {
+		switch a := strings.ToLower(arg); a {
+		case "nsec", "nsec3":
+			z.DNSSEC = a
+		case "none":
+			z.DNSSEC = ""
+		default:
+			return fmt.Errorf("bad $DNSSEC %q: want nsec, nsec3 or none", arg)
 		}
 		return nil
 	}},
@@ -532,6 +602,12 @@ func (z *Zone) Handler(origins []string) dnsserver.Handler {
 	var mu sync.Mutex
 	var window time.Time
 	var inWindow int
+	chains := map[string][]string{}
+	if z.DNSSEC != "" {
+		for _, o := range origins {
+			chains[o] = z.nsecChain(o)
+		}
+	}
 	return func(q dnsserver.Query) dnsserver.Reply {
 		if z.RefuseAbove > 0 {
 			mu.Lock()
@@ -552,6 +628,9 @@ func (z *Zone) Handler(origins []string) dnsserver.Handler {
 			if rel, ok := relative(q.Name, o); ok && len(o) > best {
 				best = len(o)
 				r = z.Answer(rel, o)
+				if q.Type != dnsmessage.TypeAXFR {
+					r = z.sign(r, q.Name, chains[o])
+				}
 				if q.Type == dnsmessage.TypeAXFR {
 					switch {
 					case rel != "":

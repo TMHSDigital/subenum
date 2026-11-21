@@ -4,11 +4,13 @@ import (
 	"context"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/TMHSDigital/subenum/internal/dnstest"
+	"github.com/TMHSDigital/subenum/internal/labzone"
 	"github.com/TMHSDigital/subenum/pkg/subenum"
 )
 
@@ -151,5 +153,75 @@ func TestProbeZoneErrors(t *testing.T) {
 		if _, err := subenum.ProbeZone(context.Background(), tc.domain, tc.opts); err == nil {
 			t.Errorf("%s: no error", name)
 		}
+	}
+}
+
+// walkZone serves example.test from a lab zone signed with plain NSEC,
+// whose only name server is the server itself, and points the package's
+// probe and walk at its port.
+func walkZone(t *testing.T) *dnstest.Server {
+	t.Helper()
+	z, err := labzone.Parse(strings.NewReader("$DNSSEC nsec\n@ NS ns1\nns1 A 127.0.0.1\nadmin-legacy A 192.0.2.10\nsecret A 192.0.2.11\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := dnstest.Start(t, z.Handler([]string{"example.test"}))
+	_, port, err := net.SplitHostPort(srv.Addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(subenum.SetZonePort(port))
+	return srv
+}
+
+// TestProbeZoneWalkNSEC covers #437: with WalkNSEC, ProbeZone lists a
+// plain-NSEC zone's names, and MaxQueries stops the walk with a reason.
+func TestProbeZoneWalkNSEC(t *testing.T) {
+	srv := walkZone(t)
+	info, err := subenum.ProbeZone(context.Background(), "example.test", subenum.ZoneOptions{Resolver: srv.Addr, WalkNSEC: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"admin-legacy", "ns1", "secret"}; !slices.Equal(info.Walked, want) || info.WalkStop != "" || info.Denial != "nsec" {
+		t.Errorf("info = %+v, want Walked %q, no WalkStop and nsec", info, want)
+	}
+	info, err = subenum.ProbeZone(context.Background(), "example.test", subenum.ZoneOptions{Resolver: srv.Addr, WalkNSEC: true, MaxQueries: 2})
+	if err != nil || len(info.Walked) != 2 || !strings.Contains(info.WalkStop, "limit of 2 queries") {
+		t.Errorf("MaxQueries 2: info = %+v, err %v", info, err)
+	}
+	if _, err := subenum.ProbeZone(context.Background(), "example.test", subenum.ZoneOptions{Resolver: srv.Addr, Rate: -1}); err == nil {
+		t.Error("a negative Rate is not an error")
+	}
+}
+
+// TestNSECWalkSource covers #437: the walk's names are scanned like any
+// other source's, labelled nsec, without a zone transfer, and Exclude keeps
+// a name out.
+func TestNSECWalkSource(t *testing.T) {
+	srv := walkZone(t)
+	results, _, err := subenum.Scan(context.Background(), subenum.Config{
+		Domain:   "example.test",
+		Words:    []string{"mail"},
+		Resolver: srv.Addr,
+		Types:    []string{"A"},
+		Exclude:  []string{"secret.example.test"},
+		Sources:  []subenum.Source{subenum.NSECWalk(subenum.ZoneOptions{Resolver: srv.Addr})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range results {
+		names = append(names, r.Name)
+		if !slices.Equal(r.Sources, []string{"nsec"}) {
+			t.Errorf("%s: sources = %q, want [nsec]", r.Name, r.Sources)
+		}
+	}
+	slices.Sort(names)
+	if want := []string{"admin-legacy.example.test", "ns1.example.test"}; !slices.Equal(names, want) {
+		t.Errorf("results = %q, want %q", names, want)
+	}
+	if n := srv.QueriesFor("example.test", dnsmessage.TypeAXFR); n != 0 {
+		t.Errorf("AXFR queries = %d, want 0", n)
 	}
 }

@@ -245,6 +245,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | **Finding more names** | | |
 | `-sources <list>` | n/a | Keyless passive sources whose names become candidates and `-permute` seeds: `ct` (crt.sh), `wayback` (Wayback Machine). One HTTPS request per source and target |
 | `-ct` | `false` | Add names from Certificate Transparency logs (crt.sh; one HTTPS request per target, no API key) as candidates and `-permute` seeds |
+| `-nsec-walk` | `false` | When the zone is signed with plain DNSSEC NSEC, list it by walking the NSEC chain at its name server first; the names become candidates and `-permute` seeds with source `nsec`. One query per name, paced by `-rate`, bounded by `-max-queries`, `-max-duration` and `-exclude` |
 | `-axfr` | `false` | Try a zone transfer (AXFR) from each of the target's name servers first; names it gives become candidates and `-permute` seeds. Also reports a zone that DNSSEC NSEC lets anyone walk |
 | `-permute` | `false` | After each scan, scan permutations of discovered names (`api` → `api-dev`, `dev-api`, `dev.api`, `api2`, ...) |
 | `-seeds <file>` | n/a | Results file (any `-format`) whose names also seed `-permute`; implies `-permute` |
@@ -292,7 +293,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
-| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab7`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
+| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab8`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
 | **Modes** | | |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates (at `-rate`, or `-rate-per-resolver` times the `-r` pool size when that is lower), and the resolver preflight (its only DNS query, also sent once to each `-r` pool resolver, paced by `-rate` and skipped for a target `-exclude` rules out; a failing pool resolver is reported but does not fail the run), then exit; JSON with `-format json` or `jsonl` |
@@ -472,7 +473,7 @@ subenum -sources ct,wayback example.com
 
 The sources of a target are asked at the same time, and a busy answer (429, 502, 503, 504) or a dropped connection is retried twice with a short backoff, honouring `Retry-After`, within the source's 60-second limit. The report has one `sources` entry per source, with the names it added or the `error` it hit; a failed source is a warning, and the scan goes on with the others. The Wayback Machine is asked for at most 200,000 URLs and 64 MiB, and crt.sh's answer is read up to 64 MiB; when a source reaches a limit its names are still used, a note says some hosts may be missing, and its entry is marked `truncated`. Simulation ignores `-sources`, lab mode refuses it, and a resumed scan reuses what each source returned.
 
-Each result says what proposed it: a `sources` list in JSON and JSONL, and a `sources` column in CSV (joined with `;`). The values are `wordlist`, `ct`, `wayback` and `axfr`, every one that had the name, in that order, or `permute` alone for a `-permute` hit; text output is unchanged. The report counts the results each source had proposed as `found` in its `sources` entry, and `axfr_found` for a zone transfer, so you can see whether a source earns its request:
+Each result says what proposed it: a `sources` list in JSON and JSONL, and a `sources` column in CSV (joined with `;`). The values are `wordlist`, `ct`, `wayback`, `axfr` and `nsec`, every one that had the name, in that order, or `permute` alone for a `-permute` hit; text output is unchanged. The report counts the results each source had proposed as `found` in its `sources` entry, and `axfr_found` for a zone transfer, so you can see whether a source earns its request:
 
 ```bash
 subenum -sources ct,wayback -format jsonl example.com | jq -r 'select(.sources == ["wayback"]) | .subdomain'
@@ -493,9 +494,11 @@ subenum -axfr -type A,AAAA,CNAME example.com
 
 <br>
 
-The same step asks one name server about a name that does not exist, with DNSSEC records requested. A zone signed with plain NSEC proves the absence by naming its neighbours, so anyone can walk the chain to list every name, transfer or not: subenum reports that as `Zone walkable` and records `zone_denial` (`nsec`, `nsec3` or `none`) in the report. It does not walk the zone itself.
+The same step asks one name server about a name that does not exist, with DNSSEC records requested. A zone signed with plain NSEC proves the absence by naming its neighbours, so anyone can walk the chain to list every name, transfer or not: subenum reports that as `Zone walkable` and records `zone_denial` (`nsec`, `nsec3` or `none`) in the report.
 
-The transfers and the probe go straight to the target's name servers, not through `-dns-server`: at most 8 servers and 2 addresses each, one query per address, at most 100,000 names kept (a larger zone is cut there and the cut is reported), plus the NS and address lookups and one denial probe, all counted in the report's `queries_sent` but not paced by `-rate`. Simulation ignores `-axfr`, lab mode sends it to the lab server (Lab 7 practises it), and a resumed scan reuses the names the interrupted run got.
+`-nsec-walk` walks such a zone: it runs the same name server lookups and probe (without the transfers, unless `-axfr` is also given), and when the zone is signed with plain NSEC it asks the name server that answered for the name just after each name it has listed, following the chain until it leads back to the apex. One query per name, paced by `-rate`, at most `-max-queries` queries (10,000 without it) and stopped by `-max-duration`; a chain that loops or leaves the zone ends the walk, which keeps what it listed. Names `-exclude` rules out are neither listed nor asked about. The names become candidates with source `nsec`, each still looked up, and the report counts them as `nsec_names` and `nsec_found`, with `nsec_stop` saying why a walk stopped early or did not run (an NSEC3 or unsigned zone).
+
+The transfers and the probe go straight to the target's name servers, not through `-dns-server`: at most 8 servers and 2 addresses each, one query per address, at most 100,000 names kept (a larger zone is cut there and the cut is reported), plus the NS and address lookups and one denial probe, all counted in the report's `queries_sent` but not paced by `-rate`. Simulation ignores `-axfr`, lab mode sends it to the lab server (Lab 7 practises it, Lab 8 the NSEC walk), and a resumed scan reuses the names the interrupted run got.
 
 </details>
 

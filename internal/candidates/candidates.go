@@ -17,6 +17,7 @@ import (
 const (
 	Wordlist = "wordlist"
 	AXFR     = "axfr"
+	NSEC     = "nsec" // an -nsec-walk name (#437)
 	Permute  = "permute"
 	Records  = "records" // a -follow-records target (#432)
 	SRV      = "srv"     // a -srv service name (#419)

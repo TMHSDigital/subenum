@@ -127,6 +127,7 @@ type cliFlags struct {
 	silent       bool   // -silent: results only on stdout, errors only on stderr (#128)
 	ct           bool   // -ct: seed from Certificate Transparency logs (#130)
 	axfr         bool   // -axfr: try a zone transfer from each name server (#85)
+	nsecWalk     bool   // -nsec-walk: list a plain-NSEC zone by walking its chain (#437)
 	sources      string // -sources: passive sources to seed candidates from (#193)
 	testMode     bool
 	testHitRate  int
@@ -237,7 +238,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
 	fs.IntVar(&f.testHitRate, "hit-rate", scan.DefaultHitRate, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
-	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab7), via a local DNS server, so no traffic leaves the machine (see the Labs page)")
+	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6, lab7, lab8), via a local DNS server, so no traffic leaves the machine (see the Labs page)")
 	fs.Var(&f.outputs, "o", "Write results to `file` (in addition to stdout); repeat for several files, each in -format or in the format named as a prefix, format:path (jsonl:results.jsonl)")
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain, 1 = no retry (default 1)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
@@ -266,6 +267,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.providersOnly, "takeover-providers-only", false, "Use only the -takeover-providers file, not the built-in provider list")
 	fs.BoolVar(&f.permute, "permute", false, "After each scan, scan permutations of the names found (api -> api-dev, dev-api, dev.api, api2, ...)")
 	fs.BoolVar(&f.axfr, "axfr", false, "Try a zone transfer (AXFR) from each of the target's name servers first, and add the names it gives as candidates and -permute seeds; also report a zone that DNSSEC NSEC lets anyone walk")
+	fs.BoolVar(&f.nsecWalk, "nsec-walk", false, "When the target's zone is signed with plain DNSSEC NSEC, list it by walking the NSEC chain at its name server first, and add the names as candidates and -permute seeds; one query per name, paced by -rate and bounded by -max-queries, -max-duration and -exclude")
 	fs.StringVar(&f.sources, "sources", "", "Comma-separated keyless passive sources whose names become candidates and -permute seeds: ct (Certificate Transparency, crt.sh), wayback (Wayback Machine); one HTTPS request per source and target")
 	fs.BoolVar(&f.ct, "ct", false, "Add names from Certificate Transparency logs (crt.sh, one HTTPS request per target, no API key) as candidates and -permute seeds")
 	fs.StringVar(&f.seedsFile, "seeds", "", "Results file (any -format) whose names also seed -permute; implies -permute")
@@ -395,8 +397,8 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 			{"r", f.resolvers != ""},
 			{"ct", f.ct},                 // an HTTPS request to crt.sh
 			{"sources", f.sources != ""}, // HTTPS requests to passive sources
-			// -axfr is allowed: in lab mode its transfers go to the lab
-			// server (#434).
+			// -axfr and -nsec-walk are allowed: in lab mode their queries
+			// go to the lab server (#434, #437).
 		} {
 			if c.set || flagSet(fs, c.name) {
 				out.Error("-simulate-zone answers from its own local DNS server; it cannot be combined with %s", in.defaults.describe(fs, c.name))

@@ -72,6 +72,10 @@ type resumeTarget struct {
 	AXFRServers []string `json:"axfr_servers,omitempty"`
 	AXFRDone    bool     `json:"axfr_done,omitempty"`
 	Denial      string   `json:"denial,omitempty"` // the zone's denial of existence, from -axfr (#234)
+	// NSEC holds the names an -nsec-walk listed and NSECStop why it stopped
+	// early or did not run, reused on resume like AXFR (#437).
+	NSEC     []string `json:"nsec,omitempty"`
+	NSECStop string   `json:"nsec_stop,omitempty"`
 }
 
 // resumePass is how far an interrupted scan pass got.
@@ -565,6 +569,7 @@ func saveResumeState(s *session) bool {
 			Sources: savedSources(res.sources, scanned)}
 		if res.axfr.done && (scanned || (saved != nil && saved.AXFRDone)) {
 			t.AXFR, t.AXFRServers, t.AXFRDone, t.Denial = res.axfr.names, res.axfr.allowed, true, string(res.axfr.denial)
+			t.NSEC, t.NSECStop = res.axfr.walked, res.axfr.walkStop
 		}
 		// A target is finished only if its scan (and any -permute pass)
 		// completed before the interrupt, with nothing left by -max-duration.

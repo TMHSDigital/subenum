@@ -1,6 +1,7 @@
 // Package axfr tries a full zone transfer of a domain from each of its name
-// servers, and probes how the zone proves a name does not exist. The CLI's
-// -axfr and the library's ZoneTransfer and ProbeZone both run it (#314).
+// servers, probes how the zone proves a name does not exist, and walks a
+// zone signed with plain NSEC. The CLI's -axfr and -nsec-walk and the
+// library's ZoneTransfer, NSECWalk and ProbeZone all run it (#314, #437).
 package axfr
 
 import (
@@ -45,6 +46,13 @@ type Options struct {
 	// looked up: a lab run sends them to its local server, so nothing leaves
 	// the machine (#434).
 	Server string
+	// NoTransfer skips the transfers: the name servers are looked up and the
+	// denial probed only, for -nsec-walk without -axfr (#437).
+	NoTransfer bool
+	// Walk, when set, walks the NSEC chain of a zone the probe finds signed
+	// with plain NSEC, at the address that answered the probe, with these
+	// bounds (#437). Its names are in Result.Walked.
+	Walk *dns.WalkOptions
 }
 
 // endpoint is where a request meant for a name server address goes.
@@ -61,8 +69,15 @@ type Result struct {
 	Allowed []string   // name servers that allowed the transfer: a misconfiguration
 	Tried   int        // name server addresses asked
 	Denial  dns.Denial // how the zone proves a name does not exist; "" when no server answered the probe (#234)
-	Queries int64      // DNS queries sent: the NS and address lookups, the denial probe, and one per transfer
+	Queries int64      // DNS queries sent: the NS and address lookups, the denial probe, one per transfer and the walk's
 	Err     string     // why no transfer could be attempted, such as a failed NS lookup
+
+	// Walked are the names an NSEC walk listed, relative to the target,
+	// sorted; WalkStop says why the walk ended before it listed the whole
+	// zone, or why it did not run (#437). Both are empty unless Options.Walk
+	// is set.
+	Walked   []string
+	WalkStop string
 }
 
 func logf(f func(string, ...any), format string, args ...any) {
@@ -143,6 +158,7 @@ func Try(ctx context.Context, target string, o Options) Result {
 		}
 		attempts = append(attempts, &attempt{host: host, addrs: addrs})
 	}
+	var probed, probedHost string // the address that answered the probe
 	for _, a := range attempts {
 		for _, addr := range a.addrs {
 			if res.Denial != "" || ctx.Err() != nil {
@@ -150,17 +166,26 @@ func Try(ctx context.Context, target string, o Options) Result {
 			}
 			res.Queries++
 			res.Denial = probeDenial(ctx, o, a.host, addr, target)
+			probed, probedHost = addr, a.host
 		}
 	}
 
 	// Ask every server at once (#365): one that silently drops TCP/53 costs
 	// a whole transfer timeout, and asking them in turn added those up. Each
 	// server's addresses are still tried in order, and what each reports is
-	// printed in server order once all are done.
+	// printed in server order once all are done. The NSEC walk runs beside
+	// them.
 	transferTimeout := max(MinTimeout, o.Timeout)
 	var wg sync.WaitGroup
-	for _, a := range attempts {
-		wg.Go(func() { a.transfer(ctx, o, target, transferTimeout) })
+	if !o.NoTransfer {
+		for _, a := range attempts {
+			wg.Go(func() { a.transfer(ctx, o, target, transferTimeout) })
+		}
+	}
+	var walk dns.WalkResult
+	walking := o.Walk != nil && res.Denial == dns.DenialNSEC
+	if walking {
+		wg.Go(func() { walk = dns.WalkNSEC(ctx, o.endpoint(probed), target, *o.Walk) })
 	}
 	wg.Wait()
 	// The names kept over all servers are bounded like one transfer's, so
@@ -193,7 +218,34 @@ func Try(ctx context.Context, target string, o Options) Result {
 		res.Names = append(res.Names, n)
 	}
 	sort.Strings(res.Names)
+	if o.Walk != nil {
+		res.walkReport(o, walking, walk, probedHost, target)
+	}
 	return res
+}
+
+// walkReport records the NSEC walk's outcome in r and reports it: what it
+// listed, or why it did not run (#437).
+func (r *Result) walkReport(o Options, walked bool, w dns.WalkResult, host, target string) {
+	if !walked {
+		switch r.Denial {
+		case dns.DenialNSEC3:
+			r.WalkStop = "the zone is signed with NSEC3, which hides its names"
+		case dns.DenialNone:
+			r.WalkStop = "the zone is not signed with DNSSEC, so it has no NSEC chain"
+		default:
+			r.WalkStop = "no name server answered the DNSSEC probe"
+		}
+		logf(o.Info, "-nsec-walk: not walking %s: %s", target, r.WalkStop)
+		return
+	}
+	r.Walked, r.WalkStop = w.Names, w.Stop
+	r.Queries += w.Queries
+	if w.Stop != "" {
+		logf(o.Info, "NSEC walk: %s's chain for %s stopped after %d queries (%s); using the %d names listed", host, target, w.Queries, w.Stop, len(w.Names))
+		return
+	}
+	logf(o.Info, "NSEC walk: listed %d names of %s from %s's NSEC chain in %d queries", len(w.Names), target, host, w.Queries)
 }
 
 // attempt is one name server's zone transfer, run beside the others.

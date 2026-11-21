@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -513,7 +514,7 @@ func TestZoneTransferStopsWhenCancelled(t *testing.T) {
 	}
 	out := output.New(nil, false, output.FormatText)
 	out.SetStderr(io.Discard)
-	res := zoneTransfer(ctx, cliFlags{timeoutMs: 5000, dnsServer: srv.Addr}, port, "example.test", nil, out.Info, nil)
+	res := zoneTransfer(ctx, cliFlags{timeoutMs: 5000, dnsServer: srv.Addr, axfr: true}, port, "example.test", nil, out.Info, nil, time.Time{})
 	if res.tried != 1 {
 		t.Errorf("addresses asked = %d, want 1: the second came after the cancel", res.tried)
 	}

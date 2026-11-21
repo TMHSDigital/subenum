@@ -1,0 +1,15 @@
+# Lab 8: NSEC walk. This zone is signed with plain DNSSEC NSEC: every
+# answer that says a name does not exist also names the next name that does,
+# so anyone can list the whole zone one query at a time. Transfers are
+# refused, and two hosts are names no wordlist holds. Run:
+#   subenum -simulate-zone lab8 -nsec-walk -format jsonl lab.example
+# Then change $DNSSEC to nsec3 in a copy of this file and run it again.
+$DNSSEC nsec
+@                 A      192.0.2.1
+@                 NS     ns1
+ns1               A      192.0.2.53
+www               A      192.0.2.10
+mail              A      192.0.2.20
+vpn               A      192.0.2.30
+payroll-archive   A      192.0.2.80
+qa.build-farm     A      10.30.0.12

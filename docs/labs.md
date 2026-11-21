@@ -233,6 +233,39 @@ server, never to the name server's real address.
 
 </details>
 
+## Lab 8: an NSEC walk{% include unreleased.html value="simulate-zone=lab8" %}
+
+```bash
+subenum -simulate-zone lab8 -format jsonl lab.example
+subenum -simulate-zone lab8 -nsec-walk -format jsonl lab.example
+```
+
+The zone is signed with plain DNSSEC NSEC and refuses transfers. Every
+answer that says a name does not exist also names the next name that does,
+so `-nsec-walk` can list the whole zone, one query per name. In lab mode
+the walk goes to the lab server.
+
+1. Which names does the second run find that the first does not, and what is
+   their `sources`?
+2. How many queries did the walk take, and why that many?
+3. Copy `examples/labs/lab8-nsec-walk.zone`, change `$DNSSEC nsec` to
+   `$DNSSEC nsec3` and run the copy with `-nsec-walk`. What changes?
+
+<details markdown="1">
+<summary>Answers</summary>
+
+1. `payroll-archive`, `qa.build-farm` and `ns1`: no wordlist holds them. Their
+   `sources` is `["nsec"]`, while `www`, `mail` and `vpn` say
+   `["wordlist", "nsec"]`. Every walked name is still looked up.
+2. Seven: one per name in the chain, the apex included, until the last
+   record leads back to the apex. `-stats` counts the names under
+   `nsec_names`.
+3. NSEC3 records hold hashes of names, not names, so there is nothing to
+   follow: subenum says it is not walking the zone and why, and the scan is
+   the wordlist's alone.
+
+</details>
+
 ## Writing your own scenario
 
 A scenario is a plain text file. Names are relative to the domain you scan,
@@ -242,6 +275,7 @@ and `#` starts a comment:
 $DELAY 20ms            # every answer waits this long
 $REFUSE-ABOVE 50       # answer REFUSED past 50 queries a second
 $TRANSFER allow        # answer a zone transfer (-axfr); the default is refuse
+$DNSSEC nsec           # prove absent names with NSEC (-nsec-walk), or nsec3; the default is none
 @        A        192.0.2.1             # the scanned domain itself
 www      A        192.0.2.10
 www      AAAA     2001:db8::10
@@ -274,9 +308,12 @@ lab points at a real host.
 
 Scenarios work with the other flags, such as `-dL` (each listed domain gets
 the same zone), `-permute`, `-diff`, `-format json` and `-stats`, which
-records the scenario file under `zone`. With `-axfr`, the transfer and its
-DNSSEC probe go to the lab server, whatever address the scenario gives its
-name servers. `-simulate-zone` cannot be combined
+records the scenario file under `zone`. With `-axfr` or `-nsec-walk`, the
+transfer, the DNSSEC probe and the walk go to the lab server, whatever
+address the scenario gives its name servers. With `$DNSSEC nsec`, an answer
+for a name the file does not define carries the NSEC record that covers it,
+from a chain of the apex, the defined names (not failing ones) and the
+wildcards. `-simulate-zone` cannot be combined
 with `-simulate`, `-dns-server`, `-r`, `-ct` or `-sources`, whether they
 come from the command line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
 rather than send a query off the machine.

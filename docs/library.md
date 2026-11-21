@@ -106,6 +106,8 @@ if info.Denial == "nsec" {
 
 Most name servers refuse transfers, which is the correct configuration and not an error. `Denial` is `nsec`, `nsec3`, `none` (no DNSSEC), or empty when no name server answered the probe. To scan the transferred names, pass `ZoneTransfer(opts)`{% include unreleased.html library="ZoneTransfer" %} in `Config.Sources`: its names are looked up like any other, so only names that still resolve are reported.
 
+With `ZoneOptions.WalkNSEC`, `ProbeZone` also walks a zone signed with plain NSEC, as the CLI's `-nsec-walk` does, and lists its names in `info.Walked`; `info.WalkStop` says why a walk stopped early or did not run. The walk asks the name server that answered the probe, one query per name, paced by `ZoneOptions.Rate` and capped by `ZoneOptions.MaxQueries` (10,000 by default). `NSECWalk(opts)`{% include unreleased.html library="NSECWalk" %} is the matching `Config.Sources` entry: it walks without asking for a transfer, labels its results `nsec`, and leaves out the names `Config.Exclude` rules out.
+
 These queries go to the domain's own name servers, not to `Resolver`, and they are **not paced by `Rate`**, just as the CLI's `-axfr` is not: at most 34 queries in all (the name server lookup, two address lookups and up to two transfers per name server, and one DNSSEC probe). `ZoneOptions.Timeout` (default `1s`) bounds each lookup; a transfer gets at least 10 seconds.
 
 ## Configuration

@@ -64,6 +64,11 @@ type Reply struct {
 	// authority section, after the SOA: "nsec" or "nsec3" (#234).
 	Denial string
 
+	// NSEC adds these NSEC records to the authority section of a negative
+	// answer, or of a positive one (a wildcard's), as a zone signed with
+	// plain NSEC proves which names do not exist (#437).
+	NSEC []NSEC
+
 	RCode    dnsmessage.RCode // e.g. RCodeNameError (NXDOMAIN), RCodeServerFailure, RCodeRefused
 	Drop     bool             // send nothing; the client times out
 	Delay    time.Duration    // wait before answering
@@ -529,8 +534,55 @@ func build(qh dnsmessage.Header, question dnsmessage.Question, q Query, r Reply)
 		if err := addDenial(&b, q.Name, r.Denial); err != nil {
 			return nil, err
 		}
+		if err := addNSEC(&b, r.NSEC); err != nil {
+			return nil, err
+		}
+	} else if len(r.NSEC) > 0 && answered > 0 {
+		// A wildcard answer proves with NSEC that the name itself does not
+		// exist, as a signed zone's server does.
+		if err := b.StartAuthorities(); err != nil {
+			return nil, err
+		}
+		if err := addNSEC(&b, r.NSEC); err != nil {
+			return nil, err
+		}
 	}
 	return b.Finish()
+}
+
+// NSEC is one NSEC record (#437): Owner is followed by Next in the zone's
+// canonical order, so no name between them exists. Names are lowercase,
+// without the trailing dot; the type bitmap lists A, RRSIG and NSEC.
+type NSEC struct {
+	Owner, Next string
+}
+
+// addNSEC adds records to the authority section the caller started. Next
+// is written uncompressed, as RFC 4034 requires.
+func addNSEC(b *dnsmessage.Builder, records []NSEC) error {
+	for _, rec := range records {
+		owner, err := dnsmessage.NewName(fqdn(rec.Owner))
+		if err != nil {
+			return err
+		}
+		var data []byte
+		if next := strings.TrimSuffix(rec.Next, "."); next != "" {
+			for label := range strings.SplitSeq(next, ".") {
+				if label == "" || len(label) > 63 {
+					return fmt.Errorf("dnsserver: bad NSEC next name %q", rec.Next)
+				}
+				data = append(append(data, byte(len(label))), label...) //nolint:gosec // checked above: at most 63
+			}
+		}
+		data = append(data, 0)
+		// Window 0, 6 bytes: A (1), RRSIG (46) and NSEC (47).
+		data = append(data, 0, 6, 0x40, 0, 0, 0, 0, 0x02|0x01)
+		t := dnsmessage.Type(47)
+		if err := b.UnknownResource(dnsmessage.ResourceHeader{Name: owner, Type: t, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.UnknownResource{Type: t, Data: data}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // addDenial adds an NSEC or NSEC3 record for name's zone to the authority

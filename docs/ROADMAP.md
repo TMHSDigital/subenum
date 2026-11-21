@@ -31,7 +31,6 @@ Planned features that make results more trustworthy and the tool easier to get.
 
 Ideas we want, with no date attached.
 
-- Walk NSEC-signed zones (`-nsec-walk`). `-axfr` already tries zone transfers ([#85](https://github.com/TMHSDigital/subenum/issues/85)) and reports walkable zones ([#234](https://github.com/TMHSDigital/subenum/issues/234)).
 - Discoverability: demo GIF and launch posts ([#74](https://github.com/TMHSDigital/subenum/issues/74)), and MCP registry listings for `subenum mcp`.
 
 ## What 1.0 means
@@ -58,11 +57,11 @@ surprises:
 Constraints to keep in mind when changing the code.
 
 - **The test DNS server (`internal/dnstest`) models A, AAAA, CNAME, NS, MX,
-  TXT and SRV answers,** any RCODE, NODATA with SOA, delays, drops and
-  truncation (scripted, or when a UDP answer exceeds the query's EDNS
-  buffer). Other record types and referrals are not modelled; extend
-  `Reply` in `internal/dnsserver` (which `internal/dnstest` re-exports) before
-  testing them.
+  TXT and SRV answers, AXFR, and NSEC records in the authority section,**
+  any RCODE, NODATA with SOA, delays, drops and truncation (scripted, or
+  when a UDP answer exceeds the query's EDNS buffer). Other record types
+  and referrals are not modelled; extend `Reply` in `internal/dnsserver`
+  (which `internal/dnstest` re-exports) before testing them.
 - **The dangling-NS hint needs the NS records.** A recursive resolver asked
   about a subzone whose every name server is gone usually answers SERVFAIL
   rather than the delegation, so such a name ends up inconclusive (listed by

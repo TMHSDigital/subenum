@@ -109,6 +109,15 @@ func explainTarget(p func(string, ...any), t output.TargetSummary) {
 	if t.ZoneDenial == "nsec" {
 		p("  The zone is signed with plain NSEC, so every name in it can be listed by walking the chain.")
 	}
+	if t.NSECNames > 0 {
+		p("  The NSEC walk listed %d names, %d of them found.", t.NSECNames, t.NSECFound)
+	}
+	switch {
+	case t.NSECStop != "" && t.NSECNames > 0:
+		p("  The NSEC walk stopped before the end of the chain: %s.", t.NSECStop)
+	case t.NSECStop != "":
+		p("  The NSEC walk listed nothing: %s.", t.NSECStop)
+	}
 	for _, src := range t.Sources {
 		if src.Error != "" {
 			p("  Passive source %s failed (%s); the scan went on without it.", src.Name, src.Error)

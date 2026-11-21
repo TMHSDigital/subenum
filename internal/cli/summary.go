@@ -35,8 +35,10 @@ func targetSummary(domain string, status report.Status, res targetResult) output
 	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
 	t.AXFRFound = res.foundBy[candidates.AXFR]
 	t.RecordsFound = res.foundBy[candidates.Records]
+	t.NSECNames, t.NSECStop = len(res.axfr.walked), res.axfr.walkStop
+	t.NSECFound = res.foundBy[candidates.NSEC]
 	t.ZoneDenial = string(res.axfr.denial)
-	t.QueriesSent += res.axfr.queries // the NS and address lookups and the transfers (#85)
+	t.QueriesSent += res.axfr.queries // the NS and address lookups, the transfers (#85) and the NSEC walk (#437)
 	if p := res.permutation; p != nil && res.done && status != report.StatusNotRun && status != report.StatusSkipped {
 		pass := report.PermutationPass{Seeds: p.seeds, Candidates: p.candidates, Found: p.found, Failure: p.pass.err}
 		if p.pass.done {

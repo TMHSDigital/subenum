@@ -91,7 +91,8 @@ internal/dns/resolver.go       - NewResolver, Lookup (ResolveTypes, Resolve, Che
 internal/dns/cname.go          - lookupCNAME: a single CNAME query, without implicit A/AAAA lookups
 internal/dns/transport.go      - UDP (TCP fallback), DNS over TLS and DNS over HTTPS dialers
 internal/dns/axfr.go           - Transfer: an AXFR zone transfer over TCP (-axfr)
-internal/dns/nsec.go           - ProbeDenial: NSEC, NSEC3 or no DNSSEC proof of absence (-axfr)
+internal/dns/nsec.go           - ProbeDenial: NSEC, NSEC3 or no DNSSEC proof of absence (-axfr, -nsec-walk)
+internal/dns/nsecwalk.go       - WalkNSEC: list a plain-NSEC zone by following its chain (-nsec-walk)
 internal/dns/pool.go           - Pool: the -r resolver pool (health benching, canaries, second opinions)
 internal/dns/ratelimit.go      - RateLimiter, WithLimiter (per-wire-query pacing)
 internal/dns/takeover.go       - TakeoverProvider, TakeoverHint, HintsTakeover (dangling or takeover-prone CNAMEs, dangling NS delegations)

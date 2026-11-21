@@ -396,6 +396,7 @@ var tuiOmittedFlags = map[string]bool{
 	"diff": true, "diff-records": true, "dL": true, "seed": true, "resume": true, "log-format": true,
 	"inconclusive": true, "takeover-providers": true, "takeover-providers-only": true,
 	"hosts": true, "recursive-w": true, "follow-records": true, "srv": true,
+	"nsec-walk": true,
 }
 
 // TestSettingNamesAgreeAcrossFrontEnds covers #160: every flag is either wired

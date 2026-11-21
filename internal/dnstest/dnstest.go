@@ -22,6 +22,8 @@ type (
 	Options = dnsserver.Options
 	// Server is a running DNS server.
 	Server = dnsserver.Server
+	// NSEC is one NSEC record a Reply can carry.
+	NSEC = dnsserver.NSEC
 )
 
 // Common replies.

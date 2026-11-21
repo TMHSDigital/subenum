@@ -11,11 +11,14 @@ flags:
   - recursive-w
   - follow-records
   - srv
+  - nsec-walk
 # new values of a flag that is itself released, as flag=VALUE (#306)
 values:
   - type=SRV
   - simulate-zone=lab7
+  - simulate-zone=lab8
 # action.yml inputs and outputs
 action: []
 # pkg/subenum identifiers
-library: []
+library:
+  - NSECWalk

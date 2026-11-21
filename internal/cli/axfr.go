@@ -45,16 +45,23 @@ type targetAXFR struct {
 	queries int64      // DNS queries sent: the NS and address lookups, the denial probe, and one per transfer
 	done    bool       // the attempt ran (it may have found nothing)
 	err     string     // why no transfer could be attempted, such as a failed NS lookup
+
+	walked   []string // relative to the target, from an -nsec-walk (#437)
+	walkStop string   // why the walk stopped early or did not run
 }
 
 // zoneTransfer tries a full zone transfer of target from each of its name
 // servers, found through the trusted resolver, with the library's shared
-// implementation (#314). A resumed run reuses the names the interrupted run
-// got, so its candidate list matches. Name servers skip rules out of scope
-// are neither resolved nor contacted (#372).
-func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *resumeTarget, info func(string, ...any), skip func(string) bool) targetAXFR {
+// implementation (#314), and with -nsec-walk walks a plain-NSEC zone (#437);
+// -nsec-walk alone skips the transfers. A resumed run reuses the names the
+// interrupted run got, so its candidate list matches. Name servers skip
+// rules out of scope are neither resolved nor contacted (#372), and the walk
+// neither returns nor asks about names it rules out. deadline is when
+// -max-duration runs out (zero for none).
+func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *resumeTarget, info func(string, ...any), skip func(string) bool, deadline time.Time) targetAXFR {
 	if saved != nil && saved.AXFRDone {
-		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, denial: dns.Denial(saved.Denial), done: true}
+		return targetAXFR{names: saved.AXFR, allowed: saved.AXFRServers, denial: dns.Denial(saved.Denial), done: true,
+			walked: saved.NSEC, walkStop: saved.NSECStop}
 	}
 	if saved != nil && saved.Done {
 		return targetAXFR{} // finished before the interrupt: not scanned again (#315)
@@ -65,6 +72,19 @@ func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *r
 		Timeout:  time.Duration(f.timeoutMs) * time.Millisecond,
 		Info:     info,
 		Skip:     skip,
+		// -nsec-walk alone asks for no transfer.
+		NoTransfer: !f.axfr,
+	}
+	if f.nsecWalk {
+		// The walk's queries are paced by -rate and count against
+		// -max-queries; it stops when -max-duration runs out.
+		opts.Walk = &dns.WalkOptions{
+			Timeout:    opts.Timeout,
+			MaxQueries: f.maxQueries,
+			Limiter:    dns.NewRateLimiter(f.rate),
+			Deadline:   deadline,
+			Skip:       skip,
+		}
 	}
 	if f.verbose {
 		opts.Debug = info
@@ -75,12 +95,20 @@ func zoneTransfer(ctx context.Context, f cliFlags, port, target string, saved *r
 		opts.Server = f.dnsServer
 	}
 	r := axfr.Try(ctx, target, opts)
-	res := targetAXFR{names: r.Names, allowed: r.Allowed, tried: r.Tried, denial: r.Denial, queries: r.Queries, done: true, err: r.Err}
+	res := targetAXFR{names: r.Names, allowed: r.Allowed, tried: r.Tried, denial: r.Denial, queries: r.Queries, done: true, err: r.Err,
+		walked: r.Walked, walkStop: r.WalkStop}
 	if r.Err != "" {
-		info("Warning: -axfr: %s; scanning %s without a zone transfer", r.Err, target)
+		switch {
+		case !f.axfr:
+			info("Warning: -nsec-walk: %s; scanning %s without an NSEC walk", r.Err, target)
+		case f.nsecWalk:
+			info("Warning: -axfr: %s; scanning %s without a zone transfer or an NSEC walk", r.Err, target)
+		default:
+			info("Warning: -axfr: %s; scanning %s without a zone transfer", r.Err, target)
+		}
 		return res
 	}
-	if len(r.Allowed) == 0 && f.verbose && ctx.Err() == nil {
+	if f.axfr && len(r.Allowed) == 0 && f.verbose && ctx.Err() == nil {
 		info("-axfr: no name server of %s allowed a zone transfer (%d addresses asked)", target, r.Tried)
 	}
 	return res
