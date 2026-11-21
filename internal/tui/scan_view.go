@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/viewport"
@@ -605,4 +606,10 @@ type wordlistLoadedMsg struct {
 	// candidate set that knows who proposed each name (#274, #347).
 	lookups []sourceLookup
 	cands   *candidates.Set
+	// zone is the Zone Transfer and NSEC Walk fields' answer, its names
+	// already merged into entries; nil when neither ran (#418).
+	zone *zoneAnswer
+	// deadline is Max Duration's end when an NSEC walk started the budget
+	// before the scan, as -max-duration's covers the walk (#418).
+	deadline time.Time
 }

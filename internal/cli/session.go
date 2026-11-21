@@ -222,10 +222,18 @@ func (s *session) parse() (code int, done bool) {
 
 // tuiOptions pre-fills the TUI form from the command line (#195): the domain
 // argument and every flag the form has a field for, over SUBENUM_* and config
-// file values. Flags the form has no field for are named in a warning, as are
-// extra domain arguments and extra -w files (the form takes one wordlist).
+// file values, and the -exclude-file lines in the Exclude field (#418). Flags
+// the form has no field for are named in a warning, as are extra domain
+// arguments and extra -w files (the form takes one wordlist). The warnings go
+// to stderr and onto the form, which covers the terminal (#418).
 func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *defaultsLoader, diag *output.Writer) tui.Options {
 	settings := defaults.settings(fs)
+	opts := tui.Options{Version: resolveVersion(), Settings: settings}
+	warn := func(format string, a ...any) {
+		msg := fmt.Sprintf(format, a...)
+		diag.Notice("Warning: %s", msg)
+		opts.Warnings = append(opts.Warnings, msg)
+	}
 	wired := map[string]bool{}
 	for _, name := range tui.Flags() {
 		wired[name] = true
@@ -234,6 +242,7 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 	fs.Visit(func(fl *flag.Flag) {
 		switch {
 		case fl.Name == "tui", fl.Name == "ct": // -ct goes to Sources, below
+		case fl.Name == "exclude-file": // read into Exclude, below
 		case wired[fl.Name]:
 			settings[fl.Name] = fl.Value.String()
 		default:
@@ -248,9 +257,20 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 			settings["sources"] = strings.Trim(settings["sources"]+",ct", ",")
 		}
 	}
+	if f.excludeFile != "" {
+		// The form has no -exclude-file field: its patterns join -exclude's
+		// in the Exclude field, so the form shows the whole scope (#418).
+		if f.excludeFile == wordlist.Stdin {
+			warn("the TUI cannot read -exclude-file from standard input; ignored")
+		} else if patterns, err := loadExcludes(f, &runtimeInputs{}); err != nil {
+			warn("cannot read -exclude-file: %v; ignored", err)
+		} else if len(patterns) > 0 {
+			settings["exclude"] = strings.Join(patterns, ",")
+		}
+	}
 	if len(f.wordlists.paths) > 1 {
 		settings["w"] = f.wordlists.paths[0]
-		diag.Notice("Warning: the TUI takes one wordlist; using %s", f.wordlists.paths[0])
+		warn("the TUI takes one wordlist; using %s", f.wordlists.paths[0])
 	}
 	if len(f.outputs.specs) > 0 {
 		// The form has one output file and one format (#334).
@@ -260,10 +280,9 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 			settings["format"] = format
 		}
 		if len(f.outputs.specs) > 1 {
-			diag.Notice("Warning: the TUI takes one output file; using %s", path)
+			warn("the TUI takes one output file; using %s", path)
 		}
 	}
-	opts := tui.Options{Version: resolveVersion(), Settings: settings}
 	if len(positionals) > 0 {
 		opts.Domain = positionals[0]
 	}
@@ -271,7 +290,7 @@ func tuiOptions(f cliFlags, fs *flag.FlagSet, positionals []string, defaults *de
 		ignored = append(ignored, positionals[1:]...)
 	}
 	if len(ignored) > 0 {
-		diag.Notice("Warning: -tui has no form field for %s; ignored", strings.Join(ignored, " "))
+		warn("-tui has no form field for %s; ignored", strings.Join(ignored, " "))
 	}
 	return opts
 }

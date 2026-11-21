@@ -388,15 +388,15 @@ func TestPrintConfigEffectiveAttempts(t *testing.T) {
 // control CLI-only output, input sources, run state or modes the form does not
 // offer, so a command-line, SUBENUM_* or config file value for them never
 // seeds the form (-tui warns about one given on the command line). Lab zones
-// are rejected before the form opens; -ct becomes ct in Sources (#348).
+// are rejected before the form opens; -ct becomes ct in Sources (#348), and
+// -exclude-file is read into Exclude (#418).
 var tuiOmittedFlags = map[string]bool{
 	"tui": true, "print-config": true, "dry-run": true, "version": true, "v": true, "progress": true, "silent": true,
-	"simulate-zone": true, "retries": true, "show-records": true, "stats": true,
-	"sarif": true, "exclude-file": true, "ct": true, "axfr": true, "seeds": true, "state": true,
+	"simulate-zone": true, "retries": true, "show-records": true,
+	"sarif": true, "exclude-file": true, "ct": true, "seeds": true, "state": true,
 	"diff": true, "diff-records": true, "dL": true, "seed": true, "resume": true, "log-format": true,
 	"inconclusive": true, "takeover-providers": true, "takeover-providers-only": true,
 	"hosts": true, "recursive-w": true, "follow-records": true, "srv": true,
-	"nsec-walk": true,
 }
 
 // TestSettingNamesAgreeAcrossFrontEnds covers #160: every flag is either wired

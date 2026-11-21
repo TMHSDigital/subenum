@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -60,6 +61,7 @@ type Model struct {
 	names    []string        // the main pass's results: permutation seeds
 	pool     *dns.Pool       // the resolver pool, for the permutation pass too
 	deadline time.Time       // Max Duration's end, shared by both passes
+	zone     *zoneAnswer     // the Zone Transfer and NSEC Walk answer; nil when neither ran (#418)
 }
 
 // Options configure the TUI.
@@ -77,14 +79,22 @@ type Options struct {
 	// SourceURLs replace the passive sources' endpoints, by source name;
 	// tests point them at local servers.
 	SourceURLs map[string]string
+	// TransferPort is the port zone transfers and the DNSSEC probe go to;
+	// "" is 53. Tests point it at a local server.
+	TransferPort string
+	// Warnings are shown on the form until the first scan starts, such as
+	// the flags given with -tui that the form has no field for (#418).
+	Warnings []string
 }
 
 // New creates the root model starting on the form screen.
 func New(opts Options) Model {
 	saved, _ := loadSavedConfig()
+	form := newFormModel(opts.prefill(saved))
+	form.warnings = opts.Warnings
 	return Model{
 		state: stateForm,
-		form:  newFormModel(opts.prefill(saved)),
+		form:  form,
 		opts:  opts,
 	}
 }
@@ -154,6 +164,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.err = ""
 			m.form.loading = true
 			m.form.asking = len(vals.sources) > 0 && !vals.Simulate
+			m.form.zoning = askingZone(vals)
 			// Load the wordlist off the event loop so a large list cannot
 			// freeze the UI (#55); beginScan runs when it arrives.
 			return m, loadWordlistCmd(vals, m.opts)
@@ -192,19 +203,57 @@ func loadWordlistCmd(vals formValues, o Options) tea.Cmd {
 		entries, skipped, err := loadWordlist(vals)
 		pool, poolErr := loadPool(vals)
 		msg := wordlistLoadedMsg{cfg: vals, entries: entries, skipped: skipped, err: err, pool: pool, poolErr: poolErr}
-		// The sources are asked only for a scan that will start, and never in
-		// simulation mode, which sends nothing off the machine (#274).
-		if err == nil && poolErr == nil && len(entries) > 0 && !vals.Simulate && len(vals.sources) > 0 {
-			msg.lookups = fetchSources(context.Background(), vals.Domain, vals.sources, o)
-			// The same candidate set as the command line's (#347).
-			msg.cands = candidates.New(vals.Domain, entries, nil)
-			for i := range msg.lookups {
-				msg.lookups[i].added = msg.cands.Add(msg.lookups[i].Source, msg.lookups[i].Names)
-			}
-			msg.entries = msg.cands.Entries()
+		// The sources and the name servers are asked only for a scan that
+		// will start, and never in simulation mode, which sends nothing off
+		// the machine (#274, #418).
+		sources := !vals.Simulate && len(vals.sources) > 0
+		zone := askingZone(vals)
+		if err != nil || poolErr != nil || len(entries) == 0 || !sources && !zone {
+			return msg
 		}
+		ctx := context.Background()
+		if vals.nsecWalk && vals.MaxDuration > 0 {
+			// Max Duration covers the walk, as -max-duration does (#437).
+			msg.deadline = time.Now().Add(vals.MaxDuration)
+		}
+		// The zone is asked while the sources are, as on the command line
+		// (#365); its names are added after theirs.
+		var wg sync.WaitGroup
+		if zone {
+			wg.Go(func() {
+				z := askZone(ctx, vals, o, msg.deadline)
+				msg.zone = &z
+			})
+		}
+		if sources {
+			msg.lookups = fetchSources(ctx, vals.Domain, vals.sources, o)
+		}
+		wg.Wait()
+		// The same candidate set as the command line's (#347).
+		msg.cands = candidates.New(vals.Domain, entries, nil)
+		for i := range msg.lookups {
+			msg.lookups[i].added = msg.cands.Add(msg.lookups[i].Source, msg.lookups[i].Names)
+		}
+		if z := msg.zone; z != nil {
+			// Transferred and walked names are candidates like a source's:
+			// each is still looked up (#85, #437).
+			if vals.axfr {
+				z.addedAXFR = msg.cands.Add(candidates.AXFR, z.Names)
+			}
+			if vals.nsecWalk {
+				z.addedNSEC = msg.cands.Add(candidates.NSEC, z.Walked)
+			}
+		}
+		msg.entries = msg.cands.Entries()
 		return msg
 	}
+}
+
+// askingZone reports whether the scan asks the domain's name servers first:
+// Zone Transfer or NSEC Walk is on, outside simulation mode, for a domain
+// Exclude does not rule out, which the scan's preflight refuses (#372, #418).
+func askingZone(vals formValues) bool {
+	return vals.zoneLookup() && !vals.Simulate && !scan.TargetOutOfScope(vals.Exclude, vals.Domain)
 }
 
 // loadWordlist reads the file named on the form, or the bundled list when the
@@ -269,7 +318,7 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.vals, m.seed, m.started, m.final = vals, seed, time.Now(), scan.Event{}
 	m.lookups, m.cands, m.foundBy = loaded.lookups, loaded.cands, map[string]int{}
-	m.entries, m.names, m.pool, m.deadline = entries, nil, pool, time.Time{}
+	m.entries, m.names, m.pool, m.deadline, m.zone = entries, nil, pool, time.Time{}, loaded.zone
 
 	m.state = stateScan
 	m.scanView = newScanViewModel(m.width, m.height, vals.Simulate)
@@ -303,6 +352,25 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 		}
 		m.scanView.addMessage(dimStyle.Render(passive.AddedLine(label, len(l.Names), vals.Domain, l.added)))
 	}
+	if vals.zoneLookup() && vals.Simulate {
+		m.scanView.addMessage(dimStyle.Render("Note: Zone Transfer and NSEC Walk are ignored in simulation mode, which sends no DNS queries"))
+	}
+	// Same lines as the CLI's -axfr and -nsec-walk (#418).
+	if z := m.zone; z != nil {
+		for _, note := range z.notes {
+			style := dimStyle
+			if strings.HasPrefix(note, "Warning: ") || strings.HasPrefix(note, "Zone ") {
+				style = wildcardStyle // a failure, or a zone anyone can list
+			}
+			m.scanView.addMessage(style.Render(note))
+		}
+		if vals.axfr && len(z.Allowed) > 0 {
+			m.scanView.addMessage(dimStyle.Render(passive.AddedLine("Zone transfer", len(z.Names), vals.Domain, z.addedAXFR)))
+		}
+		if vals.nsecWalk && len(z.Walked) > 0 {
+			m.scanView.addMessage(dimStyle.Render(passive.AddedLine("NSEC walk", len(z.Walked), vals.Domain, z.addedNSEC)))
+		}
+	}
 
 	// Same notice as the CLI's, so the TUI user knows which list ran (#288).
 	if vals.wordlist == "" {
@@ -313,8 +381,11 @@ func (m Model) beginScan(loaded wordlistLoadedMsg) (tea.Model, tea.Cmd) {
 	opts.Pool = pool
 	if vals.MaxDuration > 0 {
 		// The budget starts with the scan, as -max-duration's starts when the
-		// CLI's scans do (#274).
-		m.deadline = time.Now().Add(vals.MaxDuration)
+		// CLI's scans do (#274), or with the NSEC walk before it (#418).
+		m.deadline = loaded.deadline
+		if m.deadline.IsZero() {
+			m.deadline = time.Now().Add(vals.MaxDuration)
+		}
 		opts.Deadline = m.deadline
 	}
 	cfg := opts.Config
@@ -336,7 +407,7 @@ func newFileWriter(f *output.File, vals formValues, format output.Format, seed u
 	w := output.NewFile(f.Writer, vals.Simulate, format)
 	w.SetSeed(seed)
 	w.SetTakeoverColumn(dns.HintsTakeover(vals.Types))
-	w.SetSourcesColumn(len(vals.sources) > 0 || vals.permute)
+	w.SetSourcesColumn(vals.attributed())
 	return w
 }
 
@@ -431,6 +502,8 @@ func (m Model) updateScan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// mirroring the CLI, which skips Finish so no empty JSON array is written.
 		m.final = ev.Event
 		m.reportOutputErr(m.finalizeOutput(false))
+		// The CLI writes its -stats file for a run that stopped early too.
+		m.writeStats(m.summary(ev.Event))
 		return m, svCmd
 	case ev.Kind == scan.EventDone:
 		// Successful completion (including user abort, which still drains and
@@ -456,7 +529,7 @@ func (m *Model) record(r scan.Result) {
 	switch permuting := m.scanView.main != nil; {
 	case permuting:
 		res.Permutation, res.Sources = true, candidates.FromPermute
-	case len(m.vals.sources) > 0 || m.vals.permute:
+	case m.vals.attributed():
 		res.Sources = m.cands.SourcesOf(r.Subdomain)
 		if m.vals.permute {
 			m.names = append(m.names, r.Subdomain)
@@ -522,10 +595,27 @@ func (m *Model) finishOutput(final scan.Event) {
 		final = *main // the report's counts are the main pass's (#298)
 	}
 	m.final = final
+	summary := m.summary(final)
 	if m.out != nil {
-		m.out.Summary(m.summary(final))
+		m.out.Summary(summary)
 	}
 	m.reportOutputErr(m.finalizeOutput(true))
+	m.writeStats(summary)
+}
+
+// writeStats writes the run-quality report to the Stats File, if one is
+// set, as -stats does (#418). A failure is reported on the scan screen and
+// fails the run, as the CLI's does.
+func (m *Model) writeStats(summary output.Summary) {
+	if m.vals.statsFile == "" {
+		return
+	}
+	if err := output.WriteSummaryFile(m.vals.statsFile, summary); err != nil {
+		m.scanView.outputErr = true
+		m.scanView.addMessage(errorStyle.Render("✗ cannot write the stats file: " + err.Error()))
+		return
+	}
+	m.scanView.addMessage(dimStyle.Render("Wrote the run-quality report to " + m.vals.statsFile))
 }
 
 // defaultSavePath is the save prompt's starting path: the form's Output
@@ -648,6 +738,15 @@ func (m *Model) summary(final scan.Event) output.Summary {
 		lookups[i] = l.Lookup
 	}
 	report.Sources(&t, lookups, m.foundBy)
+	if z := m.zone; z != nil {
+		// The same zone fields as the CLI's report (#85, #234, #437).
+		t.AXFRAllowed, t.AXFRNames, t.AXFRError = z.Allowed, len(z.Names), z.Err
+		t.AXFRFound = m.foundBy[candidates.AXFR]
+		t.NSECNames, t.NSECStop = len(z.Walked), z.WalkStop
+		t.NSECFound = m.foundBy[candidates.NSEC]
+		t.ZoneDenial = string(z.Denial)
+		t.QueriesSent += z.Queries
+	}
 	m.scanView.perm.summarize(&t, m.scanView.aborted, m.scanView.errText)
 	// As the CLI's, with the resolver pool's accounting (#367).
 	return report.Build(report.Run{

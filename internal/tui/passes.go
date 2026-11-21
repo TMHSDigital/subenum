@@ -2,10 +2,15 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/TMHSDigital/subenum/internal/axfr"
 	"github.com/TMHSDigital/subenum/internal/candidates"
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
 	"github.com/TMHSDigital/subenum/internal/report"
@@ -93,4 +98,61 @@ func permutationCmd(domain string, entries, found []string, cands *candidates.Se
 		perms, tooLong, _ := candidates.Permutations(domain, entries, rel)
 		return permutationReadyMsg{seeds: len(rel), candidates: perms, tooLong: tooLong}
 	}
+}
+
+// zoneAnswer is what the Zone Transfer and NSEC Walk fields got from the
+// domain's name servers before the scan (#418).
+type zoneAnswer struct {
+	axfr.Result
+	notes     []string // the attempt's findings and warnings, for the scan screen
+	addedAXFR int      // transferred names that were not candidates already
+	addedNSEC int      // walked names that were not candidates already
+}
+
+// askZone asks the domain's name servers for a zone transfer, walks a
+// plain-NSEC zone, or both, with the command line's code and bounds (#418).
+// Name servers and names out of scope are neither asked nor returned (#372);
+// the walk is paced by Rate, sends at most Max Queries and stops at
+// deadline (zero for none).
+func askZone(ctx context.Context, vals formValues, o Options, deadline time.Time) zoneAnswer {
+	var z zoneAnswer
+	var mu sync.Mutex
+	info := func(format string, a ...any) {
+		mu.Lock()
+		z.notes = append(z.notes, fmt.Sprintf(format, a...))
+		mu.Unlock()
+	}
+	skip := scan.Excluder(vals.Exclude)
+	opts := axfr.Options{
+		Resolver:   vals.DNSServer,
+		Port:       o.TransferPort,
+		Timeout:    vals.Timeout,
+		Info:       info,
+		Skip:       skip,
+		NoTransfer: !vals.axfr,
+	}
+	if vals.nsecWalk {
+		opts.Walk = &dns.WalkOptions{
+			Timeout:    vals.Timeout,
+			MaxQueries: vals.MaxQueries,
+			Limiter:    dns.NewRateLimiter(vals.Rate),
+			Deadline:   deadline,
+			Skip:       skip,
+		}
+	}
+	r := axfr.Try(ctx, vals.Domain, opts)
+	mu.Lock()
+	defer mu.Unlock()
+	z.Result = r
+	if r.Err != "" {
+		without := "a zone transfer"
+		switch {
+		case !vals.axfr:
+			without = "an NSEC walk"
+		case vals.nsecWalk:
+			without = "a zone transfer or an NSEC walk"
+		}
+		z.notes = append(z.notes, fmt.Sprintf("Warning: %s; scanning %s without %s", r.Err, vals.Domain, without))
+	}
+	return z
 }

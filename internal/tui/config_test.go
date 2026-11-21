@@ -33,7 +33,7 @@ func filledForm(t *testing.T) formModel {
 		fieldRatePerResolver: "5", fieldConcurrency: "7", fieldTimeout: "700", fieldAttempts: "2",
 		fieldTypes: "A,CNAME", fieldDepth: "3", fieldRate: "50", fieldMaxQueries: "10",
 		fieldMaxDuration: "1h30m0s", fieldExclude: "vpn.example.com,*.corp.example.com",
-		fieldOutput: "out.json", fieldFormat: "json",
+		fieldOutput: "out.json", fieldFormat: "json", fieldStats: "run.json",
 	}
 	m := newFormModel(savedConfig{})
 	for f, spec := range formFields {
@@ -138,7 +138,10 @@ func TestSavedConfigFile(t *testing.T) {
   "max_duration": "1h30m0s",
   "retry_inconclusive": true,
   "sources": "ct,wayback",
-  "permute": true
+  "permute": true,
+  "axfr": true,
+  "nsec_walk": true,
+  "stats": "run.json"
 }`},
 		"normalized, hidden and blank rows": {sparse, `{
   "domain": "example.com",

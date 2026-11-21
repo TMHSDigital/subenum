@@ -128,7 +128,7 @@ internal/wordlist/reader.go    - ReadLines, ReadLinesFrom, Normalize, Build, Pre
 internal/tui/model.go          - Root Bubble Tea model (form -> scan state machine)
 internal/tui/form.go           - Config form screen (textinput fields + toggles)
 internal/tui/scan_view.go      - Live results screen (viewport + progress bar)
-internal/tui/passes.go         - Sources and Permute: passive-source lookups before the scan, the permutation pass after it
+internal/tui/passes.go         - Sources, Zone Transfer, NSEC Walk and Permute: source and name server lookups before the scan, the permutation pass after it
 internal/tui/logo.go           - Styled wordmark
 internal/tui/config.go         - Session persistence (load/save <user config dir>/subenum/last.json)
 pkg/subenum/subenum.go         - Scan, Run, DefaultWords, Permutations: the embeddable API
@@ -143,7 +143,7 @@ tools/licenses/main.go         - THIRD_PARTY_LICENSES for release archives and t
 
 *   **Purpose**: This component is responsible for processing the command-line arguments provided by the user when `subenum` is executed. It extracts the target domain (or a `-dL` domain list), the wordlist path, and every scan, output, and tuning option.
 *   **Implementation**: `run()` only calls `runWith(runArgs)`, which takes the arguments, stdin, stdout and stderr as injected values so tests can drive the whole CLI in-process. Per-run state lives in a `session` (`internal/cli/session.go`) whose methods are the run's phases: `parse`, `configure`, `loadInputs`, `openOutputs`, `scanAll` (which calls `scanOneTarget` per target) and `finish`. `cliFlags` holds only parsed flag values; what the run derives from them (attempts, record types, excludes, the resolver pool, the `-max-duration` deadline) is in `runtimeInputs`, and each pass over a target is a `scanPass`. `runWith` first handles the `completion`, `diff`, `man` and `mcp` subcommands and `-resume`, then builds a `flag.FlagSet` with `parseFlagsWith`, which binds every flag into a `cliFlags` struct and applies config-file and environment defaults (see section 5). The standard `flag` package stops at the first non-flag argument, so `cliargs.Parse` (`internal/cliargs`, shared with `tools/wordlist-gen.go`) re-parses around each positional; flags written after the domain are honored, and everything after a `--` terminator is positional. `runWith` then:
-    *   handles `-tui` (launches `tui.Start` with the form pre-filled from the domain and the flags it has fields for, warning about the rest), `-print-config` and `-version` first;
+    *   handles `-tui` (launches `tui.Start` with the form pre-filled from the domain, the flags it has fields for and the `-exclude-file` patterns, warning about the rest on stderr and on the form), `-print-config` and `-version` first;
     *   parses `-format` (`output.ParseFormat`), `-type` (`dns.ParseTypes`), and merges `-attempts` with the deprecated `-retries` (`effectiveAttempts`);
     *   calls `validateFlags`, which checks that a target is present, that a positional domain and `-dL` are not both given, and that `-w` and `-dL` do not both read stdin (`-w` may repeat, but only one entry may be `-`). Numeric ranges and the resolver address are checked by `scan.Options.Validate`, the same validator the TUI uses. The positional domain is canonicalized with `validate.NormalizeDomain`.
 *   **Domain normalization**: `validate.NormalizeDomain` trims and lowercases the input, strips a URL scheme and path, a `:port`, a leading `*.` and a trailing dot (returning a note for each change), converts IDNs to punycode, and checks the result with `validate.Domain`. `validate.DNSServer` checks the resolver: `ip:port`, `tls://host[:port]` or `https://host/path`. Both are shared with the TUI.
@@ -336,7 +336,7 @@ Each subsystem below is small and documented in its source; this section says wh
 
 ### 5.1. Run-Quality Verdict
 
-`scan.Stats.Verdict` grades a scan that reached `EventDone`: `unreliable` when the reliability guard aborted it or more than 20% of lookups failed; `degraded` when it was interrupted, at least 1% of lookups failed, or `-max-queries` or `-max-duration` left candidates untested; otherwise `complete`. The reason names settings as `{tokens}` (`internal/scan/settings.go`) that each front end renders in its own terms (`-max-queries` in the CLI). `internal/report` builds the run summary for the CLI and the TUI; the CLI writes it as the final line of `jsonl` output and to the `-stats` file, including per-resolver counts when `-r` is used.
+`scan.Stats.Verdict` grades a scan that reached `EventDone`: `unreliable` when the reliability guard aborted it or more than 20% of lookups failed; `degraded` when it was interrupted, at least 1% of lookups failed, or `-max-queries` or `-max-duration` left candidates untested; otherwise `complete`. The reason names settings as `{tokens}` (`internal/scan/settings.go`) that each front end renders in its own terms (`-max-queries` in the CLI). `internal/report` builds the run summary for the CLI and the TUI; the CLI writes it as the final line of `jsonl` output and to the `-stats` file (the TUI to its Stats File), including per-resolver counts when `-r` is used.
 
 ### 5.2. Scope and Exclusions
 

@@ -364,7 +364,7 @@ func TestTUIOptionsFromFlags(t *testing.T) {
 	env := map[string]string{"SUBENUM_RATE": "300", "SUBENUM_T": "20"}
 	d := &defaultsLoader{path: filepath.Join(t.TempDir(), "none.json"), getenv: func(k string) string { return env[k] }}
 	f, pos, fs, err := parseFlagsWith([]string{"-tui", "-w", "big.txt", "-w", "extra.txt", "-r", "resolvers.txt",
-		"-rate-per-resolver", "5", "-t", "30", "-stats", "r.json", "example.com", "other.com"}, d.apply, nil)
+		"-rate-per-resolver", "5", "-t", "30", "-sarif", "r.sarif", "example.com", "other.com"}, d.apply, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestTUIOptionsFromFlags(t *testing.T) {
 	if !reflect.DeepEqual(opts.Settings, want) {
 		t.Errorf("Settings = %v, want %v", opts.Settings, want)
 	}
-	for _, w := range []string{"using big.txt", "-stats other.com; ignored"} {
+	for _, w := range []string{"using big.txt", "-sarif other.com; ignored"} {
 		if !strings.Contains(stderr.String(), w) {
 			t.Errorf("stderr lacks %q:\n%s", w, stderr.String())
 		}
@@ -417,5 +417,41 @@ func TestTUIOptionsFromFlags(t *testing.T) {
 	stderr.Reset()
 	if opts := tuiOptions(f, fs, pos, d, diag); opts.Domain != "" || stderr.Len() != 0 {
 		t.Errorf("bare -tui: Domain %q, stderr %q", opts.Domain, stderr.String())
+	}
+}
+
+// TestTUIOptionsZoneStatsAndExcludeFile covers #418: -axfr, -nsec-walk and
+// -stats seed their form fields, -exclude-file's patterns join -exclude's in
+// the Exclude field, and the warnings about what stays ignored are handed to
+// the form as well as printed, since the full-screen UI covers stderr.
+func TestTUIOptionsZoneStatsAndExcludeFile(t *testing.T) {
+	d := &defaultsLoader{path: filepath.Join(t.TempDir(), "none.json"), getenv: func(string) string { return "" }}
+	scope := writeFile(t, "scope.txt", "# out of scope\nvpn.example.com\n\n*.corp.example.com\n")
+	f, pos, fs, err := parseFlagsWith([]string{"-tui", "-axfr", "-nsec-walk", "-stats", "r.json",
+		"-exclude", "legacy.example.com", "-exclude-file", scope, "-sarif", "r.sarif", "example.com"}, d.apply, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	diag := output.New(nil, false, output.FormatText)
+	diag.SetStderr(&stderr)
+	opts := tuiOptions(f, fs, pos, d, diag)
+	want := map[string]string{"axfr": "true", "nsec-walk": "true", "stats": "r.json",
+		"exclude": "legacy.example.com,vpn.example.com,*.corp.example.com"}
+	if !reflect.DeepEqual(opts.Settings, want) {
+		t.Errorf("Settings = %v, want %v", opts.Settings, want)
+	}
+	wantWarnings := []string{"-tui has no form field for -sarif; ignored"}
+	if !reflect.DeepEqual(opts.Warnings, wantWarnings) || !strings.Contains(stderr.String(), "Warning: "+wantWarnings[0]) {
+		t.Errorf("Warnings = %q, stderr %q; want %q in both", opts.Warnings, stderr.String(), wantWarnings)
+	}
+
+	// An -exclude-file that cannot be read is a warning on the form; the
+	// Exclude field keeps -exclude's patterns.
+	f, pos, fs, _ = parseFlagsWith([]string{"-tui", "-exclude", "legacy.example.com", "-exclude-file", filepath.Join(t.TempDir(), "missing.txt")}, d.apply, nil)
+	stderr.Reset()
+	opts = tuiOptions(f, fs, pos, d, diag)
+	if opts.Settings["exclude"] != "legacy.example.com" || len(opts.Warnings) != 1 || !strings.HasPrefix(opts.Warnings[0], "cannot read -exclude-file: ") {
+		t.Errorf("unreadable -exclude-file: Settings %v, Warnings %q", opts.Settings, opts.Warnings)
 	}
 }

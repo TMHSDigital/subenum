@@ -40,6 +40,11 @@ type savedConfig struct {
 	// (#274).
 	Sources string `json:"sources,omitempty"`
 	Permute bool   `json:"permute,omitempty"`
+	// AXFR, NSECWalk and Stats are -axfr, -nsec-walk and the -stats file
+	// (#418).
+	AXFR     bool   `json:"axfr,omitempty"`
+	NSECWalk bool   `json:"nsec_walk,omitempty"`
+	Stats    string `json:"stats,omitempty"`
 }
 
 // durationText is how a max duration is saved: "" for none, so the form

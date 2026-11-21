@@ -186,7 +186,7 @@ func TestTUIOptionsJSONWarnings(t *testing.T) {
 	d := &defaultsLoader{path: filepath.Join(t.TempDir(), "none.json"), getenv: func(string) string { return "" }}
 	f, pos, fs, err := parseFlagsWith([]string{
 		"-tui", "-log-format", "json", "-w", "first.txt", "-w", "extra.txt",
-		"-stats", "stats.json", "example.com", "other.example.com",
+		"-sarif", "out.sarif", "example.com", "other.example.com",
 	}, d.apply, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestTUIOptionsJSONWarnings(t *testing.T) {
 	}
 	for i, want := range []string{
 		"the TUI takes one wordlist; using first.txt",
-		"-tui has no form field for -log-format -stats other.example.com; ignored",
+		"-tui has no form field for -log-format -sarif other.example.com; ignored",
 	} {
 		if lines[i].Level != "warn" || lines[i].Kind != "message" || lines[i].Message != want {
 			t.Errorf("diagnostic %d = %+v, want a JSON warning with message %q", i, lines[i], want)

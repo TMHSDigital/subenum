@@ -36,8 +36,10 @@ const (
 	fieldAttempts
 	fieldTypes
 	fieldRecursive
-	fieldDepth   // only reachable when Recursive is ON
-	fieldPermute // -permute (#274)
+	fieldDepth    // only reachable when Recursive is ON
+	fieldPermute  // -permute (#274)
+	fieldAXFR     // -axfr (#418)
+	fieldNSECWalk // -nsec-walk (#418)
 	fieldRate
 	fieldAutoRate // -auto-rate (#274)
 	fieldMaxQueries
@@ -45,6 +47,7 @@ const (
 	fieldExclude
 	fieldOutput
 	fieldFormat
+	fieldStats // -stats run-quality report file (#418)
 	fieldForce
 	fieldNoAbort
 	fieldRetryIncon // -retry-inconclusive (#274)
@@ -112,6 +115,10 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.Depth }},
 	fieldPermute: {label: "Permute", flag: "permute", kind: toggleField,
 		saved: func(c *savedConfig) any { return &c.Permute }},
+	fieldAXFR: {label: "Zone Transfer", flag: "axfr", kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.AXFR }},
+	fieldNSECWalk: {label: "NSEC Walk", flag: "nsec-walk", kind: toggleField,
+		saved: func(c *savedConfig) any { return &c.NSECWalk }},
 	fieldRate: {setting: scan.SettingRate, kind: textField, placeholder: "0 = unlimited", def: "0",
 		saved: func(c *savedConfig) any { return &c.Rate }},
 	fieldAutoRate: {label: "Auto Rate", flag: "auto-rate", kind: toggleField,
@@ -126,6 +133,8 @@ var formFields = [fieldCount]formField{
 		saved: func(c *savedConfig) any { return &c.Output }},
 	fieldFormat: {label: "Format", flag: "format", kind: textField, placeholder: "text, json, jsonl, csv", def: "text",
 		saved: func(c *savedConfig) any { return &c.Format }},
+	fieldStats: {label: "Stats File", flag: "stats", kind: textField, placeholder: "optional, e.g. run.json",
+		saved: func(c *savedConfig) any { return &c.Stats }},
 	fieldForce: {setting: scan.SettingForce, kind: toggleField,
 		saved: func(c *savedConfig) any { return &c.Force }},
 	fieldNoAbort: {label: "No Abort", flag: "no-abort", kind: toggleField,
@@ -225,8 +234,13 @@ type formModel struct {
 	err     string
 	loading bool // wordlist is loading in the background; ctrl+r is ignored
 	asking  bool // the load also asks the passive sources (#274)
-	width   int  // terminal size, 0 until the first size message
-	height  int
+	zoning  bool // the load also asks the zone's name servers (#418)
+	// warnings are the launch warnings, such as flags -tui has no field
+	// for, shown on the form: printed to stderr alone, the full-screen UI
+	// would cover them (#418).
+	warnings []string
+	width    int // terminal size, 0 until the first size message
+	height   int
 }
 
 // newFormModel creates a form, optionally pre-seeded from a saved config.
@@ -446,13 +460,26 @@ func (m formModel) rows() []string {
 func (m formModel) footer() string {
 	var b strings.Builder
 
+	if len(m.warnings) > 0 {
+		b.WriteString("\n")
+		for _, w := range m.warnings {
+			b.WriteString(wildcardStyle.Render("  ⚠ "+w) + "\n")
+		}
+	}
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("  ✗ "+m.err) + "\n")
 	}
 	if m.loading {
-		note := "  Loading wordlist..."
+		var asked []string
 		if m.asking {
-			note = "  Loading wordlist and asking the passive sources..."
+			asked = append(asked, "the passive sources")
+		}
+		if m.zoning {
+			asked = append(asked, "the zone's name servers")
+		}
+		note := "  Loading wordlist..."
+		if len(asked) > 0 {
+			note = "  Loading wordlist and asking " + strings.Join(asked, " and ") + "..."
 		}
 		b.WriteString("\n" + dimStyle.Render(note) + "\n")
 	}
@@ -622,6 +649,8 @@ func (m *formModel) validate() (formValues, string) {
 	if err != nil {
 		return formValues{}, err.Error()
 	}
+	// The run-quality report, written when the scan ends, as -stats (#418).
+	statsFile := path(fieldStats)
 
 	v := formValues{
 		Options: scan.Options{
@@ -652,7 +681,10 @@ func (m *formModel) validate() (formValues, string) {
 		sources:    sources,
 		resolvers:  resolvers,
 		permute:    m.toggles[fieldPermute],
+		axfr:       m.toggles[fieldAXFR],
+		nsecWalk:   m.toggles[fieldNSECWalk],
 		outputFile: outputFile,
+		statsFile:  statsFile,
 		format:     format,
 		saved:      saved,
 	}
@@ -684,7 +716,20 @@ type formValues struct {
 	sources    []string // passive sources asked before the scan, in passive.Known order
 	resolvers  string   // resolver pool file; "" means the single DNS server
 	permute    bool     // a second pass over permutations of the names found
+	axfr       bool     // ask the zone's name servers for a zone transfer first (#418)
+	nsecWalk   bool     // walk a plain-NSEC zone's chain first (#418)
 	outputFile string
+	statsFile  string // the run-quality report file, as -stats; "" for none (#418)
 	format     output.Format
 	saved      savedConfig // what saveConfig writes for the next session
+}
+
+// zoneLookup reports whether the scan starts by asking the domain's name
+// servers: for a zone transfer, an NSEC walk or both (#418).
+func (v formValues) zoneLookup() bool { return v.axfr || v.nsecWalk }
+
+// attributed reports whether results say what proposed them: something
+// other than the wordlist can, as on the command line (#274, #418).
+func (v formValues) attributed() bool {
+	return len(v.sources) > 0 || v.permute || v.zoneLookup()
 }
