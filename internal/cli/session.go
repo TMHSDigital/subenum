@@ -645,12 +645,20 @@ func (s *session) handleSignals(ctx context.Context, cancel context.CancelFunc) 
 // -diff to stdout only when it changed. Names restored from a -resume state
 // were already written.
 func (s *session) emitResult(ev scan.Event, permutation bool) {
+	s.emitFrom(ev, permutation, nil)
+}
+
+// emitFrom is emitResult for a result whose sources are known, such as a
+// -ptr hit (#436); nil sources are worked out from the event.
+func (s *session) emitFrom(ev scan.Event, permutation bool, sources []string) {
 	if s.restored[ev.Result.Subdomain] {
 		s.refound.add(ev.Result)
 		return
 	}
 	res := output.Result{Result: ev.Result, Permutation: permutation, Sources: candidates.FromPermute, Target: s.target}
 	switch {
+	case sources != nil:
+		res.Sources = sources
 	case ev.Followed:
 		res.Sources = candidates.FromRecords // a found name's record named it (#432)
 	case !permutation:
@@ -678,6 +686,7 @@ func (s *session) emitResult(ev scan.Event, permutation bool) {
 
 func (s *session) emitMain(ev scan.Event)        { s.emitResult(ev, false) }
 func (s *session) emitPermutation(ev scan.Event) { s.emitResult(ev, true) }
+func (s *session) emitPTR(ev scan.Event)         { s.emitFrom(ev, false, candidates.FromPTR) }
 
 // scanAll scans every target in turn. Each target is an independent scan:
 // its own preflight, wildcard check, -max-queries budget, -rate limiter and
@@ -747,8 +756,9 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	}
 	// A resumed run re-emits these results; their records are needed only
 	// when the output shows them, -diff compares them (#183), or a resume
-	// follows them again (-follow-records, #432).
-	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil || s.f.followRecs}
+	// follows them again (-follow-records, #432), or -ptr looks up their
+	// addresses (#436).
+	s.targetResults = resultLog{full: s.format != output.FormatText || s.f.showRecords || s.diff != nil || s.f.followRecs || s.f.ptr}
 	s.entryDigests[i] = entryDigest(entries)
 	// Restored names are per target: nested -dL targets can both find a
 	// name, and each reports it (#408).
@@ -872,6 +882,20 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 			res.failed = true
 		}
 	}
+	// -ptr: the PTR records of the addresses found, then a pass over the
+	// names under the target they give (#436), once the passes before it
+	// finished. It is not resumed part way: a resumed run does it again.
+	if s.f.ptr && inScope && res.done && !res.failed && !res.unfinished() && s.signalCode.Load() == 0 &&
+		(res.permutation == nil || !res.permutation.pass.unfinished()) {
+		fingerprints := [][]dns.Record{res.final.Stats.Fingerprint}
+		if p := res.permutation; p != nil && p.pass.done {
+			fingerprints = append(fingerprints, p.pass.final.Stats.Fingerprint)
+		}
+		res.ptr = runPTRPass(ctx, s, target, entries, fingerprints...)
+		if res.ptr.pass.failed {
+			res.failed = true
+		}
+	}
 	res.sources = sourceInfo
 	res.axfr = axfrInfo
 	res.foundBy = s.foundBy
@@ -882,14 +906,20 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 // structured output hold the whole result set. It returns the main pass's
 // saved state and the number of permutation results restored.
 func (s *session) restoreTarget(saved *resumeTarget) (mainSaved *resumePass, restoredHits int) {
+	ptrHits := 0 // -ptr results are not the main pass's either (#436)
 	for _, r := range saved.Results {
-		s.emitResult(scan.Event{Result: r.Result}, r.Permutation)
+		if ptrHit(r) {
+			s.emitFrom(scan.Event{Result: r.Result}, false, candidates.FromPTR)
+			ptrHits++
+		} else {
+			s.emitResult(scan.Event{Result: r.Result}, r.Permutation)
+		}
 		s.restored[r.Subdomain] = true
 		if r.Permutation {
 			restoredHits++
 		}
 	}
-	mainSaved = &resumePass{RootDone: saved.RootDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results) - restoredHits),
+	mainSaved = &resumePass{RootDone: saved.RootDone, Stats: saved.Stats, Processed: saved.Processed, Total: saved.Total, Found: int64(len(saved.Results) - restoredHits - ptrHits),
 		Pending: saved.Pending}
 	return mainSaved, restoredHits
 }
@@ -951,6 +981,9 @@ func (s *session) inconclusiveNames() []string {
 		if p := res.permutation; p != nil && p.pass.done {
 			names = append(names, p.pass.final.Stats.Inconclusive...)
 		}
+		if p := res.ptr; p != nil && p.pass.done {
+			names = append(names, p.pass.final.Stats.Inconclusive...)
+		}
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
@@ -962,7 +995,7 @@ func (s *session) inconclusiveNames() []string {
 // interrupted one (#294).
 func (s *session) stoppedEarly() bool {
 	for _, res := range s.results {
-		if res.unfinished() || (res.permutation != nil && res.permutation.pass.unfinished()) {
+		if res.unfinished() || (res.permutation != nil && res.permutation.pass.unfinished()) || (res.ptr != nil && res.ptr.unfinished()) {
 			return true
 		}
 	}

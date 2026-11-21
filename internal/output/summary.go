@@ -117,6 +117,14 @@ type TargetSummary struct {
 	// RecordsFound counts the results -follow-records found: names a found
 	// name's CNAME, MX or NS record pointed at (#432).
 	RecordsFound int `json:"records_found,omitempty"`
+	// PTRAddresses counts the public addresses -ptr looked up, PTRQueries
+	// the PTR queries that took (queries_sent includes them and the scan of
+	// the names), PTRNames the names under the target the answers gave that
+	// were tested, and PTRFound the ones that resolved (#436).
+	PTRAddresses int   `json:"ptr_addresses,omitempty"`
+	PTRQueries   int64 `json:"ptr_queries,omitempty"`
+	PTRNames     int   `json:"ptr_names,omitempty"`
+	PTRFound     int   `json:"ptr_found,omitempty"`
 	// ZoneDenial is how the zone proves a name does not exist, from the
 	// DNSSEC probe of -axfr or -nsec-walk: "nsec" (walkable: every name can be listed), "nsec3" or
 	// "none" (unsigned) (#234).

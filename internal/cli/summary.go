@@ -35,6 +35,7 @@ func targetSummary(domain string, status report.Status, res targetResult) output
 	t.AXFRAllowed, t.AXFRNames, t.AXFRError = res.axfr.allowed, len(res.axfr.names), res.axfr.err
 	t.AXFRFound = res.foundBy[candidates.AXFR]
 	t.RecordsFound = res.foundBy[candidates.Records]
+	t.PTRFound = res.foundBy[candidates.PTR]
 	t.NSECNames, t.NSECStop = len(res.axfr.walked), res.axfr.walkStop
 	t.NSECFound = res.foundBy[candidates.NSEC]
 	t.ZoneDenial = string(res.axfr.denial)
@@ -46,5 +47,37 @@ func targetSummary(domain string, status report.Status, res targetResult) output
 		}
 		report.Permutation(&t, pass, status == report.StatusInterrupted, scan.FlagName)
 	}
+	if p := res.ptr; p != nil {
+		ptrSummary(&t, p, status == report.StatusInterrupted)
+	}
 	return t
+}
+
+// ptrReason starts a target's verdict reason when the verdict is the -ptr
+// pass's (#436).
+const ptrReason = "PTR pass: "
+
+// ptrSummary adds a target's -ptr pass to t: its counts and queries, and its
+// verdict when that is worse than the target's. A pass that ran out of
+// -max-duration makes the target at least degraded.
+func ptrSummary(t *output.TargetSummary, p *ptrResult, interrupted bool) {
+	t.PTRAddresses, t.PTRQueries, t.PTRNames = p.addresses, p.queries, p.candidates
+	t.QueriesSent += p.queries
+	switch {
+	case p.pass.done:
+		final := p.pass.final
+		t.QueriesSent += final.Stats.QueriesSent
+		if verdict, reason := final.Stats.Verdict(interrupted); scan.VerdictRank(verdict) > scan.VerdictRank(t.Verdict) {
+			t.Verdict, t.Reason = verdict, ptrReason+scan.Render(reason, scan.FlagName)
+		}
+	case p.candidates > 0 && scan.VerdictRank(t.Verdict) < scan.VerdictRank(scan.VerdictDegraded):
+		failure := p.pass.err
+		if failure == "" {
+			failure = "it did not run to completion"
+		}
+		t.Verdict, t.Reason = scan.VerdictDegraded, ptrReason+failure
+	}
+	if p.expired && scan.VerdictRank(t.Verdict) < scan.VerdictRank(scan.VerdictDegraded) {
+		t.Verdict, t.Reason = scan.VerdictDegraded, ptrReason+"-max-duration ran out before every address was looked up"
+	}
 }

@@ -69,6 +69,7 @@ internal/cli/mcp.go            - subenum mcp: its flags, the server, and the lab
 internal/cli/mcp_tools.go      - the lab_scan, scan, explain_stats and diff tools: input schemas, argument checks, the allow-list and caps
 internal/cli/mcp_report.go     - the scan and diff reports the tools return, the scan verdict and their outputSchemas
 internal/cli/permute.go        - -permute / -seeds: the permutation pass
+internal/cli/ptr.go            - -ptr: PTR lookups of the public addresses found, and the pass over the names they give
 internal/cli/resume.go         - -resume / -state: save and replay an interrupted run
 internal/cli/results.go        - resultLog: a target's results, kept for -permute seeds and -diff
 internal/cli/summary.go        - assemble the run-quality report (-stats, JSONL summary line)

@@ -247,6 +247,9 @@ func dryRunNotes(f cliFlags, sources []string, deep *wordlist.Prepared) []string
 	if f.followRecs {
 		notes = append(notes, "-follow-records targets (named by the records of what the scan finds)")
 	}
+	if f.ptr && !f.testMode {
+		notes = append(notes, "the -ptr pass (one PTR query per public address the scan finds, then the names under the target they give)")
+	}
 	if !f.testMode {
 		notes = append(notes, "wildcard probes")
 	}

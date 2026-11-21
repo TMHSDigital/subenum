@@ -29,6 +29,7 @@
 | `-permute` | - | After each scan, scan permutations of the names found (api -&gt; api-dev, dev-api, dev.api, api2, ...) |
 | `-print-config` | - | Print every setting's effective value and its source (flag, env, config or default), then exit |
 | `-progress` | true | Show progress during scanning |
+| `-ptr` {% include unreleased.html flag="ptr" %} | - | After each scan, look up the PTR records of the public addresses found, and test the names under the target they give, unless already found; the PTR queries are paced by -rate and bounded by -max-queries, -max-duration and -exclude, which also takes reverse zones such as \*.2.0.192.in-addr.arpa |
 | `-r <string>` | - | File of resolvers (ip[:port], tls://host[:port] or https://host/path, one per line) to spread queries over; every hit is re-validated against -dns-server |
 | `-rate <int>` | - | Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited) |
 | `-rate-per-resolver <int>` | - | With -r, max DNS queries per second sent to each pool resolver; -rate still caps the total (0 = unlimited) |

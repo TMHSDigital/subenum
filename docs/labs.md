@@ -321,6 +321,7 @@ mail     MX       10 mx1                # preference and host (relative or absol
 sub      NS       ns1.gone.example.     # a delegated subzone (scan with -type NS)
 slow     TIMEOUT                        # never answered
 broken   SERVFAIL                       # also: REFUSED, NXDOMAIN
+192.0.2.10 PTR    host-12.dc1           # reverse DNS of an address (-ptr); relative or absolute host
 ```
 
 Start a scenario in `examples/labs` with a comment saying what it teaches

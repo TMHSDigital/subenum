@@ -23,6 +23,7 @@
 //	sub      NS       ns1.gone.example.net.  # a delegated subzone
 //	slow     TIMEOUT                         # never answered
 //	broken   SERVFAIL                        # also REFUSED, NXDOMAIN
+//	192.0.2.10 PTR    host-12.dc1            # reverse DNS of an address (relative or absolute host)
 //
 // Names the file does not define are NXDOMAIN (or NODATA when a deeper
 // name exists under them). The server stands in for the student's resolver
@@ -46,6 +47,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/dnsserver"
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -67,6 +69,8 @@ type Zone struct {
 	// walked; "nsec3" adds an NSEC3 record; "" (none, the default) adds
 	// nothing, as for an unsigned zone.
 	DNSSEC string
+
+	ptr map[string][]string // reverse name (10.2.0.192.in-addr.arpa) -> hosts as written (#436)
 }
 
 // nsecChain lists the owner names of origin's NSEC chain in canonical order
@@ -396,6 +400,9 @@ func (z *Zone) parseRecord(fields []string) error {
 	if len(fields) < 2 {
 		return fmt.Errorf("want <name> <type> [value]")
 	}
+	if strings.EqualFold(fields[1], "PTR") {
+		return z.parsePTR(fields)
+	}
 	e, err := z.entryFor(fields[0])
 	if err != nil {
 		return err
@@ -423,6 +430,27 @@ func (z *Zone) parseRecord(fields []string) error {
 		return fmt.Errorf("%s: already defined as a failure", fields[0])
 	}
 	return rt.add(e, fields[0], strings.Join(fields[2:], " "))
+}
+
+// parsePTR reads "<address> PTR <host>": the reverse DNS of an address,
+// which is owned by no name in the zone (#436).
+func (z *Zone) parsePTR(fields []string) error {
+	if len(fields) != 3 {
+		return fmt.Errorf("want <address> PTR <host>")
+	}
+	rev, err := dns.ReverseName(fields[0])
+	if err != nil {
+		return fmt.Errorf("bad PTR address %q: the owner of a PTR record is an IPv4 or IPv6 address", fields[0])
+	}
+	host, err := cnameTarget(fields[2])
+	if err != nil || host == "@" {
+		return fmt.Errorf("bad PTR host %q", fields[2])
+	}
+	if z.ptr == nil {
+		z.ptr = map[string][]string{}
+	}
+	z.ptr[rev] = append(z.ptr[rev], host)
+	return nil
 }
 
 // entryFor returns the entry for the name as written in the file, creating
@@ -672,6 +700,17 @@ func (z *Zone) Handler(origins []string) dnsserver.Handler {
 			if over {
 				return dnsserver.Refused
 			}
+		}
+		if hosts, ok := z.ptr[q.Name]; ok && len(origins) > 0 {
+			// The reverse DNS of an address (#436); a relative host is
+			// under the first scanned domain.
+			r := dnsserver.Reply{Delay: z.Delay}
+			if q.Type == dnsmessage.TypePTR {
+				for _, h := range hosts {
+					r.PTR = append(r.PTR, absolute(h, origins[0]))
+				}
+			}
+			return r
 		}
 		r := dnsserver.NXDomain
 		best := -1

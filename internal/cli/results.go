@@ -32,7 +32,7 @@ func (l *resultLog) add(r output.Result) {
 	if len(l.names) == 0 {
 		l.simulated = r.Simulated
 	}
-	if r.Takeover != "" || r.Internal != "" || r.Partial || r.Permutation || r.Simulated != l.simulated {
+	if r.Takeover != "" || r.Internal != "" || r.Partial || r.Permutation || ptrHit(r) || r.Simulated != l.simulated {
 		if l.extra == nil {
 			l.extra = map[int]output.Result{}
 		}
@@ -62,14 +62,14 @@ func (l *resultLog) results() []output.Result {
 }
 
 // mainPassNames returns the names the main pass found, leaving out
-// permutation hits: they are the -permute seeds.
+// permutation and -ptr hits: they are the -permute seeds.
 func (l *resultLog) mainPassNames() []string {
 	if l.full {
 		return mainPassNames(l.all)
 	}
 	names := make([]string, 0, len(l.names))
 	for i, name := range l.names {
-		if r, ok := l.extra[i]; ok && r.Permutation {
+		if r, ok := l.extra[i]; ok && (r.Permutation || ptrHit(r)) {
 			continue
 		}
 		names = append(names, name)

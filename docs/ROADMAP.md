@@ -57,7 +57,7 @@ surprises:
 Constraints to keep in mind when changing the code.
 
 - **The test DNS server (`internal/dnstest`) models A, AAAA, CNAME, NS, MX,
-  TXT and SRV answers, AXFR, NSEC records in the authority section and
+  TXT, SRV and PTR answers, AXFR, NSEC records in the authority section and
   referrals (NS records in the authority section, told apart by the
   query's RD bit),** any RCODE, NODATA with SOA, delays, drops and
   truncation (scripted, or when a UDP answer exceeds the query's EDNS

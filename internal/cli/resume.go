@@ -571,13 +571,16 @@ func saveResumeState(s *session) bool {
 			t.AXFR, t.AXFRServers, t.AXFRDone, t.Denial = res.axfr.names, res.axfr.allowed, true, string(res.axfr.denial)
 			t.NSEC, t.NSECStop = res.axfr.walked, res.axfr.walkStop
 		}
-		// A target is finished only if its scan (and any -permute pass)
-		// completed before the interrupt, with nothing left by -max-duration.
+		// A target is finished only if its scan (and any -permute and -ptr
+		// pass) completed before the interrupt, with nothing left by
+		// -max-duration.
 		t.Done = s.status[i] == report.StatusOK && res.done && !res.unfinished() &&
-			(res.permutation == nil || res.permutation.candidates == 0 || (res.permutation.pass.done && !res.permutation.pass.unfinished()))
-		// The -permute pass starts only once the main pass completed, so a
-		// target with one left resumes in it, without the main pass (#358).
-		t.MainDone = !t.Done && ((res.done && !res.unfinished() && res.permutation != nil) || (saved != nil && saved.MainDone))
+			(res.permutation == nil || res.permutation.candidates == 0 || (res.permutation.pass.done && !res.permutation.pass.unfinished())) &&
+			(!s.f.ptr || (res.ptr != nil && !res.ptr.unfinished() && (res.ptr.candidates == 0 || res.ptr.pass.done)))
+		// The -permute and -ptr passes start only once the main pass
+		// completed, so a target with one left resumes in it, without the
+		// main pass (#358). A -ptr pass is done again from its start (#436).
+		t.MainDone = !t.Done && ((res.done && !res.unfinished() && (res.permutation != nil || res.ptr != nil)) || (saved != nil && saved.MainDone))
 		switch {
 		case res.done:
 			final := res.final

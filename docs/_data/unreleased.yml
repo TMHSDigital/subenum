@@ -12,6 +12,7 @@ flags:
   - follow-records
   - srv
   - nsec-walk
+  - ptr
 # new values of a flag that is itself released, as flag=VALUE (#306)
 values:
   - type=SRV

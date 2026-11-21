@@ -21,15 +21,17 @@ const (
 	Permute  = "permute"
 	Records  = "records" // a -follow-records target (#432)
 	SRV      = "srv"     // a -srv service name (#419)
+	PTR      = "ptr"     // a -ptr reverse-lookup name (#436)
 )
 
-// FromWordlist, FromPermute and FromRecords are the sources of a wordlist
-// name, a -permute hit and a -follow-records hit, shared by every such
-// result.
+// FromWordlist, FromPermute, FromRecords and FromPTR are the sources of a
+// wordlist name, a -permute hit, a -follow-records hit and a -ptr hit,
+// shared by every such result.
 var (
 	FromWordlist = []string{Wordlist}
 	FromPermute  = []string{Permute}
 	FromRecords  = []string{Records}
+	FromPTR      = []string{PTR}
 )
 
 // Set is a target's candidate entries and -permute seeds as the passive

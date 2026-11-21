@@ -28,7 +28,7 @@ A test fails when a field is added to the code but not to these files, so they s
 | `change` | string | with `-diff` | `added`, `removed`, or with `-diff-records` `changed`. `subenum diff` writes `missing` instead of `removed`, because it looks nothing up. |
 | `previous_records` | array of `{type, value}` | when `change` is `changed` | The baseline's records of the name. |
 | `permutation` | boolean | when set | `true` for a name the `-permute` pass found. |
-| `sources` | array of strings | scan results | What proposed the name, in this order: `wordlist`, `ct`, `wayback`, `axfr`, `nsec`, `srv`; or `permute` alone for a `-permute` hit, `records` alone for a `-follow-records` hit. Not on removed names or in `subenum diff` output. |
+| `sources` | array of strings | scan results | What proposed the name, in this order: `wordlist`, `ct`, `wayback`, `axfr`, `nsec`, `srv`; or `permute` alone for a `-permute` hit, `records` alone for a `-follow-records` hit, `ptr` alone for a `-ptr` hit. Not on removed names or in `subenum diff` output. |
 | `target` | string | scan results | The scanned domain that found the name, which tells `-dL` results with nested targets apart. Not on removed names or in `subenum diff` output. |
 | `first_seen` | string | real runs | When the name was first seen, as an RFC 3339 time in UTC: the earliest `first_seen` the `-diff` baseline gave it (JSON, JSONL or CSV), else this run's time. Never on `-simulate` or `-simulate-zone` runs, so seeded output stays reproducible. On a removed name, and in `subenum diff` output, it is copied from the file the name came from. |
 | `last_seen` | string | real runs | When a run last found the name: this run's time, in RFC 3339 UTC. Copied as `first_seen` is on removed names and in `subenum diff` output. |
@@ -108,6 +108,7 @@ Text output is one name per line. `-show-records` appends the records as ` TYPE=
 | `nsec_names`, `nsec_found`, `nsec_stop` | integer, integer, string | when set | `-nsec-walk`: names the walk listed, results it proposed, and why it stopped before the end of the chain or did not run. |
 | `parent_checks`, `parent_queries` | integer, integer | when set | `-type NS`: names that failed with SERVFAIL whose delegation was asked of the zone's own name servers, and the queries that took (the name server lookups included; `queries_sent` counts them too). A subzone whose every name server is gone is found this way and flagged `dangling-ns`. |
 | `records_found` | integer | when set | `-follow-records`: results that a found name's `CNAME`, `MX` or `NS` record pointed at. |
+| `ptr_addresses`, `ptr_queries`, `ptr_names`, `ptr_found` | integer | when set | `-ptr`: public addresses looked up, PTR queries sent (`queries_sent` includes them and the lookups of the names), names under the target the answers gave that were tested, and results they proposed. |
 | `zone_denial` | string | when set | The DNSSEC probe of `-axfr` or `-nsec-walk`: `nsec` (anyone can list the zone), `nsec3` or `none`. |
 | `pool_hits`, `confirmed`, `unconfirmed` | integer | when set | `-r`: pool hits, and how many the trusted resolver confirmed or denied. |
 | `wildcard` | boolean | always | `true` when the target answers names that do not exist. |

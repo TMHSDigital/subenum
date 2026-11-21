@@ -58,6 +58,7 @@ type Reply struct {
 	MX    []string // "<preference> <host>" (or just "<host>", preference 10) for MX queries
 	TXT   []string // texts for TXT queries, one record each
 	SRV   []string // "<priority> <weight> <port> <target>" for SRV queries
+	PTR   []string // host names for PTR queries of a reverse name (#436)
 
 	// Transfer answers an AXFR query for the queried zone: its SOA, an A
 	// record (192.0.2.1) for each of these names, and the SOA again (#85).
@@ -671,7 +672,24 @@ var answerBuilders = map[dnsmessage.Type]answerBuilder{
 	dnsmessage.TypeMX:   addMX,
 	dnsmessage.TypeTXT:  addTXT,
 	dnsmessage.TypeSRV:  addSRV,
+	dnsmessage.TypePTR:  addPTR,
 	dnsmessage.TypeAXFR: addTransfer,
+}
+
+// addPTR adds one PTR record per host that is a valid name (#436).
+func addPTR(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, h := range r.PTR {
+		host, err := dnsmessage.NewName(fqdn(h))
+		if err != nil {
+			continue
+		}
+		if err := b.PTRResource(rrHeader(owner, dnsmessage.TypePTR), dnsmessage.PTRResource{PTR: host}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // addSRV adds one SRV record per "<priority> <weight> <port> <target>"

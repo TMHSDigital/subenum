@@ -147,6 +147,7 @@ type cliFlags struct {
 	deepWords    wordlistPaths // -recursive-w: the labels tried below depth 1 (#403)
 	followRecs   bool          // -follow-records: test in-scope CNAME, MX and NS targets (#432)
 	srv          bool          // -srv: look up the built-in _service._proto names (#419)
+	ptr          bool          // -ptr: reverse-look up the found public addresses (#436)
 	noAbort      bool
 	maxQueries   int
 	maxDuration  time.Duration // -max-duration: time budget for the whole run (#190)
@@ -252,6 +253,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	fs.BoolVar(&f.srv, "srv", false, "Also look up a built-in list of about 50 service names (_sip._tcp, _autodiscover._tcp, _ldap._tcp, ...) under each target; needs SRV in -type")
+	fs.BoolVar(&f.ptr, "ptr", false, "After each scan, look up the PTR records of the public addresses found, and test the names under the target they give, unless already found; the PTR queries are paced by -rate and bounded by -max-queries, -max-duration and -exclude, which also takes reverse zones such as *.2.0.192.in-addr.arpa")
 	fs.BoolVar(&f.followRecs, "follow-records", false, "Also test the names under the target that found names' CNAME, MX and NS records point at, once each, unless they are already candidates; they count against -max-queries")
 	fs.Var(&f.deepWords, "recursive-w", "Path to a wordlist `file` (- for stdin) of the labels -recursive tries under each name it finds, at depth 2 and below; repeat to combine several; omitted: the -w list")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
@@ -421,6 +423,14 @@ func validateFlags(f cliFlags, in *runtimeInputs, positionals []string, fs *flag
 	if f.srv && !slices.Contains(in.recordTypes, "SRV") {
 		out.Error("-srv looks up service names, which have SRV records; add SRV to -type (for example -type A,AAAA,SRV)")
 		return "", false
+	}
+	// PTR queries start from the addresses the scan finds (#436).
+	if f.ptr && !slices.Contains(in.recordTypes, "A") && !slices.Contains(in.recordTypes, "AAAA") {
+		out.Error("-ptr looks up the addresses found, which need A or AAAA in -type (for example -type A,AAAA)")
+		return "", false
+	}
+	if f.ptr && f.testMode {
+		out.Info("Note: -ptr sends no reverse lookups in simulation mode")
 	}
 	if f.concurrency > highConcurrency {
 		out.Info("Warning: -t %d is very high; every worker can hold a socket open, and most resolvers rate-limit long before this", f.concurrency)
@@ -928,6 +938,7 @@ type targetResult struct {
 	err           string     // first error message, if any
 	final         scan.Event // the EventDone, when done
 	permutation   *permutationResult
+	ptr           *ptrResult     // -ptr pass, when it ran (#436)
 	sources       []targetSource // -ct and -sources names, kept for the report and resume state
 	axfr          targetAXFR     // -axfr zone transfer, kept for the report and resume state
 	foundBy       map[string]int // results per source that proposed them, for the report (#273)

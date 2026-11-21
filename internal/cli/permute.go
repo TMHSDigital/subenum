@@ -28,11 +28,12 @@ type permuteInput struct {
 }
 
 // mainPassNames returns the names of a target's results that the main pass
-// found, leaving out permutation hits: they are the -permute seeds.
+// found, leaving out permutation hits and -ptr hits (#436): they are the
+// -permute seeds, which a resumed pass must rebuild identically.
 func mainPassNames(results []output.Result) []string {
 	names := make([]string, 0, len(results))
 	for _, r := range results {
-		if !r.Permutation {
+		if !r.Permutation && !ptrHit(r) {
 			names = append(names, r.Subdomain)
 		}
 	}
