@@ -49,7 +49,7 @@ type Config struct {
 	// it again once they succeed, instead of letting the reliability guard
 	// abort at the first sign of rate-limiting (#220).
 	AutoRate  bool
-	Types     []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT, SRV); empty = A,AAAA
+	Types     []string // record types to look up (A, AAAA, CNAME, NS, MX, TXT, SRV, HTTPS); empty = A,AAAA
 	Recursive bool     // enumerate subdomains of discovered subdomains
 	// FollowRecords also tests the names under the target that a found
 	// name's CNAME, MX or NS records point at, once each, unless they are
@@ -759,8 +759,9 @@ func (s *scanState) gateResumeParents(ctx context.Context, workers int) []string
 }
 
 // followTargets returns the names records point at that a FollowRecords scan
-// tests (#432): CNAME, MX and NS targets under the target, lower case,
-// without the target itself and without the ones -exclude rules out.
+// tests (#432): CNAME, MX, NS and HTTPS (#438) targets under the target,
+// lower case, without the target itself and without the ones -exclude rules
+// out.
 func followTargets(cfg Config, records []dns.Record) []string {
 	var out []string
 	for _, r := range records {
@@ -774,6 +775,10 @@ func followTargets(cfg Config, records []dns.Record) []string {
 				continue
 			}
 			name = fields[len(fields)-1]
+		case "HTTPS":
+			if name = dns.HTTPSTarget(r); name == "" {
+				continue
+			}
 		default:
 			continue
 		}

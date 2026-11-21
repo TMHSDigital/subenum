@@ -67,6 +67,8 @@ func synthResolved(domain string, types []string, h uint64, logf Logf) ([]Record
 			records = append(records, Record{Type: "TXT", Value: "v=spf1 -all"})
 		case "SRV":
 			records = append(records, Record{Type: "SRV", Value: "10 5 443 target." + domain})
+		case "HTTPS":
+			records = append(records, Record{Type: "HTTPS", Value: "1 . alpn=h2,h3"})
 			// NS is left out: a simulated name is never a delegated zone.
 		}
 	}

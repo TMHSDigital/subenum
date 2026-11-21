@@ -84,7 +84,7 @@ Tools like [puredns](https://github.com/d3mondev/puredns), [shuffledns](https://
 | | |
 | :--- | :--- |
 | **Find names** | Bundled top-5000 wordlist or your own (`-w`, repeatable) · keyless passive sources: Certificate Transparency and the Wayback Machine (`-sources`, `-ct`) · zone transfers and NSEC walkability (`-axfr`) · permutation second pass (`-permute`) · recursive enumeration (`-recursive`, `-depth`) |
-| **Resolve** | Worker pool (`-t`) · UDP with TCP fallback, DNS over TLS and DNS over HTTPS · resolver pools with benching, canaries and re-validation (`-r`) · `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT` and `SRV` records (`-type`) |
+| **Resolve** | Worker pool (`-t`) · UDP with TCP fallback, DNS over TLS and DNS over HTTPS · resolver pools with benching, canaries and re-validation (`-r`) · `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT`, `SRV` and `HTTPS` records (`-type`) |
 | **Stay polite** | Wire-level rate limit (`-rate`, `-rate-per-resolver`) that adapts under load (`-auto-rate`) · query and time budgets (`-max-queries`, `-max-duration`) · scope exclusions (`-exclude`) · `-dry-run` to see the plan first |
 | **Trust the output** | Multi-probe wildcard fingerprinting · per-outcome accounting and a run-quality verdict (`-stats`) · reliability guard · retry of inconclusive names (`-retry-inconclusive`) · resumable runs (`-resume`) |
 | **Spot problems** | Dangling CNAME and NS takeover hints, with a provider list you can extend · internal addresses leaked into public DNS · SARIF for GitHub code scanning (`-sarif`) |
@@ -239,7 +239,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-w <file>` | bundled top-5000 | Wordlist file, one prefix per line; `#` comments allowed; `-` reads stdin. Repeat it to combine lists (`-w general.txt -w target.txt`); entries found in more than one are scanned once. Omit it to use the built-in list (see [Choosing a wordlist](#choosing-a-wordlist)) |
 | `-hosts <file>` | n/a | File of full host names to look up instead of a wordlist, such as another tool's output; `#` comments allowed; `-` reads stdin. Each target looks up only the names under it (the most specific one, when `-dL` targets nest), through the same wildcard filtering, pacing and verdict as a wordlist scan; names under no target are out of scope, never queried, and counted in one note. Cannot be combined with `-w`, `-recursive` or `-tui` |
 | `-dL <file>` | n/a | File of apex domains to scan, one per line (`-` reads stdin), instead of a `<domain>` argument. Each domain is an independent scan; results share one output |
-| `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT`, `SRV`. A name is found when it has a record of any listed type. `CNAME` and `NS` also check for [takeovers](#subdomain-takeover-hints); `MX` values are `<preference> <host>`; a `TXT` value shows a backslash and non-printable bytes as `\DDD`; `SRV` values are `<priority> <weight> <port> <target>`, found at service names such as `_sip._tcp` in the wordlist (Unreleased) |
+| `-type <list>` | `A,AAAA` | Comma-separated record types to look up: `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT`, `SRV`, `HTTPS`. A name is found when it has a record of any listed type. `CNAME`, `NS`, `SRV` and `HTTPS` also check for [takeovers](#subdomain-takeover-hints); `MX` values are `<preference> <host>`; a `TXT` value shows a backslash and non-printable bytes as `\DDD`; `SRV` values are `<priority> <weight> <port> <target>`, found at service names such as `_sip._tcp` in the wordlist (Unreleased); `HTTPS` (RFC 9460) values are `<priority> <target>` plus the `alpn` and `port` parameters, such as `1 . alpn=h2,h3 port=443`, and cost one more query per name (Unreleased) |
 | `-exclude <list>` | n/a | Comma-separated out-of-scope names: exact (`vpn.example.com`) or `*.parent` (every name below `parent`, not `parent` itself). Excluded names are never queried, probed or expanded, and are counted as `excluded`. A target that is itself out of scope is refused before `-axfr`, `-ct`/`-sources` or the `-dry-run` preflight touch it, and `-axfr` never resolves or contacts an excluded name server |
 | `-exclude-file <file>` | n/a | Same patterns, one per line (`#` comments allowed), e.g. a bug-bounty program's out-of-scope list |
 | **Finding more names** | | |
@@ -253,7 +253,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-depth <n>` | `1` | Max recursion depth when `-recursive` is set (1 = no recursion) |
 | `-srv` | `false` | Also look up a built-in list of about 50 service names (`_sip._tcp`, `_autodiscover._tcp`, `_ldap._tcp`, ...) under each target, which host-name wordlists never hold; needs `SRV` in `-type`. Their `sources` is `srv`, and a service whose target host does not exist is a `dangling-srv` takeover candidate |
 | `-ptr` | `false` | After the scan (and any `-permute` pass), look up the PTR records of the public addresses found (not `internal_address` ones or the wildcard fingerprint's) and test the names under the target they give, so a stale PTR is not reported; their `sources` is `ptr`. One query per address, paced by `-rate`, at most `-max-queries` addresses, stopped by `-max-duration`, and none whose reverse name `-exclude` rules out (`*.2.0.192.in-addr.arpa`) |
-| `-follow-records` | `false` | Also test the names under the target that found names' `CNAME`, `MX` and `NS` records point at (`lb-7.int` behind `app CNAME lb-7.int`), once each, unless they are already candidates; their `sources` is `records`, and they count against `-max-queries` and `-max-duration` |
+| `-follow-records` | `false` | Also test the names under the target that found names' `CNAME`, `MX`, `NS` and `HTTPS` records point at (`lb-7.int` behind `app CNAME lb-7.int`), once each, unless they are already candidates; their `sources` is `records`, and they count against `-max-queries` and `-max-duration` |
 | `-recursive-w <file>` | the `-w` list | Wordlist of the labels `-recursive` tries under each name it finds, at depth 2 and below (`-` reads stdin); repeatable. A short list here makes deep recursion affordable |
 | **Resolvers and pacing** | | |
 | `-dns-server <addr>` | `8.8.8.8:53` | DNS server: `ip:port` (UDP, TCP fallback), `tls://host[:853]` (DNS over TLS) or `https://host/path` (DNS over HTTPS); validated on startup |
@@ -590,7 +590,7 @@ jq -e '.verdict == "complete"' run.json > /dev/null || { jq -r .reason run.json;
 
 ### Subdomain takeover hints
 
-When a result has a CNAME record, subenum resolves the CNAME target with the trusted resolver and marks the result as a takeover candidate:
+When a result has a CNAME record, subenum resolves the CNAME target with the trusted resolver and marks the result as a takeover candidate. With `HTTPS` in `-type`, an AliasMode HTTPS record (priority 0, which points the name at another host the way a CNAME does) gets the same check when the name has no CNAME:
 
 | Marker | Meaning |
 |--------|---------|
@@ -614,7 +614,7 @@ A recursive resolver asked about a subzone whose every name server is gone usual
 
 A target or name server that exists but has no A or AAAA record (NODATA, such as a name with only MX or TXT records) is not dangling: when the address lookup comes back empty, subenum sends one more A query and marks the name only on an NXDOMAIN answer. A probe that fails (timeout, SERVFAIL) marks nothing.
 
-A CNAME target, name server or SRV target that `-exclude` puts out of scope is never looked up: it can still get `provider:<name>`, which needs no query, but never `dangling`, `dangling-ns` or `dangling-srv`.
+A CNAME target, HTTPS alias target, name server or SRV target that `-exclude` puts out of scope is never looked up: it can still get `provider:<name>`, which needs no query, but never `dangling`, `dangling-ns` or `dangling-srv`.
 
 The marker is a `takeover_candidate` field in JSON and JSONL, a `takeover_candidate` column in CSV, `TAKEOVER?=<marker>` in text with `-show-records`, and a count in the breakdown and the run-quality report. A dangling CNAME makes A/AAAA lookups fail, so scan with CNAME records included to find them: `-type A,AAAA,CNAME`.
 

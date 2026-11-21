@@ -137,20 +137,21 @@ func ParseTakeoverProviders(lines []string, only bool) (TakeoverProviders, error
 }
 
 // HintsTakeover reports whether a scan of these record types can produce
-// takeover hints: CNAME targets, NS delegations and SRV targets (#419) are
-// what gets checked.
+// takeover hints: CNAME targets, NS delegations, SRV targets (#419) and
+// HTTPS alias targets (#438) are what gets checked.
 func HintsTakeover(types []string) bool {
-	return slices.Contains(types, "CNAME") || slices.Contains(types, "NS") || slices.Contains(types, "SRV")
+	return slices.Contains(types, "CNAME") || slices.Contains(types, "NS") || slices.Contains(types, "SRV") || slices.Contains(types, "HTTPS")
 }
 
 // DanglingNS is the takeover marker of a delegated name whose name server
 // does not exist (#194).
 const DanglingNS = "dangling-ns"
 
-// TakeoverHint inspects a result's CNAME and NS records and returns a
-// takeover marker: "dangling" when the CNAME target does not exist
+// TakeoverHint inspects a result's CNAME, NS, SRV and HTTPS records and
+// returns a takeover marker: "dangling" when the CNAME target does not exist
 // (NXDOMAIN), "provider:<name>" when it points at a takeover-prone service,
-// "dangling:<name>" when both hold, and "dangling-ns" when the name is
+// "dangling:<name>" when both hold (an AliasMode HTTPS target is checked the
+// same way when there is no CNAME, #438), and "dangling-ns" when the name is
 // delegated to a name server that does not exist. A target that exists
 // without addresses (NODATA) is not dangling (#362). It returns "" when there
 // is nothing suspicious. Targets are resolved with l.Resolver, l.Timeout and
@@ -222,7 +223,14 @@ func (c *TakeoverCache) Lookups() int64 { return c.lookups.Load() }
 
 // Hint is TakeoverHint through the cache.
 func (c *TakeoverCache) Hint(ctx context.Context, l Lookup, records []Record) string {
-	if target := cnameTarget(records); target != "" {
+	target := cnameTarget(records)
+	if target == "" {
+		// An AliasMode HTTPS record points the name at its target as a
+		// CNAME does, so a target that is gone or on a takeover-prone
+		// service is the same lead (#438).
+		target = httpsAliasTarget(records)
+	}
+	if target != "" {
 		if c.skip(target) {
 			return c.Providers.marker(target, OutcomeFound)
 		}

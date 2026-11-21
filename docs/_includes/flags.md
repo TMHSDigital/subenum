@@ -14,7 +14,7 @@
 | `-dry-run` | - | Print the plan without scanning: candidates after dedupe and -exclude, query and duration estimates, and the resolver preflight (its only DNS query, also sent to each -r pool resolver); then exit |
 | `-exclude <string>` | - | Comma-separated out-of-scope names and \*.parent patterns; never queried or expanded |
 | `-exclude-file <string>` | - | File of out-of-scope names and \*.parent patterns, one per line (# comments allowed) |
-| `-follow-records` {% include unreleased.html flag="follow-records" %} | - | Also test the names under the target that found names' CNAME, MX and NS records point at, once each, unless they are already candidates; they count against -max-queries |
+| `-follow-records` {% include unreleased.html flag="follow-records" %} | - | Also test the names under the target that found names' CNAME, MX, NS and HTTPS records point at, once each, unless they are already candidates; they count against -max-queries |
 | `-force` | - | Continue scanning even if wildcard DNS is detected |
 | `-format <string>` | text | Output format: text, json, jsonl, or csv |
 | `-hit-rate <int>` | 15 | In simulation mode, percentage of names that resolve (1-100) |
@@ -54,7 +54,7 @@
 | `-takeover-providers-only` | - | Use only the -takeover-providers file, not the built-in provider list |
 | `-timeout <int>` | 1000 | DNS lookup timeout in milliseconds |
 | `-tui` | - | Launch the interactive terminal UI, its form pre-filled from the other flags and the domain argument |
-| `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV (CNAME and NS also check for takeovers; with NS, a name that fails with SERVFAIL is asked of the zone's own name servers for its delegation) SRV: {% include unreleased.html value="type=SRV" %} |
+| `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV, HTTPS (CNAME, NS, SRV and HTTPS aliases also check for takeovers; with NS, a name that fails with SERVFAIL is asked of the zone's own name servers for its delegation) SRV, HTTPS: {% include unreleased.html value="type=SRV" %} |
 | `-v` | - | Enable verbose output |
 | `-version` | - | Show version information |
 | `-w <file>` | - | Path to a wordlist file (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list |

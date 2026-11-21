@@ -318,6 +318,8 @@ blog     CNAME    ghost.example.net.    # absolute target (trailing dot)
 *.dev    A        192.0.2.99            # wildcard under dev
 mail     MX       10 mx1                # preference and host (relative or absolute)
 @        TXT      "v=spf1 -all"         # the rest of the line; quotes optional
+@        HTTPS    1 . alpn=h2,h3 port=443  # priority, host ("." or a name), alpn and port (-type HTTPS)
+cdn      HTTPS    0 edge.example.net.   # AliasMode: points cdn at another host, like a CNAME
 sub      NS       ns1.gone.example.     # a delegated subzone (scan with -type NS)
 slow     TIMEOUT                        # never answered
 broken   SERVFAIL                       # also: REFUSED, NXDOMAIN

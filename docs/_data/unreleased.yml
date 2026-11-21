@@ -16,6 +16,7 @@ flags:
 # new values of a flag that is itself released, as flag=VALUE (#306)
 values:
   - type=SRV
+  - type=HTTPS
   - simulate-zone=lab7
   - simulate-zone=lab8
   - simulate-zone=lab9

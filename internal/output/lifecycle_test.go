@@ -167,6 +167,20 @@ func TestWriteSARIFNoResults(t *testing.T) {
 	}
 }
 
+// TestWriteSARIFHTTPSAlias covers #438: a takeover hint from an AliasMode
+// HTTPS target names the alias target in its message.
+func TestWriteSARIFHTTPSAlias(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.sarif")
+	results := []Result{{Result: scan.Result{Subdomain: "pages.example.com", Records: []dns.Record{{Type: "HTTPS", Value: "0 acme.github.io"}}, Takeover: "provider:github-pages"}}}
+	if err := WriteSARIF(path, "v1", results); err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := readSARIF(t, path)
+	if msg := doc.Runs[0].Results[0].Message.Text; !strings.Contains(msg, "pages.example.com has an HTTPS alias to acme.github.io") {
+		t.Errorf("message = %q, want the alias target named", msg)
+	}
+}
+
 func TestWriteSARIFTakeovers(t *testing.T) {
 	cname := []dns.Record{{Type: "CNAME", Value: "gone.herokuapp.com."}}
 	results := []Result{

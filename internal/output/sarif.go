@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/TMHSDigital/subenum/internal/dns"
 )
 
 // SARIF (2.1.0) output for takeover candidates (#129), so findings can be
@@ -127,7 +129,7 @@ func WriteSARIF(path, version string, results []Result) error {
 		}
 		rule := takeoverRule(r.Takeover)
 		rules[rule.ID] = rule
-		target := ""
+		target, alias := "", ""
 		var servers []string
 		for _, rec := range r.Records {
 			switch rec.Type {
@@ -135,12 +137,18 @@ func WriteSARIF(path, version string, results []Result) error {
 				target = strings.TrimSuffix(rec.Value, ".")
 			case "NS":
 				servers = append(servers, strings.TrimSuffix(rec.Value, "."))
+			case "HTTPS":
+				if t := dns.HTTPSTarget(rec); t != "" && strings.HasPrefix(rec.Value, "0 ") && alias == "" {
+					alias = t
+				}
 			}
 		}
 		msg := fmt.Sprintf("%s: %s", r.Subdomain, rule.ShortDescription.Text)
 		switch {
 		case target != "":
 			msg = fmt.Sprintf("%s is a CNAME for %s. %s.", r.Subdomain, target, rule.ShortDescription.Text)
+		case alias != "" && !strings.HasPrefix(r.Takeover, "dangling-"):
+			msg = fmt.Sprintf("%s has an HTTPS alias to %s. %s.", r.Subdomain, alias, rule.ShortDescription.Text)
 		case len(servers) > 0:
 			msg = fmt.Sprintf("%s is delegated to %s. %s.", r.Subdomain, strings.Join(servers, ", "), rule.ShortDescription.Text)
 		}

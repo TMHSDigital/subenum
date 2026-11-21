@@ -94,8 +94,8 @@ type Config struct {
 	Rate int
 
 	// Types are the record types to look up: "A", "AAAA", "CNAME", "NS",
-	// "MX", "TXT" and "SRV". Nil looks up A and AAAA. CNAME and NS are what
-	// populate Result.Takeover.
+	// "MX", "TXT", "SRV" and "HTTPS". Nil looks up A and AAAA. CNAME, NS,
+	// SRV and HTTPS (an AliasMode target) are what populate Result.Takeover.
 	Types []string
 
 	// Recursive enumerates Words again under every name that is found,
@@ -212,8 +212,8 @@ type TakeoverProvider struct {
 
 // Record is one DNS record behind a result.
 type Record struct {
-	Type  string // "A", "AAAA", "CNAME", "NS", "MX", "TXT" or "SRV"
-	Value string // an address, a CNAME target, a name server, "<preference> <host>" (MX) or a text (TXT)
+	Type  string // "A", "AAAA", "CNAME", "NS", "MX", "TXT", "SRV" or "HTTPS"
+	Value string // an address, a CNAME target, a name server, "<preference> <host>" (MX), a text (TXT), "<priority> <weight> <port> <target>" (SRV) or "<priority> <target> [alpn=<ids>] [port=<n>]" (HTTPS)
 }
 
 // Result is a subdomain that resolved.
@@ -225,13 +225,15 @@ type Result struct {
 	// CNAME carries the alias and the addresses it leads to.
 	Records []Record
 
-	// Takeover is a hint that a CNAME points somewhere unclaimed:
+	// Takeover is a hint that a CNAME (or an AliasMode HTTPS record)
+	// points somewhere unclaimed:
 	// "dangling" (the target does not resolve), "provider:<name>" (the
 	// target belongs to a known hosting provider) or "dangling:<name>"
 	// (both); or "dangling-ns" when the name is delegated to a name server
-	// that does not resolve. It is derived only from DNS, so it is a lead
-	// to verify by hand, not a finding. Empty unless Types includes "CNAME"
-	// or "NS".
+	// that does not resolve, or "dangling-srv" when an SRV target does not
+	// resolve. It is derived only from DNS, so it is a lead to verify by
+	// hand, not a finding. Empty unless Types includes "CNAME", "NS", "SRV"
+	// or "HTTPS".
 	Takeover string
 
 	// Internal names the most notable non-public scope among the

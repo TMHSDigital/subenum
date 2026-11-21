@@ -20,6 +20,7 @@
 //	*.dev    A        192.0.2.99
 //	mail     MX       10 mx1                 # preference and host (relative or absolute)
 //	@        TXT      "v=spf1 -all"          # the rest of the line, quotes optional
+//	@        HTTPS    1 . alpn=h2,h3 port=443 # priority, host ("." or a name), alpn and port
 //	sub      NS       ns1.gone.example.net.  # a delegated subzone
 //	slow     TIMEOUT                         # never answered
 //	broken   SERVFAIL                        # also REFUSED, NXDOMAIN
@@ -145,13 +146,14 @@ type entry struct {
 	cname   string
 	ns, mx  []string // hosts as written (relative or absolute); MX keeps "<pref> <host>"
 	srv     []string // "<priority> <weight> <port> <host>", host as written
+	https   []string // "<priority> <host> [params]", host as written or "."
 	txt     []string
 	fail    *dnsserver.Reply // TIMEOUT, SERVFAIL, REFUSED or NXDOMAIN
 }
 
 // hasRecords reports whether e holds any record other than a CNAME.
 func (e *entry) hasRecords() bool {
-	return len(e.a)+len(e.aaaa)+len(e.ns)+len(e.mx)+len(e.srv)+len(e.txt) > 0
+	return len(e.a)+len(e.aaaa)+len(e.ns)+len(e.mx)+len(e.srv)+len(e.https)+len(e.txt) > 0
 }
 
 // failure is a type that makes a name fail instead of holding records; a
@@ -333,6 +335,30 @@ var recordTypes = []recordType{
 			}
 		}
 		return addHost(e, owner, "SRV", f[3], strings.Join(f[:3], " ")+" ", &e.srv)
+	}},
+	// An HTTPS record (#438): AliasMode (priority 0) points the name at
+	// its host, ServiceMode lists an endpoint with its alpn and port.
+	{name: "HTTPS", rest: true, add: func(e *entry, owner, value string) error {
+		f := strings.Fields(value)
+		if len(f) < 2 {
+			return fmt.Errorf("want <name> HTTPS <priority> <host> [alpn=<ids>] [port=<n>]")
+		}
+		// The parameters are checked as the server will read them.
+		if _, err := dnsserver.ParseHTTPS(strings.Join(append([]string{f[0], "."}, f[2:]...), " ")); err != nil {
+			return err
+		}
+		if e.cname != "" {
+			return fmt.Errorf("%s: a CNAME cannot be combined with other records", owner)
+		}
+		if f[1] != "." {
+			host, err := cnameTarget(f[1])
+			if err != nil || host == "@" {
+				return fmt.Errorf("bad HTTPS host %q", f[1])
+			}
+			f[1] = host
+		}
+		e.https = append(e.https, strings.Join(f, " "))
+		return nil
 	}},
 	{name: "TXT", rest: true, add: func(e *entry, owner, value string) error {
 		if e.cname != "" {
@@ -556,6 +582,13 @@ func (z *Zone) Answer(rel, origin string) dnsserver.Reply {
 			if i := strings.LastIndexByte(v, ' '); i >= 0 {
 				r.SRV = append(r.SRV, v[:i+1]+absolute(v[i+1:], origin))
 			}
+		}
+		for _, v := range e.https {
+			f := strings.Fields(v)
+			if f[1] != "." {
+				f[1] = absolute(f[1], origin)
+			}
+			r.HTTPS = append(r.HTTPS, strings.Join(f, " "))
 		}
 		return r
 	}

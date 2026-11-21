@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/TMHSDigital/subenum/internal/candidates"
+	"github.com/TMHSDigital/subenum/internal/dns"
 	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/scan"
 )
@@ -40,9 +41,10 @@ func mainPassNames(results []output.Result) []string {
 	return names
 }
 
-// recordTargets returns the CNAME, MX and NS targets of results that are not
-// results themselves, for a resumed -follow-records scan to queue again
-// (#432). The scan keeps the ones under its target and in scope.
+// recordTargets returns the CNAME, MX, NS and HTTPS (#438) targets of
+// results that are not results themselves, for a resumed -follow-records
+// scan to queue again (#432). The scan keeps the ones under its target and
+// in scope.
 func recordTargets(results []output.Result) []string {
 	found := make(map[string]bool, len(results))
 	for _, r := range results {
@@ -59,6 +61,8 @@ func recordTargets(results []output.Result) []string {
 				if fields := strings.Fields(rec.Value); len(fields) > 0 {
 					name = fields[len(fields)-1]
 				}
+			case "HTTPS":
+				name = dns.HTTPSTarget(rec)
 			}
 			if name = strings.ToLower(strings.TrimSuffix(name, ".")); name != "" && !found[name] {
 				found[name] = true // once

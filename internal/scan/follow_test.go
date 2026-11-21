@@ -11,9 +11,10 @@ import (
 	"github.com/TMHSDigital/subenum/internal/dnstest"
 )
 
-// TestFollowTargets covers #432: CNAME, MX and NS values under the target
-// are followed, once each; the target itself, names outside it, excluded
-// names and other record types are not.
+// TestFollowTargets covers #432: CNAME, MX, NS and HTTPS (#438) values
+// under the target are followed, once each; the target itself, names
+// outside it, excluded names, other record types and an HTTPS "." target
+// are not.
 func TestFollowTargets(t *testing.T) {
 	cfg := Config{Domain: "example.com", scope: newScope([]string{"*.corp.example.com"})}
 	got := followTargets(cfg, []dns.Record{
@@ -26,8 +27,12 @@ func TestFollowTargets(t *testing.T) {
 		{Type: "CNAME", Value: "vpn.corp.example.com"},
 		{Type: "TXT", Value: "x.example.com"},
 		{Type: "A", Value: "192.0.2.1"},
+		{Type: "HTTPS", Value: "0 edge.example.com"},        // AliasMode (#438)
+		{Type: "HTTPS", Value: "1 alt.example.com alpn=h2"}, // ServiceMode
+		{Type: "HTTPS", Value: "1 . alpn=h2,h3 port=443"},   // the name itself
+		{Type: "HTTPS", Value: "0 edge.cdn.example.net"},    // outside the target
 	})
-	want := []string{"lb-7.int.example.com", "mx1.example.com", "ns1.example.com"}
+	want := []string{"lb-7.int.example.com", "mx1.example.com", "ns1.example.com", "edge.example.com", "alt.example.com"}
 	if !slices.Equal(got, want) {
 		t.Errorf("targets %v, want %v", got, want)
 	}

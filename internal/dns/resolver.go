@@ -21,8 +21,9 @@ import (
 
 // Record is a single resolved DNS record. Type is "A", "AAAA", "CNAME", etc.
 // Value is the IP address (A/AAAA), the target name (CNAME), the name server
-// (NS), "<preference> <host>" (MX), the text (TXT) or
-// "<priority> <weight> <port> <target>" (SRV).
+// (NS), "<preference> <host>" (MX), the text (TXT),
+// "<priority> <weight> <port> <target>" (SRV) or
+// "<priority> <target> [alpn=<ids>] [port=<n>]" (HTTPS).
 type Record struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
@@ -39,7 +40,7 @@ var DefaultTypes = []string{"A", "AAAA"}
 // typeOrder is every record type -type accepts, in the order help and
 // completion list them. It is the one list (#264): Types serves it to the
 // CLI's completion and the MCP schema, and queriesPerType must price each.
-var typeOrder = []string{"A", "AAAA", "CNAME", "NS", "MX", "TXT", "SRV"}
+var typeOrder = []string{"A", "AAAA", "CNAME", "NS", "MX", "TXT", "SRV", "HTTPS"}
 
 // Types returns the record types -type accepts, in a fixed order.
 func Types() []string { return slices.Clone(typeOrder) }
@@ -305,11 +306,12 @@ func fqdn(domain string) string {
 
 // queriesPerType is how many DNS queries one lookup of each type puts on the
 // wire when the first answer is definitive. CNAME is one query of its own
-// (lookupCNAME), not Go's LookupCNAME, which also sends A and AAAA (#249).
+// (lookupCNAME), not Go's LookupCNAME, which also sends A and AAAA (#249);
+// HTTPS is one query of its own too (lookupHTTPS, #438).
 // These slots are reserved before the lookup's timeout starts; anything sent
 // beyond them (Go's retries, a TCP retry after truncation) is charged as it
 // is dialed (see NewResolver).
-var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 1, "NS": 1, "MX": 1, "TXT": 1, "SRV": 1}
+var queriesPerType = map[string]int32{"A": 1, "AAAA": 1, "CNAME": 1, "NS": 1, "MX": 1, "TXT": 1, "SRV": 1, "HTTPS": 1}
 
 // QueriesFor is how many queries one lookup of types puts on the wire, by
 // queriesPerType; empty types means DefaultTypes, as in ResolveTypes. The
@@ -506,6 +508,8 @@ func lookupType(ctx context.Context, resolver *net.Resolver, name, domain, t str
 		// answer always reads the same, so -diff-records sees no change.
 		slices.SortFunc(recs, func(a, b Record) int { return strings.Compare(a.Value, b.Value) })
 		return recs, nil
+	case "HTTPS":
+		return lookupHTTPS(ctx, resolver, name)
 	}
 	return nil, nil
 }

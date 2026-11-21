@@ -22,7 +22,7 @@ A test fails when a field is added to the code but not to these files, so they s
 | `subdomain` | string | always | The full name, lower case, without a trailing dot. |
 | `records` | array of `{type, value}` | always | The name's records of the `-type` record types. Empty for a name `-diff` reports as removed. |
 | `simulated` | boolean | when set | `true` on every result of a `-simulate` run. |
-| `takeover_candidate` | string | when set | A DNS-only [takeover hint](https://github.com/TMHSDigital/subenum#subdomain-takeover-hints): `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, `dangling-ns` for a delegation, `dangling-srv` for a service whose target host does not exist. Needs `CNAME`, `NS` or `SRV` in `-type`. |
+| `takeover_candidate` | string | when set | A DNS-only [takeover hint](https://github.com/TMHSDigital/subenum#subdomain-takeover-hints): `dangling`, `provider:<name>` or `dangling:<name>` for a CNAME, `dangling-ns` for a delegation, `dangling-srv` for a service whose target host does not exist; an AliasMode `HTTPS` target gets the CNAME markers. Needs `CNAME`, `NS`, `SRV` or `HTTPS` in `-type`. |
 | `internal_address` | string | when set | The most notable non-public scope among the name's addresses: `loopback`, `unspecified`, `link-local`, `private` or `cgnat`. |
 | `partial` | boolean | when set | `true` when a requested record type's lookup failed on every attempt while another type answered: `records` may lack that type. |
 | `change` | string | with `-diff` | `added`, `removed`, or with `-diff-records` `changed`. `subenum diff` writes `missing` instead of `removed`, because it looks nothing up. |
@@ -35,7 +35,7 @@ A test fails when a field is added to the code but not to these files, so they s
 
 A run's results all carry the same time, taken when the run starts. Pass each run's JSONL or CSV file to the next run's `-diff` (as the [GitHub Action](monitoring.html) does with its baseline) and `first_seen` carries forward, so a takeover candidate or an internal address shows how long it has been there.
 
-A record's `type` is `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT` or `SRV`{% include unreleased.html value="type=SRV" %}. Its `value` is an address, a host name (`CNAME`, `NS`), `<preference> <host>` (`MX`), the text (`TXT`), with a backslash and non-printable bytes written as `\DDD`, or `<priority> <weight> <port> <target>` (`SRV`).
+A record's `type` is `A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT`, `SRV`{% include unreleased.html value="type=SRV" %} or `HTTPS`{% include unreleased.html value="type=HTTPS" %}. Its `value` is an address, a host name (`CNAME`, `NS`), `<preference> <host>` (`MX`), the text (`TXT`), with a backslash and non-printable bytes written as `\DDD`, `<priority> <weight> <port> <target>` (`SRV`), or `<priority> <target>` followed by the `alpn` and `port` parameters, if any (`HTTPS`, such as `1 . alpn=h2,h3 port=443`; a target of `.` names no other host, and an AliasMode record, priority `0`, has no parameters).
 
 ## Results: CSV
 
@@ -47,7 +47,7 @@ CSV has one row per record, so a name with three records has three rows, and a n
 | `type` | always | The record type. |
 | `value` | always | The record value. A value starting with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so a spreadsheet does not read it as a formula. |
 | `simulated` | `-simulate` | `true`. |
-| `takeover_candidate` | `CNAME`, `NS` or `SRV` in `-type` | As in JSON; empty when there is no hint. |
+| `takeover_candidate` | `CNAME`, `NS`, `SRV` or `HTTPS` in `-type` | As in JSON; empty when there is no hint. |
 | `change` | `-diff` | As in JSON. |
 | `sources` | scan results | As in JSON, joined with `;`. |
 | `target` | `-dL` | As in JSON. |
@@ -107,7 +107,7 @@ Text output is one name per line. `-show-records` appends the records as ` TYPE=
 | `axfr_allowed`, `axfr_names`, `axfr_error`, `axfr_found` | array, integer, string, integer | when set | `-axfr`: servers that allowed a transfer, names it added, why none could be tried, results it proposed. |
 | `nsec_names`, `nsec_found`, `nsec_stop` | integer, integer, string | when set | `-nsec-walk`: names the walk listed, results it proposed, and why it stopped before the end of the chain or did not run. |
 | `parent_checks`, `parent_queries` | integer, integer | when set | `-type NS`: names that failed with SERVFAIL whose delegation was asked of the zone's own name servers, and the queries that took (the name server lookups included; `queries_sent` counts them too). A subzone whose every name server is gone is found this way and flagged `dangling-ns`. |
-| `records_found` | integer | when set | `-follow-records`: results that a found name's `CNAME`, `MX` or `NS` record pointed at. |
+| `records_found` | integer | when set | `-follow-records`: results that a found name's `CNAME`, `MX`, `NS` or `HTTPS` record pointed at. |
 | `ptr_addresses`, `ptr_queries`, `ptr_names`, `ptr_found` | integer | when set | `-ptr`: public addresses looked up, PTR queries sent (`queries_sent` includes them and the lookups of the names), names under the target the answers gave that were tested, and results they proposed. |
 | `zone_denial` | string | when set | The DNSSEC probe of `-axfr` or `-nsec-walk`: `nsec` (anyone can list the zone), `nsec3` or `none`. |
 | `pool_hits`, `confirmed`, `unconfirmed` | integer | when set | `-r`: pool hits, and how many the trusted resolver confirmed or denied. |

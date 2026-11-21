@@ -58,6 +58,10 @@ type Reply struct {
 	MX    []string // "<preference> <host>" (or just "<host>", preference 10) for MX queries
 	TXT   []string // texts for TXT queries, one record each
 	SRV   []string // "<priority> <weight> <port> <target>" for SRV queries
+	// HTTPS answers HTTPS queries (#438), one record per
+	// "<priority> <target> [alpn=<id>,...] [port=<n>]" value; the target
+	// may be ".".
+	HTTPS []string
 	PTR   []string // host names for PTR queries of a reverse name (#436)
 
 	// Transfer answers an AXFR query for the queried zone: its SOA, an A
@@ -666,14 +670,15 @@ type answerBuilder func(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (
 // answerBuilders holds one builder per query type the server answers; a new
 // record type is one entry here. Other types get only the CNAME, if any.
 var answerBuilders = map[dnsmessage.Type]answerBuilder{
-	dnsmessage.TypeA:    addA,
-	dnsmessage.TypeAAAA: addAAAA,
-	dnsmessage.TypeNS:   addNS,
-	dnsmessage.TypeMX:   addMX,
-	dnsmessage.TypeTXT:  addTXT,
-	dnsmessage.TypeSRV:  addSRV,
-	dnsmessage.TypePTR:  addPTR,
-	dnsmessage.TypeAXFR: addTransfer,
+	dnsmessage.TypeA:     addA,
+	dnsmessage.TypeAAAA:  addAAAA,
+	dnsmessage.TypeNS:    addNS,
+	dnsmessage.TypeMX:    addMX,
+	dnsmessage.TypeTXT:   addTXT,
+	dnsmessage.TypeSRV:   addSRV,
+	dnsmessage.TypeHTTPS: addHTTPS,
+	dnsmessage.TypePTR:   addPTR,
+	dnsmessage.TypeAXFR:  addTransfer,
 }
 
 // addPTR adds one PTR record per host that is a valid name (#436).
@@ -718,6 +723,74 @@ func addSRV(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) 
 		n++
 	}
 	return n, nil
+}
+
+// addHTTPS adds one HTTPS record per value that ParseHTTPS accepts; the
+// rest are skipped.
+func addHTTPS(b *dnsmessage.Builder, owner dnsmessage.Name, r Reply) (int, error) {
+	n := 0
+	for _, v := range r.HTTPS {
+		rec, err := ParseHTTPS(v)
+		if err != nil {
+			continue
+		}
+		if err := b.HTTPSResource(rrHeader(owner, dnsmessage.TypeHTTPS), rec); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// ParseHTTPS reads an HTTPS record written as "<priority> <target>
+// [alpn=<id>,...] [port=<n>]", with an absolute target (a trailing dot is
+// optional) or "." (#438).
+func ParseHTTPS(v string) (dnsmessage.HTTPSResource, error) {
+	var rec dnsmessage.HTTPSResource
+	f := strings.Fields(v)
+	if len(f) < 2 {
+		return rec, fmt.Errorf("want <priority> <target> [alpn=<ids>] [port=<n>]")
+	}
+	prio, err := strconv.ParseUint(f[0], 10, 16)
+	if err != nil {
+		return rec, fmt.Errorf("bad HTTPS priority %q", f[0])
+	}
+	rec.Priority = uint16(prio)
+	target := "."
+	if f[1] != "." {
+		target = fqdn(f[1])
+	}
+	for label := range strings.SplitSeq(strings.TrimSuffix(target, "."), ".") {
+		if target != "." && (label == "" || len(label) > 63) {
+			return rec, fmt.Errorf("bad HTTPS target %q", f[1])
+		}
+	}
+	if rec.Target, err = dnsmessage.NewName(target); err != nil {
+		return rec, fmt.Errorf("bad HTTPS target %q", f[1])
+	}
+	for _, p := range f[2:] {
+		key, val, _ := strings.Cut(p, "=")
+		switch key {
+		case "alpn":
+			var wire []byte
+			for id := range strings.SplitSeq(val, ",") {
+				if id == "" || len(id) > 255 {
+					return rec, fmt.Errorf("bad HTTPS alpn %q", val)
+				}
+				wire = append(append(wire, byte(len(id))), id...) //nolint:gosec // len(id) is checked to be at most 255 above
+			}
+			rec.SetParam(dnsmessage.SVCParamALPN, wire)
+		case "port":
+			port, err := strconv.ParseUint(val, 10, 16)
+			if err != nil {
+				return rec, fmt.Errorf("bad HTTPS port %q", val)
+			}
+			rec.SetParam(dnsmessage.SVCParamPort, binary.BigEndian.AppendUint16(nil, uint16(port)))
+		default:
+			return rec, fmt.Errorf("unknown HTTPS parameter %q (want alpn or port)", p)
+		}
+	}
+	return rec, nil
 }
 
 // addTransfer answers a zone transfer in one message: the zone's SOA, an A

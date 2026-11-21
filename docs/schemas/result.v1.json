@@ -22,7 +22,7 @@
     },
     "takeover_candidate": {
       "type": "string",
-      "description": "A DNS-only subdomain takeover hint: dangling, provider:<name> or dangling:<name> for a CNAME, dangling-ns for a delegation to a name server that does not exist, dangling-srv for a service whose target host does not exist. Absent when there is none.",
+      "description": "A DNS-only subdomain takeover hint: dangling, provider:<name> or dangling:<name> for a CNAME or an AliasMode HTTPS target, dangling-ns for a delegation to a name server that does not exist, dangling-srv for a service whose target host does not exist. Absent when there is none.",
       "pattern": "^(dangling|dangling-ns|dangling-srv|provider:.+|dangling:.+)$"
     },
     "internal_address": {
@@ -77,11 +77,11 @@
         "type": {
           "type": "string",
           "description": "The record type.",
-          "enum": ["A", "AAAA", "CNAME", "NS", "MX", "TXT", "SRV"]
+          "enum": ["A", "AAAA", "CNAME", "NS", "MX", "TXT", "SRV", "HTTPS"]
         },
         "value": {
           "type": "string",
-          "description": "An address; a host name for CNAME and NS; <preference> <host> for MX; the text for TXT, with a backslash and non-printable bytes written as \\DDD; <priority> <weight> <port> <target> for SRV."
+          "description": "An address; a host name for CNAME and NS; <preference> <host> for MX; the text for TXT, with a backslash and non-printable bytes written as \\DDD; <priority> <weight> <port> <target> for SRV; <priority> <target> [alpn=<ids>] [port=<n>] for HTTPS."
         }
       }
     }

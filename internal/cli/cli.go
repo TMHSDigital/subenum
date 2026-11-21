@@ -145,7 +145,7 @@ type cliFlags struct {
 	recursive    bool
 	depth        int
 	deepWords    wordlistPaths // -recursive-w: the labels tried below depth 1 (#403)
-	followRecs   bool          // -follow-records: test in-scope CNAME, MX and NS targets (#432)
+	followRecs   bool          // -follow-records: test in-scope CNAME, MX, NS and HTTPS targets (#432)
 	srv          bool          // -srv: look up the built-in _service._proto names (#419)
 	ptr          bool          // -ptr: reverse-look up the found public addresses (#436)
 	noAbort      bool
@@ -248,13 +248,13 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.StringVar(&f.logFormat, "log-format", "text", "Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged")
 	fs.BoolVar(&f.showRecords, "show-records", false, "In text format, append each result's records (TYPE=value)")
 	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited)")
-	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV (CNAME and NS also check for takeovers; with NS, a name that fails with SERVFAIL is asked of the zone's own name servers for its delegation)")
+	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV, HTTPS (CNAME, NS, SRV and HTTPS aliases also check for takeovers; with NS, a name that fails with SERVFAIL is asked of the zone's own name servers for its delegation)")
 	fs.BoolVar(&f.autoRate, "auto-rate", false, "When over 20% of the last 200 lookups fail, halve the query rate and keep going (up to 6 times, down to 5 queries/s) instead of aborting; speed back up once lookups succeed")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
 	fs.BoolVar(&f.srv, "srv", false, "Also look up a built-in list of about 50 service names (_sip._tcp, _autodiscover._tcp, _ldap._tcp, ...) under each target; needs SRV in -type")
 	fs.BoolVar(&f.ptr, "ptr", false, "After each scan, look up the PTR records of the public addresses found, and test the names under the target they give, unless already found; the PTR queries are paced by -rate and bounded by -max-queries, -max-duration and -exclude, which also takes reverse zones such as *.2.0.192.in-addr.arpa")
-	fs.BoolVar(&f.followRecs, "follow-records", false, "Also test the names under the target that found names' CNAME, MX and NS records point at, once each, unless they are already candidates; they count against -max-queries")
+	fs.BoolVar(&f.followRecs, "follow-records", false, "Also test the names under the target that found names' CNAME, MX, NS and HTTPS records point at, once each, unless they are already candidates; they count against -max-queries")
 	fs.Var(&f.deepWords, "recursive-w", "Path to a wordlist `file` (- for stdin) of the labels -recursive tries under each name it finds, at depth 2 and below; repeat to combine several; omitted: the -w list")
 	fs.BoolVar(&f.noAbort, "no-abort", false, "Do not abort when the resolver failure rate exceeds 20% (warning is still emitted)")
 	fs.IntVar(&f.maxQueries, "max-queries", 0, "Max candidate names to test (0 = unlimited); each name sends one query per record type, per attempt")

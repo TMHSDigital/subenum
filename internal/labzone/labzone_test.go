@@ -140,6 +140,26 @@ func TestAnswerSRV(t *testing.T) {
 	}
 }
 
+// TestAnswerHTTPS covers #438: an HTTPS record keeps its priority and
+// parameters, a "." host stays ".", and a host resolves against the
+// scanned domain.
+func TestAnswerHTTPS(t *testing.T) {
+	z := mustParse(t, strings.Join([]string{
+		"@    HTTPS 1 . alpn=h2,h3 port=443",
+		"cdn  HTTPS 0 edge.example.net.",
+		"alt  HTTPS 2 www alpn=h2",
+	}, "\n"))
+	for rel, want := range map[string][]string{
+		"":    {"1 . alpn=h2,h3 port=443"},
+		"cdn": {"0 edge.example.net"},
+		"alt": {"2 www.lab.example alpn=h2"},
+	} {
+		if got := z.Answer(rel, "lab.example").HTTPS; !slices.Equal(got, want) {
+			t.Errorf("%q: HTTPS = %q, want %q", rel, got, want)
+		}
+	}
+}
+
 func TestHandler(t *testing.T) {
 	z := mustParse(t, scenario)
 	h := z.Handler([]string{"lab.example", "other.test"})
@@ -186,9 +206,13 @@ func TestParseErrors(t *testing.T) {
 		{"www A", "line 1: want <name> A <value>"},
 		{"www a 192.0.2.1 extra", "line 1: want <name> A <value>"},
 		{"www MX", "line 1: want <name> MX <value>"},
-		{"www CAA x", "line 1: unknown type CAA (known: A, AAAA, CNAME, NS, MX, SRV, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
-		{"www caa x", "line 1: unknown type caa (known: A, AAAA, CNAME, NS, MX, SRV, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www CAA x", "line 1: unknown type CAA (known: A, AAAA, CNAME, NS, MX, SRV, HTTPS, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
+		{"www caa x", "line 1: unknown type caa (known: A, AAAA, CNAME, NS, MX, SRV, HTTPS, TXT, TIMEOUT, SERVFAIL, REFUSED, NXDOMAIN)"},
 		{"_sip._tcp SRV 10 5", "line 1: want <name> SRV <priority> <weight> <port> <host>"},
+		{"www HTTPS 1", "line 1: want <name> HTTPS <priority> <host> [alpn=<ids>] [port=<n>]"},
+		{"www HTTPS x .", "line 1: bad HTTPS priority \"x\""},
+		{"www HTTPS 1 . ech=abc", "line 1: unknown HTTPS parameter \"ech=abc\" (want alpn or port)"},
+		{"www HTTPS 1 a..b", "line 1: bad HTTPS host \"a..b\""},
 		{"_sip._tcp SRV 10 5 x sip", "line 1: bad SRV number \"x\""},
 		{"www MX mail", "line 1: want <name> MX <preference> <host>"},
 		{"www MX x mail", "line 1: bad MX preference \"x\""},
