@@ -45,7 +45,7 @@ func pendingOf(j job, o dns.Outcome) pendingLookup {
 // domain is the name that was looked up.
 func (p pendingLookup) domain(cfg *Config) string {
 	if p.root >= 0 {
-		return cfg.Entries[p.root] + "." + cfg.Domain
+		return cfg.roots().at(p.root) + "." + cfg.Domain
 	}
 	return p.name
 }

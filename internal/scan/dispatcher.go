@@ -170,12 +170,12 @@ func hasMultiLabel(entries []string) bool {
 }
 
 func newDispatcher(cfg Config, maxDepth int) *dispatcher {
-	n := len(cfg.Entries)
+	n := cfg.roots().len()
 	start := min(max(cfg.ResumeFrom, 0), n)
 	if !cfg.Recursive {
 		cfg.RecursiveEntries = nil // never tried: no level below 1
 	}
-	multiLabel := hasMultiLabel(cfg.Entries) || hasMultiLabel(cfg.RecursiveEntries)
+	multiLabel := hasMultiLabel(cfg.Entries) || hasMultiLabel(cfg.Extra) || hasMultiLabel(cfg.RecursiveEntries)
 	d := &dispatcher{
 		cfg: cfg,
 		n:   n,
@@ -185,7 +185,7 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		// names those entries begin. Without it a multi-million-entry list
 		// skips a map as large as the list (#248), and a recursive scan one
 		// that grows with every candidate (#301, #359).
-		multi:      multiLabelEntries(cfg.Recursive, multiLabel, cfg.Entries, cfg.RecursiveEntries),
+		multi:      multiLabelEntries(cfg.Recursive, multiLabel, cfg.Entries, cfg.Extra, cfg.RecursiveEntries),
 		multiLabel: multiLabel,
 		frontier:   []expansion{{parent: cfg.Domain, depth: 1, next: start}},
 		remaining:  n - start,
@@ -208,7 +208,7 @@ func newDispatcher(cfg Config, maxDepth int) *dispatcher {
 		for _, p := range cfg.ResumeParents {
 			if name, depth, ok := resumeParent(d.cfg, p, maxDepth); ok && d.markExpanded(name) {
 				d.frontier = append(d.frontier, expansion{parent: name, depth: depth + 1})
-				d.remaining += len(d.cfg.entriesAt(depth + 1))
+				d.remaining += d.cfg.entriesAt(depth + 1).len()
 			}
 		}
 	}
@@ -295,7 +295,7 @@ func resumeDepths(cfg Config) map[string]int {
 			}
 		}
 	}
-	for _, e := range cfg.Entries {
+	for _, e := range cfg.roots().all() {
 		if _, ok := isEntry[e]; ok {
 			isEntry[e] = true
 		}
@@ -371,8 +371,8 @@ func (d *dispatcher) stopAdmitting() {
 	default:
 		for _, e := range d.frontier[d.head:] {
 			entries := d.cfg.entriesAt(e.depth)
-			for i := e.next; i < len(entries); i++ {
-				entry := entries[i]
+			for i := e.next; i < entries.len(); i++ {
+				entry := entries.at(i)
 				name := entry + "." + e.parent
 				if !d.firstVisit(entry, name, e.depth) {
 					continue
@@ -412,15 +412,15 @@ func (d *dispatcher) countUnbuilt() {
 		}
 		if d.cfg.RecursiveEntries != nil {
 			t.rindex = maps.Clone(t.index)
-			placeLabels(t.rindex, d.cfg.RecursiveEntries)
+			placeLabels(t.rindex, entryList{base: d.cfg.RecursiveEntries})
 		}
-		placeLabels(t.index, d.cfg.Entries)
+		placeLabels(t.index, d.cfg.roots())
 		d.unbuilt = t
 	}
 	labels := d.unbuilt.labels
 	for _, e := range d.frontier[d.head:] {
 		index := d.unbuilt.indexFor(e.depth)
-		left := len(d.cfg.entriesAt(e.depth)) - e.next
+		left := d.cfg.entriesAt(e.depth).len() - e.next
 		if s.subtreeExcluded(e.parent) {
 			d.excluded += left
 			continue
@@ -438,11 +438,11 @@ func (d *dispatcher) countUnbuilt() {
 
 // placeLabels sets each label of index that is an entry to its position in
 // entries.
-func placeLabels(index map[string]int, entries []string) {
+func placeLabels(index map[string]int, entries entryList) {
 	if len(index) == 0 {
 		return
 	}
-	for i, entry := range entries {
+	for i, entry := range entries.all() {
 		if _, ok := index[entry]; ok {
 			index[entry] = i
 		}
@@ -469,33 +469,33 @@ func (d *dispatcher) countUnbuiltRepeats() {
 				}
 			}
 		}
-		d.repeatWalk = prefixWalk(prefixes, d.cfg.Entries)
+		d.repeatWalk = prefixWalk(prefixes, d.cfg.roots())
 		if d.cfg.RecursiveEntries != nil {
-			d.rrepeatWalk = prefixWalk(prefixes, d.cfg.RecursiveEntries)
+			d.rrepeatWalk = prefixWalk(prefixes, entryList{base: d.cfg.RecursiveEntries})
 		}
 	}
 	for _, e := range d.frontier[d.head:] {
-		entries, walk := d.cfg.Entries, d.repeatWalk
+		entries, walk := d.cfg.roots(), d.repeatWalk
 		if e.depth > 1 && d.cfg.RecursiveEntries != nil {
-			entries, walk = d.cfg.RecursiveEntries, d.rrepeatWalk
+			entries, walk = entryList{base: d.cfg.RecursiveEntries}, d.rrepeatWalk
 		}
 		repeats := 0
 		first, _ := slices.BinarySearch(walk, e.next)
 		for _, i := range walk[first:] {
-			entry := entries[i]
+			entry := entries.at(i)
 			if !d.firstVisit(entry, entry+"."+e.parent, e.depth) {
 				repeats++
 			}
 		}
-		d.skipped += len(entries) - e.next - repeats
+		d.skipped += entries.len() - e.next - repeats
 	}
 }
 
 // prefixWalk returns the indexes of the entries in prefixes, ascending;
 // non-nil, so a built walk is told apart from none.
-func prefixWalk(prefixes map[string]struct{}, entries []string) []int {
+func prefixWalk(prefixes map[string]struct{}, entries entryList) []int {
 	walk := []int{}
-	for i, entry := range entries {
+	for i, entry := range entries.all() {
 		if _, ok := prefixes[entry]; ok {
 			walk = append(walk, i)
 		}
@@ -534,7 +534,7 @@ func (d *dispatcher) next() (job, bool) {
 	for d.head < len(d.frontier) {
 		e := &d.frontier[d.head]
 		entries := d.cfg.entriesAt(e.depth)
-		if e.next == len(entries) {
+		if e.next == entries.len() {
 			d.head++
 			// Compact only once the consumed prefix is at least half the
 			// slice, so each element is copied O(1) times.
@@ -554,7 +554,7 @@ func (d *dispatcher) next() (job, bool) {
 			d.stopAdmitting()
 			return job{}, false
 		}
-		entry := entries[e.next]
+		entry := entries.at(e.next)
 		e.next++
 		d.remaining--
 		name := entry + "." + e.parent
@@ -593,7 +593,7 @@ func (d *dispatcher) expand(parent job) {
 	if !d.markExpanded(parent.domain) {
 		return
 	}
-	children := len(d.cfg.entriesAt(parent.depth + 1))
+	children := d.cfg.entriesAt(parent.depth + 1).len()
 	switch {
 	// An excluded subtree is excluded whether or not a budget has run out,
 	// as countUnbuilt counts it, so it cannot lower the verdict (#238).
@@ -715,8 +715,8 @@ type handoff struct {
 func (d *dispatcher) follow(names []string) {
 	if d.followSeen == nil {
 		d.followSeen = make(map[string]struct{})
-		d.entrySet = make(map[string]struct{}, len(d.cfg.Entries))
-		for _, e := range d.cfg.Entries {
+		d.entrySet = make(map[string]struct{}, d.cfg.roots().len())
+		for _, e := range d.cfg.roots().all() {
 			d.entrySet[e] = struct{}{}
 		}
 		d.deepSet = d.entrySet

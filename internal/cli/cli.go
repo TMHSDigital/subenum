@@ -198,7 +198,8 @@ func (in *runtimeInputs) readLines(path string) ([]string, error) {
 type scanPass struct {
 	domain       string
 	entries      []string
-	deepEntries  []string       // -recursive-w entries; nil means entries (#403)
+	extra        []string       // tried after entries, such as source names (#365)
+	deepEntries  []string       // -recursive-w entries; nil means entries and extra (#403)
 	maxQueries   int            // this pass's -max-queries budget
 	resumeFrom   int            // set while resuming (#73)
 	resumeNames  []string       // names found before the interrupt
@@ -878,6 +879,7 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		Config: scan.Config{
 			Domain:           p.domain,
 			Entries:          p.entries,
+			Extra:            p.extra,
 			RecursiveEntries: p.deepEntries,
 			Concurrency:      f.concurrency,
 			Timeout:          time.Duration(f.timeoutMs) * time.Millisecond,

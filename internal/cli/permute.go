@@ -22,6 +22,7 @@ type permutationResult struct {
 type permuteInput struct {
 	target       string
 	entries      []string            // the target's wordlist entries, not permuted again
+	extra        []string            // the names the sources added, not permuted again either (#365)
 	found        []string            // the main pass's names
 	seeds        map[string]struct{} // -seeds names, and -ct names under target
 	prev         *resumePass         // the pass's state from an interrupted run, if it had started
@@ -81,7 +82,7 @@ func finishedPermutation(p permuteInput) *permutationResult {
 	if len(rel) == 0 {
 		return nil
 	}
-	perms, _, _ := candidates.Permutations(p.target, p.entries, rel)
+	perms, _, _ := candidates.Permutations(p.target, p.entries, rel, p.extra)
 	res := &permutationResult{seeds: len(rel), candidates: len(perms), found: p.restoredHits}
 	if p.prev != nil {
 		res.pass = targetResult{done: true, final: p.prev.event()}
@@ -103,7 +104,7 @@ func runPermutationPass(ctx context.Context, s *session, p permuteInput) *permut
 	if len(rel) == 0 {
 		return nil
 	}
-	perms, tooLong, capped := candidates.Permutations(target, p.entries, rel)
+	perms, tooLong, capped := candidates.Permutations(target, p.entries, rel, p.extra)
 	res := &permutationResult{seeds: len(rel), candidates: len(perms), found: p.restoredHits}
 	if len(perms) == 0 {
 		return res

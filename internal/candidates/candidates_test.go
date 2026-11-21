@@ -142,3 +142,37 @@ func BenchmarkPermutations50k(b *testing.B) {
 		_, _, _ = Permutations("example.com", entries, seeds)
 	}
 }
+
+// TestAddDoesNotCopyEntries covers #365 item 2: the wordlist's entries come
+// with no spare capacity (wordlist.Prepared.For shares them across -dL
+// targets), and one source name used to copy the whole slice once per
+// target. The names a source adds are now kept apart from the entries.
+func TestAddDoesNotCopyEntries(t *testing.T) {
+	const size = 1_000_000 // a copy of these headers is 16 MB or more
+	entries := make([]string, size)
+	for i := range entries {
+		entries[i] = fmt.Sprintf("w%d", i)
+	}
+	entries = entries[:size:size]
+	c := New("example.com", entries, nil)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	added := c.Add("ct", []string{"new", "w7"})
+	runtime.ReadMemStats(&after)
+	if b, limit := after.TotalAlloc-before.TotalAlloc, uint64(1<<20); b > limit {
+		t.Errorf("Add allocated %d bytes for one new name, want at most %d (no copy of the entries)", b, limit)
+	}
+	base, extra := c.Lists()
+	if added != 1 || !slices.Equal(extra, []string{"new"}) {
+		t.Errorf("added %d, extra %q; want 1, [new]", added, extra)
+	}
+	if len(base) != size || &base[0] != &entries[0] {
+		t.Error("Lists did not return the entries New was given")
+	}
+	if got := c.Entries(); len(got) != size+1 || got[size] != "new" {
+		t.Errorf("Entries has %d names ending %q, want %d ending new", len(got), got[len(got)-1], size+1)
+	}
+	if again := c.Add("wayback", []string{"new", "other"}); again != 1 {
+		t.Errorf("a second source added %d names, want 1 (new was added before)", again)
+	}
+}

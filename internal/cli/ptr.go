@@ -162,8 +162,9 @@ func lookupPTRs(ctx context.Context, s *session, addrs []string) ptrLookups {
 }
 
 // ptrCandidates returns the names under target, relative to it, that are in
-// scope, not wordlist entries (already tested) and not found already.
-func ptrCandidates(target string, names, entries []string, found []output.Result, excludes []string) []string {
+// scope, not candidates of the main pass (entries and extra: already
+// tested) and not found already.
+func ptrCandidates(target string, names, entries, extra []string, found []output.Result, excludes []string) []string {
 	have := make(map[string]bool, len(found))
 	for _, r := range found {
 		have[strings.ToLower(r.Subdomain)] = true
@@ -178,7 +179,7 @@ func ptrCandidates(target string, names, entries []string, found []output.Result
 		rel = append(rel, r)
 	}
 	built, _, _ := wordlist.Build(rel, target)
-	return wordlist.NotIn(built, entries)
+	return wordlist.NotIn(wordlist.NotIn(built, entries), extra)
 }
 
 // runPTRPass is the -ptr pass of a target (#436): after the main pass and
@@ -188,7 +189,7 @@ func ptrCandidates(target string, names, entries []string, found []output.Result
 // The scan is fully guarded (preflight, wildcard filtering, -rate,
 // -max-queries, -max-duration, -exclude). A resumed run does it again: its
 // lookups are few, and names it already found are not reported twice.
-func runPTRPass(ctx context.Context, s *session, target string, entries []string, fingerprints ...[]dns.Record) *ptrResult {
+func runPTRPass(ctx context.Context, s *session, target string, entries, extra []string, fingerprints ...[]dns.Record) *ptrResult {
 	out := s.out
 	res := &ptrResult{}
 	if s.f.testMode {
@@ -213,7 +214,7 @@ func runPTRPass(ctx context.Context, s *session, target string, entries []string
 	if ctx.Err() != nil {
 		return res
 	}
-	cands := ptrCandidates(target, lk.names, entries, s.targetResults.results(), s.in.excludes)
+	cands := ptrCandidates(target, lk.names, entries, extra, s.targetResults.results(), s.in.excludes)
 	res.candidates = len(cands)
 	out.Info("PTR pass for %s: %d addresses gave %d names, %d of them new under the target", target, lk.asked, len(lk.names), len(cands))
 	if len(cands) == 0 {

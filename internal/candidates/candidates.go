@@ -5,6 +5,7 @@
 package candidates
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -40,7 +41,8 @@ var (
 // the entries in one pass (#321).
 type Set struct {
 	target  string
-	entries []string            // the wordlist's, then the new names in order
+	entries []string            // the wordlist's, never written to
+	extra   []string            // the names the sources added, in order, after entries (#365)
 	seeds   map[string]struct{} // -seeds names plus every name a source proposed, full
 	owned   bool                // seeds is this set's copy, not the caller's map
 
@@ -58,9 +60,22 @@ func New(target string, entries []string, seeds map[string]struct{}) *Set {
 	return &Set{target: target, entries: entries, seeds: seeds}
 }
 
-// Entries returns the candidates: the wordlist's entries, then the names the
-// sources added, relative to the target.
-func (c *Set) Entries() []string { return c.entries }
+// Entries returns the candidates as one list: the wordlist's entries, then
+// the names the sources added, relative to the target. When sources added
+// names it is a new slice, a copy of the entries; Lists avoids that.
+func (c *Set) Entries() []string {
+	if len(c.extra) == 0 {
+		return c.entries
+	}
+	return slices.Concat(c.entries, c.extra)
+}
+
+// Lists returns the candidates as two lists, to be indexed as one: the
+// wordlist's entries, and the names the sources added after them, relative
+// to the target. The entries are the slice New was given, not a copy, so a
+// wordlist shared by every -dL target is not copied per target (#365); the
+// scan takes them as scan.Config's Entries and Extra.
+func (c *Set) Lists() (entries, extra []string) { return c.entries, c.extra }
 
 // Seeds returns the -seeds names and every name a source proposed, full.
 func (c *Set) Seeds() map[string]struct{} { return c.seeds }
@@ -86,8 +101,8 @@ func (c *Set) add(source string, names []string, seed bool) int {
 	if c.from == nil {
 		c.labels, c.from = []string{Wordlist}, map[string]uint8{}
 	}
-	var added []string
-	c.entries, added = passive.Merge(c.entries, names, c.target)
+	added := passive.Merge(c.entries, c.extra, names, c.target)
+	c.extra = append(c.extra, added...)
 	fresh := make(map[string]struct{}, len(added))
 	for _, n := range added {
 		fresh[n] = struct{}{}
@@ -181,18 +196,21 @@ func RelativeSeeds(target string, found []string, seeds map[string]struct{}) []s
 // The permutations are built in one set, wordlist entries are deleted from
 // it, and only the survivors are copied out, so no second or third copy of
 // the list is held (#400). At most MaxPermutations are built; capped reports
-// that the seeds gave more.
-func Permutations(target string, entries, rel []string) (candidates []string, tooLong int, capped bool) {
+// that the seeds gave more. more are further entry lists, such as the
+// names the sources added (Set.Lists).
+func Permutations(target string, entries, rel []string, more ...[]string) (candidates []string, tooLong int, capped bool) {
 	skip := make(map[string]bool, len(rel))
 	for _, s := range rel {
 		skip[s] = true
 	}
 	set, capped := permute.GenerateSet(rel, permute.Words, skip, MaxPermutations)
-	for _, e := range entries {
-		if len(set) == 0 {
-			break
+	for _, list := range append([][]string{entries}, more...) {
+		for _, e := range list {
+			if len(set) == 0 {
+				break
+			}
+			delete(set, e)
 		}
-		delete(set, e)
 	}
 	limit := 253 - 1 - len(strings.TrimSuffix(target, "."))
 	candidates = make([]string, 0, len(set))

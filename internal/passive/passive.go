@@ -85,17 +85,18 @@ func New(name string, opts Options) (Source, error) {
 	return nil, fmt.Errorf("unknown source %q", name)
 }
 
-// Merge appends to entries the names that are not already among them, after
-// them, so the entries' own order (and a resumed scan's positions) stays
-// put. Names are relative to domain; wordlist.Build normalises them and
-// drops invalid ones and ones too long for domain. It returns the entries
-// and the names that were new. It looks the names up with one pass over
-// entries and no map as large as them (#321). The CLI and pkg/subenum share
-// it, so both merge sources the same way (#265).
-func Merge(entries, names []string, domain string) (merged, added []string) {
-	extra, _, _ := wordlist.Build(names, domain)
-	added = wordlist.NotIn(extra, entries)
-	return append(entries, added...), added
+// Merge returns the names that are neither among entries nor among extra
+// (the names merged before), for the caller to put after both, so the
+// entries' own order (and a resumed scan's positions) stays put. Names are
+// relative to domain; wordlist.Build normalises them and drops invalid ones
+// and ones too long for domain. It looks the names up with one pass over
+// each list and no map as large as them (#321), and writes to neither: the
+// entries may be a wordlist every -dL target shares, which appending to
+// would copy once per target (#365). The CLI and pkg/subenum share it, so
+// both merge sources the same way (#265).
+func Merge(entries, extra, names []string, domain string) (added []string) {
+	built, _, _ := wordlist.Build(names, domain)
+	return wordlist.NotIn(wordlist.NotIn(built, entries), extra)
 }
 
 // ctSource reports a crt.sh answer cut off at its read limit as Truncated,

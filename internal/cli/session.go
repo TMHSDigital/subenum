@@ -818,8 +818,11 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string, la *l
 		names := srvNames()
 		out.Info("%s", passive.AddedLine("-srv", len(names), target, cands.AddUnseeded(candidates.SRV, names)))
 	}
-	entries, seeds := cands.Entries(), cands.Seeds()
-	pass := scanPass{domain: target, entries: entries, maxQueries: s.f.maxQueries}
+	// The source names stay apart from the wordlist's entries, which every
+	// -dL target shares: joining them would copy the whole list (#365).
+	entries, extra := cands.Lists()
+	seeds := cands.Seeds()
+	pass := scanPass{domain: target, entries: entries, extra: extra, maxQueries: s.f.maxQueries}
 	if s.deepWords != nil {
 		// The name-length limit is the target's, as for -w; a label too
 		// long under a deeper parent fails its lookup like any other.
@@ -834,7 +837,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string, la *l
 			// The report keeps what the finished run found (#315).
 			res := targetResult{done: true, final: mainSaved.event(), sources: sourceInfo, axfr: axfrInfo, foundBy: s.foundBy}
 			if s.f.permute {
-				res.permutation = finishedPermutation(permuteInput{target: target, entries: entries, found: s.targetResults.mainPassNames(),
+				res.permutation = finishedPermutation(permuteInput{target: target, entries: entries, extra: extra, found: s.targetResults.mainPassNames(),
 					seeds: seeds, prev: saved.Permute, restoredHits: restoredHits})
 			}
 			s.results[i] = res
@@ -850,7 +853,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string, la *l
 			if s.f.followRecs {
 				pass.resumeFollow = recordTargets(s.targetResults.results())
 			}
-			out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries), len(saved.Results))
+			out.Info("Resuming %s at wordlist entry %d of %d (%d results restored)", target, saved.RootDone, len(entries)+len(extra), len(saved.Results))
 		}
 	}
 	var res targetResult
@@ -867,7 +870,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string, la *l
 	// main pass's names only, so a resumed pass rebuilds the same
 	// candidate list, and it resumes from its own position (#107).
 	if s.f.permute && res.done && !res.unfinished() && s.signalCode.Load() == 0 {
-		p := permuteInput{target: target, entries: entries, found: s.targetResults.mainPassNames(), seeds: seeds, restoredHits: restoredHits}
+		p := permuteInput{target: target, entries: entries, extra: extra, found: s.targetResults.mainPassNames(), seeds: seeds, restoredHits: restoredHits}
 		if saved != nil {
 			p.prev = saved.Permute
 		}
@@ -892,7 +895,7 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string, la *l
 		if p := res.permutation; p != nil && p.pass.done {
 			fingerprints = append(fingerprints, p.pass.final.Stats.Fingerprint)
 		}
-		res.ptr = runPTRPass(ctx, s, target, entries, fingerprints...)
+		res.ptr = runPTRPass(ctx, s, target, entries, extra, fingerprints...)
 		if res.ptr.pass.failed {
 			res.failed = true
 		}

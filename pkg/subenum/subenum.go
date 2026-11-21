@@ -539,7 +539,8 @@ func run(ctx context.Context, cfg Config, tweak func(*scan.Options)) (<-chan Eve
 		// query, so its sources are not asked either (#372).
 		if len(cfg.Sources) > 0 && !cfg.Simulate && !scan.TargetOutOfScope(cfg.Exclude, internal.Domain) {
 			cands = withSourceNames(ctx, out, cfg.Sources, internal.Domain, internal.Entries, scan.Excluder(cfg.Exclude))
-			internal.Entries = cands.Entries()
+			// The names stay apart from Words: no copy of the list (#365).
+			internal.Entries, internal.Extra = cands.Lists()
 		}
 		in := make(chan scan.Event, 64)
 		go scan.Run(ctx, internal.Config, in)

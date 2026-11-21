@@ -354,7 +354,7 @@ With `-permute` (or `-seeds`, which implies it), each target that finished gets 
 
 ### 5.5. Certificate Transparency Seeding
 
-With `-ct`, `ct.Client.Names` makes one HTTPS request per target to crt.sh (no API key) and returns the names its certificates cover, relative to the target. `passiveNames` gathers the names through `passive.FetchAll`, and `passive.Merge` appends those not already in the wordlist after the wordlist entries, so wordlist resume positions stay put. They are only candidates and are resolved like any other; those that resolve also seed `-permute`. A failed lookup is a warning, not a failed scan. A resumed run reuses the saved CT names so its candidate list is the same.
+With `-ct`, `ct.Client.Names` makes one HTTPS request per target to crt.sh (no API key) and returns the names its certificates cover, relative to the target. `passiveNames` gathers the names through `passive.FetchAll`, and `passive.Merge` picks those not already in the wordlist. `candidates.Set` keeps them in a list of their own, which the scan takes as `scan.Config.Extra` and tries after `Entries` as if appended to them, so wordlist resume positions stay put and the wordlist, which every `-dL` target shares, is not copied per target. They are only candidates and are resolved like any other; those that resolve also seed `-permute`. A failed lookup is a warning, not a failed scan. A resumed run reuses the saved CT names so its candidate list is the same.
 
 ### 5.6. Lab Mode
 

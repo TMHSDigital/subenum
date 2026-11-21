@@ -548,6 +548,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"RecursiveEntries":  "the form has no -recursive-w field; every level uses the wordlist",
 		"FollowRecords":     "the form has no -follow-records field",
 		"ResumeFollow":      "the TUI does not resume interrupted scans",
+		"Extra":             "the scan takes the source names joined to the wordlist (Set.Entries): one scan, no list shared across targets",
 	}
 	m := filledForm(t)
 	v, errStr := m.validate()

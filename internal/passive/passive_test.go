@@ -108,16 +108,20 @@ func TestWaybackTruncated(t *testing.T) {
 }
 
 // TestMerge covers #265: the merge shared by the CLI and pkg/subenum keeps
-// the entries' order, appends new names after them in order, normalises,
-// and drops duplicates, invalid names and names already present.
+// new names in order, normalises, and drops duplicates, invalid names and
+// names already present, among the entries or among the names merged before
+// (#365). It writes to neither list.
 func TestMerge(t *testing.T) {
 	entries := []string{"www", "mail"}
-	got, added := Merge(entries, []string{"API", "www", "bad_name!", "dev.api", "api", strings.Repeat("a", 64)}, "example.com")
-	if want := []string{"www", "mail", "api", "dev.api"}; !slices.Equal(got, want) || !slices.Equal(added, []string{"api", "dev.api"}) {
-		t.Errorf("Merge = %q, %q; want %q, [api dev.api]", got, added, want)
+	added := Merge(entries, nil, []string{"API", "www", "bad_name!", "dev.api", "api", strings.Repeat("a", 64)}, "example.com")
+	if !slices.Equal(added, []string{"api", "dev.api"}) {
+		t.Errorf("Merge = %q, want [api dev.api]", added)
 	}
-	if got, added := Merge(got, []string{"api"}, "example.com"); len(got) != 4 || len(added) != 0 {
-		t.Errorf("a repeated merge added %q: %q", added, got)
+	if again := Merge(entries, added, []string{"api", "mail", "new"}, "example.com"); !slices.Equal(again, []string{"new"}) {
+		t.Errorf("a repeated merge added %q, want [new]", again)
+	}
+	if !slices.Equal(entries, []string{"www", "mail"}) {
+		t.Errorf("Merge wrote to the entries: %q", entries)
 	}
 }
 

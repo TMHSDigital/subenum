@@ -6,6 +6,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"iter"
 	"net"
 	"slices"
 	"strings"
@@ -30,9 +31,16 @@ type Config struct {
 	// and Prepare guarantee both); a non-recursive scan does not dedupe them
 	// again (#248).
 	Entries []string
+	// Extra are labels tried after Entries, as if appended to them, such as
+	// the names passive sources propose: unique and normalized like
+	// Entries, and none of them an entry. Keeping them apart spares the
+	// copy of Entries that appending them would make (#365). Resume
+	// positions (ResumeFrom, Stats.RootDone, pending roots) index Entries,
+	// then Extra.
+	Extra []string
 	// RecursiveEntries are the labels a recursive scan tries under each name
 	// it finds, at depth 2 and below (-recursive-w, #403); unique and
-	// normalized like Entries. Nil means Entries.
+	// normalized like Entries. Nil means Entries and Extra.
 	RecursiveEntries []string
 	Concurrency      int
 	Timeout          time.Duration
@@ -199,16 +207,49 @@ func RecursionCeilingOf(n, m, depth int) float64 {
 
 // recursionCeiling is the job ceiling of cfg's entries to depth.
 func recursionCeiling(cfg Config, depth int) float64 {
-	return RecursionCeilingOf(len(cfg.Entries), len(cfg.entriesAt(2)), depth)
+	return RecursionCeilingOf(cfg.roots().len(), cfg.entriesAt(2).len(), depth)
 }
 
-// entriesAt returns the labels an expansion at depth tries: Entries at depth
-// 1, and RecursiveEntries below it when they are given (#403).
-func (c Config) entriesAt(depth int) []string {
+// entriesAt returns the labels an expansion at depth tries: Entries and
+// Extra at depth 1, and RecursiveEntries below it when they are given (#403).
+func (c Config) entriesAt(depth int) entryList {
 	if depth > 1 && c.RecursiveEntries != nil {
-		return c.RecursiveEntries
+		return entryList{base: c.RecursiveEntries}
 	}
-	return c.Entries
+	return c.roots()
+}
+
+// roots returns the depth-1 labels: Entries, then Extra.
+func (c Config) roots() entryList { return entryList{base: c.Entries, extra: c.Extra} }
+
+// entryList is a list of labels held as two slices, base then extra, and
+// indexed as one, so names added after a shared wordlist need no copy of
+// it (#365).
+type entryList struct{ base, extra []string }
+
+func (l entryList) len() int { return len(l.base) + len(l.extra) }
+
+func (l entryList) at(i int) string {
+	if i < len(l.base) {
+		return l.base[i]
+	}
+	return l.extra[i-len(l.base)]
+}
+
+// all yields every label with its index.
+func (l entryList) all() iter.Seq2[int, string] {
+	return func(yield func(int, string) bool) {
+		for i, e := range l.base {
+			if !yield(i, e) {
+				return
+			}
+		}
+		for i, e := range l.extra {
+			if !yield(len(l.base)+i, e) {
+				return
+			}
+		}
+	}
 }
 
 // workerCount caps the pool at the most jobs the scan can produce, so a huge
@@ -299,7 +340,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	doneSent, failed := false, false
 	defer func() {
 		if !doneSent {
-			events <- Event{Kind: EventDone, Stopped: true, Failed: failed, Total: int64(len(cfg.Entries)), Stats: Stats{QueriesSent: queriesSent.Load()}}
+			events <- Event{Kind: EventDone, Stopped: true, Failed: failed, Total: int64(cfg.roots().len()), Stats: Stats{QueriesSent: queriesSent.Load()}}
 		}
 	}()
 
@@ -336,9 +377,10 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 			st.pending.add(pendingLookup{name: p.Name, root: -1, outcome: p.Outcome, prior: true})
 		}
 	}
-	st.rootStart = min(max(cfg.ResumeFrom, 0), len(cfg.Entries))
-	st.rootOutcome = make([]uint8, len(cfg.Entries)-st.rootStart)
-	st.total.Store(int64(len(cfg.Entries)))
+	roots := cfg.roots().len()
+	st.rootStart = min(max(cfg.ResumeFrom, 0), roots)
+	st.rootOutcome = make([]uint8, roots-st.rootStart)
+	st.total.Store(int64(roots))
 	if cfg.AutoRate {
 		sent := queriesSent.Load
 		if jobLimiter != nil {
@@ -426,7 +468,7 @@ func preflight(ctx context.Context, cfg *Config, maxDepth int, events chan<- Eve
 
 	if cfg.Recursive {
 		ceiling := recursionCeiling(*cfg, maxDepth)
-		entries := fmt.Sprintf("%d entries", len(cfg.Entries))
+		entries := fmt.Sprintf("%d entries", cfg.roots().len())
 		if cfg.RecursiveEntries != nil {
 			entries += fmt.Sprintf(" (%d below depth 1)", len(cfg.RecursiveEntries))
 		}
