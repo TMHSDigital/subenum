@@ -157,7 +157,7 @@ func TestE2EBuiltinLabs(t *testing.T) {
 	})
 	t.Run("unknown", func(t *testing.T) {
 		t.Parallel()
-		code, out := runCLIMerged(t, "-simulate-zone", "lab9", "lab.example")
+		code, out := runCLIMerged(t, "-simulate-zone", "lab99", "lab.example")
 		if code != exitFailure || !strings.Contains(out, "lab1-first-scan, lab2-wildcard") {
 			t.Fatalf("exit %d, want %d and the built-in names\n%s", code, exitFailure, out)
 		}

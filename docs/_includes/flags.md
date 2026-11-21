@@ -43,7 +43,7 @@
 | `-show-records` | - | In text format, append each result's records (TYPE=value) |
 | `-silent` | - | Pipeline mode: bare result names on stdout, and only errors (and a simulation warning) on stderr |
 | `-simulate` | - | Run in simulation mode without actual DNS queries (for testing) |
-| `-simulate-zone <string>` | - | Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6, lab7, lab8), via a local DNS server, so no traffic leaves the machine (see the Labs page) lab7, lab8: {% include unreleased.html value="simulate-zone=lab7" %} |
+| `-simulate-zone <string>` | - | Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6, lab7, lab8, lab9), via a local DNS server, so no traffic leaves the machine (see the Labs page) lab7, lab8, lab9: {% include unreleased.html value="simulate-zone=lab7" %} |
 | `-sources <string>` | - | Comma-separated keyless passive sources whose names become candidates and -permute seeds: ct (Certificate Transparency, crt.sh), wayback (Wayback Machine); one HTTPS request per source and target |
 | `-srv` {% include unreleased.html flag="srv" %} | - | Also look up a built-in list of about 50 service names (\_sip.\_tcp, \_autodiscover.\_tcp, \_ldap.\_tcp, ...) under each target; needs SRV in -type |
 | `-state <string>` | subenum-resume.json | Where a run that was interrupted, ran out of -max-duration or was aborted saves its state for -resume |
@@ -53,7 +53,7 @@
 | `-takeover-providers-only` | - | Use only the -takeover-providers file, not the built-in provider list |
 | `-timeout <int>` | 1000 | DNS lookup timeout in milliseconds |
 | `-tui` | - | Launch the interactive terminal UI, its form pre-filled from the other flags and the domain argument |
-| `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV (CNAME and NS also check for takeovers) SRV: {% include unreleased.html value="type=SRV" %} |
+| `-type <string>` | A,AAAA | Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV (CNAME and NS also check for takeovers; with NS, a name that fails with SERVFAIL is asked of the zone's own name servers for its delegation) SRV: {% include unreleased.html value="type=SRV" %} |
 | `-v` | - | Enable verbose output |
 | `-version` | - | Show version information |
 | `-w <file>` | - | Path to a wordlist file (- for stdin); repeat to combine several, deduplicated; omitted: the bundled top-5000 list |

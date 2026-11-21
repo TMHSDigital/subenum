@@ -98,6 +98,11 @@ type Config struct {
 	// -dns-server), whose answer is the one reported; preflight and wildcard
 	// checks also use Resolver.
 	Pool *dns.Pool
+	// ZoneServer, when set ("host:port"), receives the delegation queries
+	// meant for the target zone's name servers, which are then not looked
+	// up: a lab run sends them to its local server, which answers for the
+	// zone, so nothing leaves the machine (#406).
+	ZoneServer string
 
 	// resolveHook, if set, replaces the simulation and live lookups (see resolve).
 	// Tests inject classified outcomes through this field without network I/O.
@@ -318,6 +323,7 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	st := &scanState{
 		cfg: cfg, maxDepth: maxDepth, limiter: jobLimiter, events: events,
 		cancel: cancel, fp: fingerprint, wc: &wildcardCache{known: make(map[string]bool)},
+		parent: newParentZone(cfg),
 	}
 	if cfg.ListInconclusive || cfg.RetryInconclusive {
 		st.pending = &pendingList{}
@@ -380,6 +386,9 @@ func Run(ctx context.Context, cfg Config, events chan<- Event) {
 	snap.Wildcard = wildcardRoot
 	snap.Fingerprint = fingerprint.records()
 	st.finishPending(&snap, &repeat)
+	if st.parent != nil {
+		snap.ParentChecks, snap.ParentQueries = st.parent.checks.Load(), st.parent.queries.Load()
+	}
 	snap.Repeat = repeat
 	if st.auto != nil {
 		snap.RateBackoffs, snap.FinalRate = st.auto.result()
@@ -577,6 +586,7 @@ type scanState struct {
 	wc        *wildcardCache
 	pending   *pendingList // inconclusive lookups (#217); nil when nothing reads them (#300)
 	auto      *autoRate    // the AutoRate controller; nil without AutoRate (#220)
+	parent    *parentZone  // asks the zone's name servers about SERVFAIL names (#406); nil unless NS is looked up live
 
 	// For Stats.Repeat (#341): how each wordlist entry from rootStart on
 	// ended (a repeat code, written by the one worker that looked it up, or
@@ -636,6 +646,17 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 		return true
 	}
 
+	// A name that ends SERVFAIL may be a subzone whose every name server is
+	// gone: the zone's own name servers still name them (#406).
+	delegated := false
+	if outcome == dns.OutcomeOther {
+		if ns, ok := s.danglingDelegation(ctx, j.domain); ok {
+			records, outcome, partial, delegated = ns, dns.OutcomeFound, false, true
+		} else if settle(ctx, outcome) == dns.OutcomeCanceled {
+			return false
+		}
+	}
+
 	st.add(outcome)
 	s.recordRepeat(j, repeatCode(outcome))
 	if inconclusive(outcome) {
@@ -661,7 +682,9 @@ func (s *scanState) processJob(ctx context.Context, j job) (finished bool) {
 		}
 	}
 
-	if cfg.Recursive && j.depth < maxDepth && s.expandable(ctx, j.domain) {
+	// Every name under a dangling delegation fails the same way, so it is
+	// not expanded.
+	if cfg.Recursive && !delegated && j.depth < maxDepth && s.expandable(ctx, j.domain) {
 		// Hand the parent to the dispatcher, which generates its children.
 		select {
 		case s.enqueue <- j:

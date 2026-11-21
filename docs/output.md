@@ -106,6 +106,7 @@ Text output is one name per line. `-show-records` appends the records as ` TYPE=
 | `ct_names`, `ct_error` | integer, string | when set | Repeat the `ct` entry of `sources`. |
 | `axfr_allowed`, `axfr_names`, `axfr_error`, `axfr_found` | array, integer, string, integer | when set | `-axfr`: servers that allowed a transfer, names it added, why none could be tried, results it proposed. |
 | `nsec_names`, `nsec_found`, `nsec_stop` | integer, integer, string | when set | `-nsec-walk`: names the walk listed, results it proposed, and why it stopped before the end of the chain or did not run. |
+| `parent_checks`, `parent_queries` | integer, integer | when set | `-type NS`: names that failed with SERVFAIL whose delegation was asked of the zone's own name servers, and the queries that took (the name server lookups included; `queries_sent` counts them too). A subzone whose every name server is gone is found this way and flagged `dangling-ns`. |
 | `records_found` | integer | when set | `-follow-records`: results that a found name's `CNAME`, `MX` or `NS` record pointed at. |
 | `zone_denial` | string | when set | The DNSSEC probe of `-axfr` or `-nsec-walk`: `nsec` (anyone can list the zone), `nsec3` or `none`. |
 | `pool_hits`, `confirmed`, `unconfirmed` | integer | when set | `-r`: pool hits, and how many the trusted resolver confirmed or denied. |

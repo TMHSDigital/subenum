@@ -238,7 +238,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.BoolVar(&f.testMode, "simulate", false, "Run in simulation mode without actual DNS queries (for testing)")
 	fs.IntVar(&f.testHitRate, "hit-rate", scan.DefaultHitRate, "In simulation mode, percentage of names that resolve (1-100)")
 	fs.Uint64Var(&f.seed, "seed", 0, "In simulation mode, seed for reproducible results (0 = random; the seed used is printed)")
-	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6, lab7, lab8), via a local DNS server, so no traffic leaves the machine (see the Labs page)")
+	fs.StringVar(&f.simZone, "simulate-zone", "", "Lab mode: answer every query from this scenario file, or a built-in scenario such as lab1 (lab1-lab6, lab7, lab8, lab9), via a local DNS server, so no traffic leaves the machine (see the Labs page)")
 	fs.Var(&f.outputs, "o", "Write results to `file` (in addition to stdout); repeat for several files, each in -format or in the format named as a prefix, format:path (jsonl:results.jsonl)")
 	fs.IntVar(&f.attempts, "attempts", 0, "Total DNS resolution attempts per subdomain, 1 = no retry (default 1)")
 	fs.IntVar(&f.retries, "retries", 0, "Deprecated: use -attempts instead")
@@ -247,7 +247,7 @@ func parseFlagsWith(args []string, applyDefaults func(*flag.FlagSet) error, stde
 	fs.StringVar(&f.logFormat, "log-format", "text", "Diagnostics format on stderr: text, or json for one JSON object per line (level, kind, target, message); results on stdout are unchanged")
 	fs.BoolVar(&f.showRecords, "show-records", false, "In text format, append each result's records (TYPE=value)")
 	fs.IntVar(&f.rate, "rate", 0, "Max DNS queries per second on the wire, all workers combined; counts every record type, retry and wildcard probe (0 = unlimited)")
-	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV (CNAME and NS also check for takeovers)")
+	fs.StringVar(&f.recordTypes, "type", "A,AAAA", "Comma-separated DNS record types to look up: A, AAAA, CNAME, NS, MX, TXT, SRV (CNAME and NS also check for takeovers; with NS, a name that fails with SERVFAIL is asked of the zone's own name servers for its delegation)")
 	fs.BoolVar(&f.autoRate, "auto-rate", false, "When over 20% of the last 200 lookups fail, halve the query rate and keep going (up to 6 times, down to 5 queries/s) instead of aborting; speed back up once lookups succeed")
 	fs.BoolVar(&f.recursive, "recursive", false, "Recursively enumerate subdomains of discovered subdomains")
 	fs.IntVar(&f.depth, "depth", 1, "Max recursion depth when -recursive is set (1 = no recursion)")
@@ -760,6 +760,9 @@ func logScanBreakdown(domain string, ev scan.Event, out *output.Writer) {
 	if s.Takeover > 0 {
 		out.Info("  takeover candidates: %d (DNS-only hints; verify each by hand)", s.Takeover)
 	}
+	if s.ParentChecks > 0 {
+		out.Info("  asked the zone's name servers: %d SERVFAIL names (%d queries)", s.ParentChecks, s.ParentQueries)
+	}
 	if s.Internal > 0 {
 		out.Info("  internal addresses: %d (public names answering with loopback, private, link-local or CGNAT addresses)", s.Internal)
 	}
@@ -897,6 +900,7 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 			// expanded.
 			ResumeParents: p.resumeNames,
 			Pool:          in.pool,
+			ZoneServer:    labZoneServer(f),
 			NoAbort:       f.noAbort,
 			Verbose:       f.verbose,
 			Logf:          logf,
@@ -904,6 +908,16 @@ func scanOptions(f cliFlags, in *runtimeInputs, p scanPass, logf dns.Logf) scan.
 		MaxDuration:     f.maxDuration,
 		RatePerResolver: f.ratePerRes,
 	}
+}
+
+// labZoneServer is where a lab run sends the queries meant for the zone's
+// name servers: its local server, so they never leave the machine (#406).
+// Outside a lab it is "", and they go to the name servers' addresses.
+func labZoneServer(f cliFlags) string {
+	if f.simZone == "" {
+		return ""
+	}
+	return f.dnsServer
 }
 
 // targetResult is how one domain's scan ended.

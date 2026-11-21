@@ -40,6 +40,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"RetryPrior":    "the library does not resume interrupted scans",
 		"ResumeFollow":  "the library does not resume interrupted scans",
 		"Resolver":      "scan.Run builds the resolver from DNSServer",
+		"ZoneServer":    "the library does not run labs; delegation queries go to the zone's name servers",
 	}
 	c := Config{
 		Domain: "example.com", Words: []string{"www"}, Concurrency: 7, Timeout: 700 * time.Millisecond,

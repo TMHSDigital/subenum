@@ -1308,7 +1308,7 @@ func TestResumeStateKeys(t *testing.T) {
 		targets.results.simulated targets.results.sources targets.results.subdomain targets.results.takeover_candidate`)
 	// scan.Stats is stored twice, for the target and for its -permute pass.
 	statsKeys := strings.Fields(`Aborted Confirmed Excluded Expired FinalRate Fingerprint Fingerprint.type
-		Fingerprint.value Found Inconclusive Internal NXDomain Other Partial PoolHits QueriesSent RateBackoffs
+		Fingerprint.value Found Inconclusive Internal NXDomain Other ParentChecks ParentQueries Partial PoolHits QueriesSent RateBackoffs
 		Recovered Refused Retried RootDone Skipped Takeover Timeout Unconfirmed Wildcard WildcardFiltered`)
 	for _, prefix := range []string{"targets.stats.", "targets.permute.stats."} {
 		for _, k := range statsKeys {

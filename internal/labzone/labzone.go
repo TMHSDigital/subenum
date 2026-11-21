@@ -29,6 +29,9 @@
 // and the scenario is the whole world, so names outside the scanned domain
 // (an external CNAME target, say) are NXDOMAIN too. An in-zone CNAME target
 // is followed, through further CNAMEs and wildcards, as that resolver would.
+// A delegation none of whose name servers has an address in the scenario
+// (sub above) is SERVFAIL to a query that asks for recursion, and a referral
+// to one that does not, as the parent zone's server answers (#406).
 package labzone
 
 import (
@@ -596,6 +599,54 @@ func relative(name, origin string) (string, bool) {
 	return rel, ok
 }
 
+// delegation is a subzone the scenario delegates (a name below the apex
+// with NS records): its absolute name and name servers.
+type delegation struct {
+	zone  string
+	hosts []string
+}
+
+// reply is the answer for a name in a delegation none of whose name servers
+// exist (#406). A recursive resolver, which the server stands in for when
+// asked to recurse, cannot reach any of them and answers SERVFAIL; asked
+// without recursion, the server answers as the parent zone's server does,
+// with a referral to them.
+func (d delegation) reply(recursive bool) dnsserver.Reply {
+	if recursive {
+		return dnsserver.ServFail
+	}
+	return dnsserver.Reply{Referral: d.hosts, ReferralZone: d.zone}
+}
+
+// danglingDelegation returns the delegation rel is at or under, the one
+// closest to the apex, when none of its name servers has an address in the
+// scenario: a fully dangling delegation (#406). A delegation with one name
+// server that answers is served as before, its NS records answered from the
+// scenario.
+func (z *Zone) danglingDelegation(rel, origin string) (delegation, bool) {
+	var cut *entry
+	cutName := ""
+	for n := rel; n != ""; n = parent(n) {
+		if e := z.entries[n]; e != nil && e.fail == nil && len(e.ns) > 0 {
+			cut, cutName = e, n
+		}
+	}
+	if cut == nil {
+		return delegation{}, false
+	}
+	d := delegation{zone: cutName + "." + origin}
+	for _, h := range cut.ns {
+		host := absolute(h, origin)
+		if t, ok := relative(host, origin); ok {
+			if e, _ := z.lookup(t); e != nil && e.fail == nil && len(e.a)+len(e.aaaa) > 0 {
+				return delegation{}, false // a name server that answers
+			}
+		}
+		d.hosts = append(d.hosts, host)
+	}
+	return d, true
+}
+
 // Handler answers queries for any of origins (the scanned domains) from the
 // zone, applying $DELAY and $REFUSE-ABOVE. Other names are NXDOMAIN.
 func (z *Zone) Handler(origins []string) dnsserver.Handler {
@@ -630,6 +681,11 @@ func (z *Zone) Handler(origins []string) dnsserver.Handler {
 				r = z.Answer(rel, o)
 				if q.Type != dnsmessage.TypeAXFR {
 					r = z.sign(r, q.Name, chains[o])
+				}
+				if q.Type != dnsmessage.TypeAXFR {
+					if d, ok := z.danglingDelegation(rel, o); ok {
+						r = d.reply(q.Recursive)
+					}
 				}
 				if q.Type == dnsmessage.TypeAXFR {
 					switch {

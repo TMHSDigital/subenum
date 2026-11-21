@@ -274,6 +274,14 @@ type Stats struct {
 	Internal    int64 // results with an Internal address scope
 	Partial     int64 // results marked Partial
 
+	// ParentChecks counts the names that failed with SERVFAIL, with NS
+	// among Types, whose delegation was asked of the zone's own name
+	// servers, and ParentQueries the queries that took; QueriesSent
+	// includes them. A subzone whose every name server is gone is found
+	// this way, as a Result with a dangling-ns Takeover hint.
+	ParentChecks  int64
+	ParentQueries int64
+
 	PoolHits    int64 // names a ResolverPool member reported
 	Confirmed   int64 // of those, the ones Resolver confirmed
 	Unconfirmed int64 // of those, the ones Resolver said do not exist
@@ -897,6 +905,9 @@ func engineStats(s Stats) scan.Stats {
 		Internal:    s.Internal,
 		Partial:     s.Partial,
 
+		ParentChecks:  s.ParentChecks,
+		ParentQueries: s.ParentQueries,
+
 		PoolHits:    s.PoolHits,
 		Confirmed:   s.Confirmed,
 		Unconfirmed: s.Unconfirmed,
@@ -929,6 +940,9 @@ func stats(s scan.Stats) Stats {
 		Takeover:    s.Takeover,
 		Internal:    s.Internal,
 		Partial:     s.Partial,
+
+		ParentChecks:  s.ParentChecks,
+		ParentQueries: s.ParentQueries,
 
 		PoolHits:    s.PoolHits,
 		Confirmed:   s.Confirmed,

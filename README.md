@@ -293,7 +293,7 @@ This table describes `main`, which can be ahead of the latest release: a release
 | `-simulate` | `false` | Simulation mode: no real DNS queries |
 | `-hit-rate <n>` | `15` | Simulated resolution rate, percent (1-100), applied uniformly to every name |
 | `-seed <n>` | `0` | Simulation seed; the same seed reproduces the same results (line order can vary unless `-t 1`). `0` picks a random seed and prints it |
-| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab8`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
+| `-simulate-zone <file>` | n/a | Lab mode: answer every query from a scenario file, or a built-in scenario such as `lab1` (`lab1`-`lab9`, with their own wordlist when `-w` is not given), via a local DNS server on `127.0.0.1`; no traffic leaves the machine. See [Labs](docs/labs.md) |
 | **Modes** | | |
 | `-tui` | `false` | Launch the interactive Terminal UI |
 | `-dry-run` | `false` | Print the plan without scanning: candidates after dedupe and `-exclude`, query and duration estimates (at `-rate`, or `-rate-per-resolver` times the `-r` pool size when that is lower), and the resolver preflight (its only DNS query, also sent once to each `-r` pool resolver, paced by `-rate` and skipped for a target `-exclude` rules out; a failing pool resolver is reported but does not fail the run), then exit; JSON with `-format json` or `jsonl` |
@@ -609,7 +609,7 @@ When a result has a CNAME record, subenum resolves the CNAME target with the tru
 
 Every JSON, JSONL and CSV field and every `-stats` report field, with when it is present and its values, is listed in the [output field reference](https://tmhsdigital.github.io/subenum/output.html), with JSON Schema files for results and the report.
 
-A recursive resolver asked about a subzone whose every name server is gone usually answers SERVFAIL instead of the delegation, so such a name is reported as inconclusive (see `-inconclusive`) rather than marked; scanning against the parent zone's authoritative server finds it.
+A recursive resolver asked about a subzone whose every name server is gone usually answers SERVFAIL instead of the delegation. So with `NS` in `-type`, a name whose lookup ends SERVFAIL is asked of the target zone's own name servers (found as `-axfr` finds them, once per target), with one NS query that does not ask for recursion. When the referral they give names name servers that do not exist (NXDOMAIN through `-dns-server`), the name is reported with those NS records and marked `dangling-ns`; otherwise it stays inconclusive. These queries go straight to the zone's name servers, take a `-rate` slot each, stop at `-max-queries` and `-max-duration`, are never sent for a name `-exclude` rules out, and are counted in the report's `queries_sent` and as `parent_checks` and `parent_queries`.
 
 A target or name server that exists but has no A or AAAA record (NODATA, such as a name with only MX or TXT records) is not dangling: when the address lookup comes back empty, subenum sends one more A query and marks the name only on an NXDOMAIN answer. A probe that fails (timeout, SERVFAIL) marks nothing.
 

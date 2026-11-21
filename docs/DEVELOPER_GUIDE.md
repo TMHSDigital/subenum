@@ -118,6 +118,7 @@ subenum/
 │   │   ├── axfr.go             # Transfer: AXFR zone transfer over TCP (-axfr)
 │   │   ├── nsec.go             # ProbeDenial: is the zone NSEC-walkable (-axfr)
 │   │   ├── nsecwalk.go         # WalkNSEC: list a plain-NSEC zone (-nsec-walk)
+│   │   ├── referral.go         # AskDelegation: a name's delegation, asked without recursion
 │   │   ├── pool.go             # Pool: the -r resolver pool (benching, canaries, second opinions)
 │   │   ├── ratelimit.go        # RateLimiter, WithLimiter (per-wire-query pacing)
 │   │   ├── takeover.go         # TakeoverProvider, TakeoverHint (dangling CNAMEs and NS delegations)
@@ -148,6 +149,7 @@ subenum/
 │   │   ├── events.go           # Event, EventKind, NoticeKind, Result
 │   │   ├── stats.go            # Stats, Repeat: the run's counters
 │   │   ├── pending.go          # Inconclusive list and the retry pass
+│   │   ├── delegation.go       # A SERVFAIL name's delegation, asked of the zone's name servers
 │   │   ├── wildcard.go         # Wildcard cache and fingerprint matching
 │   │   ├── dispatcher.go       # Lazy candidate generation in chunks, budgets, resume watermark
 │   │   ├── autorate.go         # -auto-rate back-off controller

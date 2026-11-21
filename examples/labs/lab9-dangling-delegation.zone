@@ -1,0 +1,13 @@
+# Lab 9: a dangling delegation. legacy is delegated to two name servers
+# that no longer exist, so a resolver asked about it answers SERVFAIL, and
+# whoever registers either name answers for the whole subzone. staging is
+# delegated to a name server that still answers. Run:
+#   subenum -simulate-zone lab9 -type A,NS -format jsonl lab.example
+# Then run it again without -type and compare.
+@          A      192.0.2.1
+@          NS     ns1
+ns1        A      192.0.2.53
+www        A      192.0.2.10
+legacy     NS     ns1.legacy-dns.example.
+legacy     NS     ns2.legacy-dns.example.
+staging    NS     ns1

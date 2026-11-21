@@ -38,6 +38,10 @@ type Query struct {
 	Name string          // lowercase, without the trailing dot
 	Type dnsmessage.Type // dnsmessage.TypeA, TypeAAAA, TypeCNAME, ...
 	TCP  bool            // the query arrived over TCP
+	// Recursive is the query's RD bit: a stub resolver sets it, while a
+	// query meant for an authoritative server (a delegation check, an NSEC
+	// walk step) leaves it clear (#406).
+	Recursive bool
 }
 
 // Reply scripts the answer to a Query. The zero Reply is NOERROR with no
@@ -68,6 +72,13 @@ type Reply struct {
 	// answer, or of a positive one (a wildcard's), as a zone signed with
 	// plain NSEC proves which names do not exist (#437).
 	NSEC []NSEC
+
+	// Referral answers as a parent zone's server does for a name in a
+	// subzone it delegated (#406): NOERROR, not authoritative, no answer,
+	// and an NS record per host here in the authority section, owned by
+	// ReferralZone ("" is the queried name). It replaces every answer above.
+	Referral     []string
+	ReferralZone string
 
 	RCode    dnsmessage.RCode // e.g. RCodeNameError (NXDOMAIN), RCodeServerFailure, RCodeRefused
 	Drop     bool             // send nothing; the client times out
@@ -443,7 +454,7 @@ func (s *Server) handle(msg []byte, tcp bool, h Handler) []byte {
 	if err != nil {
 		return nil
 	}
-	q := Query{Name: normalize(question.Name.String()), Type: question.Type, TCP: tcp}
+	q := Query{Name: normalize(question.Name.String()), Type: question.Type, TCP: tcp, Recursive: hdr.RecursionDesired}
 	s.total.Add(1)
 	if s.counts != nil {
 		s.mu.Lock()
@@ -493,10 +504,11 @@ func udpPayload(p *dnsmessage.Parser) int {
 }
 
 func build(qh dnsmessage.Header, question dnsmessage.Question, q Query, r Reply) ([]byte, error) {
+	referral := len(r.Referral) > 0 && r.RCode == dnsmessage.RCodeSuccess
 	hdr := dnsmessage.Header{
 		ID:                 qh.ID,
 		Response:           true,
-		Authoritative:      true,
+		Authoritative:      !referral, // a referral is not an answer from the zone itself
 		RecursionDesired:   qh.RecursionDesired,
 		RecursionAvailable: true,
 		RCode:              r.RCode,
@@ -516,8 +528,15 @@ func build(qh dnsmessage.Header, question dnsmessage.Question, q Query, r Reply)
 		return nil, err
 	}
 
+	if referral && !hdr.Truncated {
+		if err := addReferral(&b, q.Name, r); err != nil {
+			return nil, err
+		}
+		return b.Finish()
+	}
+
 	answered := 0
-	if r.RCode == dnsmessage.RCodeSuccess && !hdr.Truncated {
+	if r.RCode == dnsmessage.RCodeSuccess && !hdr.Truncated && !referral {
 		n, err := addAnswers(&b, question.Name, q.Type, r)
 		if err != nil {
 			return nil, err
@@ -548,6 +567,32 @@ func build(qh dnsmessage.Header, question dnsmessage.Question, q Query, r Reply)
 		}
 	}
 	return b.Finish()
+}
+
+// addReferral adds r's referral to the authority section: one NS record per
+// host, owned by r.ReferralZone, or by name when that is empty (#406).
+func addReferral(b *dnsmessage.Builder, name string, r Reply) error {
+	if err := b.StartAuthorities(); err != nil {
+		return err
+	}
+	zone := r.ReferralZone
+	if zone == "" {
+		zone = name
+	}
+	owner, err := dnsmessage.NewName(fqdn(zone))
+	if err != nil {
+		return err
+	}
+	for _, h := range r.Referral {
+		host, err := dnsmessage.NewName(fqdn(h))
+		if err != nil {
+			continue
+		}
+		if err := b.NSResource(rrHeader(owner, dnsmessage.TypeNS), dnsmessage.NSResource{NS: host}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NSEC is one NSEC record (#437): Owner is followed by Next in the zone's

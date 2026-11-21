@@ -79,6 +79,7 @@ internal/scan/runner.go        - Scan engine: Config, Run, preflight, the worker
 internal/scan/events.go        - Event, EventKind, NoticeKind, Result: what Run sends
 internal/scan/stats.go         - Stats, Repeat: the run's counters (a -resume file format)
 internal/scan/pending.go       - The inconclusive list and the -retry-inconclusive pass
+internal/scan/delegation.go    - parentZone: ask the zone's name servers about a SERVFAIL name's delegation (dangling-ns)
 internal/scan/wildcard.go      - Wildcard cache, fingerprint and near-miss matching
 internal/scan/dispatcher.go    - dispatcher: lazy candidate generation in chunks, budgets, resume watermark
 internal/scan/autorate.go      - autoRate: the -auto-rate back-off controller
@@ -93,6 +94,7 @@ internal/dns/transport.go      - UDP (TCP fallback), DNS over TLS and DNS over H
 internal/dns/axfr.go           - Transfer: an AXFR zone transfer over TCP (-axfr)
 internal/dns/nsec.go           - ProbeDenial: NSEC, NSEC3 or no DNSSEC proof of absence (-axfr, -nsec-walk)
 internal/dns/nsecwalk.go       - WalkNSEC: list a plain-NSEC zone by following its chain (-nsec-walk)
+internal/dns/referral.go       - AskDelegation: a non-recursive NS query for a name's delegation (dangling-ns)
 internal/dns/pool.go           - Pool: the -r resolver pool (health benching, canaries, second opinions)
 internal/dns/ratelimit.go      - RateLimiter, WithLimiter (per-wire-query pacing)
 internal/dns/takeover.go       - TakeoverProvider, TakeoverHint, HintsTakeover (dangling or takeover-prone CNAMEs, dangling NS delegations)

@@ -108,6 +108,12 @@ type TargetSummary struct {
 	NSECNames int    `json:"nsec_names,omitempty"`
 	NSECFound int    `json:"nsec_found,omitempty"`
 	NSECStop  string `json:"nsec_stop,omitempty"`
+	// ParentChecks counts the names that failed with SERVFAIL under -type
+	// NS whose delegation was asked of the zone's own name servers, and
+	// ParentQueries the queries that took (queries_sent includes them): a
+	// subzone whose every name server is gone is found this way (#406).
+	ParentChecks  int64 `json:"parent_checks,omitempty"`
+	ParentQueries int64 `json:"parent_queries,omitempty"`
 	// RecordsFound counts the results -follow-records found: names a found
 	// name's CNAME, MX or NS record pointed at (#432).
 	RecordsFound int `json:"records_found,omitempty"`

@@ -30,6 +30,12 @@ type Stats struct {
 	Takeover    int64 `json:"Takeover"`    // results flagged as subdomain-takeover candidates
 	Internal    int64 `json:"Internal"`    // results with a non-public address (Result.Internal, #218)
 	Partial     int64 `json:"Partial"`     // found names a requested type's lookup failed for (Result.Partial, #357)
+	// ParentChecks counts the names that ended SERVFAIL whose delegation was
+	// asked of the zone's own name servers, and ParentQueries the queries
+	// that took, the name server lookups included; QueriesSent counts them
+	// too (#406).
+	ParentChecks  int64 `json:"ParentChecks"`
+	ParentQueries int64 `json:"ParentQueries"`
 	// RootDone is the resume point: every wordlist entry before this index
 	// has been fully looked up (#73). Entries at or after it may also be
 	// done; resuming repeats at most one chunk (maxChunk jobs) per worker,
@@ -145,6 +151,8 @@ func (s Stats) AddCounts(o Stats) Stats {
 	s.Takeover += o.Takeover
 	s.Internal += o.Internal
 	s.Partial += o.Partial
+	s.ParentChecks += o.ParentChecks
+	s.ParentQueries += o.ParentQueries
 	s.Retried += o.Retried
 	s.Recovered += o.Recovered
 	s.Inconclusive = append(append([]string(nil), s.Inconclusive...), o.Inconclusive...)

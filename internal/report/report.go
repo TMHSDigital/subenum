@@ -124,6 +124,7 @@ func target(domain string, status Status, errMsg string, done bool, final scan.E
 		t.StoppedBy = "queries"
 	}
 	t.Takeover = st.Takeover
+	t.ParentChecks, t.ParentQueries = st.ParentChecks, st.ParentQueries
 	t.Internal = st.Internal
 	t.Retried, t.Recovered = st.Retried, st.Recovered
 	t.RateBackoffs, t.FinalRate = st.RateBackoffs, st.FinalRate

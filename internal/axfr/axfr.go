@@ -104,6 +104,65 @@ func probeDenial(ctx context.Context, o Options, host, addr, target string) dns.
 	return d
 }
 
+// NameServer is one of a zone's name servers and its addresses.
+type NameServer struct {
+	Host  string   // lower case, without the trailing dot
+	Addrs []string // at most AddrsPerServer
+}
+
+// NameServers looks up target's name servers (at most MaxServers) and their
+// addresses through resolver, with o.Timeout per lookup; hosts o.Skip rules
+// out are neither resolved nor returned, and neither is a host that does not
+// resolve. Each lookup first takes its slots of the rate limiter on ctx
+// (dns.WithLimiter), one for the NS lookup and two (A and AAAA) per host, so
+// a scan can pace them by -rate (#406). It returns how many queries it sent,
+// and why no name server could be found ("" when some were).
+func NameServers(ctx context.Context, resolver *net.Resolver, target string, o Options) (servers []NameServer, queries int64, errMsg string) {
+	if err := dns.WaitRate(ctx, 1); err != nil {
+		return nil, 0, "name server lookup failed: " + err.Error()
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, o.Timeout)
+	found, err := resolver.LookupNS(lookupCtx, target+".")
+	cancel()
+	queries++
+	// Go reports an answer without NS records as a not-found error, not as
+	// an empty list, so "no name servers" is told apart by the error (#347).
+	var de *net.DNSError
+	switch {
+	case err == nil && len(found) > 0:
+	case err == nil || errors.As(err, &de) && de.IsNotFound:
+		return nil, queries, "no name servers found for " + target
+	default:
+		return nil, queries, "name server lookup failed: " + err.Error()
+	}
+	if len(found) > MaxServers {
+		found = found[:MaxServers]
+	}
+	for _, ns := range found {
+		host := strings.ToLower(strings.TrimSuffix(ns.Host, "."))
+		if o.Skip != nil && o.Skip(host) {
+			logf(o.Debug, "-axfr: skipping name server %s: it is out of scope", host)
+			continue
+		}
+		if err := dns.WaitRate(ctx, 2); err != nil {
+			break
+		}
+		lookupCtx, cancel := context.WithTimeout(ctx, o.Timeout)
+		addrs, err := resolver.LookupHost(lookupCtx, host+".")
+		cancel()
+		queries += 2 // A and AAAA
+		if err != nil {
+			logf(o.Debug, "-axfr: cannot resolve name server %s: %v", host, err)
+			continue
+		}
+		if len(addrs) > AddrsPerServer {
+			addrs = addrs[:AddrsPerServer]
+		}
+		servers = append(servers, NameServer{Host: host, Addrs: addrs})
+	}
+	return servers, queries, ""
+}
+
 // Try tries a full zone transfer (AXFR) of target from each of its name
 // servers, found through o.Resolver. A server that allows it gives every
 // name in the zone in one query; most refuse, which is the correct
@@ -116,48 +175,17 @@ func Try(ctx context.Context, target string, o Options) Result {
 	defer dns.CloseIdleConnections(resolver)
 	var res Result
 
-	lookupCtx, cancel := context.WithTimeout(ctx, o.Timeout)
-	servers, err := resolver.LookupNS(lookupCtx, target+".")
-	cancel()
-	res.Queries++
-	// Go reports an answer without NS records as a not-found error, not as
-	// an empty list, so "no name servers" is told apart by the error (#347).
-	var de *net.DNSError
-	switch {
-	case err == nil && len(servers) > 0:
-	case err == nil || errors.As(err, &de) && de.IsNotFound:
-		res.Err = "no name servers found for " + target
-		return res
-	default:
-		res.Err = "name server lookup failed: " + err.Error()
+	servers, queries, errMsg := NameServers(ctx, resolver, target, o)
+	res.Queries += queries
+	if errMsg != "" {
+		res.Err = errMsg
 		return res
 	}
-	if len(servers) > MaxServers {
-		servers = servers[:MaxServers]
-	}
-
-	// Resolve the servers, and probe the denial at the first address that
-	// answers, in order.
-	var attempts []*attempt
+	attempts := make([]*attempt, 0, len(servers))
 	for _, ns := range servers {
-		host := strings.ToLower(strings.TrimSuffix(ns.Host, "."))
-		if o.Skip != nil && o.Skip(host) {
-			logf(o.Debug, "-axfr: skipping name server %s: it is out of scope", host)
-			continue
-		}
-		lookupCtx, cancel := context.WithTimeout(ctx, o.Timeout)
-		addrs, err := resolver.LookupHost(lookupCtx, host+".")
-		cancel()
-		res.Queries += 2 // A and AAAA
-		if err != nil {
-			logf(o.Debug, "-axfr: cannot resolve name server %s: %v", host, err)
-			continue
-		}
-		if len(addrs) > AddrsPerServer {
-			addrs = addrs[:AddrsPerServer]
-		}
-		attempts = append(attempts, &attempt{host: host, addrs: addrs})
+		attempts = append(attempts, &attempt{host: ns.Host, addrs: ns.Addrs})
 	}
+	// Probe the denial at the first address that answers, in order.
 	var probed, probedHost string // the address that answered the probe
 	for _, a := range attempts {
 		for _, addr := range a.addrs {

@@ -18,7 +18,8 @@ import (
 // with a reason.
 func TestScanOptionsSetsEveryField(t *testing.T) {
 	cliUnmapped := map[string]string{
-		"Resolver": "scan.Run builds the resolver from DNSServer",
+		"Resolver":   "scan.Run builds the resolver from DNSServer",
+		"ZoneServer": "set only in a lab run (-simulate-zone), which cannot be combined with -simulate; TestE2ELabDanglingNS covers it",
 	}
 
 	f := cliFlags{

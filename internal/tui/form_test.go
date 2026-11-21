@@ -541,6 +541,7 @@ func TestOptionsSetsEveryField(t *testing.T) {
 		"Verbose":           "the scan screen shows events itself; there is no debug log",
 		"Logf":              "the scan screen shows events itself; there is no debug log",
 		"Resolver":          "scan.Run builds the resolver from DNSServer",
+		"ZoneServer":        "the TUI does not run labs (-simulate-zone)",
 		"RecursiveEntries":  "the form has no -recursive-w field; every level uses the wordlist",
 		"FollowRecords":     "the form has no -follow-records field",
 		"ResumeFollow":      "the TUI does not resume interrupted scans",

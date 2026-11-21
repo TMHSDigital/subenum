@@ -266,6 +266,40 @@ the walk goes to the lab server.
 
 </details>
 
+## Lab 9: a dangling delegation{% include unreleased.html value="simulate-zone=lab9" %}
+
+```bash
+subenum -simulate-zone lab9 -format jsonl lab.example
+subenum -simulate-zone lab9 -type A,NS -format jsonl -stats run.json lab.example
+```
+
+`legacy` is a subzone delegated to two name servers that no longer exist, so
+the lab's resolver, which cannot reach either, answers SERVFAIL for it, as a
+real one would. Whoever registers `legacy-dns.example` would answer for every
+name under `legacy`. `staging` is delegated to a name server that still
+answers. With `NS` in `-type`, subenum asks the zone's own name server about a
+name that ends SERVFAIL, without asking it to recurse, and gets the
+delegation back as a referral. In lab mode that query goes to the lab
+server.
+
+1. How does `legacy` end in the first run, and in the second?
+2. What does the second run's report say about the extra queries?
+3. Why is `staging` not marked?
+
+<details markdown="1">
+<summary>Answers</summary>
+
+1. The first run counts it under `other` (inconclusive): without `NS` nothing
+   asks the zone. The second reports it with its two NS records and
+   `"takeover_candidate":"dangling-ns"`, because both name servers are
+   NXDOMAIN.
+2. `parent_checks` is 1 (one name was asked about) and `parent_queries` is 1;
+   `queries_sent` includes it. The query takes a `-rate` slot like any other.
+3. Its name server, `ns1.lab.example`, exists, so a resolver gets its NS
+   records directly and there is nothing to take over.
+
+</details>
+
 ## Writing your own scenario
 
 A scenario is a plain text file. Names are relative to the domain you scan,
@@ -313,7 +347,12 @@ transfer, the DNSSEC probe and the walk go to the lab server, whatever
 address the scenario gives its name servers. With `$DNSSEC nsec`, an answer
 for a name the file does not define carries the NSEC record that covers it,
 from a chain of the apex, the defined names (not failing ones) and the
-wildcards. `-simulate-zone` cannot be combined
+wildcards. A delegation none of whose name servers has an address in the
+scenario (such as `sub` above) answers SERVFAIL for itself and every name
+under it, as a resolver that cannot reach them does, and a query that does
+not ask for recursion gets a referral to them, as from the parent zone's
+server; a delegation with one name server that answers is served from the
+file. `-simulate-zone` cannot be combined
 with `-simulate`, `-dns-server`, `-r`, `-ct` or `-sources`, whether they
 come from the command line, a `SUBENUM_*` variable or the config file: a lab run refuses to start
 rather than send a query off the machine.

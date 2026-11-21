@@ -17,8 +17,10 @@ values:
   - type=SRV
   - simulate-zone=lab7
   - simulate-zone=lab8
+  - simulate-zone=lab9
 # action.yml inputs and outputs
 action: []
 # pkg/subenum identifiers
 library:
   - NSECWalk
+  - ParentChecks

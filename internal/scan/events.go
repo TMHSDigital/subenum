@@ -32,7 +32,7 @@ const (
 	NoticeWildcard NoticeKind = iota + 1
 	NoticeCap                 // -max-queries or -max-duration reached; candidates skipped
 	NoticeCeiling             // recursive scan may generate very many queries
-	NoticeSkip                // a recursive branch was not expanded
+	NoticeSkip                // a recursive branch was not expanded, or a check could not be made (#406)
 	NoticeRate                // AutoRate changed the query rate (#220)
 )
 
