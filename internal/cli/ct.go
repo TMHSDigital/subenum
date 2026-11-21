@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 
-	"github.com/TMHSDigital/subenum/internal/output"
 	"github.com/TMHSDigital/subenum/internal/passive"
 )
 
@@ -14,8 +13,9 @@ type targetSource = passive.Lookup
 // ones a resumed run saved, so its candidate list matches the interrupted
 // run's, or a fresh lookup. The results, and the warning for each failed
 // lookup (a warning, not a failed scan), keep the order of sources.
-// baseURLs, set by tests, replace the sources' endpoints by name.
-func passiveNames(ctx context.Context, sources []string, target string, saved *resumeTarget, out *output.Writer, baseURLs map[string]string) []targetSource {
+// Those lines go to info. baseURLs, set by tests, replace the sources'
+// endpoints by name.
+func passiveNames(ctx context.Context, sources []string, target string, saved *resumeTarget, info func(string, ...any), baseURLs map[string]string) []targetSource {
 	if len(sources) == 0 {
 		return nil
 	}
@@ -45,9 +45,9 @@ func passiveNames(ctx context.Context, sources []string, target string, saved *r
 	for _, r := range res {
 		switch {
 		case !r.Fetched && r.Err != "":
-			out.Info("Warning: %s; scanning %s without %s names", r.Err, target, passive.Labels[r.Source])
+			info("Warning: %s; scanning %s without %s names", r.Err, target, passive.Labels[r.Source])
 		case r.Truncated != "":
-			out.Info("Note: %s (%s, %d names)", r.Truncated, target, len(r.Names))
+			info("Note: %s (%s, %d names)", r.Truncated, target, len(r.Names))
 		}
 	}
 	return res

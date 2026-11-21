@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -704,11 +703,17 @@ func (s *session) scanAll(ctx context.Context) {
 		// earlier ones left, and report what they skipped (#190).
 		s.in.deadline = s.started.Add(s.f.maxDuration)
 	}
+	// The next target's passive sources and zone transfer are fetched while
+	// this one scans (#365); the fetch is cancelled once the targets end.
+	aheadCtx, stopAhead := context.WithCancel(ctx)
+	la := &lookahead{ctx: aheadCtx}
 	for i, target := range s.targets {
-		if ctx.Err() != nil || !s.scanOneTarget(ctx, i, target) {
+		if ctx.Err() != nil || !s.scanOneTarget(ctx, i, target, la) {
 			break
 		}
 	}
+	stopAhead()
+	la.discard()
 	if n > 1 {
 		s.out.Info("Targets:")
 		for i, target := range s.targets {
@@ -721,7 +726,9 @@ func (s *session) scanAll(ctx context.Context) {
 // restoring what an interrupted run saved for it. It reports whether to go
 // on: after a reliability abort the resolver is overloaded, so the remaining
 // targets are skipped rather than sent to it too (#82).
-func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next bool) {
+// la holds the lookup fetched ahead for it, if any, and takes the next
+// target's.
+func (s *session) scanOneTarget(ctx context.Context, i int, target string, la *lookahead) (next bool) {
 	out := s.out
 	out.SetTarget(target) // JSON diagnostics name it (#198)
 	defer out.SetTarget("")
@@ -772,30 +779,24 @@ func (s *session) scanOneTarget(ctx context.Context, i int, target string) (next
 	// A target -exclude rules out is refused by the scan's preflight; it gets
 	// no passive lookup and no zone transfer before that either (#372).
 	inScope := !scan.TargetOutOfScope(s.in.excludes, target)
-	// The zone transfer runs while the passive sources are asked: they are
-	// independent, and a source can take tens of seconds (#365). Its lines
-	// are held and printed after the sources', and its names added after
-	// theirs, as when the two ran one after the other.
-	var axfrInfo targetAXFR
-	var axfrLines heldLines
-	var transfer sync.WaitGroup
-	if (s.f.axfr || s.f.nsecWalk) && inScope {
-		transfer.Go(func() {
-			axfrInfo = zoneTransfer(ctx, s.f, s.a.transferPort(), target, saved, axfrLines.Info, scan.Excluder(s.in.excludes), s.in.deadline)
-		})
+	// The lookup may have been fetched while the previous target scanned;
+	// its lines were held, and print now, as if it had run here (#365).
+	lookup := la.take(i)
+	if lookup == nil {
+		lookup = s.startLookup(ctx, target, saved)
 	}
-	var sourceInfo []targetSource
-	if inScope {
-		sourceInfo = passiveNames(ctx, s.in.sources, target, saved, out, s.a.sourceURLs)
-	}
-	transfer.Wait()
+	lookup.wait()
+	// Only now is the next target's fetched: one lookup at a time.
+	s.fetchAhead(la, i+1)
+	sourceInfo, axfrInfo := lookup.sources, lookup.axfr
+	lookup.sourceLines.replay(out.Info)
 	for _, src := range sourceInfo {
 		added := cands.Add(src.Source, src.Names)
 		if src.Fetched {
 			out.Info("%s", passive.AddedLine(passive.Labels[src.Source], len(src.Names), target, added))
 		}
 	}
-	axfrLines.replay(out.Info)
+	lookup.axfrLines.replay(out.Info)
 	if s.f.axfr && inScope {
 		// Transferred names are candidates like -ct's: each is still looked
 		// up, so only names that resolve are reported (#85).
