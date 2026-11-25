@@ -916,7 +916,11 @@ func (s *session) restoreTarget(saved *resumeTarget) (mainSaved *resumePass, res
 			s.emitFrom(scan.Event{Result: r.Result}, false, candidates.FromPTR)
 			ptrHits++
 		} else {
-			s.emitResult(scan.Event{Result: r.Result}, r.Permutation)
+			// r.Sources is what the stopped run reported: a -follow-records
+			// hit is not in the candidate set, so recomputing its sources
+			// would call it a wordlist hit (#441). nil recomputes, for state
+			// written before results carried their sources.
+			s.emitFrom(scan.Event{Result: r.Result}, r.Permutation, r.Sources)
 		}
 		s.restored[r.Subdomain] = true
 		if r.Permutation {

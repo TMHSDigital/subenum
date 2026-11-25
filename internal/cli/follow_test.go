@@ -90,3 +90,50 @@ func TestE2EFollowRecords(t *testing.T) {
 		t.Errorf("resumed: exit %d, results %v; want lb-7.int found as records", code, resumed)
 	}
 }
+
+// TestE2EResumeFollowRecordsHit covers #441: a -follow-records hit saved
+// before the interrupt keeps its records source when the run resumes, and
+// counts in -stats's records_found as the uninterrupted run's does.
+func TestE2EResumeFollowRecordsHit(t *testing.T) {
+	t.Parallel()
+	srv := dnstest.Start(t, func(q dnstest.Query) dnstest.Reply {
+		switch q.Name {
+		case "example.com":
+			return dnstest.Reply{}
+		case "app.example.com":
+			return dnstest.Reply{CNAME: "lb-7.int.example.com", A: []string{"192.0.2.7"}}
+		case "lb-7.int.example.com":
+			return dnstest.Reply{A: []string{"192.0.2.7"}}
+		}
+		return dnstest.NXDomain
+	})
+	wl := writeFile(t, "wl.txt", "app\n")
+	stats := filepath.Join(t.TempDir(), "stats.json")
+	args := append(localArgs("-dns-server", srv.Addr, "-type", "A,CNAME", "-progress=false", "-format", "jsonl",
+		"-w", wl, "-follow-records", "-stats", stats), "example.com")
+	app := output.Result{Sources: []string{"wordlist"}}
+	app.Subdomain, app.Records = "app.example.com", []dns.Record{{Type: "CNAME", Value: "lb-7.int.example.com"}, {Type: "A", Value: "192.0.2.7"}}
+	hit := output.Result{Sources: []string{"records"}}
+	hit.Subdomain, hit.Records = "lb-7.int.example.com", []dns.Record{{Type: "A", Value: "192.0.2.7"}}
+	path := writeState(t, resumeState{Args: args, Targets: []resumeTarget{{Domain: "example.com", MainDone: true, RootDone: 1, Processed: 1, Total: 1,
+		Results: []output.Result{app, hit}}}})
+	code, out := runCLIWith(t, runArgs{args: []string{"-resume", path}})
+	got := seenResults(t, out)
+	if code != exitOK || !slices.Equal(got["lb-7.int.example.com"].Sources, []string{"records"}) || len(got) != 2 {
+		t.Fatalf("resumed: exit %d, results %v; want lb-7.int restored with source records\n%s", code, got, out)
+	}
+	if !slices.Equal(got["app.example.com"].Sources, []string{"wordlist"}) {
+		t.Errorf("resumed: app sources %v, want wordlist", got["app.example.com"].Sources)
+	}
+	var s output.Summary
+	b, err := os.ReadFile(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Targets[0].RecordsFound != 1 {
+		t.Errorf("-stats: records_found %d, want the restored record-follow hit counted", s.Targets[0].RecordsFound)
+	}
+}
